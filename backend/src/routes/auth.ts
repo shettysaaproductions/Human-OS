@@ -61,6 +61,13 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
       return;
     }
 
+    if (!config.supabase.url || !config.supabase.anonKey) {
+      const errorMsg = 'Backend Error: SUPABASE_URL or SUPABASE_ANON_KEY is missing from environment variables.';
+      logger.error('Login failed: Supabase variables missing', { urlSet: !!config.supabase.url, anonKeySet: !!config.supabase.anonKey });
+      res.status(500).json({ error: errorMsg });
+      return;
+    }
+
     const { data, error } = await supabaseAnon.auth.signInWithPassword({
       email,
       password,
