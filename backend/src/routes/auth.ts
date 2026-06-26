@@ -46,7 +46,7 @@ authRouter.post('/signup', async (req: Request, res: Response, next: NextFunctio
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined
     });
-    next(err);
+    res.status(500).json({ error: `Backend crash: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
