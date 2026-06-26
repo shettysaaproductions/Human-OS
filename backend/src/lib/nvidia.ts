@@ -15,6 +15,13 @@ export const nvidiaClient = new OpenAI({
   baseURL: config.nvidia.baseUrl,
 });
 
+export interface ChatOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  response_format?: { type: 'json_object' | 'text' };
+}
+
 /**
  * Sends a chat completion request to NVIDIA's API.
  * Returns the full response text (non-streaming).
@@ -23,19 +30,21 @@ export const nvidiaClient = new OpenAI({
  */
 export async function chatCompletion(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-  options?: {
-    model?: string;
-    maxTokens?: number;
-    temperature?: number;
-  },
+  options?: ChatOptions,
 ): Promise<string> {
-  const response = await nvidiaClient.chat.completions.create({
+  const payload: any = {
     model: options?.model ?? config.nvidia.chatModel,
     messages,
     max_tokens: options?.maxTokens ?? 1024,
     temperature: options?.temperature ?? 0.7,
     stream: false,
-  });
+  };
+
+  if (options?.response_format) {
+    payload.response_format = options.response_format;
+  }
+
+  const response = await nvidiaClient.chat.completions.create(payload);
 
   const content = response.choices[0]?.message?.content;
   if (!content) {

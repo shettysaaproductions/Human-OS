@@ -10,6 +10,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { chatCompletion } from '../lib/nvidia';
+import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
 export const healthRouter: import('express').Router = Router();
@@ -85,6 +86,56 @@ healthRouter.get(
       });
 
       // Don't propagate to error handler — we've already responded
+      void next;
+    }
+  },
+);
+
+// ── GET /health/db ────────────────────────────────────────────────────────────
+// Pings Supabase to verify database connectivity.
+healthRouter.get(
+  '/db',
+  async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const start = Date.now();
+
+    try {
+      logger.info('DB health check initiated');
+
+      // Simple query to verify connection
+      // We use supabaseAdmin since it's a server-side check
+      const { error } = await supabaseAdmin.from('memories').select('id').limit(1);
+
+      const latencyMs = Date.now() - start;
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      logger.info('DB health check passed', { latency_ms: latencyMs });
+
+      res.status(200).json({
+        status: 'ok',
+        database: 'connected',
+        latency_ms: latencyMs,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      const message = err instanceof Error ? err.message : 'Unknown database error';
+
+      logger.error('DB health check failed', {
+        latency_ms: latencyMs,
+        error: message,
+      });
+
+      res.status(502).json({
+        status: 'error',
+        database: 'disconnected',
+        latency_ms: latencyMs,
+        error: message,
+        timestamp: new Date().toISOString(),
+      });
+
       void next;
     }
   },

@@ -16,6 +16,9 @@ import { z } from 'zod';
 import { chatCompletion } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
+import { memoryRepository } from '../services/memoryRepository';
+import { memoryExtractor } from '../services/memoryExtractor';
+import { promptBuilder } from '../services/promptBuilder';
 import { config } from '../config';
 
 export const chatRouter: import('express').Router = Router();
@@ -33,8 +36,10 @@ const ChatTestSchema = z.object({
 
 // ── System prompt for Phase 1 test ────────────────────────────────────────────
 // Minimal but well-formed. Full companion system prompt is built in Phase 2.
-const PHASE1_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
-You are speaking with someone for the first time.
+// Hardcoded user ID for Phase 2 (No Auth yet)
+const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
+
+const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
 Be friendly, concise, and genuine. Ask one follow-up question.
 Never say "As an AI..." — you are Nova, not a generic chatbot.`;
 
@@ -60,12 +65,19 @@ chatRouter.post(
         model: config.nvidia.chatModel,
       });
 
-      // 3. Call NVIDIA API
+      // 1. Retrieve Memories
+      const keywords = memoryExtractor.extractKeywords(message);
+      const memories = await memoryRepository.searchMemories(HARDCODED_USER_ID, keywords);
+
+      // 2. Build Injected Prompt
+      const systemPrompt = promptBuilder.buildSystemPrompt(BASE_SYSTEM_PROMPT, memories);
+
+      // 3. Call NVIDIA for the final response
       let reply: string;
       try {
         reply = await chatCompletion(
           [
-            { role: 'system', content: PHASE1_SYSTEM_PROMPT },
+            { role: 'system', content: systemPrompt },
             { role: 'user', content: message },
           ],
           {
@@ -96,8 +108,36 @@ chatRouter.post(
         success: true,
       });
 
-      // 5. Return response
-      res.status(200).json({ reply });
+      // 5. Background Memory Extraction (Fire & Forget)
+      // We do not await this, so it doesn't block the user from getting a fast reply.
+      memoryExtractor.extractMemories(message).then(async (extracted) => {
+        let savedCount = 0;
+        for (const mem of extracted) {
+          if (mem.shouldPersist) {
+            try {
+              // using a fake message ID since we aren't saving messages to DB yet
+              await memoryRepository.upsertMemory(HARDCODED_USER_ID, mem, 'msg_' + Date.now());
+              savedCount++;
+            } catch (err) {
+              logger.error('Background memory save failed', { error: err instanceof Error ? err.message : String(err) });
+            }
+          }
+        }
+        if (savedCount > 0) {
+          logger.info('Background memory extraction complete', { saved: savedCount });
+        }
+      }).catch(err => {
+        logger.error('Background extraction failed entirely', { error: err.message });
+      });
+
+      // 6. Return response
+      res.status(200).json({
+        reply,
+        meta: {
+          memories_retrieved: memories.length,
+          keywords_searched: keywords,
+        }
+      });
     } catch (err) {
       next(err);
     }
