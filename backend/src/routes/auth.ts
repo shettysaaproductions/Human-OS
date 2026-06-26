@@ -53,7 +53,7 @@ authRouter.post('/signup', async (req: Request, res: Response, next: NextFunctio
 /**
  * POST /auth/login
  */
-authRouter.post('/login', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+authRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
