@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: humanos-backend
+    runtime: node
+    region: singapore          # Closest to your users — change if needed
+    plan: free
+
+    # Build command: install deps + compile TypeScript
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+
+    # Start command: run compiled JS
+    startCommand: node dist/index.js
+
+    # Health check — Render pings this after deploy
+    # If it returns non-200 within 2 minutes, deploy is rolled back
+    healthCheckPath: /health
+
+    # Environment variables — set these in Render Dashboard → Environment
+    # DO NOT hard-code values here — this file is committed to git.
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_VERSION
+        value: 1.0.0
+      - key: PORT
+        value: 10000              # Render assigns PORT automatically; this is the default
+      - key: NVIDIA_API_KEY
+        sync: false               # Marked secret — must be set in Render Dashboard
+      - key: NVIDIA_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
+      - key: NVIDIA_CHAT_MODEL
+        value: meta/llama-3.1-70b-instruct
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false               # Set to your mobile app origin in production
