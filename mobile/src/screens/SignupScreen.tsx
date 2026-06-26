@@ -20,8 +20,18 @@ export function SignupScreen() {
     setLoading(true);
     try {
       const data = await authService.signup(email, password);
-      // Automatically login on signup
-      await login(data.access_token, data.user);
+
+      if (data.access_token) {
+        // Session was issued immediately (email confirmation disabled)
+        await login(data.access_token, data.user);
+      } else {
+        // Supabase requires email confirmation before issuing a session
+        Alert.alert(
+          'Check Your Email',
+          'A confirmation link has been sent to ' + email + '. Please verify your email then come back to log in.',
+          [{ text: 'OK', onPress: () => navigation.navigate('Login' as never) }]
+        );
+      }
     } catch (err: any) {
       Alert.alert('Signup Failed', err.response?.data?.error || err.message);
     } finally {

@@ -45,8 +45,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  login: async (token: string, user: any) => {
-    await SecureStore.setItemAsync('accessToken', token);
+  login: async (token: string | null, user: any) => {
+    if (token) {
+      await SecureStore.setItemAsync('accessToken', token);
+    }
     set({ accessToken: token, user });
   },
 
