@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAnon } from '../lib/supabase';
 import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
+import { config } from '../config';
 
 export const authRouter = Router();
 
@@ -16,12 +17,21 @@ authRouter.post('/signup', async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
+    if (!config.supabase.url || !config.supabase.anonKey) {
+      const errorMsg = 'Backend Error: SUPABASE_URL or SUPABASE_ANON_KEY is missing from environment variables.';
+      logger.error('Signup failed: Supabase variables missing', { urlSet: !!config.supabase.url, anonKeySet: !!config.supabase.anonKey });
+      res.status(500).json({ error: errorMsg });
+      return;
+    }
+
+    logger.info('Attempting to sign up user with Supabase...', { email });
     const { data, error } = await supabaseAnon.auth.signUp({
       email,
       password,
     });
 
     if (error) {
+      logger.error('Supabase auth.signUp returned an error', { error: error.message, status: error.status });
       res.status(400).json({ error: error.message });
       return;
     }
@@ -32,7 +42,10 @@ authRouter.post('/signup', async (req: Request, res: Response, next: NextFunctio
       refresh_token: data.session?.refresh_token || null,
     });
   } catch (err) {
-    logger.error('Signup failed', { error: err instanceof Error ? err.message : String(err) });
+    logger.error('Signup completely failed due to an exception', { 
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined
+    });
     next(err);
   }
 });
