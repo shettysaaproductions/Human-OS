@@ -84,8 +84,12 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
       refresh_token: data.session?.refresh_token || null,
     });
   } catch (err) {
-    logger.error('Login failed', { error: err instanceof Error ? err.message : String(err) });
-    next(err);
+    logger.error('Login completely failed due to an exception', { 
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined
+    });
+    // Return the EXACT error message to the client for debugging
+    res.status(500).json({ error: `Backend crash: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
