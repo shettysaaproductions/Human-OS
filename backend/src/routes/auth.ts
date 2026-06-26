@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { supabaseAnon } from '../lib/supabase';
 import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
@@ -9,7 +9,7 @@ export const authRouter = Router();
 /**
  * POST /auth/signup
  */
-authRouter.post('/signup', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+authRouter.post('/signup', async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -96,7 +96,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 /**
  * POST /auth/logout
  */
-authRouter.post('/logout', authenticateUser, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+authRouter.post('/logout', authenticateUser, async (req: Request, res: Response): Promise<void> => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (token) {
@@ -107,7 +107,7 @@ authRouter.post('/logout', authenticateUser, async (req: Request, res: Response,
     res.status(200).json({ success: true });
   } catch (err) {
     logger.error('Logout failed', { error: err instanceof Error ? err.message : String(err) });
-    next(err);
+    res.status(500).json({ error: 'Logout failed' });
   }
 });
 
