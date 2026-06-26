@@ -19,6 +19,7 @@ import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
 import { memoryExtractor } from '../services/memoryExtractor';
 import { promptBuilder } from '../services/promptBuilder';
+import { supabaseAdmin } from '../lib/supabase';
 import { config } from '../config';
 
 export const chatRouter: import('express').Router = Router();
@@ -37,7 +38,6 @@ const ChatTestSchema = z.object({
 // ── System prompt for Phase 1 test ────────────────────────────────────────────
 // Minimal but well-formed. Full companion system prompt is built in Phase 2.
 // Hardcoded user ID for Phase 2 (No Auth yet)
-const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
 Be friendly, concise, and genuine. Ask one follow-up question.
@@ -58,6 +58,14 @@ chatRouter.post(
       }
 
       const { message } = parseResult.data;
+      const userId = (req as any).user!.id;
+
+      // 1. Fetch user profile for persona
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('preferred_name, companion_personality')
+        .eq('id', userId)
+        .single();
 
       // 2. Log the NVIDIA call (PRD §17) — never log raw message content
       logger.info('NVIDIA API call initiated', {
@@ -65,12 +73,17 @@ chatRouter.post(
         model: config.nvidia.chatModel,
       });
 
-      // 1. Retrieve Memories
+      // 3. Retrieve Memories
       const keywords = memoryExtractor.extractKeywords(message);
-      const memories = await memoryRepository.searchMemories(HARDCODED_USER_ID, keywords);
+      const memories = await memoryRepository.searchMemories(userId, keywords);
 
-      // 2. Build Injected Prompt
-      const systemPrompt = promptBuilder.buildSystemPrompt(BASE_SYSTEM_PROMPT, memories);
+      // 4. Build Injected Prompt
+      const systemPrompt = promptBuilder.buildSystemPrompt(
+        BASE_SYSTEM_PROMPT, 
+        memories,
+        profile?.preferred_name,
+        profile?.companion_personality
+      );
 
       // 3. Call NVIDIA for the final response
       let reply: string;
@@ -116,7 +129,7 @@ chatRouter.post(
           if (mem.shouldPersist) {
             try {
               // using a fake message ID since we aren't saving messages to DB yet
-              await memoryRepository.upsertMemory(HARDCODED_USER_ID, mem, 'msg_' + Date.now());
+              await memoryRepository.upsertMemory(userId, mem, 'msg_' + Date.now());
               savedCount++;
             } catch (err) {
               logger.error('Background memory save failed', { error: err instanceof Error ? err.message : String(err) });

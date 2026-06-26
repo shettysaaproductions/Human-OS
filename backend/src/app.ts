@@ -15,6 +15,10 @@ import { requestLogger } from './middleware/requestLogger';
 import { errorHandler } from './middleware/errorHandler';
 import { healthRouter } from './routes/health';
 import { chatRouter } from './routes/chat';
+import { memoryDebugRouter } from './routes/memoryDebug';
+import { authRouter } from './routes/auth';
+import { onboardingRouter } from './routes/onboarding';
+import { authenticateUser } from './middleware/auth';
 import { logger } from './lib/logger';
 
 export function createApp(): express.Application {
@@ -87,7 +91,10 @@ export function createApp(): express.Application {
 
   // ── Routes ───────────────────────────────────────────────────────────────────
   app.use('/health', healthRouter);
-  app.use('/chat', chatLimiter, chatRouter);
+  app.use('/auth', authRouter);
+  app.use('/onboarding', authenticateUser, onboardingRouter);
+  app.use('/chat', authenticateUser, chatLimiter, chatRouter);
+  app.use('/memory/debug', authenticateUser, memoryDebugRouter);
 
   // ── 404 handler ──────────────────────────────────────────────────────────────
   app.use((_req, res) => {

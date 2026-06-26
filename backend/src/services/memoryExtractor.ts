@@ -15,8 +15,15 @@ export class MemoryExtractor {
           role: 'system',
           content: `You are the memory extraction engine for HumanOS. 
 Extract key facts, preferences, goals, relationships, and biography details about the user from their message.
-Do NOT store trivial, conversational, or temporary facts (e.g., "I am eating lunch"). Only store lasting information.
-If the information is not worth remembering, set "shouldPersist" to false.
+
+STRICT EXTRACTION RULES:
+1. ONLY extract information that is likely to remain useful for at least several days.
+2. NEVER extract greetings, jokes, temporary emotions, short-term states, or small talk.
+   - Example "I'm tired today." -> do not save (shouldPersist = false)
+   - Example "I'm hungry." -> do not save (shouldPersist = false)
+   - Example "I have diabetes." -> save (shouldPersist = true)
+3. For contradictions or updates, use the EXACT SAME "key" as the old memory so the system naturally overwrites it.
+   - If they say "I love rap", key might be "music_preference". If they later say "I hate rap, I love jazz", use key "music_preference" with value "jazz". Do not create a new key.
 
 Return ONLY a JSON array named "memories". If no memory is present, return {"memories": []}.
 

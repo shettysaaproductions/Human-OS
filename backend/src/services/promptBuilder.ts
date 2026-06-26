@@ -5,9 +5,24 @@ export class PromptBuilder {
    * Injects the retrieved memories into the base system prompt.
    * Format follows the XML `<user_memories>` structure defined in the design.
    */
-  buildSystemPrompt(basePrompt: string, memories: Memory[]): string {
+  buildSystemPrompt(
+    basePrompt: string, 
+    memories: Memory[], 
+    preferredName?: string, 
+    companionPersonality?: string
+  ): string {
+    let finalPrompt = basePrompt;
+
+    if (companionPersonality) {
+      finalPrompt += `\n\nCOMPANION PERSONALITY:\n${companionPersonality}`;
+    }
+
+    if (preferredName) {
+      finalPrompt += `\n\nUSER'S NAME: The user prefers to be called ${preferredName}. Address them naturally when appropriate.`;
+    }
+
     if (!memories || memories.length === 0) {
-      return basePrompt;
+      return finalPrompt;
     }
 
     let memoryList = '<user_memories>\n';
@@ -23,9 +38,9 @@ export class PromptBuilder {
         memoryList += `- Fact (${mem.key.replace(/_/g, ' ')}): ${mem.value}.\n`;
       }
     }
-    memoryList += '</user_memories>\n\nIMPORTANT: You have access to the user\'s memories above. Use them naturally to personalize your response and show that you remember them. Do not explicitly state "I remember" or "according to my memory".';
+    memoryList += '</user_memories>\n\nIMPORTANT INSTRUCTIONS REGARDING MEMORIES:\n- Only reference memories that are directly relevant to the user\'s message.\n- Do not force unrelated memories into every response.\n- Never mention a memory unless it improves the answer.\n- Never combine unrelated memories.\n- Do not explicitly state "I remember" or "according to my memory".';
 
-    return `${basePrompt}\n\n${memoryList}`;
+    return `${finalPrompt}\n\n${memoryList}`;
   }
 }
 
