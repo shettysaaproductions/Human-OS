@@ -60,6 +60,21 @@ chatRouter.post(
       if (userMsgError) logger.error('Failed to save user message', { error: userMsgError.message });
       const userMessageId = userMsgRecord?.id || 'msg_' + Date.now();
 
+      // 3.5 Track Conversation Session (Fire & Forget)
+      const today = new Date().toISOString().split('T')[0];
+      (async () => {
+        try {
+          const { data: session } = await supabaseAdmin.from('conversation_sessions').select('id, message_count').eq('user_id', userId).eq('session_date', today).maybeSingle();
+          if (session) {
+            await supabaseAdmin.from('conversation_sessions').update({ message_count: (session.message_count || 0) + 1, updated_at: new Date().toISOString() }).eq('id', session.id);
+          } else {
+            await supabaseAdmin.from('conversation_sessions').insert({ user_id: userId, session_date: today, message_count: 1 });
+          }
+        } catch (err) {
+          logger.error('Failed to track session', { error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+
       // 4. Fetch last 20 messages for Context Pipeline
       const { data: historyData } = await supabaseAdmin
         .from('chat_history')

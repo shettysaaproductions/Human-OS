@@ -52,7 +52,7 @@ diagnosticsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
-diagnosticsRouter.get('/queue', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+diagnosticsRouter.get('/queue', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { count: pendingCount } = await supabaseAdmin.from('background_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending');
     const { count: runningCount } = await supabaseAdmin.from('background_jobs').select('*', { count: 'exact', head: true }).eq('status', 'running');

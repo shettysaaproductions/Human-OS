@@ -69,6 +69,15 @@ export abstract class BaseAgent {
       await this.markProcessed(messageId);
       
       const executionTime = Date.now() - startTime;
+      
+      // Log Metrics
+      await supabaseAdmin.from('agent_metrics').insert({
+        agent_name: this.agentName,
+        execution_time_ms: executionTime,
+        status: 'success',
+        tokens_used: 0 // Will hook up to real token counting later
+      });
+
       logger.info(`Agent ${this.agentName} completed successfully`, { 
         jobId: job.id, 
         messageId,
@@ -77,6 +86,15 @@ export abstract class BaseAgent {
       });
     } catch (err) {
       const executionTime = Date.now() - startTime;
+      
+      // Log Failure Metrics
+      await supabaseAdmin.from('agent_metrics').insert({
+        agent_name: this.agentName,
+        execution_time_ms: executionTime,
+        status: 'failed',
+        tokens_used: 0
+      });
+
       logger.error(`Agent ${this.agentName} failed`, { 
         jobId: job.id, 
         messageId,
