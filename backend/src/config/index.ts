@@ -49,4 +49,10 @@ export const config = {
       .split(',')
       .map((o) => o.trim()),
   },
+
+  db: {
+    degradedMode: optionalEnv('DATABASE_DEGRADED_MODE', 'false') === 'true',
+    memorySearchLimit: parseInt(optionalEnv('MEMORY_SEARCH_LIMIT', '200'), 10),
+    egressWarningThresholdMb: parseInt(optionalEnv('EGRESS_WARNING_THRESHOLD_MB', '400'), 10),
+  },
 } as const;

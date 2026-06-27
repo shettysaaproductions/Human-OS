@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { qt } from '../lib/queryTracker';
 
 export interface JobOptions {
   attempts?: number;
@@ -72,18 +73,18 @@ export class QueueService {
 
     try {
       while (true) {
-        // Fetch the next pending job
-        // Note: For a true distributed system, this needs a transaction with row locking, 
-        // but for now this works as a Node-level queue processor.
+        const start = Date.now();
         const { data: jobs, error } = await supabaseAdmin
           .from('background_jobs')
-          .select('*')
+          .select('id, job_type, payload, attempts, status, created_at')
           .eq('status', 'pending')
           .order('created_at', { ascending: true })
           .limit(1);
 
+        qt.record('poll_pending_job', 'background_jobs', Date.now() - start, jobs?.length ?? 0);
+
         if (error || !jobs || jobs.length === 0) {
-          break; // Queue is empty
+          break;
         }
 
         const job = jobs[0] as Job;

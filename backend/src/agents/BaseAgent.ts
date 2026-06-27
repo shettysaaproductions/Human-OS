@@ -1,55 +1,101 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { Job } from '../services/QueueService';
 import { logger } from '../lib/logger';
+import { cache, CACHE_NS, CACHE_TTL } from '../lib/cache';
+import { qt } from '../lib/queryTracker';
+
+// Buffered agent metrics — flushed every 15 seconds
+interface MetricRecord {
+  agent_name: string;
+  execution_time_ms: number;
+  status: 'success' | 'failed';
+  tokens_used: number;
+  created_at: string;
+}
+
+const metricsBuffer: MetricRecord[] = [];
+let metricsFlushTimer: NodeJS.Timeout | null = null;
+
+function ensureMetricsFlush() {
+  if (metricsFlushTimer) return;
+  metricsFlushTimer = setInterval(async () => {
+    if (metricsBuffer.length === 0) return;
+    const batch = metricsBuffer.splice(0, metricsBuffer.length);
+    try {
+      await supabaseAdmin.from('agent_metrics').insert(batch);
+    } catch (err) {
+      logger.warn('Failed to flush agent_metrics batch', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }, 15_000);
+  if (metricsFlushTimer.unref) metricsFlushTimer.unref();
+}
+
+function bufferMetric(record: MetricRecord): void {
+  metricsBuffer.push(record);
+}
 
 export abstract class BaseAgent {
   protected agentName: string;
 
   constructor(agentName: string) {
     this.agentName = agentName;
+    ensureMetricsFlush();
   }
 
   /**
    * Checks if a specific message has already been processed by this agent.
+   * Uses in-memory cache to avoid redundant DB reads.
    */
   protected async isIdempotent(messageId: string): Promise<boolean> {
-    const { data, error } = await supabaseAdmin
-      .from('processed_jobs')
-      .select('id')
-      .eq('agent_name', this.agentName)
-      .eq('message_id', messageId)
-      .maybeSingle();
-      
+    const cacheKey = `idempotency:${this.agentName}:${messageId}`;
+    const cached = cache.get<boolean>(cacheKey);
+    if (cached === true) {
+      logger.debug(`Idempotency cache hit for ${this.agentName}:${messageId}`);
+      return true;
+    }
+
+    const { data, error } = await qt.track('idempotency_check', 'processed_jobs', () =>
+      supabaseAdmin
+        .from('processed_jobs')
+        .select('id')
+        .eq('agent_name', this.agentName)
+        .eq('message_id', messageId)
+        .maybeSingle()
+    );
+
     if (error) {
       logger.warn(`Idempotency check failed for ${this.agentName}`, { error: error.message });
-      // If we fail to check, assume not processed to attempt work, but it might fail on UNIQUE constraint later.
-      return false; 
+      return false;
     }
-    
-    return !!data;
+
+    const alreadyDone = !!data;
+    if (alreadyDone) {
+      // Cache positive result so subsequent calls don't hit DB
+      cache.set(cacheKey, true, CACHE_TTL.IDEMPOTENCY_MS, CACHE_NS.IDEMPOTENCY);
+    }
+    return alreadyDone;
   }
 
   /**
    * Marks a message as processed.
    */
   protected async markProcessed(messageId: string): Promise<void> {
-    await supabaseAdmin
-      .from('processed_jobs')
-      .insert({
-        agent_name: this.agentName,
-        message_id: messageId
-      });
+    await qt.track('mark_processed', 'processed_jobs', () =>
+      supabaseAdmin
+        .from('processed_jobs')
+        .insert({ agent_name: this.agentName, message_id: messageId })
+    );
+
+    // Cache the positive result immediately
+    const cacheKey = `idempotency:${this.agentName}:${messageId}`;
+    cache.set(cacheKey, true, CACHE_TTL.IDEMPOTENCY_MS, CACHE_NS.IDEMPOTENCY);
   }
 
-  /**
-   * The core extraction logic to be implemented by child classes.
-   * Return the number of memories/records created for logging.
-   */
   protected abstract execute(job: Job): Promise<number>;
 
   /**
    * The public wrapper that QueueService will call.
-   * Handles idempotency, timing, logging, and error handling.
+   * Handles idempotency, timing, batched metrics, and error handling.
    */
   public async processJob(job: Job): Promise<void> {
     const messageId = job.payload.messageId;
@@ -67,41 +113,42 @@ export abstract class BaseAgent {
     try {
       const recordsCreated = await this.execute(job);
       await this.markProcessed(messageId);
-      
+
       const executionTime = Date.now() - startTime;
-      
-      // Log Metrics
-      await supabaseAdmin.from('agent_metrics').insert({
+
+      // Buffer metric — don't await
+      bufferMetric({
         agent_name: this.agentName,
         execution_time_ms: executionTime,
         status: 'success',
-        tokens_used: 0 // Will hook up to real token counting later
+        tokens_used: 0,
+        created_at: new Date().toISOString(),
       });
 
-      logger.info(`Agent ${this.agentName} completed successfully`, { 
-        jobId: job.id, 
+      logger.info(`Agent ${this.agentName} completed successfully`, {
+        jobId: job.id,
         messageId,
         executionTimeMs: executionTime,
-        recordsCreated
+        recordsCreated,
       });
     } catch (err) {
       const executionTime = Date.now() - startTime;
-      
-      // Log Failure Metrics
-      await supabaseAdmin.from('agent_metrics').insert({
+
+      bufferMetric({
         agent_name: this.agentName,
         execution_time_ms: executionTime,
         status: 'failed',
-        tokens_used: 0
+        tokens_used: 0,
+        created_at: new Date().toISOString(),
       });
 
-      logger.error(`Agent ${this.agentName} failed`, { 
-        jobId: job.id, 
+      logger.error(`Agent ${this.agentName} failed`, {
+        jobId: job.id,
         messageId,
         executionTimeMs: executionTime,
-        error: err instanceof Error ? err.message : String(err)
+        error: err instanceof Error ? err.message : String(err),
       });
-      throw err; // Throwing so QueueService handles retry/DLQ
+      throw err;
     }
   }
 }
