@@ -30,3 +30,4 @@
 - **Unified Mind:** Under no circumstances should the user see mentions of sub-models or internal tools. The response comes purely from *Nova*.
 - **Async Execution:** Heavy cognitive tasks (e.g. episodic summarization, Knowledge Graph changes) must occur offline in `background_jobs` to keep HTTP response times under 2 seconds.
 - **Strict Types:** Code must maintain type definitions for cognitive states (e.g. `EmotionalState`, `ReflectiveThought`).
+- **Data Boundaries:** Enforce [DATA_BOUNDARIES.md](file:///e:/project%20software/Human%20OS/DATA_BOUNDARIES.md). Supabase handles runtime tables (`profiles`, `chat_history`, `memories`) only. Filesystem handles all documentation, architecture books, plans, and session logs. Never write logs or guides to database columns.

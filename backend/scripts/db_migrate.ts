@@ -40,8 +40,17 @@ async function migrate() {
       const sql = fs.readFileSync(filePath, 'utf8');
 
       // Execute migration
-      await client.query(sql);
-      console.log(`Successfully executed: ${file}`);
+      try {
+        await client.query(sql);
+        console.log(`Successfully executed: ${file}`);
+      } catch (err: any) {
+        // Postgres codes: 42P07 = duplicate_table, 42701 = duplicate_column
+        if (err.code === '42P07' || err.code === '42701' || err.message.includes('already exists')) {
+          console.warn(`[Info] Skipping existing schema in ${file}: ${err.message}`);
+        } else {
+          throw err;
+        }
+      }
     }
 
     // Automatically apply grants to prevent PGRST205 errors
