@@ -7,6 +7,7 @@ import { memoryRepository } from '../services/memoryRepository';
 import { memoryExtractor } from '../services/memoryExtractor';
 import { promptBuilder } from '../services/promptBuilder';
 import { supabaseAdmin } from '../lib/supabase';
+import crypto from 'crypto';
 
 export const chatRouter: import('express').Router = Router();
 

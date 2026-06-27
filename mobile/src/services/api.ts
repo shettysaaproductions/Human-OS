@@ -19,6 +19,11 @@ api.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      
+      console.log(`[API REQUEST] ${config.method?.toUpperCase()} ${config.url}`);
+      console.log(`[API HEADERS]`, JSON.stringify(config.headers));
+      if (config.data) console.log(`[API PAYLOAD]`, JSON.stringify(config.data));
+      
     } catch (error) {
       console.error('[api] Error reading accessToken from SecureStore', error);
     }
@@ -37,9 +42,20 @@ function drainQueue(error: any, token: string | null) {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`[API RESPONSE] ${response.status} ${response.config.url}`);
+    console.log(`[API BODY]`, JSON.stringify(response.data));
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
+    
+    if (error.response) {
+      console.log(`[API RESPONSE ERROR] ${error.response.status} ${originalRequest?.url}`);
+      console.log(`[API RESPONSE BODY]`, JSON.stringify(error.response.data));
+    } else {
+      console.log(`[API NETWORK ERROR]`, error.message);
+    }
 
     // Only attempt refresh on 401, and never retry the refresh call itself
     if (

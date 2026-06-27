@@ -6,6 +6,7 @@ export interface Message {
   role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
   content: string;
   status: 'sending' | 'sent' | 'error';
+  errorMessage?: string;
 }
 
 interface ChatState {
@@ -42,9 +43,21 @@ export const useChatStore = create<ChatState>((set, get) => {
           conversationId: conversation_id // Save the active conversation ID
         };
       });
-    } catch (error) {
+    } catch (error: any) {
+      let errorMessage = 'Network error';
+      if (error.response) {
+        if (error.response.status === 401) {
+          errorMessage = 'Unauthorized';
+        } else if (error.response.status === 404) {
+          errorMessage = 'Endpoint not found';
+        } else if (error.response.status >= 500) {
+          errorMessage = 'Server error';
+        } else {
+          errorMessage = error.response.data?.error || 'Failed to send';
+        }
+      }
       set((s) => {
-        const updated = s.messages.map(m => m.id === msgId ? { ...m, status: 'error' as const } : m);
+        const updated = s.messages.map(m => m.id === msgId ? { ...m, status: 'error' as const, errorMessage } : m);
         return { messages: updated, isTyping: false };
       });
     }
