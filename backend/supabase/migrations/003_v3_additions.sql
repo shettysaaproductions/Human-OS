@@ -53,3 +53,26 @@ CREATE TABLE IF NOT EXISTS processed_jobs (
   UNIQUE(agent_name, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_processed_jobs_message ON processed_jobs(message_id);
+
+-- 5. Metrics and Sessions (Added for Milestone 3 Prep)
+CREATE TABLE IF NOT EXISTS agent_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_name TEXT NOT NULL,
+  execution_time_ms INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  tokens_used INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_metrics_name ON agent_metrics(agent_name);
+
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  session_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  message_count INTEGER DEFAULT 0,
+  summary TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, session_date)
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_sessions_user ON conversation_sessions(user_id);

@@ -52,7 +52,7 @@ export class QueueService {
 
       return job as Job;
     } catch (err) {
-      logger.error(`Failed to add job to queue ${this.queueName}`, { error: err instanceof Error ? err.message : String(err) });
+      logger.error(`Failed to add job to queue ${this.queueName}`, { error: err instanceof Error ? err.message : JSON.stringify(err) });
       return null;
     }
   }

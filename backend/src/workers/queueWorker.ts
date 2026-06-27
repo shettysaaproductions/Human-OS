@@ -1,9 +1,10 @@
-import { memoryQueue } from '../services/QueueService';
+import { memoryQueue, reflectionQueue } from '../services/QueueService';
 import { semanticAgent } from '../agents/SemanticAgent';
 import { workingMemoryAgent } from '../agents/WorkingMemoryAgent';
 import { episodicAgent } from '../agents/EpisodicAgent';
 import { kgAgent } from '../agents/KgAgent';
 import { emotionalAgent } from '../agents/EmotionalAgent';
+import { reflectionAgent } from '../agents/ReflectionAgent';
 import { logger } from '../lib/logger';
 
 export function startWorkers() {
@@ -35,6 +36,16 @@ export function startWorkers() {
         break;
       default:
         logger.warn(`Unknown job type received: ${job.job_type}`);
+    }
+  });
+
+  reflectionQueue.process(async (job) => {
+    switch (job.job_type) {
+      case 'daily_reflection':
+        await reflectionAgent.processJob(job);
+        break;
+      default:
+        logger.warn(`Unknown reflection job type: ${job.job_type}`);
     }
   });
 }

@@ -19,6 +19,7 @@ import { memoryDebugRouter } from './routes/memoryDebug';
 import { authRouter } from './routes/auth';
 import { onboardingRouter } from './routes/onboarding';
 import { diagnosticsRouter } from './routes/diagnostics';
+import { adminRouter } from './routes/admin';
 import { authenticateUser } from './middleware/auth';
 import { logger } from './lib/logger';
 
@@ -97,6 +98,7 @@ export function createApp(): express.Application {
   app.use('/chat', authenticateUser, chatLimiter, chatRouter);
   app.use('/memory/debug', authenticateUser, memoryDebugRouter);
   app.use('/admin/diagnostics', authenticateUser, diagnosticsRouter);
+  app.use('/admin', authenticateUser, adminRouter);
 
   // ── 404 handler ──────────────────────────────────────────────────────────────
   app.use((_req, res) => {
