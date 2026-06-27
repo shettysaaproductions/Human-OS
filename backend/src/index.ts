@@ -12,6 +12,8 @@ import { createApp } from './app';
 import { config } from './config';
 import { logger } from './lib/logger';
 import { startWorkers } from './workers/queueWorker';
+import { momentEngineService } from './services/MomentEngineService';
+import { reflectionScheduler } from './services/ReflectionSchedulerService';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -22,6 +24,42 @@ async function main(): Promise<void> {
 
   // Initialize Background Queue Workers
   startWorkers();
+
+  // Start Moment Engine Scheduler (runs once every 24 hours)
+  const momentInterval = setInterval(async () => {
+    try {
+      logger.info('Scheduler: Triggering daily Moment Engine checks...');
+      await momentEngineService.runEngineForAllUsers();
+    } catch (err) {
+      logger.error('Error in Moment Engine scheduled run', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }, 24 * 60 * 60 * 1000); // 24 hours
+  if (momentInterval.unref) momentInterval.unref();
+
+  // Daily Reflection Scheduler (runs once per day)
+  const dailyReflectionInterval = setInterval(async () => {
+    try {
+      logger.info('Scheduler: Triggering daily reflections...');
+      await reflectionScheduler.runDailyForAllUsers();
+    } catch (err) {
+      logger.error('Error in daily reflection scheduled run', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }, 24 * 60 * 60 * 1000); // 24 hours
+  if (dailyReflectionInterval.unref) dailyReflectionInterval.unref();
+
+  // Weekly Reflection Scheduler (runs on Sundays)
+  const weeklyReflectionInterval = setInterval(async () => {
+    const day = new Date().getDay();
+    if (day === 0) { // Sunday
+      try {
+        logger.info('Scheduler: Triggering weekly reflections...');
+        await reflectionScheduler.runWeeklyForAllUsers();
+      } catch (err) {
+        logger.error('Error in weekly reflection scheduled run', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  }, 24 * 60 * 60 * 1000); // Check daily, run on Sunday
+  if (weeklyReflectionInterval.unref) weeklyReflectionInterval.unref();
 
   const app = createApp();
 

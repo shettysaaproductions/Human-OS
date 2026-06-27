@@ -71,10 +71,13 @@ Return ONLY a valid JSON object:
     // 3. Save Reflection
     await supabaseAdmin.from('reflections').insert({
       user_id: userId,
+      reflection_type: 'daily',
       summary: parsed.reflection,
-      importance: parsed.importance,
-      emotional_summary: parsed.emotional_summary,
-      goals_progress: parsed.goals_progress
+      key_takeaways: {
+        importance: parsed.importance,
+        emotional_summary: parsed.emotional_summary,
+        goals_progress: parsed.goals_progress
+      }
     });
     
     // 4. Update conversation_sessions

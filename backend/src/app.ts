@@ -20,6 +20,10 @@ import { authRouter } from './routes/auth';
 import { onboardingRouter } from './routes/onboarding';
 import { diagnosticsRouter } from './routes/diagnostics';
 import { adminRouter } from './routes/admin';
+import { momentsRouter } from './routes/moments';
+import { analyticsRouter } from './routes/analytics';
+import { founderRouter } from './routes/founder';
+import { memoryManagementRouter } from './routes/memoryManagement';
 import { dbHealthService } from './services/DatabaseHealthService';
 import { degradedMode } from './services/DegradedModeService';
 import { authenticateUser } from './middleware/auth';
@@ -101,6 +105,11 @@ export function createApp(): express.Application {
   app.use('/memory/debug', authenticateUser, memoryDebugRouter);
   app.use('/admin/diagnostics', authenticateUser, diagnosticsRouter);
   app.use('/admin', authenticateUser, adminRouter);
+  app.use('/moments', authenticateUser, momentsRouter);
+  app.use('/analytics', authenticateUser, analyticsRouter);
+  app.use('/analytics/overview', authenticateUser, founderRouter);
+  app.use('/founder', authenticateUser, founderRouter);
+  app.use('/memories', authenticateUser, memoryManagementRouter);
 
   // ── 404 handler ──────────────────────────────────────────────────────────────
   app.use((_req, res) => {

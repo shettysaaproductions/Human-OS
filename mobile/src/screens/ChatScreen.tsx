@@ -55,9 +55,14 @@ export function ChatScreen() {
       >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Nova</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Diagnostics')} style={styles.diagBtn}>
-          <Text style={styles.diagText}>⚙️</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={() => navigation.navigate('Brain')} style={styles.headerBtn}>
+            <Text style={styles.headerBtnText}>🧠</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Diagnostics')} style={styles.headerBtn}>
+            <Text style={styles.headerBtnText}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -104,8 +109,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff'
   },
   headerTitle: { fontSize: 18, fontWeight: 'bold' },
-  diagBtn: { position: 'absolute', right: 16 },
-  diagText: { fontSize: 20 },
+  headerRight: { position: 'absolute', right: 16, flexDirection: 'row' },
+  headerBtn: { marginLeft: 16 },
+  headerBtnText: { fontSize: 20 },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 16, paddingBottom: 32 },
   messageBubble: {
