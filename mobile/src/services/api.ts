@@ -57,11 +57,14 @@ api.interceptors.response.use(
       console.log(`[API NETWORK ERROR]`, error.message);
     }
 
-    // Only attempt refresh on 401, and never retry the refresh call itself
+    // Only attempt token refresh on 401 for protected routes.
+    // NEVER intercept /auth/ endpoints (login, signup, refresh) — they don't
+    // use bearer tokens and intercepting them causes "No refresh token" errors
+    // to mask the real failure (bad credentials, cold backend, etc.).
     if (
       error.response?.status !== 401 ||
       originalRequest._retried ||
-      originalRequest.url?.includes('/auth/refresh')
+      originalRequest.url?.includes('/auth/')
     ) {
       return Promise.reject(error);
     }
