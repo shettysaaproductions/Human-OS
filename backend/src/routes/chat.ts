@@ -41,7 +41,7 @@ chatRouter.post(
         .from('profiles')
         .select('preferred_name, companion_personality')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       // 3. Save User Message to DB
       const { data: userMsgRecord, error: userMsgError } = await supabaseAdmin

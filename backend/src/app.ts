@@ -96,7 +96,7 @@ export function createApp(): express.Application {
   app.use('/onboarding', authenticateUser, onboardingRouter);
   app.use('/chat', authenticateUser, chatLimiter, chatRouter);
   app.use('/memory/debug', authenticateUser, memoryDebugRouter);
-  app.use('/admin/diagnostics', diagnosticsRouter);
+  app.use('/admin/diagnostics', authenticateUser, diagnosticsRouter);
 
   // ── 404 handler ──────────────────────────────────────────────────────────────
   app.use((_req, res) => {

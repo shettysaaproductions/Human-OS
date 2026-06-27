@@ -12,6 +12,11 @@ export class MemoryRepository {
     if (!memory.shouldPersist) return;
 
     try {
+      // TODO (Tech Debt): Race condition vulnerability.
+      // If two requests upsert the same memory simultaneously, the select() -> update() 
+      // cycle will overwrite each other's increments. 
+      // Fix: Implement Postgres RPC with ON CONFLICT DO UPDATE for atomic increments.
+      
       // 1. Check if memory exists for this user + key
       const { data: existing } = await supabaseAdmin
         .from('memories')
