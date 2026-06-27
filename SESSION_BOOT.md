@@ -48,3 +48,7 @@ Supabase (PostgreSQL) is the core nervous system. Key tables include:
 ## 8. Continuous Memory
 - Reference: [MEMORY.md](file:///e:/project%20software/Human%20OS/MEMORY.md)
 - All architectural decisions, task continuity, and pivot points must be documented here to prevent context loss between AI sessions.
+
+## 9. Data Boundaries
+- Reference: [DATA_BOUNDARIES.md](file:///e:/project%20software/Human%20OS/DATA_BOUNDARIES.md)
+- Supabase stores only runtime application/user data. Markdown documentation, plans, books, prompts, logs, and notes are strictly forbidden from database tables and must reside only on the filesystem (Git).
