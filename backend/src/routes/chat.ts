@@ -4,7 +4,7 @@ import { chatCompletion } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
-import { memoryExtractor } from '../services/memoryExtractor';
+import { extractorAgent } from '../agents/ExtractorAgent';
 import { promptBuilder } from '../services/promptBuilder';
 import { supabaseAdmin } from '../lib/supabase';
 import crypto from 'crypto';
@@ -73,14 +73,28 @@ chatRouter.post(
         content: msg.content
       }));
 
-      // 5. Retrieve Long-Term Memories
-      const keywords = memoryExtractor.extractKeywords(message);
-      const memories = await memoryRepository.searchMemories(userId, keywords);
+      // 5. Retrieve Long-Term Memories & Working Memory
+      const keywords = extractorAgent.extractKeywords(message);
+      
+      const [memories, { data: workingMemoryData }] = await Promise.all([
+        memoryRepository.searchMemories(userId, keywords),
+        supabaseAdmin
+          .from('working_memory')
+          .select('key, value')
+          .eq('user_id', userId)
+          .gt('expires_at', new Date().toISOString())
+      ]);
+
+      const workingMemories = (workingMemoryData || []).map(wm => ({
+        key: wm.key,
+        value: wm.value
+      }));
 
       // 6. Build Context Pipeline System Prompt
       const systemPrompt = promptBuilder.buildSystemPrompt(
         BASE_SYSTEM_PROMPT, 
         memories,
+        workingMemories,
         profile?.preferred_name,
         profile?.companion_personality
       );
@@ -113,15 +127,9 @@ chatRouter.post(
         });
 
       // 10. Background Memory Extraction (Fire & Forget)
-      memoryExtractor.extractMemories(message).then(async (extracted) => {
-        for (const mem of extracted) {
-          if (mem.shouldPersist) {
-            try {
-              await memoryRepository.upsertMemory(userId, mem, userMessageId);
-            } catch (err) {
-              logger.error('Background memory save failed', { error: err instanceof Error ? err.message : String(err) });
-            }
-          }
+      extractorAgent.extractAll(message).then(async (extracted) => {
+        if (extracted) {
+           await extractorAgent.processAndSave(userId, userMessageId, extracted);
         }
       }).catch(err => {
         logger.error('Background extraction failed entirely', { error: err.message });
