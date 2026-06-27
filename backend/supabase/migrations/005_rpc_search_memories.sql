@@ -12,6 +12,8 @@ CREATE INDEX IF NOT EXISTS idx_memories_fts
   ON public.memories USING GIN (to_tsvector('english', key || ' ' || value));
 
 -- 3. Create the optimized retrieval RPC function
+DROP FUNCTION IF EXISTS search_relevant_memories(uuid, text, integer);
+
 CREATE OR REPLACE FUNCTION search_relevant_memories(
   p_user_id uuid,
   p_query text,

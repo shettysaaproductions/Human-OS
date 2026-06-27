@@ -57,6 +57,7 @@ export class MemoryRepository {
               value: memory.value,
               importance: memory.importance,
               confidence: memory.confidence,
+              emotional_weight: memory.emotional_weight ?? 0,
               source_message: sourceMessage,
             })
         );

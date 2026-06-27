@@ -4,6 +4,7 @@ import { config } from '../config';
 import { cache, CACHE_NS, CACHE_TTL } from '../lib/cache';
 import { qt } from '../lib/queryTracker';
 import { dbHealthService } from '../services/DatabaseHealthService';
+import { extractKeywords } from '../utils/nlp';
 
 export const diagnosticsRouter: import('express').Router = Router();
 
@@ -156,6 +157,58 @@ diagnosticsRouter.get('/queries', async (_req: Request, res: Response, next: Nex
 
     if (error) throw error;
     res.status(200).json({ queries: data || [], count: data?.length || 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Memory Scoring Diagnostics ────────────────────────────────────────────────
+diagnosticsRouter.get('/memory', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = (req as any).user?.id || req.query.user_id as string;
+    const query = req.query.q as string;
+
+    if (!userId || !query) {
+      res.status(400).json({ error: 'Missing user_id or q (query) parameter' });
+      return;
+    }
+
+    const keywords = extractKeywords(query);
+    const searchStr = keywords.join(' ');
+
+    const { data, error } = await supabaseAdmin.rpc('search_relevant_memories', {
+      p_user_id: userId,
+      p_query: searchStr,
+      p_limit: 10
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const results = (data || []).map((m: any) => ({
+      id: m.id,
+      key: m.key,
+      value: m.value,
+      type: m.memory_type,
+      final_score: m.score,
+      explanation: {
+        importance: m.score_importance,
+        relevance: m.score_relevance,
+        confidence: m.score_confidence,
+        memory_type: m.score_type,
+        recency: m.score_recency,
+        frequency: m.score_frequency,
+        emotional: m.score_emotion
+      },
+      matched_keywords: m.matched_keywords
+    }));
+
+    res.status(200).json({
+      query: searchStr,
+      extracted_keywords: keywords,
+      results
+    });
   } catch (err) {
     next(err);
   }

@@ -191,7 +191,8 @@ chatRouter.post(
         memoryQueue.add('extract_working_memory', payload),
         memoryQueue.add('extract_episodic', payload),
         memoryQueue.add('extract_kg', payload),
-        memoryQueue.add('extract_emotional', payload)
+        memoryQueue.add('extract_emotional', payload),
+        memoryQueue.add('extract_milestone', payload)
       ]).catch(err => {
         logger.error('Failed to enqueue background extraction jobs', { error: err instanceof Error ? err.message : String(err) });
       });
