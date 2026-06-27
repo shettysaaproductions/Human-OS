@@ -72,6 +72,7 @@ diagnosticsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
       cache: cache.stats(),
       egress: {
         estimated_mb: qt.estimatedEgressMb(),
+        estimated_saved_mb: qt.estimatedEgressSavedMb(),
         warning_threshold_mb: config.db.egressWarningThresholdMb,
       },
       latency_ms: Date.now() - startTime,

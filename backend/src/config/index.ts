@@ -51,6 +51,7 @@ export const config = {
   },
 
   db: {
+    databaseUrl: optionalEnv('DATABASE_URL', ''),
     degradedMode: optionalEnv('DATABASE_DEGRADED_MODE', 'false') === 'true',
     memorySearchLimit: parseInt(optionalEnv('MEMORY_SEARCH_LIMIT', '200'), 10),
     egressWarningThresholdMb: parseInt(optionalEnv('EGRESS_WARNING_THRESHOLD_MB', '400'), 10),
