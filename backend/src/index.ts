@@ -11,6 +11,7 @@
 import { createApp } from './app';
 import { config } from './config';
 import { logger } from './lib/logger';
+import { startWorkers } from './workers/queueWorker';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -18,6 +19,9 @@ async function main(): Promise<void> {
     version: config.server.appVersion,
     environment: config.server.nodeEnv,
   });
+
+  // Initialize Background Queue Workers
+  startWorkers();
 
   const app = createApp();
 
