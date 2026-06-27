@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import * as Updates from 'expo-updates';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/useAuthStore';
 import { useNavigation } from '@react-navigation/native';
@@ -62,6 +63,9 @@ export function LoginScreen() {
         onPress={() => navigation.navigate('Signup')} 
         color="#888" 
       />
+      <Text style={styles.versionStamp}>
+        Bundle: {Updates.updateId?.slice(0, 8) ?? 'embedded'} | Runtime: {Updates.runtimeVersion ?? 'N/A'}
+      </Text>
     </View>
   );
 }
@@ -88,5 +92,11 @@ const styles = StyleSheet.create({
   },
   spacer: {
     height: 20
+  },
+  versionStamp: {
+    marginTop: 24,
+    fontSize: 10,
+    color: '#bbb',
+    textAlign: 'center',
   }
 });
