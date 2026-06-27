@@ -20,6 +20,8 @@ import { authRouter } from './routes/auth';
 import { onboardingRouter } from './routes/onboarding';
 import { diagnosticsRouter } from './routes/diagnostics';
 import { adminRouter } from './routes/admin';
+import { dbHealthService } from './services/DatabaseHealthService';
+import { degradedMode } from './services/DegradedModeService';
 import { authenticateUser } from './middleware/auth';
 import { logger } from './lib/logger';
 
@@ -112,6 +114,24 @@ export function createApp(): express.Application {
 
   // ── Global error handler (must be LAST) ──────────────────────────────────────
   app.use(errorHandler);
+
+  // ── Background health checker ────────────────────────────────────────────────
+  // Runs every 30s: checks DB health, fires alerts, drains degraded queue on recovery
+  const healthInterval = setInterval(async () => {
+    const report = await dbHealthService.check();
+    if (report.status === 'online') {
+      const queueSize = degradedMode.queueSize();
+      if (queueSize > 0) {
+        const result = await degradedMode.drain();
+        if (result.success > 0) {
+          // Invalidate diagnostics cache after drain
+          const { cache } = await import('./lib/cache');
+          cache.invalidateNamespace('diagnostics');
+        }
+      }
+    }
+  }, 30_000);
+  if (healthInterval.unref) healthInterval.unref();
 
   return app;
 }
