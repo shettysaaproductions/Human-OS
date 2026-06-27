@@ -7,10 +7,20 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "ts-node scripts/db_migrate.ts",
+    "db:verify": "ts-node scripts/db_verify.ts",
+    "db:reset": "ts-node scripts/db_reset.ts",
+    "db:backup": "ts-node scripts/db_backup.ts",
+    "doctor": "ts-node scripts/doctor.ts",
+    "boot": "ts-node scripts/session_boot.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.44.4",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^20.19.43",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -18,15 +28,13 @@
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
     "openai": "^4.52.7",
+    "pg": "^8.22.0",
+    "typescript": "^5.9.3",
     "winston": "^3.13.0",
-    "zod": "^3.23.8",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^4.17.25",
-    "@types/morgan": "^1.9.10",
-    "@types/node": "^20.19.43",
-    "typescript": "^5.9.3"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/pg": "^8.20.0",
     "ts-node": "^10.9.2"
   },
   "ts-node": {

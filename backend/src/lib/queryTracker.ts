@@ -43,12 +43,22 @@ class QueryTracker {
   private buffer: QueryMetricRecord[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private totalEgressBytes = 0;
+  private totalEgressSavedBytes = 0;
 
   constructor() {
     // Flush every 10 seconds
     this.flushTimer = setInterval(() => this.flush(), 10_000);
     // Allow process to exit without waiting
     if (this.flushTimer.unref) this.flushTimer.unref();
+  }
+
+  /**
+   * Explicitly record egress bytes saved (e.g. by using an RPC instead of fetching rows).
+   */
+  recordEgressSaved(bytes: number): void {
+    if (bytes > 0) {
+      this.totalEgressSavedBytes += bytes;
+    }
   }
 
   /**
@@ -78,6 +88,13 @@ class QueryTracker {
    */
   estimatedEgressMb(): number {
     return parseFloat((this.totalEgressBytes / (1024 * 1024)).toFixed(3));
+  }
+
+  /**
+   * Estimated total egress saved in MB since process start.
+   */
+  estimatedEgressSavedMb(): number {
+    return parseFloat((this.totalEgressSavedBytes / (1024 * 1024)).toFixed(3));
   }
 
   /**
