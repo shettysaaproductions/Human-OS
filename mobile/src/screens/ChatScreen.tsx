@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TextInput, Button, FlatList, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 
 export function ChatScreen() {
+  const navigation = useNavigation<any>();
   const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage } = useChatStore();
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
@@ -48,6 +50,13 @@ export function ChatScreen() {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Nova</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Diagnostics')} style={styles.diagBtn}>
+          <Text style={styles.diagText}>⚙️</Text>
+        </TouchableOpacity>
+      </View>
+
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -79,7 +88,19 @@ export function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9f9f9' },
+  container: { flex: 1, backgroundColor: '#f9f9f9', paddingTop: Platform.OS === 'ios' ? 40 : 20 },
+  header: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    backgroundColor: '#fff'
+  },
+  headerTitle: { fontSize: 18, fontWeight: 'bold' },
+  diagBtn: { position: 'absolute', right: 16 },
+  diagText: { fontSize: 20 },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 16, paddingBottom: 32 },
   messageBubble: {

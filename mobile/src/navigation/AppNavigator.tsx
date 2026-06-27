@@ -8,6 +8,7 @@ import { SignupScreen } from '../screens/SignupScreen';
 import { SplashScreen } from '../screens/SplashScreen';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
+import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
 
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -41,7 +42,10 @@ export function AppNavigator() {
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         ) : (
           // Main Stack
-          <Stack.Screen name="Chat" component={ChatScreen} />
+          <>
+            <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="Diagnostics" component={DiagnosticsScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

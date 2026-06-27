@@ -1,56 +1,50 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
 import { chatService } from '../services/chatService';
 
 export interface Message {
   id: string;
-  role: 'user' | 'nova';
+  role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
   content: string;
   status: 'sending' | 'sent' | 'error';
 }
 
 interface ChatState {
   messages: Message[];
+  conversationId: string | null;
   isTyping: boolean;
   isHydrated: boolean;
   
   hydrateMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
-  clearMessages: () => Promise<void>;
+  clearMessages: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => {
-  const saveMessages = async (msgs: Message[]) => {
-    try {
-      await SecureStore.setItemAsync('chatHistory', JSON.stringify(msgs));
-    } catch (e) {
-      console.error('Failed to save chat history', e);
-    }
-  };
-
   const processMessage = async (msgId: string, content: string) => {
     set({ isTyping: true });
     try {
-      const { reply } = await chatService.sendMessage(content);
+      const state = get();
+      const { reply, conversation_id } = await chatService.sendMessage(content, state.conversationId || undefined);
       
       const novaMsg: Message = {
         id: Date.now().toString() + '_nova',
-        role: 'nova',
+        role: 'assistant',
         content: reply,
         status: 'sent'
       };
 
-      set((state) => {
-        const updated = state.messages.map(m => m.id === msgId ? { ...m, status: 'sent' as const } : m);
-        const finalMsgs = [...updated, novaMsg];
-        saveMessages(finalMsgs);
-        return { messages: finalMsgs, isTyping: false };
+      set((s) => {
+        const updated = s.messages.map(m => m.id === msgId ? { ...m, status: 'sent' as const } : m);
+        return { 
+          messages: [...updated, novaMsg], 
+          isTyping: false,
+          conversationId: conversation_id // Save the active conversation ID
+        };
       });
     } catch (error) {
-      set((state) => {
-        const updated = state.messages.map(m => m.id === msgId ? { ...m, status: 'error' as const } : m);
-        saveMessages(updated);
+      set((s) => {
+        const updated = s.messages.map(m => m.id === msgId ? { ...m, status: 'error' as const } : m);
         return { messages: updated, isTyping: false };
       });
     }
@@ -58,18 +52,30 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   return {
     messages: [],
+    conversationId: null,
     isTyping: false,
     isHydrated: false,
     
     hydrateMessages: async () => {
       try {
-        const history = await SecureStore.getItemAsync('chatHistory');
-        if (history) {
-          set({ messages: JSON.parse(history), isHydrated: true });
+        const history = await chatService.getHistory();
+        if (history && history.length > 0) {
+          const formattedHistory = history.map((msg: any) => ({
+            id: msg.id,
+            role: msg.role === 'nova' ? 'assistant' : msg.role,
+            content: msg.content,
+            status: 'sent'
+          }));
+          set({ 
+            messages: formattedHistory, 
+            conversationId: history[0].conversation_id, // Get ID from most recent message
+            isHydrated: true 
+          });
         } else {
           set({ isHydrated: true });
         }
       } catch (e) {
+        console.error('Failed to hydrate history from backend:', e);
         set({ isHydrated: true });
       }
     },
@@ -82,12 +88,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         status: 'sending'
       };
 
-      set((state) => {
-        const newMsgs = [...state.messages, userMsg];
-        saveMessages(newMsgs);
-        return { messages: newMsgs };
-      });
-
+      set((state) => ({ messages: [...state.messages, userMsg] }));
       await processMessage(userMsg.id, content);
     },
 
@@ -96,18 +97,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       const msg = state.messages.find(m => m.id === messageId);
       if (!msg) return;
 
-      set((s) => {
-        const updated = s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m);
-        saveMessages(updated);
-        return { messages: updated };
-      });
+      set((s) => ({
+        messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m)
+      }));
 
       await processMessage(msg.id, msg.content);
     },
     
-    clearMessages: async () => {
-      await SecureStore.deleteItemAsync('chatHistory');
-      set({ messages: [] });
+    clearMessages: () => {
+      set({ messages: [], conversationId: null });
     }
   };
 });
