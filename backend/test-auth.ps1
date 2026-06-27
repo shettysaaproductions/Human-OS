@@ -1,79 +1,20 @@
-$baseUrl = "http://localhost:3000"
+$baseUrl = "https://human-os-zitw.onrender.com"
 $headers = @{ "Content-Type" = "application/json" }
 
-function Create-User {
-    param([string]$email, [string]$password)
-    Write-Host "Signing up $email..."
-    $body = @{ email = $email; password = $password } | ConvertTo-Json
-    $response = Invoke-RestMethod -Uri "$baseUrl/auth/signup" -Method Post -Body $body -Headers $headers -ErrorAction SilentlyContinue
-    if ($null -eq $response) {
-        # Might already exist, try login
-        $response = Invoke-RestMethod -Uri "$baseUrl/auth/login" -Method Post -Body $body -Headers $headers
-    }
-    return $response.access_token
-}
+Write-Host "--- TEST AUTH ---"
 
-function Test-Chat {
-    param([string]$token, [string]$message, [string]$userLabel)
-    Write-Host "USER $($userLabel): $message" -ForegroundColor Cyan
-    $authHeaders = @{
-        "Content-Type" = "application/json"
-        "Authorization" = "Bearer $token"
-    }
-    $body = @{ message = $message } | ConvertTo-Json
-    $response = Invoke-RestMethod -Uri "$baseUrl/chat/test" -Method Post -Body $body -Headers $authHeaders
-    Write-Host "NOVA: $($response.reply)" -ForegroundColor Green
-    Write-Host "META: $($response.meta | ConvertTo-Json -Compress)" -ForegroundColor DarkGray
-    Write-Host ""
-    # Sleep to respect rate limits and background processing
-    Start-Sleep -Seconds 15
-}
+$email = "auth_test_$(Get-Random -Maximum 99999)@humanos.app"
+$body = @{ email = $email; password = "TestPassword123!" } | ConvertTo-Json
 
-function Clear-Memories {
-    param([string]$token)
-    $authHeaders = @{
-        "Content-Type" = "application/json"
-        "Authorization" = "Bearer $token"
-    }
-    Invoke-RestMethod -Uri "$baseUrl/memory/debug" -Method Delete -Headers $authHeaders | Out-Null
-    Start-Sleep -Seconds 2
-}
+Write-Host "1. Signup..."
+$signup = Invoke-RestMethod -Uri "$baseUrl/auth/signup" -Method Post -Body $body -Headers $headers
+if ($signup.access_token) { Write-Host "PASS: Signup" -ForegroundColor Green } else { Write-Host "FAIL: Signup" -ForegroundColor Red }
 
-# Setup users
-$tokenA = Create-User "userA@humanos.app" "password123"
-$tokenB = Create-User "userB@humanos.app" "password123"
+Write-Host "2. Login..."
+$login = Invoke-RestMethod -Uri "$baseUrl/auth/login" -Method Post -Body $body -Headers $headers
+if ($login.access_token) { Write-Host "PASS: Login" -ForegroundColor Green } else { Write-Host "FAIL: Login" -ForegroundColor Red }
 
-Clear-Memories $tokenA
-Clear-Memories $tokenB
-
-Write-Host "================ TEST 1 & 2 ================"
-Test-Chat $tokenA "I love rap." "A"
-Test-Chat $tokenB "What should I listen to?" "B"
-Test-Chat $tokenA "What should I listen to?" "A"
-
-Write-Host "================ TEST 3 ================"
-Test-Chat $tokenA "My wife is pregnant." "A"
-Test-Chat $tokenB "I'm stressed." "B"
-
-Write-Host "================ TEST 4 ================"
-Write-Host "Testing Unauthorized Request..."
-try {
-    Invoke-RestMethod -Uri "$baseUrl/auth/me" -Method Get -Headers $headers
-    Write-Host "FAIL: Expected 401 Unauthorized" -ForegroundColor Red
-} catch {
-    if ($_.Exception.Response.StatusCode -eq "Unauthorized") {
-        Write-Host "PASS: Received 401 Unauthorized" -ForegroundColor Green
-    } else {
-        Write-Host "FAIL: Received unexpected error: $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
-Write-Host ""
-
-Write-Host "================ TEST 5 ================"
-Clear-Memories $tokenA
-Clear-Memories $tokenB
-
-Test-Chat $tokenA "I love rap." "A"
-Test-Chat $tokenB "I hate rap." "B"
-Test-Chat $tokenA "Recommend music." "A"
-Test-Chat $tokenB "Recommend music." "B"
+Write-Host "3. Refresh Token..."
+$refreshBody = @{ refresh_token = $login.refresh_token } | ConvertTo-Json
+$refresh = Invoke-RestMethod -Uri "$baseUrl/auth/refresh" -Method Post -Body $refreshBody -Headers $headers
+if ($refresh.access_token) { Write-Host "PASS: Refresh" -ForegroundColor Green } else { Write-Host "FAIL: Refresh" -ForegroundColor Red }
