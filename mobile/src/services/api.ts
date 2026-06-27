@@ -6,10 +6,27 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onren
 
 export const api = axios.create({
   baseURL: BASE_URL,
+  timeout: 15000, // 15s timeout — fail fast on slow connections
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// ── Retry on network errors (not auth errors) ─────────────────────────────────
+const MAX_RETRIES = 2;
+async function withRetry(fn: () => Promise<any>, retries = MAX_RETRIES): Promise<any> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const isNetworkError = !err.response && err.code !== 'ECONNABORTED';
+    if (isNetworkError && retries > 0) {
+      const delay = (MAX_RETRIES - retries + 1) * 1000;
+      await new Promise(r => setTimeout(r, delay));
+      return withRetry(fn, retries - 1);
+    }
+    throw err;
+  }
+}
 
 // ── Request interceptor: attach the current access token ─────────────────────
 api.interceptors.request.use(

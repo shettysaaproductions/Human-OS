@@ -24,6 +24,9 @@ import { momentsRouter } from './routes/moments';
 import { analyticsRouter } from './routes/analytics';
 import { founderRouter } from './routes/founder';
 import { memoryManagementRouter } from './routes/memoryManagement';
+import { feedbackRouter } from './routes/feedback';
+import { telemetryRouter } from './routes/telemetry';
+import { exportRouter } from './routes/export';
 import { dbHealthService } from './services/DatabaseHealthService';
 import { degradedMode } from './services/DegradedModeService';
 import { authenticateUser } from './middleware/auth';
@@ -110,6 +113,10 @@ export function createApp(): express.Application {
   app.use('/analytics/overview', authenticateUser, founderRouter);
   app.use('/founder', authenticateUser, founderRouter);
   app.use('/memories', authenticateUser, memoryManagementRouter);
+  app.use('/memories', authenticateUser, exportRouter);
+  app.use('/feedback', authenticateUser, feedbackRouter);
+  app.use('/telemetry', authenticateUser, telemetryRouter);
+  app.use('/admin/errors', authenticateUser, telemetryRouter);
 
   // ── 404 handler ──────────────────────────────────────────────────────────────
   app.use((_req, res) => {

@@ -4,9 +4,13 @@
 CREATE TABLE IF NOT EXISTS public.app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
-  description TEXT,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Add description column if it doesn't already exist (idempotent)
+ALTER TABLE public.app_settings
+  ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
 -- Seed default model settings
 INSERT INTO public.app_settings (key, value, description) VALUES
