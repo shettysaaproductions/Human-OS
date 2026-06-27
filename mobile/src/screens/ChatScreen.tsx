@@ -31,7 +31,7 @@ export function ChatScreen() {
         
         {isUser && item.status === 'error' && (
           <TouchableOpacity onPress={() => retryMessage(item.id)} style={styles.retryButton}>
-            <Text style={styles.retryText}>Failed. Tap to retry.</Text>
+            <Text style={styles.retryText}>{item.errorMessage ? `${item.errorMessage}. Tap to retry.` : 'Failed. Tap to retry.'}</Text>
           </TouchableOpacity>
         )}
       </View>
