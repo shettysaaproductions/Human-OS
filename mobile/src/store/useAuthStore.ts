@@ -43,7 +43,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         try {
           // Fast path: existing token is still valid
           const user = await authService.getMe();
-          set({ accessToken, user, isLoading: false });
+          set({ accessToken, user, onboardingStatus: user.onboardingCompleted || false, isLoading: false });
           return;
         } catch {
           // Token expired — fall through to refresh
@@ -56,7 +56,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           const data = await authService.refresh(refreshToken);
           await SecureStore.setItemAsync('accessToken', data.access_token);
           await SecureStore.setItemAsync('refreshToken', data.refresh_token);
-          set({ accessToken: data.access_token, user: data.user, isLoading: false });
+          set({ accessToken: data.access_token, user: data.user, onboardingStatus: data.user?.onboardingCompleted || false, isLoading: false });
           return;
         } catch {
           // Refresh token also expired — force re-login
@@ -84,7 +84,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (refreshToken) {
       await SecureStore.setItemAsync('refreshToken', refreshToken);
     }
-    set({ accessToken, user });
+    set({ accessToken, user, onboardingStatus: user?.onboardingCompleted || false });
   },
 
   logout: async () => {

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabaseAnon } from '../lib/supabase';
+import { supabaseAnon, supabaseAdmin } from '../lib/supabase';
 import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { config } from '../config';
@@ -78,8 +78,17 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('onboarding_completed')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
     res.status(200).json({
-      user: data.user,
+      user: {
+        ...data.user,
+        onboardingCompleted: profile?.onboarding_completed || false,
+      },
       access_token: data.session?.access_token || null,
       refresh_token: data.session?.refresh_token || null,
     });
@@ -115,10 +124,19 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
     }
 
     logger.info('Token refreshed successfully', { userId: data.user?.id });
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('onboarding_completed')
+      .eq('id', data.user?.id)
+      .maybeSingle();
+
     res.status(200).json({
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
-      user: data.user,
+      user: {
+        ...data.user,
+        onboardingCompleted: profile?.onboarding_completed || false,
+      },
     });
   } catch (err) {
     logger.error('Token refresh crashed', { error: err instanceof Error ? err.message : String(err) });
@@ -147,6 +165,23 @@ authRouter.post('/logout', authenticateUser, async (req: Request, res: Response)
 /**
  * GET /auth/me
  */
-authRouter.get('/me', authenticateUser, (req: Request, res: Response): void => {
-  res.status(200).json((req as any).user);
+authRouter.get('/me', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('onboarding_completed')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    res.status(200).json({
+      id: user.id,
+      email: user.email,
+      name: user.user_metadata?.name || null,
+      onboardingCompleted: profile?.onboarding_completed || false,
+    });
+  } catch (err) {
+    logger.error('Failed to fetch /me', { error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
 });
