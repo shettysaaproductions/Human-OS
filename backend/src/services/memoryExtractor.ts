@@ -29,10 +29,10 @@ Return ONLY a JSON array named "memories". If no memory is present, return {"mem
 
 Fields for each memory:
 - "shouldPersist": boolean (false if trivial)
-- "type": "preference" | "interest" | "goal" | "biography" | "relationship" | "fact"
-- "key": A short, snake_case identifier (e.g., "music_preference", "dog_name")
-- "value": The actual fact (e.g., "rap", "Buster")
-- "importance": Integer 1-10 (10 = life-altering, 5 = standard fact, 1 = trivial)
+- "type": "family" | "personal" | "work" | "goals" | "preferences" | "health" | "important_dates"
+- "key": A short, snake_case identifier (e.g., "music_preference", "dog_name", "son_age")
+- "value": The actual fact (e.g., "rap", "Buster", "5 months old")
+- "importance": Integer 0-100 (100 = life-altering/birthday, 80 = profession, 50 = standard fact, 10 = trivial preference)
 - "confidence": Float 0.0-1.0 (How certain are you of this fact?)`
         },
         {

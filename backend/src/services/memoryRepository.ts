@@ -22,7 +22,7 @@ export class MemoryRepository {
 
       if (existing) {
         // Increment importance if it's mentioned again
-        const newImportance = Math.min((existing.importance || 5) + 1, 10);
+        const newImportance = Math.min((existing.importance || 50) + 5, 100);
         
         await supabaseAdmin
           .from('memories')
@@ -79,7 +79,7 @@ export class MemoryRepository {
       // Calculate scores
       const scoredMemories = memories.map(mem => {
         // 1. Importance (0.0 to 1.0)
-        const normImportance = Math.min(10, Math.max(1, mem.importance)) / 10;
+        const normImportance = Math.min(100, Math.max(1, mem.importance)) / 100;
 
         // 2. Relevance (0.0 to 1.0)
         let matches = 0;

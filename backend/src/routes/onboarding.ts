@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { authenticateUser } from '../middleware/auth';
 import { onboardingService, OnboardingAnswers } from '../services/onboardingService';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
@@ -10,7 +9,7 @@ export const onboardingRouter = Router();
  * POST /onboarding
  * Receives the 6 onboarding answers, updates the profile, and injects seed memories.
  */
-onboardingRouter.post('/', authenticateUser, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+onboardingRouter.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user!.id;
     const answers: OnboardingAnswers = req.body;
@@ -34,7 +33,7 @@ onboardingRouter.post('/', authenticateUser, async (req: Request, res: Response,
  * GET /onboarding/status
  * Returns the current onboarding status for the user to help frontend routing.
  */
-onboardingRouter.get('/status', authenticateUser, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+onboardingRouter.get('/status', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user!.id;
 

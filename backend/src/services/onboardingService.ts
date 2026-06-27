@@ -49,43 +49,43 @@ export class OnboardingService {
       // 2. Insert Seed Memories directly (bypassing LLM)
       const seedMemories: ExtractedMemory[] = [
         {
-          type: 'preference',
+          type: 'preferences',
           key: 'preferred_name',
           value: `Prefers to be called ${answers.preferred_name}.`,
           shouldPersist: true,
-          importance: 10,
+          importance: 100,
           confidence: 1.0
         },
         {
-          type: 'interest',
+          type: 'personal',
           key: 'passions_and_interests',
           value: answers.passions,
           shouldPersist: true,
-          importance: 10,
+          importance: 80,
           confidence: 1.0
         },
         {
-          type: 'goal',
+          type: 'goals',
           key: 'current_goals',
           value: answers.goals,
           shouldPersist: true,
-          importance: 10,
+          importance: 90,
           confidence: 1.0
         },
         {
-          type: 'relationship',
+          type: 'family',
           key: 'family_and_relationships',
           value: answers.family,
           shouldPersist: true,
-          importance: 10,
+          importance: 95,
           confidence: 1.0
         },
         {
-          type: 'fact',
+          type: 'personal',
           key: 'important_facts',
           value: answers.important_facts,
           shouldPersist: true,
-          importance: 10,
+          importance: 85,
           confidence: 1.0
         }
       ];
@@ -103,10 +103,10 @@ export class OnboardingService {
         // or just add importance to ExtractedMemory.
       }
 
-      // Direct update to ensure these are locked at importance 10
+      // Direct update to ensure these are locked at high importance
       await supabaseAdmin
         .from('memories')
-        .update({ importance: 10, confidence: 1.0, is_user_confirmed: true })
+        .update({ importance: 90, confidence: 1.0, is_user_confirmed: true })
         .eq('user_id', userId)
         .eq('source_message', 'onboarding_seed');
 
