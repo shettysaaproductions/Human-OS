@@ -8,6 +8,7 @@ export class PromptBuilder {
   buildSystemPrompt(
     basePrompt: string, 
     memories: Memory[], 
+    workingMemories: { key: string, value: string }[],
     preferredName?: string, 
     companionPersonality?: string
   ): string {
@@ -29,7 +30,15 @@ CRITICAL RULES FOR NOVA:
       finalPrompt += `\nYour Personality Style: ${companionPersonality}`;
     }
 
-    // Pipeline Step 2: Long-Term Memory
+    // Pipeline Step 2: Working Memory (Short-Term Context)
+    if (workingMemories && workingMemories.length > 0) {
+      finalPrompt += `\n\n--- WORKING MEMORY (CURRENT CONTEXT & TASKS) ---`;
+      for (const wm of workingMemories) {
+        finalPrompt += `\n- ${wm.key.replace(/_/g, ' ')}: ${wm.value}`;
+      }
+    }
+
+    // Pipeline Step 3: Long-Term Memory
     finalPrompt += `\n\n--- LONG-TERM MEMORY (FACTS & CONTEXT) ---`;
     if (!memories || memories.length === 0) {
       finalPrompt += `\nNo specific memories retrieved for this context.`;

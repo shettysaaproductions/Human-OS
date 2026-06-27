@@ -26,8 +26,9 @@ export class MemoryRepository {
         .single();
 
       if (existing) {
-        // Increment importance if it's mentioned again
+        // Increment importance and frequency if it's mentioned again
         const newImportance = Math.min((existing.importance || 50) + 5, 100);
+        const newFrequency = (existing.frequency || 1) + 1;
         
         await supabaseAdmin
           .from('memories')
@@ -35,12 +36,14 @@ export class MemoryRepository {
             value: memory.value,
             importance: Math.max(newImportance, memory.importance),
             confidence: memory.confidence,
+            frequency: newFrequency,
+            emotional_weight: memory.emotional_weight || existing.emotional_weight || 0,
             source_message: sourceMessage,
             updated_at: new Date().toISOString()
           })
           .eq('id', existing.id);
           
-        logger.debug('Memory updated', { key: memory.key, userId });
+        logger.debug('Memory updated', { key: memory.key, userId, frequency: newFrequency });
       } else {
         // Insert new memory
         await supabaseAdmin
@@ -82,7 +85,7 @@ export class MemoryRepository {
       const now = Date.now();
 
       // Calculate scores
-      const scoredMemories = memories.map(mem => {
+      const scoredMemories = memories.filter(m => !m.is_archived).map(mem => {
         // 1. Importance (0.0 to 1.0)
         const normImportance = Math.min(100, Math.max(1, mem.importance)) / 100;
 
@@ -100,8 +103,14 @@ export class MemoryRepository {
         const daysOld = (now - new Date(targetDate).getTime()) / (1000 * 60 * 60 * 24);
         const recency = Math.max(0, 1 - (daysOld / 30));
 
-        // Final Score (45 / 40 / 15)
-        const final_score = (normImportance * 0.45) + (relevance * 0.40) + (recency * 0.15);
+        // 4. Frequency (0.0 to 1.0) - Maxes out at 10 accesses
+        const normFrequency = Math.min(10, Math.max(1, mem.frequency || 1)) / 10;
+
+        // 5. Emotional Weight (0.0 to 1.0) - Magnitude of emotion
+        const normEmotion = Math.min(10, Math.abs(mem.emotional_weight || 0)) / 10;
+
+        // Final Score (30/30/15/15/10)
+        const final_score = (normImportance * 0.30) + (relevance * 0.30) + (recency * 0.15) + (normFrequency * 0.15) + (normEmotion * 0.10);
 
         return { mem, final_score, normImportance };
       });
