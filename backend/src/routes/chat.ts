@@ -4,7 +4,8 @@ import { chatCompletion } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
-import { extractorAgent } from '../agents/ExtractorAgent';
+import { memoryQueue } from '../services/QueueService';
+import { extractKeywords } from '../utils/nlp';
 import { promptBuilder } from '../services/promptBuilder';
 import { supabaseAdmin } from '../lib/supabase';
 import crypto from 'crypto';
@@ -74,7 +75,7 @@ chatRouter.post(
       }));
 
       // 5. Retrieve Long-Term Memories & Working Memory
-      const keywords = extractorAgent.extractKeywords(message);
+      const keywords = extractKeywords(message);
       
       const [memories, { data: workingMemoryData }] = await Promise.all([
         memoryRepository.searchMemories(userId, keywords),
@@ -126,13 +127,18 @@ chatRouter.post(
           content: reply
         });
 
-      // 10. Background Memory Extraction (Fire & Forget)
-      extractorAgent.extractAll(message).then(async (extracted) => {
-        if (extracted) {
-           await extractorAgent.processAndSave(userId, userMessageId, extracted);
-        }
-      }).catch(err => {
-        logger.error('Background extraction failed entirely', { error: err.message });
+      // 10. Background Memory Extraction (Fire & Forget via QueueService)
+      const payload = { userId, messageId: userMessageId, message };
+      
+      // We don't await these so they don't block the response
+      Promise.all([
+        memoryQueue.add('extract_semantic', payload),
+        memoryQueue.add('extract_working_memory', payload),
+        memoryQueue.add('extract_episodic', payload),
+        memoryQueue.add('extract_kg', payload),
+        memoryQueue.add('extract_emotional', payload)
+      ]).catch(err => {
+        logger.error('Failed to enqueue background extraction jobs', { error: err.message });
       });
 
       // Return response
