@@ -7,6 +7,7 @@ import { LifeTimelineScreen } from '../screens/analytics/LifeTimelineScreen';
 import { FounderDashboardScreen } from '../screens/analytics/FounderDashboardScreen';
 import { KgExplorerScreen } from '../screens/analytics/KgExplorerScreen';
 import { MemoryManagementScreen } from '../screens/analytics/MemoryManagementScreen';
+import { BetaAdminScreen } from '../screens/analytics/BetaAdminScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -30,6 +31,7 @@ export function BrainNavigator() {
       <Tab.Screen name="Timeline" component={LifeTimelineScreen} />
       <Tab.Screen name="Memories" component={MemoryManagementScreen} />
       <Tab.Screen name="Founder" component={FounderDashboardScreen} />
+      <Tab.Screen name="Beta" component={BetaAdminScreen} />
     </Tab.Navigator>
   );
 }
