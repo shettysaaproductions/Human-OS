@@ -4,7 +4,7 @@ import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { config } from '../config';
 
-export const authRouter = Router();
+export const authRouter: import('express').Router = Router();
 
 /**
  * POST /auth/signup

@@ -1,4 +1,4 @@
-export type MemoryType = 'preference' | 'interest' | 'goal' | 'biography' | 'relationship' | 'fact';
+export type MemoryType = 'family' | 'personal' | 'work' | 'goals' | 'preferences' | 'health' | 'important_dates';
 
 export interface Memory {
   id: string;

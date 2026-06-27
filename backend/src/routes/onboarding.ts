@@ -3,7 +3,7 @@ import { onboardingService, OnboardingAnswers } from '../services/onboardingServ
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
-export const onboardingRouter = Router();
+export const onboardingRouter: import('express').Router = Router();
 
 /**
  * POST /onboarding

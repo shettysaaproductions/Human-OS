@@ -23,7 +23,7 @@ diagnosticsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
     const { count: chatCount } = await supabaseAdmin.from('chat_history').select('*', { count: 'exact', head: true });
 
     res.status(200).json({
-      environment: config.env,
+      environment: config.server.nodeEnv,
       user_id: userId,
       jwt_status: 'Valid',
       metrics: {
