@@ -23,7 +23,7 @@ export function SignupScreen() {
 
       if (data.access_token) {
         // Session was issued immediately (email confirmation disabled)
-        await login(data.access_token, data.user);
+        await login(data.access_token, data.refresh_token, data.user);
       } else {
         // Supabase requires email confirmation before issuing a session
         Alert.alert(

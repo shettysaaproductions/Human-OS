@@ -20,9 +20,8 @@ export function LoginScreen() {
     setLoading(true);
     try {
       const data = await authService.login(email, password);
-      // The store login function saves to SecureStore and updates state
-      // which triggers the AppNavigator to switch stacks automatically
-      await login(data.access_token, data.user);
+      // Save both tokens — the store persists them to SecureStore
+      await login(data.access_token, data.refresh_token, data.user);
     } catch (err: any) {
       Alert.alert('Login Failed', err.response?.data?.error || err.message);
     } finally {

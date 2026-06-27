@@ -94,6 +94,39 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 });
 
 /**
+ * POST /auth/refresh
+ * Exchanges a Supabase refresh_token for a new access_token + refresh_token pair.
+ * Called automatically by the mobile app's axios interceptor when a 401 is received.
+ */
+authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { refresh_token } = req.body;
+    if (!refresh_token) {
+      res.status(400).json({ error: 'refresh_token is required' });
+      return;
+    }
+
+    const { data, error } = await supabaseAnon.auth.refreshSession({ refresh_token });
+
+    if (error || !data.session) {
+      logger.warn('Token refresh failed', { error: error?.message });
+      res.status(401).json({ error: 'Session expired. Please log in again.' });
+      return;
+    }
+
+    logger.info('Token refreshed successfully', { userId: data.user?.id });
+    res.status(200).json({
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      user: data.user,
+    });
+  } catch (err) {
+    logger.error('Token refresh crashed', { error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: 'Internal Server Error during token refresh' });
+  }
+});
+
+/**
  * POST /auth/logout
  */
 authRouter.post('/logout', authenticateUser, async (req: Request, res: Response): Promise<void> => {
