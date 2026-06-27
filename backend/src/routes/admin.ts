@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
 import { reflectionQueue } from '../services/QueueService';
 import { memoryDecayService } from '../services/MemoryDecayService';
+import { momentEngineService } from '../services/MomentEngineService';
+import { reflectionScheduler } from '../services/ReflectionSchedulerService';
 
 export const adminRouter: import('express').Router = Router();
 
@@ -47,6 +49,54 @@ adminRouter.post('/trigger-decay', async (_req: Request, res: Response, next: Ne
   try {
     const archivedCount = await memoryDecayService.processWeeklyDecay();
     res.status(200).json({ success: true, archived_count: archivedCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Triggers the Moment Engine processing for all onboarded users immediately.
+ */
+adminRouter.post('/trigger-moments', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const generatedCount = await momentEngineService.runEngineForAllUsers();
+    res.status(200).json({ success: true, moments_generated: generatedCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Retrieves aggregate moment telemetry metrics.
+ */
+adminRouter.get('/moments/telemetry', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const metrics = await momentEngineService.getTelemetryMetrics();
+    res.status(200).json({ success: true, telemetry: metrics });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Triggers daily reflections for all onboarded users immediately.
+ */
+adminRouter.post('/trigger-reflections-daily', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const processed = await reflectionScheduler.runDailyForAllUsers();
+    res.status(200).json({ success: true, users_processed: processed });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Triggers weekly reflections for all onboarded users immediately.
+ */
+adminRouter.post('/trigger-reflections-weekly', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const processed = await reflectionScheduler.runWeeklyForAllUsers();
+    res.status(200).json({ success: true, users_processed: processed });
   } catch (err) {
     next(err);
   }

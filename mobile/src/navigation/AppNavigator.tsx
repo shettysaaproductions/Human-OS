@@ -9,6 +9,7 @@ import { SplashScreen } from '../screens/SplashScreen';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
+import { BrainNavigator } from './BrainNavigator';
 
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -45,6 +46,7 @@ export function AppNavigator() {
           <>
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="Diagnostics" component={DiagnosticsScreen} />
+            <Stack.Screen name="Brain" component={BrainNavigator} />
           </>
         )}
       </Stack.Navigator>
