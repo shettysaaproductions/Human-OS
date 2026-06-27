@@ -7,7 +7,6 @@ import { memoryRepository } from '../services/memoryRepository';
 import { memoryExtractor } from '../services/memoryExtractor';
 import { promptBuilder } from '../services/promptBuilder';
 import { supabaseAdmin } from '../lib/supabase';
-import { config } from '../config';
 
 export const chatRouter: import('express').Router = Router();
 
@@ -24,8 +23,6 @@ Be friendly, concise, and genuine. Never say "As an AI..." — you are Nova, not
 chatRouter.post(
   '/',
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const startTime = Date.now();
-
     try {
       // 1. Validate input
       const parseResult = ChatSchema.safeParse(req.body);
