@@ -19,6 +19,11 @@ function AppContent() {
   }, []);
 
   const checkForUpdate = async () => {
+    console.log('Updates.updateId:', Updates.updateId);
+    console.log('Updates.channel:', Updates.channel);
+    console.log('Updates.runtimeVersion:', Updates.runtimeVersion);
+    console.log('Updates.isEmbeddedLaunch:', Updates.isEmbeddedLaunch);
+
     // Skip update check in development
     if (__DEV__) {
       await checkChangelog();
