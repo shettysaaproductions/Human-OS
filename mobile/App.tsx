@@ -15,16 +15,10 @@ export default function App() {
     checkForUpdate();
   }, []);
 
-  useEffect(() => {
-    console.log('modalVisible changed:', modalVisible);
-  }, [modalVisible]);
+
 
   const checkForUpdate = async () => {
-    console.log('Update ID:', Updates.updateId);
-    console.log('Runtime version:', Updates.runtimeVersion);
-    console.log('Channel:', Updates.channel);
-    console.log('Is embedded launch:', Updates.isEmbeddedLaunch);
-    console.log('Manifest ID:', Updates.manifest?.id);
+
 
     // Skip update check in development
     if (__DEV__) {
@@ -36,7 +30,7 @@ export default function App() {
       setIsCheckingUpdate(true);
       console.log('[Updates] Checking for OTA update...');
       const update = await Updates.checkForUpdateAsync();
-      console.log('Update available:', update.isAvailable);
+
 
       if (update.isAvailable) {
         console.log('[Updates] Update found — downloading...');
@@ -59,13 +53,10 @@ export default function App() {
   const checkChangelog = async () => {
     try {
       const lastSeen = await SecureStore.getItemAsync('lastSeenVersion');
-      console.log('Stored version:', lastSeen);
-      console.log('Current version:', changelog.version);
-      console.log('Modal visible before set:', modalVisible);
-      console.log('Setting modal to visible...');
-      setModalType('changelog');
-      console.log('Modal type:', 'changelog');
-      setModalVisible(true);
+      if (lastSeen !== changelog.version) {
+        setModalType('changelog');
+        setModalVisible(true);
+      }
     } catch (err) {
       console.warn('[Updates] Failed to read lastSeenVersion:', err);
     }
@@ -101,20 +92,6 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppNavigator />
-      
-      <View
-        style={{
-          position:'absolute',
-          top:60,
-          right:10,
-          backgroundColor:'red',
-          padding:10,
-          zIndex:99999,
-          elevation:99999
-        }}
-      >
-        <Text style={{color:'white'}}>OTA TEST v1.2.1</Text>
-      </View>
       
       {modalVisible && (
         <View style={styles.modalOverlay}>
