@@ -1,0 +1,9 @@
+{
+  "version": "1.2.0",
+  "notes": [
+    "Added smart reminders",
+    "Improved memory retrieval",
+    "Added dark/light theme",
+    "Fixed network retry issue"
+  ]
+}
