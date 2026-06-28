@@ -6,7 +6,7 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onren
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000, // 15s timeout — fail fast on slow connections
+  timeout: 60000, // 60s timeout — wait for cold boot if needed
   headers: {
     'Content-Type': 'application/json',
   },
@@ -67,11 +67,28 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     
-    if (error.response) {
+    // 1. Log specific failure details
+    if (error.code === 'ECONNABORTED') {
+      console.warn(`[api] Request to ${originalRequest?.url} timed out (timeout: ${originalRequest?.timeout || 60000}ms). This is likely a Render cold boot.`);
+    } else if (!error.response) {
+      console.warn(`[api] Network error or DNS lookup failure for request to ${originalRequest?.url}. Device might be offline.`);
+    } else {
       console.log(`[API RESPONSE ERROR] ${error.response.status} ${originalRequest?.url}`);
       console.log(`[API RESPONSE BODY]`, JSON.stringify(error.response.data));
-    } else {
-      console.log(`[API NETWORK ERROR]`, error.message);
+      if (error.response.status >= 500) {
+        console.warn(`[api] Server error (HTTP ${error.response.status}) on request to ${originalRequest?.url}`);
+      }
+    }
+
+    // 2. Auto-retry on network errors or timeouts (max 2 retries)
+    const isTimeout = error.code === 'ECONNABORTED';
+    const isNetworkErr = !error.response;
+    if ((isTimeout || isNetworkErr) && (!originalRequest._retryCount || originalRequest._retryCount < 2)) {
+      originalRequest._retryCount = (originalRequest._retryCount || 0) + 1;
+      const delay = originalRequest._retryCount * 2000; // Exponential backoff (2s, 4s)
+      console.warn(`[api] Retrying request to ${originalRequest?.url} (Attempt ${originalRequest._retryCount}/2) in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return api(originalRequest);
     }
 
     // Only attempt token refresh on 401 for protected routes.
