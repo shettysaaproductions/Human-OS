@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { ExtractedMemory, Memory } from '../types/memory';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
+import { stopWords } from '../utils/nlp';
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type';
@@ -119,6 +120,7 @@ export class MemoryRepository {
       const now = Date.now();
 
       // Score memories in JS
+      const effectiveKeywords = keywords.filter(kw => !stopWords.has(kw.toLowerCase()));
       const scoredMemories = memories.map(mem => {
         const normImportance = Math.min(100, Math.max(1, mem.importance)) / 100;
         let matches = 0;
@@ -127,7 +129,7 @@ export class MemoryRepository {
         for (const kw of keywords) {
           if (keyLower.includes(kw) || valLower.includes(kw)) matches++;
         }
-        const relevance = keywords.length > 0 ? Math.min(1.0, matches / keywords.length) : 0;
+        const relevance = effectiveKeywords.length > 0 ? Math.min(1.0, matches / effectiveKeywords.length) : 0;
         const targetDate = mem.last_accessed_at || mem.created_at;
         const daysOld = (now - new Date(targetDate).getTime()) / (1000 * 60 * 60 * 24);
         const recency = Math.max(0, 1 - daysOld / 30);
