@@ -34,6 +34,7 @@ function AppContent() {
       setIsCheckingUpdate(true);
       console.log('[Updates] Checking for OTA update...');
       const update = await Updates.checkForUpdateAsync();
+      console.log('Update object:', JSON.stringify(update));
 
       if (update.isAvailable) {
         console.log('[Updates] Update found — downloading...');
