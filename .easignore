@@ -1,0 +1,16 @@
+node_modules/
+.expo/
+dist/
+web-build/
+mobile/android/
+mobile/ios/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+backend/node_modules/
+backend/dist/
+.gradle/
+.git/
+*.apk
+*.jks
+*.keystore
