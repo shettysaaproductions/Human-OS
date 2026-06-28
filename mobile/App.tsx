@@ -16,6 +16,10 @@ export default function App() {
   }, []);
 
   const checkForUpdate = async () => {
+    console.log('Currently running update ID:', Updates.updateId);
+    console.log('Channel:', Updates.channel);
+    console.log('Runtime version:', Updates.runtimeVersion);
+
     // Skip update check in development
     if (__DEV__) {
       await checkChangelog();
@@ -26,6 +30,7 @@ export default function App() {
       setIsCheckingUpdate(true);
       console.log('[Updates] Checking for OTA update...');
       const update = await Updates.checkForUpdateAsync();
+      console.log('Update available:', update.isAvailable);
 
       if (update.isAvailable) {
         console.log('[Updates] Update found — downloading...');
@@ -47,6 +52,9 @@ export default function App() {
 
   const checkChangelog = async () => {
     try {
+      // Temporarily delete to force popup to appear during testing/diagnosis
+      await SecureStore.deleteItemAsync('lastSeenVersion');
+
       const lastSeen = await SecureStore.getItemAsync('lastSeenVersion');
       console.log('Stored version:', lastSeen);
       console.log('Current version:', changelog.version);
