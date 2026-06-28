@@ -1,8 +1,9 @@
 {
-  "version": "1.2.1",
+  "version": "1.2.2",
   "notes": [
-    "Demo OTA update test.",
-    "Testing changelog popup.",
-    "Improved update experience."
+    "Fixed network retry behavior during cold boot.",
+    "Resolved auto-appearing update popups.",
+    "Cleaned up development diagnostics overlay.",
+    "Improved OTA changelog version tracking."
   ]
 }
