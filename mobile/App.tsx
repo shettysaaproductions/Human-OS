@@ -56,6 +56,8 @@ export default function App() {
       if (lastSeen !== changelog.version) {
         setModalType('changelog');
         setModalVisible(true);
+      } else {
+        setModalVisible(false);
       }
     } catch (err) {
       console.warn('[Updates] Failed to read lastSeenVersion:', err);
