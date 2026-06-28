@@ -52,16 +52,14 @@ export default function App() {
 
   const checkChangelog = async () => {
     try {
-      // Temporarily delete to force popup to appear during testing/diagnosis
-      await SecureStore.deleteItemAsync('lastSeenVersion');
-
       const lastSeen = await SecureStore.getItemAsync('lastSeenVersion');
       console.log('Stored version:', lastSeen);
       console.log('Current version:', changelog.version);
-      if (lastSeen !== changelog.version) {
-        setModalType('changelog');
-        setModalVisible(true);
-      }
+      console.log('Modal visible before set:', modalVisible);
+      console.log('Setting modal to visible...');
+      setModalType('changelog');
+      console.log('Modal type:', 'changelog');
+      setModalVisible(true);
     } catch (err) {
       console.warn('[Updates] Failed to read lastSeenVersion:', err);
     }
