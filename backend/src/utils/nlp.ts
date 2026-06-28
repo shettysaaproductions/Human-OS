@@ -1,9 +1,11 @@
+export const stopWords = new Set([
+  'i', 'am', 'the', 'a', 'to', 'and', 'my', 'is', 'in', 'it', 
+  'that', 'of', 'for', 'with', 'on', 'this', 'but', 'what', 
+  'should', 'about', 'how', 'when', 'where', 'why', 'can', 'will',
+  'who', 'whom', 'whose'
+]);
+
 export function extractKeywords(userMessage: string): string[] {
-  const stopWords = new Set([
-    'i', 'am', 'the', 'a', 'to', 'and', 'my', 'is', 'in', 'it', 
-    'that', 'of', 'for', 'with', 'on', 'this', 'but', 'what', 
-    'should', 'about', 'how', 'when', 'where', 'why', 'can', 'will'
-  ]);
   const words = userMessage
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
