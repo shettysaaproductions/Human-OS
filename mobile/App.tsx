@@ -13,6 +13,7 @@ function AppContent() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'downloaded' | 'changelog'>('changelog');
+  const [updateAvailable, setUpdateAvailable] = useState<string>('unknown');
 
   useEffect(() => {
     checkForUpdate();
@@ -35,6 +36,7 @@ function AppContent() {
       console.log('[Updates] Checking for OTA update...');
       const update = await Updates.checkForUpdateAsync();
       console.log('Update object:', JSON.stringify(update));
+      setUpdateAvailable(update.isAvailable ? 'true' : 'false');
 
       if (update.isAvailable) {
         console.log('[Updates] Update found — downloading...');
@@ -100,6 +102,29 @@ function AppContent() {
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AppNavigator />
+      
+      <View
+        style={{
+          position: 'absolute',
+          top: 60,
+          right: 10,
+          backgroundColor: 'rgba(0, 0, 0, 0.9)',
+          padding: 10,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          zIndex: 99999,
+          elevation: 99999,
+        }}
+      >
+        <Text style={{ color: '#FF3B30', fontWeight: 'bold', fontSize: 12, marginBottom: 4 }}>🔬 OTA DIAGNOSTICS</Text>
+        <Text style={{ color: '#FFF', fontSize: 10 }}>Channel: {Updates.channel || 'default'}</Text>
+        <Text style={{ color: '#FFF', fontSize: 10 }}>Runtime: {Updates.runtimeVersion}</Text>
+        <Text style={{ color: '#FFF', fontSize: 10 }}>Update ID: {Updates.updateId || 'none'}</Text>
+        <Text style={{ color: '#FFF', fontSize: 10 }}>Embedded: {Updates.isEmbeddedLaunch ? 'true' : 'false'}</Text>
+        <Text style={{ color: '#FFF', fontSize: 10 }}>Available: {updateAvailable}</Text>
+        <Text style={{ color: '#FFF', fontSize: 10 }}>Theme Context: loaded</Text>
+      </View>
       
       {modalVisible && (
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>
