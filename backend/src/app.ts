@@ -23,6 +23,7 @@ import { adminRouter } from './routes/admin';
 import { momentsRouter } from './routes/moments';
 import { analyticsRouter } from './routes/analytics';
 import { founderRouter } from './routes/founder';
+import { remindersRouter } from './routes/reminders';
 import { memoryManagementRouter } from './routes/memoryManagement';
 import { feedbackRouter } from './routes/feedback';
 import { telemetryRouter } from './routes/telemetry';
@@ -110,6 +111,7 @@ export function createApp(): express.Application {
   app.use('/admin/diagnostics', authenticateUser, diagnosticsRouter);
   app.use('/admin', authenticateUser, adminRouter);
   app.use('/moments', authenticateUser, momentsRouter);
+  app.use('/reminders', authenticateUser, remindersRouter);
   app.use('/analytics', authenticateUser, analyticsRouter);
   app.use('/analytics/overview', authenticateUser, founderRouter);
   app.use('/founder', authenticateUser, founderRouter);
