@@ -20,9 +20,11 @@ export default function App() {
   }, [modalVisible]);
 
   const checkForUpdate = async () => {
-    console.log('Currently running update ID:', Updates.updateId);
-    console.log('Channel:', Updates.channel);
+    console.log('Update ID:', Updates.updateId);
     console.log('Runtime version:', Updates.runtimeVersion);
+    console.log('Channel:', Updates.channel);
+    console.log('Is embedded launch:', Updates.isEmbeddedLaunch);
+    console.log('Manifest ID:', Updates.manifest?.id);
 
     // Skip update check in development
     if (__DEV__) {
@@ -99,6 +101,20 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppNavigator />
+      
+      <View
+        style={{
+          position:'absolute',
+          top:60,
+          right:10,
+          backgroundColor:'red',
+          padding:10,
+          zIndex:99999,
+          elevation:99999
+        }}
+      >
+        <Text style={{color:'white'}}>OTA TEST v1.2.1</Text>
+      </View>
       
       {modalVisible && (
         <View style={styles.modalOverlay}>
