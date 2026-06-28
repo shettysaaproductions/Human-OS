@@ -14,6 +14,7 @@ import { logger } from './lib/logger';
 import { startWorkers } from './workers/queueWorker';
 import { momentEngineService } from './services/MomentEngineService';
 import { reflectionScheduler } from './services/ReflectionSchedulerService';
+import { reminderSchedulerService } from './services/ReminderSchedulerService';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -35,6 +36,16 @@ async function main(): Promise<void> {
     }
   }, 24 * 60 * 60 * 1000); // 24 hours
   if (momentInterval.unref) momentInterval.unref();
+
+  // Reminders Polling Engine (runs every 10 seconds)
+  const remindersInterval = setInterval(async () => {
+    try {
+      await reminderSchedulerService.checkAndFireReminders();
+    } catch (err) {
+      logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }, 10 * 1000); // 10 seconds
+  if (remindersInterval.unref) remindersInterval.unref();
 
   // Daily Reflection Scheduler (runs once per day)
   const dailyReflectionInterval = setInterval(async () => {
