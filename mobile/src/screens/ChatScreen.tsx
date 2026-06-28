@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
+import { useTheme } from '../theme/ThemeContext';
 
 // Silent telemetry helper
 async function trackEvent(event_type: string, event_data?: object) {
@@ -17,6 +18,7 @@ async function trackEvent(event_type: string, event_data?: object) {
 
 export function ChatScreen() {
   const navigation = useNavigation<any>();
+  const { colors } = useTheme();
   const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage } = useChatStore();
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
@@ -43,8 +45,16 @@ export function ChatScreen() {
         {!isUser && (
           <View style={s.avatarDot} />
         )}
-        <View style={[s.bubbleInner, isUser ? s.userBubbleInner : s.novaBubbleInner]}>
-          <Text style={[s.messageText, isUser ? s.userText : s.novaText]}>
+        <View style={[
+          s.bubbleInner,
+          isUser
+            ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4 }
+            : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4 }
+        ]}>
+          <Text style={[
+            s.messageText,
+            isUser ? { color: colors.buttonText } : { color: colors.assistantText }
+          ]}>
             {item.content}
           </Text>
           {isUser && item.status === 'error' && (
@@ -55,32 +65,32 @@ export function ChatScreen() {
         </View>
       </View>
     );
-  }, [retryMessage]);
+  }, [retryMessage, colors]);
 
   if (!isHydrated) {
     return (
-      <View style={s.centerContainer}>
+      <View style={[s.centerContainer, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color="#8B5CF6" />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={s.safeArea} edges={['top', 'bottom']}>
+    <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={s.container}
+        style={[s.container, { backgroundColor: colors.background }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         {/* Header */}
-        <View style={s.header}>
+        <View style={[s.header, { borderBottomColor: colors.border }]}>
           <View style={s.headerLeft}>
             <View style={s.novaAvatar}>
               <Text style={s.novaAvatarText}>N</Text>
             </View>
             <View>
-              <Text style={s.headerTitle}>Nova</Text>
-              <Text style={s.headerSubtitle}>Your AI companion</Text>
+              <Text style={[s.headerTitle, { color: colors.textPrimary }]}>Nova</Text>
+              <Text style={[s.headerSubtitle, { color: colors.textSecondary }]}>Your AI companion</Text>
             </View>
           </View>
           <View style={s.headerRight}>
@@ -107,8 +117,8 @@ export function ChatScreen() {
           ListEmptyComponent={
             <View style={s.emptyChat}>
               <Text style={s.emptyChatEmoji}>🌌</Text>
-              <Text style={s.emptyChatText}>Hi, I'm Nova.</Text>
-              <Text style={s.emptyChatSubtext}>Tell me about yourself — your goals, your day, what's on your mind. I remember everything.</Text>
+              <Text style={[s.emptyChatText, { color: colors.textPrimary }]}>Hi, I'm Nova.</Text>
+              <Text style={[s.emptyChatSubtext, { color: colors.textSecondary }]}>Tell me about yourself — your goals, your day, what's on your mind. I remember everything.</Text>
             </View>
           }
         />
@@ -123,13 +133,13 @@ export function ChatScreen() {
         )}
 
         {/* Input */}
-        <View style={s.inputContainer}>
+        <View style={[s.inputContainer, { borderTopColor: colors.border }]}>
           <TextInput
-            style={s.input}
+            style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg }]}
             value={inputText}
             onChangeText={setInputText}
             placeholder="Message Nova..."
-            placeholderTextColor="#555"
+            placeholderTextColor={colors.placeholder}
             multiline
             maxLength={2000}
           />
@@ -147,13 +157,13 @@ export function ChatScreen() {
 }
 
 const s = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#09090B' },
-  container: { flex: 1, backgroundColor: '#09090B' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
+  safeArea: { flex: 1 },
+  container: { flex: 1 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)',
+    borderBottomWidth: 1,
     backgroundColor: 'rgba(255,255,255,0.02)'
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -162,8 +172,8 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center'
   },
   novaAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#fff' },
-  headerSubtitle: { fontSize: 11, color: '#666' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold' },
+  headerSubtitle: { fontSize: 11 },
   headerRight: { flexDirection: 'row', gap: 4 },
   headerBtn: { padding: 8 },
   headerBtnText: { fontSize: 20 },
@@ -173,11 +183,7 @@ const s = StyleSheet.create({
   novaBubble: { justifyContent: 'flex-start', gap: 8 },
   avatarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#8B5CF6', marginBottom: 6 },
   bubbleInner: { maxWidth: '80%', padding: 12, borderRadius: 18 },
-  userBubbleInner: { backgroundColor: '#8B5CF6', borderBottomRightRadius: 4 },
-  novaBubbleInner: { backgroundColor: 'rgba(255,255,255,0.07)', borderBottomLeftRadius: 4 },
   messageText: { fontSize: 16, lineHeight: 22 },
-  userText: { color: '#fff' },
-  novaText: { color: '#e8e8e8' },
   retryButton: { marginTop: 6 },
   retryText: { color: '#F59E0B', fontSize: 12, fontWeight: '600' },
   typingContainer: {
@@ -186,23 +192,27 @@ const s = StyleSheet.create({
   typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#8B5CF6' },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingTop: 80 },
   emptyChatEmoji: { fontSize: 48, marginBottom: 16 },
-  emptyChatText: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 10 },
-  emptyChatSubtext: { fontSize: 15, color: '#666', textAlign: 'center', lineHeight: 22 },
+  emptyChatText: { fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
+  emptyChatSubtext: { fontSize: 15, textAlign: 'center', lineHeight: 22 },
   inputContainer: {
     flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10,
     backgroundColor: 'rgba(255,255,255,0.02)',
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
+    borderTopWidth: 1,
     alignItems: 'flex-end', gap: 10
   },
   input: {
-    flex: 1, color: '#fff', backgroundColor: 'rgba(255,255,255,0.07)',
+    flex: 1,
     borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10,
     fontSize: 16, maxHeight: 120, lineHeight: 22
   },
   sendBtn: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: '#8B5CF6',
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#8B5CF6',
     alignItems: 'center', justifyContent: 'center'
   },
-  sendBtnDisabled: { backgroundColor: 'rgba(139,92,246,0.3)' },
-  sendBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold', lineHeight: 22 },
+  sendBtnDisabled: {
+    backgroundColor: '#333'
+  },
+  sendBtnText: {
+    color: '#fff', fontSize: 20, fontWeight: 'bold'
+  }
 });

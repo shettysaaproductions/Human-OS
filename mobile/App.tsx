@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import * as SecureStore from 'expo-secure-store';
+import { StatusBar } from 'expo-status-bar';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import changelog from './src/config/changelog.json';
 
-export default function App() {
+function AppContent() {
+  const { isDark, colors } = useTheme();
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'downloaded' | 'changelog'>('changelog');
@@ -15,11 +18,7 @@ export default function App() {
     checkForUpdate();
   }, []);
 
-
-
   const checkForUpdate = async () => {
-
-
     // Skip update check in development
     if (__DEV__) {
       await checkChangelog();
@@ -30,7 +29,6 @@ export default function App() {
       setIsCheckingUpdate(true);
       console.log('[Updates] Checking for OTA update...');
       const update = await Updates.checkForUpdateAsync();
-
 
       if (update.isAvailable) {
         console.log('[Updates] Update found — downloading...');
@@ -84,28 +82,29 @@ export default function App() {
 
   if (isCheckingUpdate) {
     return (
-      <View style={styles.updateScreen}>
+      <View style={[styles.updateScreen, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={styles.updateText}>Checking for updates...</Text>
+        <Text style={[styles.updateText, { color: colors.textSecondary }]}>Checking for updates...</Text>
       </View>
     );
   }
 
   return (
     <SafeAreaProvider>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <AppNavigator />
       
       {modalVisible && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>✨ Nova Updated</Text>
+        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>✨ Nova Updated</Text>
             <Text style={styles.versionTag}>v{changelog.version}</Text>
             
             <ScrollView style={styles.notesContainer} showsVerticalScrollIndicator={false}>
               {changelog.notes.map((note, index) => (
                 <View key={index} style={styles.noteRow}>
                   <Text style={styles.bullet}>•</Text>
-                  <Text style={styles.noteText}>{note}</Text>
+                  <Text style={[styles.noteText, { color: colors.textSecondary }]}>{note}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -117,7 +116,7 @@ export default function App() {
                     <Text style={styles.primaryBtnText}>Update Now</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.secondaryBtn} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.secondaryBtnText}>Later</Text>
+                    <Text style={[styles.secondaryBtnText, { color: colors.textSecondary }]}>Later</Text>
                   </TouchableOpacity>
                 </>
               ) : (
@@ -133,17 +132,23 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   updateScreen: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#09090B',
     gap: 16,
   },
   updateText: {
     fontSize: 16,
-    color: '#a1a1aa',
   },
   modalOverlay: {
     position: 'absolute',
@@ -151,7 +156,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -161,11 +165,9 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 340,
-    backgroundColor: '#18181B',
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
@@ -176,7 +178,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#FFFFFF',
     marginBottom: 6,
     textAlign: 'center',
   },
@@ -210,7 +211,6 @@ const styles = StyleSheet.create({
   noteText: {
     flex: 1,
     fontSize: 15,
-    color: '#D4D4D8',
     lineHeight: 22,
   },
   buttonContainer: {
@@ -241,7 +241,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   secondaryBtnText: {
-    color: '#A1A1AA',
     fontSize: 16,
     fontWeight: '600',
   },
