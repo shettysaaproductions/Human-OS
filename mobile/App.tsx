@@ -38,9 +38,10 @@ function AppContent() {
       if (update.isAvailable) {
         console.log('[Updates] Update found — downloading...');
         await Updates.fetchUpdateAsync();
-        console.log('[Updates] Download complete — ready to reload');
-        setModalType('downloaded');
-        setModalVisible(true);
+        console.log('OTA downloaded');
+        console.log('modalVisible before:', modalVisible);
+        console.log('Applying OTA immediately...');
+        await Updates.reloadAsync();
       } else {
         console.log('[Updates] App is up to date.');
         await checkChangelog();
