@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "updates": {
-      "url": "https://u.expo.dev/17e73685-4785-47b5-8302-82d1df185f8c",
+      "url": "https://u.expo.dev/83d042bf-6247-4525-8842-f4aed537c95f",
       "enabled": true,
       "fallbackToCacheTimeout": 0,
       "checkAutomatically": "ON_LOAD"
@@ -51,9 +51,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "17e73685-4785-47b5-8302-82d1df185f8c"
+        "projectId": "83d042bf-6247-4525-8842-f4aed537c95f"
       }
     },
-    "owner": "shettysaa"
+    "owner": "sakshiirabatti"
   }
 }
