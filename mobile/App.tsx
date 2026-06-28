@@ -15,6 +15,10 @@ export default function App() {
     checkForUpdate();
   }, []);
 
+  useEffect(() => {
+    console.log('modalVisible changed:', modalVisible);
+  }, [modalVisible]);
+
   const checkForUpdate = async () => {
     console.log('Currently running update ID:', Updates.updateId);
     console.log('Channel:', Updates.channel);
@@ -96,12 +100,7 @@ export default function App() {
     <SafeAreaProvider>
       <AppNavigator />
       
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
+      {modalVisible && (
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>✨ Nova Updated</Text>
@@ -134,7 +133,7 @@ export default function App() {
             </View>
           </View>
         </View>
-      </Modal>
+      )}
     </SafeAreaProvider>
   );
 }
@@ -152,11 +151,17 @@ const styles = StyleSheet.create({
     color: '#a1a1aa',
   },
   modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+    zIndex: 99999,
+    elevation: 99999,
   },
   modalContent: {
     width: '100%',
