@@ -1,9 +1,8 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "notes": [
-    "Added smart reminders",
-    "Improved memory retrieval",
-    "Added dark/light theme",
-    "Fixed network retry issue"
+    "Demo OTA update test.",
+    "Testing changelog popup.",
+    "Improved update experience."
   ]
 }

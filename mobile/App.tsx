@@ -48,6 +48,8 @@ export default function App() {
   const checkChangelog = async () => {
     try {
       const lastSeen = await SecureStore.getItemAsync('lastSeenVersion');
+      console.log('Stored version:', lastSeen);
+      console.log('Current version:', changelog.version);
       if (lastSeen !== changelog.version) {
         setModalType('changelog');
         setModalVisible(true);
