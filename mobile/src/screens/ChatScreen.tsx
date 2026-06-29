@@ -9,6 +9,38 @@ import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { useTheme } from '../theme/ThemeContext';
 
+// Utility functions for WhatsApp-style formatting
+const formatTime = (dateString?: string) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  let hours = date.getHours();
+  const minutes = date.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  const minutesStr = minutes < 10 ? '0' + minutes : minutes;
+  return `${hours}:${minutesStr} ${ampm}`;
+};
+
+const formatDateSeparator = (dateString?: string) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (date.toDateString() === today.toDateString()) {
+    return 'Today';
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    return 'Yesterday';
+  } else {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+};
+
 // Silent telemetry helper
 async function trackEvent(event_type: string, event_data?: object) {
   try {
@@ -38,34 +70,66 @@ export function ChatScreen() {
     setInputText('');
   }, [inputText, sendMessage]);
 
-  const renderItem = useCallback(({ item }: { item: Message }) => {
+  const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
+    
+    let showDateSeparator = false;
+    if (index === 0) {
+      showDateSeparator = true;
+    } else {
+      const prevMessage = messages[index - 1];
+      if (prevMessage && item.timestamp) {
+        const currentDate = new Date(item.timestamp).toDateString();
+        const prevDate = new Date(prevMessage.timestamp || new Date().toISOString()).toDateString();
+        if (currentDate !== prevDate) {
+          showDateSeparator = true;
+        }
+      }
+    }
+
     return (
-      <View style={[s.bubble, isUser ? s.userBubble : s.novaBubble]}>
-        {!isUser && (
-          <View style={s.avatarDot} />
+      <View>
+        {showDateSeparator && item.timestamp && (
+          <View style={s.dateSeparatorContainer}>
+            <Text style={[s.dateSeparatorText, { backgroundColor: colors.border, color: colors.textSecondary }]}>
+              {formatDateSeparator(item.timestamp)}
+            </Text>
+          </View>
         )}
-        <View style={[
-          s.bubbleInner,
-          isUser
-            ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4 }
-            : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4 }
-        ]}>
-          <Text style={[
-            s.messageText,
-            isUser ? { color: colors.buttonText } : { color: colors.assistantText }
-          ]}>
-            {item.content}
-          </Text>
-          {isUser && item.status === 'error' && (
-            <TouchableOpacity onPress={() => retryMessage(item.id)} style={s.retryButton}>
-              <Text style={s.retryText}>⚠️ {item.errorMessage || 'Failed'} · Tap to retry</Text>
-            </TouchableOpacity>
+        <View style={[s.bubble, isUser ? s.userBubble : s.novaBubble]}>
+          {!isUser && (
+            <View style={s.avatarDot} />
           )}
+          <View style={[
+            s.bubbleInner,
+            isUser
+              ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4 }
+              : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4 }
+          ]}>
+            <Text style={[
+              s.messageText,
+              isUser ? { color: colors.buttonText } : { color: colors.assistantText }
+            ]}>
+              {item.content}
+            </Text>
+            <View style={s.timestampContainer}>
+              <Text style={[
+                s.timestampText,
+                isUser ? { color: 'rgba(255,255,255,0.6)' } : { color: 'rgba(255,255,255,0.4)' }
+              ]}>
+                {formatTime(item.timestamp)}
+              </Text>
+            </View>
+            {isUser && item.status === 'error' && (
+              <TouchableOpacity onPress={() => retryMessage(item.id)} style={s.retryButton}>
+                <Text style={s.retryText}>⚠️ {item.errorMessage || 'Failed'} · Tap to retry</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
     );
-  }, [retryMessage, colors]);
+  }, [retryMessage, colors, messages]);
 
   if (!isHydrated) {
     return (
@@ -214,5 +278,25 @@ const s = StyleSheet.create({
   },
   sendBtnText: {
     color: '#fff', fontSize: 20, fontWeight: 'bold'
+  },
+  dateSeparatorContainer: {
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dateSeparatorText: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    fontSize: 12,
+    fontWeight: '500',
+    overflow: 'hidden'
+  },
+  timestampContainer: {
+    alignSelf: 'flex-end',
+    marginTop: 4,
+    marginLeft: 12,
+  },
+  timestampText: {
+    fontSize: 10,
   }
 });
