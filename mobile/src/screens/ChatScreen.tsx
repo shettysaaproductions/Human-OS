@@ -115,7 +115,7 @@ export function ChatScreen() {
             <View style={s.timestampContainer}>
               <Text style={[
                 s.timestampText,
-                isUser ? { color: 'rgba(255,255,255,0.6)' } : { color: 'rgba(255,255,255,0.4)' }
+                isUser ? { color: colors.buttonText, opacity: 0.7 } : { color: colors.assistantText, opacity: 0.6 }
               ]}>
                 {formatTime(item.timestamp)}
               </Text>
