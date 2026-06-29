@@ -104,7 +104,6 @@ export function ChatScreen() {
     const paddingToBottom = 150;
     isNearBottomRef.current = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
   }, []);
-
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
     
@@ -154,7 +153,11 @@ export function ChatScreen() {
             <View style={s.timestampContainer}>
               <Text style={[
                 s.timestampText,
+<<<<<<< HEAD
                 isUser ? { color: colors.buttonText, opacity: 0.7 } : { color: colors.assistantText, opacity: 0.6 }
+=======
+                isUser ? { color: 'rgba(255,255,255,0.6)' } : { color: 'rgba(255,255,255,0.4)' }
+>>>>>>> 95b66cd (Add WhatsApp style timestamps and date separators)
               ]}>
                 {formatTime(item.timestamp)}
               </Text>
@@ -363,6 +366,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 16,
   },
+<<<<<<< HEAD
   stickyDateContainer: {
     position: 'absolute',
     top: 8,
@@ -371,6 +375,8 @@ const s = StyleSheet.create({
     zIndex: 10,
     alignItems: 'center',
   },
+=======
+>>>>>>> 95b66cd (Add WhatsApp style timestamps and date separators)
   dateSeparatorText: {
     paddingHorizontal: 12,
     paddingVertical: 4,
