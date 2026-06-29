@@ -225,7 +225,7 @@ chatRouter.get(
 
       let query = supabaseAdmin
         .from('chat_history')
-        .select('id, role, content, created_at, conversation_id')
+        .select('id, role, content, created_at, conversation_id, user_id')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(1000); // Increased limit to allow fetching older messages

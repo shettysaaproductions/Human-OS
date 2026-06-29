@@ -4,7 +4,11 @@ export const chatService = {
   getHistory: async (conversationId?: string) => {
     const url = conversationId ? `/chat?conversation_id=${conversationId}` : '/chat';
     const response = await api.get(url);
-    return response.data; // array of { id, role, content, created_at, conversation_id }
+    const data = response.data;
+    console.log("API messages received:", data?.length);
+    console.log("First message:", data[0]?.created_at);
+    console.log("Last message:", data[data?.length - 1]?.created_at);
+    return data; // array of { id, role, content, created_at, conversation_id }
   },
 
   sendMessage: async (message: string, conversationId?: string) => {

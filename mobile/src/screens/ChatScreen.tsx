@@ -52,7 +52,7 @@ async function trackEvent(event_type: string, event_data?: object) {
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics } = useChatStore();
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
@@ -120,6 +120,10 @@ export function ChatScreen() {
           showDateSeparator = true;
         }
       }
+    }
+    
+    if (showDateSeparator && item.timestamp) {
+      console.log("Date separator:", formatDateSeparator(item.timestamp));
     }
 
     return (
@@ -202,6 +206,24 @@ export function ChatScreen() {
           </View>
         </View>
 
+        {/* Diagnostics Card */}
+        {diagnostics && (
+          <View style={{
+            position: 'absolute', top: 80, right: 16, zIndex: 100,
+            backgroundColor: 'rgba(0,0,0,0.8)', padding: 10, borderRadius: 8,
+            borderWidth: 1, borderColor: '#8B5CF6'
+          }}>
+            <Text style={{ color: '#0f0', fontSize: 10, fontWeight: 'bold' }}>DEV DIAGNOSTICS</Text>
+            <Text style={{ color: '#fff', fontSize: 10 }}>API: {diagnostics.apiCount}</Text>
+            <Text style={{ color: '#fff', fontSize: 10 }}>Store: {diagnostics.storeCount}</Text>
+            <Text style={{ color: '#fff', fontSize: 10 }}>Rendered: {messages.length}</Text>
+            <Text style={{ color: '#fff', fontSize: 10 }}>Oldest: {diagnostics.oldestTimestamp ? new Date(diagnostics.oldestTimestamp).toDateString() : 'N/A'}</Text>
+            <Text style={{ color: '#fff', fontSize: 10 }}>Newest: {diagnostics.newestTimestamp ? new Date(diagnostics.newestTimestamp).toDateString() : 'N/A'}</Text>
+            <Text style={{ color: '#fff', fontSize: 8 }}>User: {diagnostics.activeUserId}</Text>
+            <Text style={{ color: '#fff', fontSize: 8 }}>Conv: {diagnostics.activeConversationId}</Text>
+          </View>
+        )}
+
         {/* Messages and Sticky Header Container */}
         <View style={{ flex: 1 }}>
           {stickyDate && (
@@ -211,6 +233,10 @@ export function ChatScreen() {
               </Text>
             </View>
           )}
+          {(() => {
+             console.log("FlatList data length:", messages.length);
+             return null;
+          })()}
           <FlatList
             ref={flatListRef}
             data={messages}
