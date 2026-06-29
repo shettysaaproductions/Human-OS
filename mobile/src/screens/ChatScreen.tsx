@@ -228,7 +228,7 @@ export function ChatScreen() {
         )}
 
         {/* Messages and Sticky Header Container */}
-        <View style={{ flex: 1, opacity: (isListReady || messages.length === 0) ? 1 : 0 }}>
+        <View style={{ flex: 1 }}>
           {stickyDate && (
             <View style={s.stickyDateContainer}>
               <Text style={[s.dateSeparatorText, { backgroundColor: colors.border, color: colors.textSecondary }]}>
@@ -248,22 +248,19 @@ export function ChatScreen() {
             contentContainerStyle={s.listContent}
             onScroll={handleScroll}
             scrollEventThrottle={16}
+            maintainVisibleContentPosition={{
+              startRenderingFromBottom: true
+            }}
             onContentSizeChange={() => {
               if (isNearBottomRef.current) {
                 const animate = !isInitialLoad.current;
                 flatListRef.current?.scrollToEnd({ animated: animate });
                 isInitialLoad.current = false;
-                if (!isListReady && messages.length > 0) {
-                  setTimeout(() => setIsListReady(true), 50);
-                }
               }
             }}
             onLayout={() => {
               if (isNearBottomRef.current) {
                 flatListRef.current?.scrollToEnd({ animated: false });
-                if (!isListReady && messages.length > 0) {
-                  setTimeout(() => setIsListReady(true), 50);
-                }
               }
             }}
             viewabilityConfig={viewabilityConfig}
