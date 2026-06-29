@@ -1,0 +1,20 @@
+[
+  {
+    "version": "1.2.3",
+    "title": "✨ I've learned something new",
+    "message": [
+      "I can now keep up with you even if you send multiple messages quickly.",
+      "Our conversations should feel much more natural now."
+    ],
+    "date": "2026-06-29"
+  },
+  {
+    "version": "1.2.2",
+    "title": "✨ I've evolved a little more",
+    "message": [
+      "I learned Dark and Light themes.",
+      "I became better at handling updates."
+    ],
+    "date": "2026-06-29"
+  }
+]

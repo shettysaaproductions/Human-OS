@@ -6,7 +6,9 @@ import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
-import changelog from './src/config/changelog.json';
+import updateHistory from './src/config/updateHistory.json';
+
+const latestUpdate = updateHistory[0];
 
 function AppContent() {
   const { isDark, colors } = useTheme();
@@ -54,7 +56,7 @@ function AppContent() {
   const checkChangelog = async () => {
     try {
       const lastSeen = await SecureStore.getItemAsync('lastSeenVersion');
-      if (lastSeen !== changelog.version) {
+      if (lastSeen !== latestUpdate.version) {
         setModalType('changelog');
         setModalVisible(true);
       } else {
@@ -77,7 +79,7 @@ function AppContent() {
   const handleCloseChangelog = async () => {
     try {
       setModalVisible(false);
-      await SecureStore.setItemAsync('lastSeenVersion', changelog.version);
+      await SecureStore.setItemAsync('lastSeenVersion', latestUpdate.version);
     } catch (err) {
       console.warn('[Updates] Failed to write lastSeenVersion:', err);
     }
@@ -102,11 +104,11 @@ function AppContent() {
       {modalVisible && (
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>
           <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>✨ Nova Updated</Text>
-            <Text style={styles.versionTag}>v{changelog.version}</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{latestUpdate.title}</Text>
+            <Text style={styles.versionTag}>v{latestUpdate.version}</Text>
             
             <ScrollView style={styles.notesContainer} showsVerticalScrollIndicator={false}>
-              {changelog.notes.map((note, index) => (
+              {latestUpdate.message.map((note, index) => (
                 <View key={index} style={styles.noteRow}>
                   <Text style={styles.bullet}>•</Text>
                   <Text style={[styles.noteText, { color: colors.textSecondary }]}>{note}</Text>
