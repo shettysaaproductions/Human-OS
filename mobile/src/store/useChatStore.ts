@@ -7,6 +7,7 @@ export interface Message {
   content: string;
   status: 'sending' | 'sent' | 'error';
   errorMessage?: string;
+  timestamp: string;
 }
 
 interface ChatState {
@@ -32,7 +33,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         id: Date.now().toString() + '_nova',
         role: 'assistant',
         content: reply,
-        status: 'sent'
+        status: 'sent',
+        timestamp: new Date().toISOString()
       };
 
       set((s) => {
@@ -77,7 +79,8 @@ export const useChatStore = create<ChatState>((set, get) => {
             id: msg.id,
             role: msg.role === 'nova' ? 'assistant' : msg.role,
             content: msg.content,
-            status: 'sent'
+            status: 'sent',
+            timestamp: msg.created_at || new Date().toISOString()
           }));
           set({ 
             messages: formattedHistory, 
@@ -98,7 +101,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         id: Date.now().toString(),
         role: 'user',
         content,
-        status: 'sending'
+        status: 'sending',
+        timestamp: new Date().toISOString()
       };
 
       set((state) => ({ messages: [...state.messages, userMsg] }));
