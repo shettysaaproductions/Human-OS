@@ -10,12 +10,22 @@ export interface Message {
   timestamp: string;
 }
 
+export interface ChatDiagnostics {
+  apiCount: number;
+  storeCount: number;
+  oldestTimestamp: string;
+  newestTimestamp: string;
+  activeUserId: string;
+  activeConversationId: string;
+}
+
 interface ChatState {
   messages: Message[];
   conversationId: string | null;
   isTyping: boolean;
   isHydrated: boolean;
   pendingQueue: { id: string, content: string }[];
+  diagnostics: ChatDiagnostics | null;
   
   hydrateMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
@@ -88,6 +98,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     isTyping: false,
     isHydrated: false,
     pendingQueue: [],
+    diagnostics: null,
     
     hydrateMessages: async () => {
       try {
@@ -108,7 +119,15 @@ export const useChatStore = create<ChatState>((set, get) => {
           set({ 
             messages: formattedHistory, 
             conversationId: history[0].conversation_id, // Get ID from most recent message
-            isHydrated: true 
+            isHydrated: true,
+            diagnostics: {
+              apiCount: history.length,
+              storeCount: formattedHistory.length,
+              oldestTimestamp: formattedHistory[0]?.timestamp || '',
+              newestTimestamp: formattedHistory[formattedHistory.length - 1]?.timestamp || '',
+              activeUserId: history[0]?.user_id || 'UNKNOWN',
+              activeConversationId: history[0]?.conversation_id || 'UNKNOWN'
+            }
           });
         } else {
           set({ isHydrated: true });
