@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  View, Text, TextInput, FlatList, StyleSheet,
+  View, Text, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
@@ -54,7 +55,7 @@ export function ChatScreen() {
   const { colors } = useTheme();
   const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics } = useChatStore();
   const [inputText, setInputText] = useState('');
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<any>(null);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
   
@@ -237,7 +238,7 @@ export function ChatScreen() {
              console.log("FlatList data length:", messages.length);
              return null;
           })()}
-          <FlatList
+          <FlashList
             ref={flatListRef}
             data={messages}
             keyExtractor={(item) => item.id}

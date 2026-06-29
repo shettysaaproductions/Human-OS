@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { chatService } from '../services/chatService';
+import { localDatabase } from '../services/localDatabase';
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
+  role: 'user' | 'assistant';
   content: string;
   status: 'sending' | 'sent' | 'error';
   errorMessage?: string;
@@ -62,11 +63,27 @@ export const useChatStore = create<ChatState>((set, get) => {
         timestamp: new Date().toISOString()
       };
 
+      // Save Assistant response to SQLite
+      await localDatabase.saveMessages([novaMsg]);
+
+      // Update sent statuses in SQLite
+      const updatedUserMsgs = batch.map(q => {
+        const existing = get().messages.find(m => m.id === q.id);
+        return {
+          id: q.id,
+          role: 'user' as const,
+          content: q.content,
+          status: 'sent' as const,
+          timestamp: existing?.timestamp || new Date().toISOString()
+        };
+      });
+      await localDatabase.saveMessages(updatedUserMsgs);
+
       set((s) => {
         const updated = s.messages.map(m => batchIds.includes(m.id) ? { ...m, status: 'sent' as const } : m);
         return { 
           messages: [...updated, novaMsg], 
-          conversationId: conversation_id // Save the active conversation ID
+          conversationId: conversation_id
         };
       });
     } catch (error: any) {
@@ -82,6 +99,21 @@ export const useChatStore = create<ChatState>((set, get) => {
           errorMessage = error.response.data?.error || 'Failed to send';
         }
       }
+
+      // Update failed statuses in SQLite
+      const failedUserMsgs = batch.map(q => {
+        const existing = get().messages.find(m => m.id === q.id);
+        return {
+          id: q.id,
+          role: 'user' as const,
+          content: q.content,
+          status: 'error' as const,
+          errorMessage,
+          timestamp: existing?.timestamp || new Date().toISOString()
+        };
+      });
+      await localDatabase.saveMessages(failedUserMsgs);
+
       set((s) => {
         const updated = s.messages.map(m => batchIds.includes(m.id) ? { ...m, status: 'error' as const, errorMessage } : m);
         return { messages: updated };
@@ -102,8 +134,27 @@ export const useChatStore = create<ChatState>((set, get) => {
     
     hydrateMessages: async () => {
       try {
+        // 1. Load instantly from SQLite first
+        const localMsgs = await localDatabase.getMessages();
+        if (localMsgs.length > 0) {
+          set({
+            messages: localMsgs,
+            isHydrated: true,
+            diagnostics: {
+              apiCount: 0,
+              storeCount: localMsgs.length,
+              oldestTimestamp: localMsgs[0]?.timestamp || '',
+              newestTimestamp: localMsgs[localMsgs.length - 1]?.timestamp || '',
+              activeUserId: 'LOCAL_CACHE',
+              activeConversationId: 'LOCAL_CACHE'
+            }
+          });
+        } else {
+          set({ isHydrated: true });
+        }
+
+        // 2. Background Sync
         const history = await chatService.getHistory();
-        console.log('Diagnostics - Messages received from API:', history?.length);
         if (history && history.length > 0) {
           const formattedHistory = history.map((msg: any) => ({
             id: msg.id,
@@ -112,28 +163,27 @@ export const useChatStore = create<ChatState>((set, get) => {
             status: 'sent',
             timestamp: msg.created_at || new Date().toISOString()
           }));
-          
-          console.log('Diagnostics - Oldest message from API:', formattedHistory[0]?.timestamp);
-          console.log('Diagnostics - Newest message from API:', formattedHistory[formattedHistory.length - 1]?.timestamp);
-          
-          set({ 
-            messages: formattedHistory, 
-            conversationId: history[0].conversation_id, // Get ID from most recent message
-            isHydrated: true,
+
+          // Merge into SQLite (using INSERT OR REPLACE in transaction)
+          await localDatabase.saveMessages(formattedHistory);
+
+          // Refresh state from SQLite database
+          const updatedLocalMsgs = await localDatabase.getMessages();
+          set({
+            messages: updatedLocalMsgs,
+            conversationId: history[0]?.conversation_id || null,
             diagnostics: {
               apiCount: history.length,
-              storeCount: formattedHistory.length,
-              oldestTimestamp: formattedHistory[0]?.timestamp || '',
-              newestTimestamp: formattedHistory[formattedHistory.length - 1]?.timestamp || '',
+              storeCount: updatedLocalMsgs.length,
+              oldestTimestamp: updatedLocalMsgs[0]?.timestamp || '',
+              newestTimestamp: updatedLocalMsgs[updatedLocalMsgs.length - 1]?.timestamp || '',
               activeUserId: history[0]?.user_id || 'UNKNOWN',
               activeConversationId: history[0]?.conversation_id || 'UNKNOWN'
             }
           });
-        } else {
-          set({ isHydrated: true });
         }
       } catch (e) {
-        console.error('Failed to hydrate history from backend:', e);
+        console.error('Failed to hydrate or background sync history:', e);
         set({ isHydrated: true });
       }
     },
@@ -146,6 +196,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         status: 'sending',
         timestamp: new Date().toISOString()
       };
+
+      // Save user message to SQLite instantly
+      await localDatabase.saveMessages([userMsg]);
 
       set((state) => ({ 
         messages: [...state.messages, userMsg],
@@ -163,6 +216,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       const msg = state.messages.find(m => m.id === messageId);
       if (!msg) return;
 
+      const updatedMsg = { ...msg, status: 'sending' as const };
+      await localDatabase.saveMessages([updatedMsg]);
+
       set((s) => ({
         messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m),
         pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content }]
@@ -175,6 +231,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
     
     clearMessages: () => {
+      localDatabase.clearMessages().catch(console.error);
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
     },
     
