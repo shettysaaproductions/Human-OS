@@ -228,7 +228,7 @@ chatRouter.get(
         .select('id, role, content, created_at, conversation_id')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(1000); // Increased limit to allow fetching older messages
 
       if (conversationId) query = query.eq('conversation_id', conversationId);
 
