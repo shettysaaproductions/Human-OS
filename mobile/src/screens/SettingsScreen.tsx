@@ -159,6 +159,11 @@ export function SettingsScreen() {
             <Text style={[st.rowValue, { color: colors.textSecondary }]}>Beta</Text>
           </View>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('UpdateHistory')}>
+            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Update History</Text>
+            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
+          </TouchableOpacity>
+          <View style={[st.divider, { backgroundColor: colors.divider }]} />
           <SettingsRow label="Developer Mode" value={devMode} onToggle={setDevMode} />
           {devMode && (
             <>

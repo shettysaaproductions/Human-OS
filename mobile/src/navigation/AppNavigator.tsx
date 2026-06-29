@@ -10,6 +10,7 @@ import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { UpdateHistoryScreen } from '../screens/UpdateHistoryScreen';
 import { FeedbackScreen } from '../screens/FeedbackScreen';
 import { BrainNavigator } from './BrainNavigator';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -49,6 +50,7 @@ export function AppNavigator() {
               <Stack.Screen name="Diagnostics" component={DiagnosticsScreen} />
               <Stack.Screen name="Brain" component={BrainNavigator} />
               <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="UpdateHistory" component={UpdateHistoryScreen} />
               <Stack.Screen name="Feedback" component={FeedbackScreen} />
             </>
           )}
