@@ -56,6 +56,7 @@ export function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
+<<<<<<< HEAD
   const isNearBottomRef = useRef(true);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
@@ -69,6 +70,11 @@ export function ChatScreen() {
     }
   }, [messages.length]);
 
+=======
+  
+  const [stickyDate, setStickyDate] = useState<string | null>(null);
+
+>>>>>>> 40a94f8 (Add WhatsApp style sticky date headers)
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 10,
     minimumViewTime: 100,
@@ -222,7 +228,6 @@ export function ChatScreen() {
             <Text style={{ color: '#fff', fontSize: 8 }}>Conv: {diagnostics.activeConversationId}</Text>
           </View>
         )}
-
         {/* Messages and Sticky Header Container */}
         <View style={{ flex: 1 }}>
           {stickyDate && (
@@ -254,6 +259,8 @@ export function ChatScreen() {
                 flatListRef.current?.scrollToEnd({ animated: false });
               }
             }}
+            removeClippedSubviews
+            windowSize={10}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
             ListEmptyComponent={
