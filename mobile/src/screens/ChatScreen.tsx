@@ -30,14 +30,15 @@ const formatDateSeparator = (dateString?: string) => {
   yesterday.setDate(yesterday.getDate() - 1);
 
   if (date.toDateString() === today.toDateString()) {
-    return 'Today';
+    return 'TODAY';
   } else if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday';
+    return 'YESTERDAY';
   } else {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const day = date.getDate();
+    const month = months[date.getMonth()];
     const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
+    return `${day} ${month} ${year}`;
   }
 };
 
@@ -55,6 +56,23 @@ export function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
+  
+  const [stickyDate, setStickyDate] = useState<string | null>(null);
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 10,
+    minimumViewTime: 100,
+  }).current;
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems && viewableItems.length > 0) {
+      // The top-most visible item determines the sticky date
+      const topItem = viewableItems[0].item;
+      if (topItem && topItem.timestamp) {
+        setStickyDate(formatDateSeparator(topItem.timestamp));
+      }
+    }
+  }).current;
 
   useEffect(() => {
     hydrateMessages();
@@ -167,25 +185,36 @@ export function ChatScreen() {
           </View>
         </View>
 
-        {/* Messages */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={s.listContent}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          removeClippedSubviews
-          windowSize={10}
-          ListEmptyComponent={
-            <View style={s.emptyChat}>
-              <Text style={s.emptyChatEmoji}>🌌</Text>
-              <Text style={[s.emptyChatText, { color: colors.textPrimary }]}>Hi, I'm Nova.</Text>
-              <Text style={[s.emptyChatSubtext, { color: colors.textSecondary }]}>Tell me about yourself — your goals, your day, what's on your mind. I remember everything.</Text>
+        {/* Messages and Sticky Header Container */}
+        <View style={{ flex: 1 }}>
+          {stickyDate && (
+            <View style={s.stickyDateContainer}>
+              <Text style={[s.dateSeparatorText, { backgroundColor: colors.border, color: colors.textSecondary }]}>
+                {stickyDate}
+              </Text>
             </View>
-          }
-        />
+          )}
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={s.listContent}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            removeClippedSubviews
+            windowSize={10}
+            viewabilityConfig={viewabilityConfig}
+            onViewableItemsChanged={onViewableItemsChanged}
+            ListEmptyComponent={
+              <View style={s.emptyChat}>
+                <Text style={s.emptyChatEmoji}>🌌</Text>
+                <Text style={[s.emptyChatText, { color: colors.textPrimary }]}>Hi, I'm Nova.</Text>
+                <Text style={[s.emptyChatSubtext, { color: colors.textSecondary }]}>Tell me about yourself — your goals, your day, what's on your mind. I remember everything.</Text>
+              </View>
+            }
+          />
+        </View>
 
         {/* Typing indicator */}
         {isTyping && (
@@ -282,6 +311,14 @@ const s = StyleSheet.create({
   dateSeparatorContainer: {
     alignItems: 'center',
     marginVertical: 16,
+  },
+  stickyDateContainer: {
+    position: 'absolute',
+    top: 8,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    alignItems: 'center',
   },
   dateSeparatorText: {
     paddingHorizontal: 12,
