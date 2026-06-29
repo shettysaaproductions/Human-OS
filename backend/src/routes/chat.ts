@@ -14,6 +14,13 @@ import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
 import crypto from 'crypto';
 
+function shouldExtractShortTermMemory(message: string): boolean {
+  if (message.length > 25) return true;
+  const keywords = ['feel', 'sad', 'happy', 'mad', 'angry', 'wife', 'husband', 'friend', 'boss', 'office', 'work', 'issue', 'problem', 'task', 'todo', 'buy', 'going', 'went', 'saw', 'met'];
+  const lower = message.toLowerCase();
+  return keywords.some(k => lower.includes(k));
+}
+
 export const chatRouter: import('express').Router = Router();
 
 const ChatSchema = z.object({
@@ -152,13 +159,50 @@ chatRouter.post(
 
       const memories = await memoryRepository.searchMemories(userId, keywords);
 
+      // 4.5 Fetch Short-Term Memories
+      const { data: stmData } = await qt.track('get_short_term_memories', 'short_term_memories', () =>
+        supabaseAdmin.from('short_term_memories')
+          .select('memory, emotion, importance, mention_count, expires_at, confidence')
+          .eq('user_id', userId)
+          .gte('confidence', 0.6)
+          .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+          .order('importance', { ascending: false })
+          .order('last_mentioned_at', { ascending: false })
+          .limit(20)
+      );
+      
+      const allFetched = stmData || [];
+      let stmTokens = 0;
+      const budgetMemories = [];
+      
+      for (const m of allFetched) {
+        const memTokens = Math.ceil(m.memory.length / 4);
+        if (stmTokens + memTokens > 1500) break;
+        stmTokens += memTokens;
+        budgetMemories.push(m);
+      }
+
+      const shortTermMemories = budgetMemories;
+      const importantShortTermCount = shortTermMemories.filter(m => m.expires_at === null).length;
+      
+      logger.info('ShortTermMemories Loaded:', { count: shortTermMemories.length });
+      logger.info('Important Memories:', { count: importantShortTermCount });
+      logger.info('Memory Tokens Injected:', { tokens: stmTokens });
+
+      // Count total short term memories for user
+      supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
+        .then(({ count }) => {
+          if (count !== null) logger.info('Total Memories For User:', { count });
+        });
+
       // 5. Build prompt
       const systemPrompt = promptBuilder.buildSystemPrompt(
         BASE_SYSTEM_PROMPT,
         memories,
         workingMemories,
         profile?.preferred_name,
-        profile?.companion_personality
+        profile?.companion_personality,
+        shortTermMemories
       );
 
       const messagesForLLM = [
@@ -186,14 +230,29 @@ chatRouter.post(
 
       // 9. Background extraction (fire & forget)
       const payload = { userId, messageId: userMessageId, message };
-      Promise.all([
+      
+      const backgroundJobs = [
         memoryQueue.add('extract_semantic', payload),
         memoryQueue.add('extract_working_memory', payload),
         memoryQueue.add('extract_episodic', payload),
         memoryQueue.add('extract_kg', payload),
         memoryQueue.add('extract_emotional', payload),
         memoryQueue.add('extract_milestone', payload)
-      ]).catch(err => {
+      ];
+
+      if (shouldExtractShortTermMemory(message)) {
+        const rateKey = `stm_rate_${userId}`;
+        const currentCount = cache.get<number>(rateKey) || 0;
+        
+        if (currentCount >= 50) {
+          logger.info('Memory Extraction Skipped:', { reason: 'Rate limit exceeded (50/hr)' });
+        } else {
+          cache.set(rateKey, currentCount + 1, 60 * 60 * 1000, 'rate_limit');
+          backgroundJobs.push(memoryQueue.add('extract_short_term', payload));
+        }
+      }
+
+      Promise.all(backgroundJobs).catch(err => {
         logger.error('Failed to enqueue background extraction jobs', { error: err instanceof Error ? err.message : String(err) });
       });
 

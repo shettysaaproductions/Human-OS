@@ -6,6 +6,7 @@ import { kgAgent } from '../agents/KgAgent';
 import { emotionalAgent } from '../agents/EmotionalAgent';
 import { milestoneAgent } from '../agents/MilestoneAgent';
 import { reflectionAgent } from '../agents/ReflectionAgent';
+import { shortTermMemoryAgent } from '../agents/ShortTermMemoryAgent';
 import { logger } from '../lib/logger';
 
 export function startWorkers() {
@@ -37,6 +38,9 @@ export function startWorkers() {
         break;
       case 'extract_milestone':
         await milestoneAgent.processJob(job);
+        break;
+      case 'extract_short_term':
+        await shortTermMemoryAgent.processJob(job);
         break;
       default:
         logger.warn(`Unknown job type received: ${job.job_type}`);

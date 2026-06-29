@@ -10,7 +10,8 @@ export class PromptBuilder {
     memories: Memory[], 
     workingMemories: { key: string, value: string }[],
     preferredName?: string, 
-    companionPersonality?: string
+    companionPersonality?: string,
+    shortTermMemories?: any[]
   ): string {
     let finalPrompt = `${basePrompt}
 
@@ -35,6 +36,15 @@ CRITICAL RULES FOR NOVA:
       finalPrompt += `\n\n--- WORKING MEMORY (CURRENT CONTEXT & TASKS) ---`;
       for (const wm of workingMemories) {
         finalPrompt += `\n- ${wm.key.replace(/_/g, ' ')}: ${wm.value}`;
+      }
+    }
+
+    // Pipeline Step 2.5: Short-Term Memories
+    if (shortTermMemories && shortTermMemories.length > 0) {
+      finalPrompt += `\n\n--- SHORT-TERM MEMORY (RECENT EVENTS & EMOTIONS) ---`;
+      for (const stm of shortTermMemories) {
+        const emotionContext = stm.emotion ? ` [Emotion: ${stm.emotion}]` : '';
+        finalPrompt += `\n- ${stm.memory}${emotionContext}`;
       }
     }
 
