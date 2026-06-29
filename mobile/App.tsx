@@ -22,8 +22,6 @@ function AppContent() {
   }, []);
 
   const checkForUpdate = async () => {
-
-
     // Skip update check in development
     if (__DEV__) {
       await checkChangelog();
@@ -31,12 +29,11 @@ function AppContent() {
     }
 
     try {
-      setIsCheckingUpdate(true);
-      console.log('[Updates] Checking for OTA update...');
+      console.log('[Updates] Checking for OTA update silently in background...');
       const update = await Updates.checkForUpdateAsync();
 
       if (update.isAvailable) {
-        console.log('[Updates] Update found — downloading...');
+        console.log('[Updates] Update found — downloading silently...');
         await Updates.fetchUpdateAsync();
         console.log('[Updates] Download complete — ready to reload');
         setModalType('downloaded');
@@ -46,10 +43,8 @@ function AppContent() {
         await checkChangelog();
       }
     } catch (error) {
-      console.warn('[Updates] Update check failed (non-fatal):', error);
+      console.warn('[Updates] Silent update check failed (non-fatal):', error);
       await checkChangelog();
-    } finally {
-      setIsCheckingUpdate(false);
     }
   };
 
@@ -85,15 +80,6 @@ function AppContent() {
     }
   };
 
-  if (isCheckingUpdate) {
-    return (
-      <View style={[styles.updateScreen, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={[styles.updateText, { color: colors.textSecondary }]}>Checking for updates...</Text>
-      </View>
-    );
-  }
-
   return (
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -104,7 +90,9 @@ function AppContent() {
       {modalVisible && (
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>
           <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{latestUpdate.title}</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {modalType === 'downloaded' ? 'A new update is available.' : latestUpdate.title}
+            </Text>
             <Text style={styles.versionTag}>v{latestUpdate.version}</Text>
             
             <ScrollView style={styles.notesContainer} showsVerticalScrollIndicator={false}>

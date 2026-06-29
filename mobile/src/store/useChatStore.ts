@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { chatService } from '../services/chatService';
 import { localDatabase } from '../services/localDatabase';
+import * as SecureStore from 'expo-secure-store';
 
 export interface Message {
   id: string;
@@ -27,12 +28,14 @@ interface ChatState {
   isHydrated: boolean;
   pendingQueue: { id: string, content: string }[];
   diagnostics: ChatDiagnostics | null;
+  developerMode: boolean;
   
   hydrateMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
   processQueue: () => Promise<void>;
+  setDeveloperMode: (val: boolean) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => {
@@ -131,9 +134,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     isHydrated: false,
     pendingQueue: [],
     diagnostics: null,
+    developerMode: false,
     
     hydrateMessages: async () => {
       try {
+        // Hydrate developer mode setting first
+        const devMode = await SecureStore.getItemAsync('developerMode');
+        set({ developerMode: devMode === 'true' });
+
         // 1. Load instantly from SQLite first
         const localMsgs = await localDatabase.getMessages();
         if (localMsgs.length > 0) {
@@ -233,6 +241,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     clearMessages: () => {
       localDatabase.clearMessages().catch(console.error);
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
+    },
+    
+    setDeveloperMode: async (val: boolean) => {
+      set({ developerMode: val });
+      await SecureStore.setItemAsync('developerMode', val ? 'true' : 'false');
     },
     
     processQueue

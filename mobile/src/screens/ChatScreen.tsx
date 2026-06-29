@@ -53,11 +53,12 @@ async function trackEvent(event_type: string, event_data?: object) {
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<any>(null);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
+  const isInitialLoad = useRef(true);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
@@ -208,7 +209,7 @@ export function ChatScreen() {
         </View>
 
         {/* Diagnostics Card */}
-        {diagnostics && (
+        {developerMode && diagnostics && (
           <View style={{
             position: 'absolute', top: 80, right: 16, zIndex: 100,
             backgroundColor: 'rgba(0,0,0,0.8)', padding: 10, borderRadius: 8,
@@ -248,7 +249,9 @@ export function ChatScreen() {
             scrollEventThrottle={16}
             onContentSizeChange={() => {
               if (isNearBottomRef.current) {
-                flatListRef.current?.scrollToEnd({ animated: true });
+                const animate = !isInitialLoad.current;
+                flatListRef.current?.scrollToEnd({ animated: animate });
+                isInitialLoad.current = false;
               }
             }}
             onLayout={() => {
