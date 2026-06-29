@@ -63,9 +63,9 @@ export function ChatScreen() {
   // Temporary diagnostics
   useEffect(() => {
     if (messages.length > 0) {
-      console.log('Diagnostics - Total messages loaded:', messages.length);
-      console.log('Diagnostics - Oldest timestamp:', messages[0].timestamp);
-      console.log('Diagnostics - Newest timestamp:', messages[messages.length - 1].timestamp);
+      console.log('Messages stored in Zustand:', messages.length);
+      console.log('Oldest message:', messages[0]?.timestamp);
+      console.log('Newest message:', messages[messages.length - 1]?.timestamp);
     }
   }, [messages.length]);
 
@@ -229,8 +229,6 @@ export function ChatScreen() {
                 flatListRef.current?.scrollToEnd({ animated: false });
               }
             }}
-            removeClippedSubviews
-            windowSize={10}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
             ListEmptyComponent={
