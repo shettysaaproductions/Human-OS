@@ -153,11 +153,7 @@ export function ChatScreen() {
             <View style={s.timestampContainer}>
               <Text style={[
                 s.timestampText,
-<<<<<<< HEAD
                 isUser ? { color: colors.buttonText, opacity: 0.7 } : { color: colors.assistantText, opacity: 0.6 }
-=======
-                isUser ? { color: 'rgba(255,255,255,0.6)' } : { color: 'rgba(255,255,255,0.4)' }
->>>>>>> 95b66cd (Add WhatsApp style timestamps and date separators)
               ]}>
                 {formatTime(item.timestamp)}
               </Text>
