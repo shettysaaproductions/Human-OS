@@ -92,6 +92,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     hydrateMessages: async () => {
       try {
         const history = await chatService.getHistory();
+        console.log('Diagnostics - Messages received from API:', history?.length);
         if (history && history.length > 0) {
           const formattedHistory = history.map((msg: any) => ({
             id: msg.id,
@@ -100,6 +101,10 @@ export const useChatStore = create<ChatState>((set, get) => {
             status: 'sent',
             timestamp: msg.created_at || new Date().toISOString()
           }));
+          
+          console.log('Diagnostics - Oldest message from API:', formattedHistory[0]?.timestamp);
+          console.log('Diagnostics - Newest message from API:', formattedHistory[formattedHistory.length - 1]?.timestamp);
+          
           set({ 
             messages: formattedHistory, 
             conversationId: history[0].conversation_id, // Get ID from most recent message
