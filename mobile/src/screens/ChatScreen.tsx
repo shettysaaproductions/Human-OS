@@ -59,6 +59,7 @@ export function ChatScreen() {
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
   const isInitialLoad = useRef(true);
+  const [isListReady, setIsListReady] = useState(false);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
@@ -227,7 +228,7 @@ export function ChatScreen() {
         )}
 
         {/* Messages and Sticky Header Container */}
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, opacity: (isListReady || messages.length === 0) ? 1 : 0 }}>
           {stickyDate && (
             <View style={s.stickyDateContainer}>
               <Text style={[s.dateSeparatorText, { backgroundColor: colors.border, color: colors.textSecondary }]}>
@@ -252,11 +253,17 @@ export function ChatScreen() {
                 const animate = !isInitialLoad.current;
                 flatListRef.current?.scrollToEnd({ animated: animate });
                 isInitialLoad.current = false;
+                if (!isListReady && messages.length > 0) {
+                  setTimeout(() => setIsListReady(true), 50);
+                }
               }
             }}
             onLayout={() => {
               if (isNearBottomRef.current) {
                 flatListRef.current?.scrollToEnd({ animated: false });
+                if (!isListReady && messages.length > 0) {
+                  setTimeout(() => setIsListReady(true), 50);
+                }
               }
             }}
             viewabilityConfig={viewabilityConfig}
