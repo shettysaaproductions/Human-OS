@@ -208,9 +208,9 @@ export function ChatScreen() {
             maxLength={2000}
           />
           <TouchableOpacity
-            style={[s.sendBtn, (!inputText.trim() || isTyping) && s.sendBtnDisabled]}
+            style={[s.sendBtn, !inputText.trim() && s.sendBtnDisabled]}
             onPress={handleSend}
-            disabled={!inputText.trim() || isTyping}
+            disabled={!inputText.trim()}
           >
             <Text style={s.sendBtnText}>↑</Text>
           </TouchableOpacity>

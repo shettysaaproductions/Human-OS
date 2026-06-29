@@ -15,19 +15,34 @@ interface ChatState {
   conversationId: string | null;
   isTyping: boolean;
   isHydrated: boolean;
+  pendingQueue: { id: string, content: string }[];
   
   hydrateMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
+  processQueue: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => {
-  const processMessage = async (msgId: string, content: string) => {
+  const processQueue = async () => {
+    const state = get();
+    if (state.pendingQueue.length === 0) {
+      set({ isTyping: false });
+      return;
+    }
+
     set({ isTyping: true });
+
+    // Grab everything in queue
+    const batch = [...state.pendingQueue];
+    set({ pendingQueue: [] });
+
+    const combinedContent = batch.map(q => q.content).join('\n\n');
+    const batchIds = batch.map(q => q.id);
+
     try {
-      const state = get();
-      const { reply, conversation_id } = await chatService.sendMessage(content, state.conversationId || undefined);
+      const { reply, conversation_id } = await chatService.sendMessage(combinedContent, get().conversationId || undefined);
       
       const novaMsg: Message = {
         id: Date.now().toString() + '_nova',
@@ -38,10 +53,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       };
 
       set((s) => {
-        const updated = s.messages.map(m => m.id === msgId ? { ...m, status: 'sent' as const } : m);
+        const updated = s.messages.map(m => batchIds.includes(m.id) ? { ...m, status: 'sent' as const } : m);
         return { 
           messages: [...updated, novaMsg], 
-          isTyping: false,
           conversationId: conversation_id // Save the active conversation ID
         };
       });
@@ -59,10 +73,13 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
       }
       set((s) => {
-        const updated = s.messages.map(m => m.id === msgId ? { ...m, status: 'error' as const, errorMessage } : m);
-        return { messages: updated, isTyping: false };
+        const updated = s.messages.map(m => batchIds.includes(m.id) ? { ...m, status: 'error' as const, errorMessage } : m);
+        return { messages: updated };
       });
     }
+
+    // Process any new messages that arrived while we were waiting
+    get().processQueue();
   };
 
   return {
@@ -70,6 +87,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     conversationId: null,
     isTyping: false,
     isHydrated: false,
+    pendingQueue: [],
     
     hydrateMessages: async () => {
       try {
@@ -98,15 +116,22 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     sendMessage: async (content: string) => {
       const userMsg: Message = {
-        id: Date.now().toString(),
+        id: Date.now().toString() + Math.random().toString().slice(2, 6),
         role: 'user',
         content,
         status: 'sending',
         timestamp: new Date().toISOString()
       };
 
-      set((state) => ({ messages: [...state.messages, userMsg] }));
-      await processMessage(userMsg.id, content);
+      set((state) => ({ 
+        messages: [...state.messages, userMsg],
+        pendingQueue: [...state.pendingQueue, { id: userMsg.id, content }]
+      }));
+
+      if (!get().isTyping) {
+        set({ isTyping: true });
+        get().processQueue();
+      }
     },
 
     retryMessage: async (messageId: string) => {
@@ -115,14 +140,20 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!msg) return;
 
       set((s) => ({
-        messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m)
+        messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m),
+        pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content }]
       }));
 
-      await processMessage(msg.id, msg.content);
+      if (!get().isTyping) {
+        set({ isTyping: true });
+        get().processQueue();
+      }
     },
     
     clearMessages: () => {
-      set({ messages: [], conversationId: null });
-    }
+      set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
+    },
+    
+    processQueue
   };
 });
