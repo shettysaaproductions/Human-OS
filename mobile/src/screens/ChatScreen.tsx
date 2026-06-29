@@ -56,8 +56,18 @@ export function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
+  const isNearBottomRef = useRef(true);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
+
+  // Temporary diagnostics
+  useEffect(() => {
+    if (messages.length > 0) {
+      console.log('Diagnostics - Total messages loaded:', messages.length);
+      console.log('Diagnostics - Oldest timestamp:', messages[0].timestamp);
+      console.log('Diagnostics - Newest timestamp:', messages[messages.length - 1].timestamp);
+    }
+  }, [messages.length]);
 
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 10,
@@ -86,7 +96,14 @@ export function ChatScreen() {
     if (!inputText.trim()) return;
     sendMessage(inputText.trim());
     setInputText('');
+    isNearBottomRef.current = true;
   }, [inputText, sendMessage]);
+
+  const handleScroll = useCallback((event: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const paddingToBottom = 150;
+    isNearBottomRef.current = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+  }, []);
 
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
@@ -200,8 +217,18 @@ export function ChatScreen() {
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={() => {
+              if (isNearBottomRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: true });
+              }
+            }}
+            onLayout={() => {
+              if (isNearBottomRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
             removeClippedSubviews
             windowSize={10}
             viewabilityConfig={viewabilityConfig}
