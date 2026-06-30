@@ -52,11 +52,20 @@ async function trackEvent(event_type: string, event_data?: object) {
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
   const [inputText, setInputText] = useState('');
+  const [isReadyToRender, setIsReadyToRender] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
+  const isInitialScrollRef = useRef(true);
+
+  // If hydrated and there are no messages, show empty state immediately
+  useEffect(() => {
+    if (isHydrated && messages.length === 0) {
+      setIsReadyToRender(true);
+    }
+  }, [isHydrated, messages.length]);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
@@ -205,7 +214,7 @@ export function ChatScreen() {
         </View>
 
         {/* Diagnostics Card */}
-        {diagnostics && (
+        {developerMode && diagnostics && (
           <View style={{
             position: 'absolute', top: 80, right: 16, zIndex: 100,
             backgroundColor: 'rgba(0,0,0,0.8)', padding: 10, borderRadius: 8,
@@ -243,12 +252,23 @@ export function ChatScreen() {
             onScroll={handleScroll}
             scrollEventThrottle={16}
             onContentSizeChange={() => {
-              if (isNearBottomRef.current) {
+              if (isInitialScrollRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                if (messages.length > 0) {
+                  isInitialScrollRef.current = false;
+                  setIsReadyToRender(true);
+                }
+              } else if (isNearBottomRef.current) {
                 flatListRef.current?.scrollToEnd({ animated: true });
               }
             }}
             onLayout={() => {
-              if (isNearBottomRef.current) {
+              if (isInitialScrollRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                if (messages.length > 0) {
+                  setIsReadyToRender(true);
+                }
+              } else if (isNearBottomRef.current) {
                 flatListRef.current?.scrollToEnd({ animated: false });
               }
             }}
@@ -264,6 +284,12 @@ export function ChatScreen() {
               </View>
             }
           />
+          {!isReadyToRender && (
+            <View style={[StyleSheet.absoluteFill, s.centerContainer, { backgroundColor: colors.background }]}>
+              <ActivityIndicator size="large" color="#8B5CF6" />
+              <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing local companion database...</Text>
+            </View>
+          )}
         </View>
 
         {/* Typing indicator */}

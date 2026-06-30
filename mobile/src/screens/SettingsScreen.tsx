@@ -7,19 +7,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
 import { useTheme, ThemeMode } from '../theme/ThemeContext';
+import { useChatStore } from '../store/useChatStore';
 
 const APP_VERSION = '0.2.0-beta';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { colors, themeMode, setThemeMode } = useTheme();
+  const { developerMode, setDeveloperMode } = useChatStore();
 
   // Notification settings (local state — could persist to backend)
   const [momentNotifs, setMomentNotifs] = useState(true);
   const [reflectionNotifs, setReflectionNotifs] = useState(true);
   const [goalNotifs, setGoalNotifs] = useState(true);
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(true);
-  const [devMode, setDevMode] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const handleExport = useCallback(async () => {
@@ -164,8 +165,8 @@ export function SettingsScreen() {
             <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
           </TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <SettingsRow label="Developer Mode" value={devMode} onToggle={setDevMode} />
-          {devMode && (
+          <SettingsRow label="Developer Mode" value={developerMode} onToggle={setDeveloperMode} />
+          {developerMode && (
             <>
               <View style={[st.divider, { backgroundColor: colors.divider }]} />
               <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Diagnostics')}>
