@@ -5,6 +5,7 @@
 |---|---|---|---|---|---|---|
 | 1 | `46c2969e-1787-4cfd-a860-3fa0df18f1fa` | production | Restore timestamps + floating date header + multiple message sending | iOS + Android | 2026-06-30 | ✅ Live |
 | 2 | `a9b98ce0-fc5b-48ca-9cb3-9e1d10682d41` | production | Remove blocking update screen - background OTA check | iOS + Android | 2026-06-30 | ✅ Live |
+| 3 | `26732af2-6900-441f-a523-62a2163eb618` | production | Diagnostic startup scroll logging & fixed chat jump | iOS + Android | 2026-06-30 | ✅ Live |
 
 ---
 
