@@ -26,6 +26,8 @@ interface ChatState {
   isHydrated: boolean;
   pendingQueue: { id: string, content: string }[];
   diagnostics: ChatDiagnostics | null;
+  developerMode: boolean;
+  setDeveloperMode: (val: boolean) => void;
   
   hydrateMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
@@ -99,6 +101,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     isHydrated: false,
     pendingQueue: [],
     diagnostics: null,
+    developerMode: false,
+    setDeveloperMode: (val: boolean) => set({ developerMode: val }),
     
     hydrateMessages: async () => {
       try {
