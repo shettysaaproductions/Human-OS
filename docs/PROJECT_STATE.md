@@ -4,16 +4,16 @@ Current Version:
 `v0.2.0-beta`
 
 Current Stable Tag:
-`stable-v2-instant-startup`
+`stable-v3-recovered`
 
 Latest OTA:
-`2b867ae3-30f4-423e-af2b-c63d8794336b`
+`fd1565e0-f1d4-433d-b881-e73739e86aa8`
 
 Current Branch:
-`main`
+`feature-performance-phase1`
 
 Release Status:
-Beta
+PRODUCTION STABLE (Beta)
 
 Open Bugs:
 - None
@@ -26,3 +26,11 @@ Blockers:
 
 Production Risk:
 LOW
+
+## Emergency Recovery Command
+
+If any future OTA breaks production, run:
+
+```bash
+eas update:republish --group fd1565e0-f1d4-433d-b881-e73739e86aa8 --destination-branch production --message "Emergency recovery to stable-v3-recovered"
+```

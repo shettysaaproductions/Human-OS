@@ -10,20 +10,20 @@ Completed:
 - Added Native Dependency Rule to KNOWN_PATTERNS.md and AI_GUARDRAILS.md.
 
 Current State:
-- Awaiting new native binary build.
-- App reverted to stable state.
-- Uncommitted code now committed to `feature-performance-phase1`.
+- Established stable baseline with git tag `stable-v3-recovered`.
+- Production OTA verified running rollback `fd1565e0-f1d4-433d-b881-e73739e86aa8`.
+- Local branch `feature-performance-phase1` is synchronized at `d668311` (`stable-v3-recovered`).
+- Status is PRODUCTION STABLE.
 
 Working On:
-- Recovering and migrating to Home PC.
-- Preparing for new native binary build to support Sentry/SplashScreen.
+- Handing off to the next stage after establishing baseline.
 
 Next Recommended Task:
-- Verify stable recovery on device.
-- Execute `eas build --profile production --platform android` (on Home PC) to create a new APK containing native modules.
+- Proceed with building a new native binary or further performance tuning under `feature-performance-phase1`.
 
-Risks:
-- Do not publish OTAs until new binary is installed.
+Emergency Recovery:
+- If a future OTA breaks production, republish using:
+  `eas update:republish --group fd1565e0-f1d4-433d-b881-e73739e86aa8 --destination-branch production --message "Emergency recovery to stable-v3-recovered"`
 
 Recommended Model:
 Gemini Flash Low.
