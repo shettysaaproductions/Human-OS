@@ -362,7 +362,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 16,
   },
-<<<<<<< HEAD
   stickyDateContainer: {
     position: 'absolute',
     top: 8,
@@ -371,8 +370,6 @@ const s = StyleSheet.create({
     zIndex: 10,
     alignItems: 'center',
   },
-=======
->>>>>>> 95b66cd (Add WhatsApp style timestamps and date separators)
   dateSeparatorText: {
     paddingHorizontal: 12,
     paddingVertical: 4,
