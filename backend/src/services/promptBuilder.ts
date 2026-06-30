@@ -11,7 +11,8 @@ export class PromptBuilder {
     workingMemories: { key: string, value: string }[],
     preferredName?: string, 
     companionPersonality?: string,
-    shortTermMemories?: any[]
+    shortTermMemories?: any[],
+    preferredLanguage: 'en' | 'hi' | 'auto' = 'auto'
   ): string {
     let finalPrompt = `${basePrompt}
 
@@ -59,6 +60,12 @@ CRITICAL RULES FOR NOVA:
     }
 
     finalPrompt += `\n\n(Use these memories to understand the user's current message, but DO NOT list them out to the user.)`;
+
+    if (preferredLanguage === 'hi') {
+      finalPrompt += `\n\nCRITICAL INSTRUCTION: You MUST respond in Hindi (Devanagari script). Do not use English unless quoting.`;
+    } else if (preferredLanguage === 'en') {
+      finalPrompt += `\n\nCRITICAL INSTRUCTION: You MUST respond in English.`;
+    }
 
     return finalPrompt;
   }
