@@ -69,14 +69,14 @@ export function ChatScreen() {
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
-  // Temporary diagnostics
+  // Diagnostics — dev mode only
   useEffect(() => {
-    if (messages.length > 0) {
+    if (developerMode && messages.length > 0) {
       console.log('Messages stored in Zustand:', messages.length);
       console.log('Oldest message:', messages[0]?.timestamp);
       console.log('Newest message:', messages[messages.length - 1]?.timestamp);
     }
-  }, [messages.length]);
+  }, [developerMode, messages.length]);
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 10,
     minimumViewTime: 100,
@@ -84,10 +84,11 @@ export function ChatScreen() {
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems && viewableItems.length > 0) {
-      // The top-most visible item determines the sticky date
       const topItem = viewableItems[0].item;
       if (topItem && topItem.timestamp) {
-        setStickyDate(formatDateSeparator(topItem.timestamp));
+        const newDate = formatDateSeparator(topItem.timestamp);
+        // Bail out if date hasn't changed — prevents unnecessary re-renders
+        setStickyDate(prev => prev === newDate ? prev : newDate);
       }
     }
   }).current;
@@ -129,7 +130,7 @@ export function ChatScreen() {
       }
     }
     
-    if (showDateSeparator && item.timestamp) {
+    if (developerMode && showDateSeparator && item.timestamp) {
       console.log("Date separator:", formatDateSeparator(item.timestamp));
     }
 
@@ -239,10 +240,7 @@ export function ChatScreen() {
               </Text>
             </View>
           )}
-          {(() => {
-             console.log("FlatList data length:", messages.length);
-             return null;
-          })()}
+
           <FlatList
             ref={flatListRef}
             data={messages}
@@ -274,6 +272,9 @@ export function ChatScreen() {
             }}
             removeClippedSubviews
             windowSize={10}
+            initialNumToRender={15}
+            maxToRenderPerBatch={5}
+            updateCellsBatchingPeriod={50}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
             ListEmptyComponent={

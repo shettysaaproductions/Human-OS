@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import * as SecureStore from 'expo-secure-store';
@@ -12,45 +12,32 @@ const latestUpdate = updateHistory[0];
 
 function AppContent() {
   const { isDark, colors } = useTheme();
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'downloaded' | 'changelog'>('changelog');
 
-
   useEffect(() => {
-    checkForUpdate();
+    // Run entirely in background — never block the UI
+    runBackgroundChecks();
   }, []);
 
-  const checkForUpdate = async () => {
-
-
-    // Skip update check in development
-    if (__DEV__) {
-      await checkChangelog();
-      return;
-    }
-
-    try {
-      setIsCheckingUpdate(true);
-      console.log('[Updates] Checking for OTA update...');
-      const update = await Updates.checkForUpdateAsync();
-
-      if (update.isAvailable) {
-        console.log('[Updates] Update found — downloading...');
-        await Updates.fetchUpdateAsync();
-        console.log('[Updates] Download complete — ready to reload');
-        setModalType('downloaded');
-        setModalVisible(true);
-      } else {
-        console.log('[Updates] App is up to date.');
-        await checkChangelog();
+  const runBackgroundChecks = async () => {
+    // Skip OTA check in development
+    if (!__DEV__) {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          // Only surface popup when update is actually ready
+          setModalType('downloaded');
+          setModalVisible(true);
+          return; // skip changelog if update downloaded
+        }
+      } catch {
+        // Non-fatal — silently ignore
       }
-    } catch (error) {
-      console.warn('[Updates] Update check failed (non-fatal):', error);
-      await checkChangelog();
-    } finally {
-      setIsCheckingUpdate(false);
     }
+    // Check changelog after OTA check (or in dev)
+    await checkChangelog();
   };
 
   const checkChangelog = async () => {
@@ -59,11 +46,9 @@ function AppContent() {
       if (lastSeen !== latestUpdate.version) {
         setModalType('changelog');
         setModalVisible(true);
-      } else {
-        setModalVisible(false);
       }
-    } catch (err) {
-      console.warn('[Updates] Failed to read lastSeenVersion:', err);
+    } catch {
+      // Non-fatal
     }
   };
 
@@ -80,19 +65,10 @@ function AppContent() {
     try {
       setModalVisible(false);
       await SecureStore.setItemAsync('lastSeenVersion', latestUpdate.version);
-    } catch (err) {
-      console.warn('[Updates] Failed to write lastSeenVersion:', err);
+    } catch {
+      // Non-fatal
     }
   };
-
-  if (isCheckingUpdate) {
-    return (
-      <View style={[styles.updateScreen, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={[styles.updateText, { color: colors.textSecondary }]}>Checking for updates...</Text>
-      </View>
-    );
-  }
 
   return (
     <SafeAreaProvider>
@@ -148,15 +124,6 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  updateScreen: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-  },
-  updateText: {
-    fontSize: 16,
-  },
   modalOverlay: {
     position: 'absolute',
     top: 0,
