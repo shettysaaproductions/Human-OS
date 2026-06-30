@@ -12,6 +12,7 @@
 |---|---|---|
 | a9b98ce0-fc5b-48ca-9cb3-9e1d10682d41 | Remove blocking update screen - background OTA check | 2026-06-30 |
 | 46c2969e-1787-4cfd-a860-3fa0df18f1fa | Restore timestamps + floating date header + multiple message sending | 2026-06-30 |
+| 26732af2-6900-441f-a523-62a2163eb618 | Diagnostic startup scroll logging & fixed chat jump | 2026-06-30 |
 
 ---
 

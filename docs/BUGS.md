@@ -21,6 +21,6 @@
 
 | ID | Resolution | OTA |
 |---|---|---|
-| BUG-001 | Non-animated scrollToEnd on first content size change + overlay render gate | 46c2969e |
+| BUG-001 | FlatList inverted={true} with reversed data array | 26732af2 |
 | BUG-002 | Moved developerMode to Zustand store; wrapped diagnostics in guard | 46c2969e |
 | BUG-003 | Removed blocking state; OTA check runs fully in background | a9b98ce0 |

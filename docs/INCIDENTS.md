@@ -52,3 +52,21 @@ Every app cold start showed a loading spinner ("Checking for updates...") while 
 Removed `isCheckingUpdate` state and blocking render. OTA check runs fully in `useEffect` background without blocking `AppNavigator`.
 
 **OTA Published:** `a9b98ce0-fc5b-48ca-9cb3-9e1d10682d41`
+
+---
+
+## INC-004 — Startup Chat Scroll Jump
+**Date:** 2026-06-30
+**Severity:** P0
+**Duration:** ~2 hours
+
+**Summary:**
+When opening the app, the chat screen natively rendered from the oldest message (index 0) and then visually scrolled to the bottom (newest message), creating an unacceptable visual flash and animation.
+
+**Root Cause:**
+FlatList was relying on `scrollToEnd()` which fires asynchronously after initial layout, causing the user to see the initial top-of-list render before the scroll repositioned the viewport.
+
+**Resolution:**
+Re-engineered the FlatList to use `inverted={true}`. The data array was reversed (`[...messages].reverse()`) so the newest message sits at index 0. This allows the FlatList to natively render the newest message at the bottom of the viewport with zero scroll logic and zero top-flash.
+
+**OTA Published:** `26732af2-6900-441f-a523-62a2163eb618`
