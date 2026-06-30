@@ -1,14 +1,13 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
-  KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator, Animated
+  KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { useTheme } from '../theme/ThemeContext';
-import * as SplashScreenNative from 'expo-splash-screen';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -90,14 +89,6 @@ export function ChatScreen() {
       setIsReadyToRender(true);
     }
   }, [isHydrated, messages.length]);
-
-  // Hide the native splash screen ONLY when Chat is fully painted
-  useEffect(() => {
-    if (isReadyToRender) {
-      console.log('[STARTUP] HIDE_SPLASH from ChatScreen');
-      SplashScreenNative.hideAsync().catch(() => {});
-    }
-  }, [isReadyToRender]);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
@@ -126,7 +117,6 @@ export function ChatScreen() {
   }).current;
 
   useEffect(() => {
-    console.log('[STARTUP] CHATSCREEN_RENDER');
     logEvent('COMPONENT_MOUNT');
     hydrateMessages();
     if (!didTrackOpen.current) {
@@ -148,28 +138,26 @@ export function ChatScreen() {
     const paddingToBottom = 150;
     isNearBottomRef.current = contentOffset.y < paddingToBottom;
   }, []);
-  const dateSeparators = useMemo(() => {
-    const separators = new Set<string>();
-    reversedMessages.forEach((item, index) => {
-      if (index === reversedMessages.length - 1) {
-        separators.add(item.id);
-      } else {
-        const prevMessage = reversedMessages[index + 1];
-        if (prevMessage && item.timestamp) {
-          const currentDate = new Date(item.timestamp).toDateString();
-          const prevDate = new Date(prevMessage.timestamp || new Date().toISOString()).toDateString();
-          if (currentDate !== prevDate) {
-            separators.add(item.id);
-          }
-        }
-      }
-    });
-    return separators;
-  }, [reversedMessages]);
-
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
-    const showDateSeparator = dateSeparators.has(item.id);
+    
+    let showDateSeparator = false;
+    if (index === reversedMessages.length - 1) {
+      showDateSeparator = true;
+    } else {
+      const prevMessage = reversedMessages[index + 1];
+      if (prevMessage && item.timestamp) {
+        const currentDate = new Date(item.timestamp).toDateString();
+        const prevDate = new Date(prevMessage.timestamp || new Date().toISOString()).toDateString();
+        if (currentDate !== prevDate) {
+          showDateSeparator = true;
+        }
+      }
+    }
+    
+    if (developerMode && showDateSeparator && item.timestamp) {
+      console.log("Date separator:", formatDateSeparator(item.timestamp));
+    }
 
     return (
       <View>
@@ -213,9 +201,15 @@ export function ChatScreen() {
         </View>
       </View>
     );
-  }, [retryMessage, colors, dateSeparators]);
+  }, [retryMessage, colors, reversedMessages, developerMode]);
 
-  // Removed early return for !isHydrated to allow skeleton to render over the full layout.
+  if (!isHydrated) {
+    return (
+      <View style={[s.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color="#8B5CF6" />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
@@ -317,9 +311,10 @@ export function ChatScreen() {
               </View>
             }
           />
-          {(!isHydrated || !isReadyToRender) && (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]}>
-              <ChatSkeleton colors={colors} />
+          {!isReadyToRender && (
+            <View style={[StyleSheet.absoluteFill, s.centerContainer, { backgroundColor: colors.background }]}>
+              <ActivityIndicator size="large" color="#8B5CF6" />
+              <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing local companion database...</Text>
             </View>
           )}
         </View>
@@ -445,45 +440,3 @@ const s = StyleSheet.create({
     fontSize: 10,
   }
 });
-
-const ChatSkeleton = ({ colors }: { colors: any }) => {
-  const opacity = useRef(new Animated.Value(0.4)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.8, duration: 800, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.4, duration: 800, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [opacity]);
-
-  const skeletons = [
-    { id: '1', isUser: false, width: '60%', height: 60 },
-    { id: '2', isUser: true, width: '40%', height: 40 },
-    { id: '3', isUser: false, width: '75%', height: 80 },
-    { id: '4', isUser: true, width: '50%', height: 40 },
-    { id: '5', isUser: false, width: '65%', height: 60 },
-  ];
-
-  return (
-    <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 16, justifyContent: 'flex-end', gap: 16 }}>
-      {skeletons.map((sk) => (
-        <Animated.View key={sk.id} style={[
-          s.bubble,
-          sk.isUser ? s.userBubble : s.novaBubble,
-          { opacity }
-        ]}>
-          {!sk.isUser && <View style={s.avatarDot} />}
-          <View style={[
-            s.bubbleInner,
-            sk.isUser
-              ? { backgroundColor: colors.border, borderBottomRightRadius: 4 }
-              : { backgroundColor: colors.border, borderBottomLeftRadius: 4 },
-            { width: sk.width as any, height: sk.height as any }
-          ]} />
-        </Animated.View>
-      ))}
-    </View>
-  );
-};

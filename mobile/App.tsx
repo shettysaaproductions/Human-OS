@@ -4,15 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
-import * as SplashScreen from 'expo-splash-screen';
 import { AppNavigator } from './src/navigation/AppNavigator';
-
-import { initLogger } from './src/services/logger';
-import * as Sentry from '@sentry/react-native';
-
-SplashScreen.preventAutoHideAsync().catch(() => {});
-initLogger();
-
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import updateHistory from './src/config/updateHistory.json';
 
@@ -123,15 +115,13 @@ function AppContent() {
   );
 }
 
-function App() {
+export default function App() {
   return (
     <ThemeProvider>
       <AppContent />
     </ThemeProvider>
   );
 }
-
-export default Sentry.wrap(App);
 
 const styles = StyleSheet.create({
   modalOverlay: {

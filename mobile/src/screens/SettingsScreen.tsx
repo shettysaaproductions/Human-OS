@@ -8,9 +8,6 @@ import { useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
 import { useTheme, ThemeMode } from '../theme/ThemeContext';
 import { useChatStore } from '../store/useChatStore';
-import { useSettingsStore, LanguagePreference } from '../store/useSettingsStore';
-import * as Updates from 'expo-updates';
-import { triggerTestCrash, triggerTestError } from '../services/logger';
 
 const APP_VERSION = '0.2.0-beta';
 
@@ -18,7 +15,6 @@ export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { colors, themeMode, setThemeMode } = useTheme();
   const { developerMode, setDeveloperMode } = useChatStore();
-  const { language, setLanguage } = useSettingsStore();
 
   // Notification settings (local state — could persist to backend)
   const [momentNotifs, setMomentNotifs] = useState(true);
@@ -89,25 +85,6 @@ export function SettingsScreen() {
           <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('light')}>
             <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Light Mode</Text>
             {themeMode === 'light' && <Text style={st.checkmark}>✓</Text>}
-          </TouchableOpacity>
-        </View>
-
-        {/* Language Settings */}
-        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🗣️ LANGUAGE</Text>
-        <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity style={st.row} onPress={() => setLanguage('auto')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Auto (Default)</Text>
-            {language === 'auto' && <Text style={st.checkmark}>✓</Text>}
-          </TouchableOpacity>
-          <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => setLanguage('en')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>English</Text>
-            {language === 'en' && <Text style={st.checkmark}>✓</Text>}
-          </TouchableOpacity>
-          <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => setLanguage('hi')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Hindi</Text>
-            {language === 'hi' && <Text style={st.checkmark}>✓</Text>}
           </TouchableOpacity>
         </View>
 
@@ -188,30 +165,6 @@ export function SettingsScreen() {
             <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
           </TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          
-          {/* Internal Diagnostics (TEMPORARY: ALWAYS VISIBLE FOR R&D) */}
-          <View style={[st.row, { paddingVertical: 8 }]}>
-            <Text style={[st.rowLabel, { color: '#F59E0B', fontSize: 13 }]}>App Version</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary, fontSize: 13 }]}>{APP_VERSION}</Text>
-          </View>
-          <View style={[st.row, { paddingVertical: 8 }]}>
-            <Text style={[st.rowLabel, { color: '#F59E0B', fontSize: 13 }]}>Runtime Version</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary, fontSize: 13 }]}>{Updates.runtimeVersion || 'Unknown'}</Text>
-          </View>
-          <View style={[st.row, { paddingVertical: 8 }]}>
-            <Text style={[st.rowLabel, { color: '#F59E0B', fontSize: 13 }]}>Update ID</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary, fontSize: 11 }]} selectable>{Updates.updateId || 'Embedded'}</Text>
-          </View>
-          <View style={[st.row, { paddingVertical: 8 }]}>
-            <Text style={[st.rowLabel, { color: '#F59E0B', fontSize: 13 }]}>Channel / Branch</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary, fontSize: 13 }]}>{Updates.channel || 'development'}</Text>
-          </View>
-          <View style={[st.row, { paddingVertical: 8 }]}>
-            <Text style={[st.rowLabel, { color: '#F59E0B', fontSize: 13 }]}>Build Date</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary, fontSize: 11 }]}>{Updates.createdAt ? new Date(Updates.createdAt).toLocaleString() : 'N/A'}</Text>
-          </View>
-          
           <SettingsRow label="Developer Mode" value={developerMode} onToggle={setDeveloperMode} />
           {developerMode && (
             <>
@@ -225,18 +178,6 @@ export function SettingsScreen() {
                 <Text style={[st.rowLabel, { color: '#F59E0B' }]}>Founder Dashboard</Text>
                 <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
               </TouchableOpacity>
-              <View style={[st.divider, { backgroundColor: colors.divider }]} />
-              <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-                <Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: 'bold', marginBottom: 8 }}>TEST CRASH REPORTING</Text>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity style={st.testButton} onPress={triggerTestError}>
-                    <Text style={st.testButtonText}>Send Test Error</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[st.testButton, { backgroundColor: '#EF4444' }]} onPress={triggerTestCrash}>
-                    <Text style={st.testButtonText}>Force Crash</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
             </>
           )}
         </View>
@@ -280,17 +221,4 @@ const st = StyleSheet.create({
   chevron: { fontSize: 20 },
   checkmark: { color: '#8B5CF6', fontWeight: 'bold', fontSize: 16 },
   divider: { height: 1, marginHorizontal: 16 },
-  testButton: {
-    flex: 1,
-    backgroundColor: '#374151',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  testButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
 });

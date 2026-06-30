@@ -11,8 +11,8 @@ export const chatService = {
     return data; // array of { id, role, content, created_at, conversation_id }
   },
 
-  sendMessage: async (message: string, conversationId?: string, language: string = 'auto') => {
-    const payload: any = { message, language };
+  sendMessage: async (message: string, conversationId?: string) => {
+    const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;
 
     const response = await api.post('/chat', payload);
