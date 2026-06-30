@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator
@@ -53,12 +53,35 @@ export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
   const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
+  const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [isReadyToRender, setIsReadyToRender] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
   const isInitialScrollRef = useRef(true);
+  const currentOffsetRef = useRef(0);
+
+  const logEvent = (eventName: string, explicitOffset?: number) => {
+    const offset = explicitOffset !== undefined ? explicitOffset : currentOffsetRef.current;
+    console.log(`[DIAGNOSTIC] ${new Date().toISOString()} | ${eventName} | messages.length: ${messages.length} | contentOffset: ${offset}`);
+  };
+
+  useEffect(() => {
+    logEvent('MESSAGES_COUNT');
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (isHydrated) {
+      logEvent('HYDRATION_COMPLETE');
+    }
+  }, [isHydrated]);
+
+  const hasRenderedList = useRef(false);
+  if (!hasRenderedList.current && isHydrated) {
+    hasRenderedList.current = true;
+    logEvent('FLATLIST_FIRST_RENDER');
+  }
 
   // If hydrated and there are no messages, show empty state immediately
   useEffect(() => {
@@ -84,7 +107,7 @@ export function ChatScreen() {
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems && viewableItems.length > 0) {
-      const topItem = viewableItems[0].item;
+      const topItem = viewableItems[viewableItems.length - 1].item;
       if (topItem && topItem.timestamp) {
         const newDate = formatDateSeparator(topItem.timestamp);
         // Bail out if date hasn't changed — prevents unnecessary re-renders
@@ -94,6 +117,7 @@ export function ChatScreen() {
   }).current;
 
   useEffect(() => {
+    logEvent('COMPONENT_MOUNT');
     hydrateMessages();
     if (!didTrackOpen.current) {
       didTrackOpen.current = true;
@@ -109,18 +133,19 @@ export function ChatScreen() {
   }, [inputText, sendMessage]);
 
   const handleScroll = useCallback((event: any) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const { contentOffset } = event.nativeEvent;
+    currentOffsetRef.current = contentOffset.y;
     const paddingToBottom = 150;
-    isNearBottomRef.current = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+    isNearBottomRef.current = contentOffset.y < paddingToBottom;
   }, []);
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
     
     let showDateSeparator = false;
-    if (index === 0) {
+    if (index === reversedMessages.length - 1) {
       showDateSeparator = true;
     } else {
-      const prevMessage = messages[index - 1];
+      const prevMessage = reversedMessages[index + 1];
       if (prevMessage && item.timestamp) {
         const currentDate = new Date(item.timestamp).toDateString();
         const prevDate = new Date(prevMessage.timestamp || new Date().toISOString()).toDateString();
@@ -176,7 +201,7 @@ export function ChatScreen() {
         </View>
       </View>
     );
-  }, [retryMessage, colors, messages]);
+  }, [retryMessage, colors, reversedMessages, developerMode]);
 
   if (!isHydrated) {
     return (
@@ -243,31 +268,32 @@ export function ChatScreen() {
 
           <FlatList
             ref={flatListRef}
-            data={messages}
+            inverted
+            data={reversedMessages}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
             onScroll={handleScroll}
             scrollEventThrottle={16}
             onContentSizeChange={() => {
+              logEvent('ON_CONTENT_SIZE_CHANGE');
               if (isInitialScrollRef.current) {
-                flatListRef.current?.scrollToEnd({ animated: false });
                 if (messages.length > 0) {
                   isInitialScrollRef.current = false;
+                  logEvent('INITIAL_SCROLL_COMPLETED');
                   setIsReadyToRender(true);
                 }
               } else if (isNearBottomRef.current) {
-                flatListRef.current?.scrollToEnd({ animated: true });
+                logEvent('SCROLL_TO_END_CALLED');
+                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
               }
             }}
             onLayout={() => {
+              logEvent('ON_LAYOUT');
               if (isInitialScrollRef.current) {
-                flatListRef.current?.scrollToEnd({ animated: false });
                 if (messages.length > 0) {
                   setIsReadyToRender(true);
                 }
-              } else if (isNearBottomRef.current) {
-                flatListRef.current?.scrollToEnd({ animated: false });
               }
             }}
             removeClippedSubviews
