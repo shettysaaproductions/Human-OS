@@ -1,20 +1,5 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import * as SecureStore from 'expo-secure-store';
 import { chatService } from '../services/chatService';
-import { useSettingsStore } from './useSettingsStore';
-
-const secureStorage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await SecureStore.getItemAsync(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await SecureStore.setItemAsync(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await SecureStore.deleteItemAsync(name);
-  },
-};
 
 export interface Message {
   id: string;
@@ -51,10 +36,8 @@ interface ChatState {
   processQueue: () => Promise<void>;
 }
 
-export const useChatStore = create<ChatState>()(
-  persist(
-    (set, get) => {
-      const processQueue = async () => {
+export const useChatStore = create<ChatState>((set, get) => {
+  const processQueue = async () => {
     const state = get();
     if (state.pendingQueue.length === 0) {
       set({ isTyping: false });
@@ -71,8 +54,7 @@ export const useChatStore = create<ChatState>()(
     const batchIds = batch.map(q => q.id);
 
     try {
-      const currentLanguage = useSettingsStore.getState().language;
-      const { reply, conversation_id } = await chatService.sendMessage(combinedContent, get().conversationId || undefined, currentLanguage);
+      const { reply, conversation_id } = await chatService.sendMessage(combinedContent, get().conversationId || undefined);
       
       const novaMsg: Message = {
         id: Date.now().toString() + '_nova',
@@ -200,29 +182,6 @@ export const useChatStore = create<ChatState>()(
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
     },
     
-    
     processQueue
   };
-},
-{
-  name: 'chat-storage',
-  storage: createJSONStorage(() => secureStorage),
-  partialize: (state) => ({ 
-    messages: state.messages, 
-    conversationId: state.conversationId 
-  }),
-  onRehydrateStorage: () => {
-    console.log('[STARTUP] CHAT_REHYDRATE_START');
-    return (state, error) => {
-      console.log('[STARTUP] CHAT_REHYDRATE_COMPLETE');
-      if (error) {
-        console.error('[STARTUP] REHYDRATION_ERROR', error);
-      }
-      if (state) {
-        state.isHydrated = true;
-        console.log('[STARTUP] IS_HYDRATED_TRUE');
-      }
-    };
-  }
-}
-));
+});
