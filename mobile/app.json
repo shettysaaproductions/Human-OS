@@ -13,7 +13,7 @@
       "checkAutomatically": "ON_LOAD"
     },
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "ios": {
       "supportsTablet": true
@@ -47,7 +47,9 @@
             "deploymentTarget": "16.4"
           }
         }
-      ]
+      ],
+      "expo-splash-screen",
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {

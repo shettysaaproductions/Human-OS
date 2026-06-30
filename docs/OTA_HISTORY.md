@@ -1,21 +1,11 @@
-# HumanOS — OTA Update History
-> Last Updated: 2026-06-30
+# OTA HISTORY
 
-| # | OTA Group ID | Branch | Message | Platform | Date | Status |
-|---|---|---|---|---|---|---|
-| 1 | `46c2969e-1787-4cfd-a860-3fa0df18f1fa` | production | Restore timestamps + floating date header + multiple message sending | iOS + Android | 2026-06-30 | ✅ Live |
-| 2 | `a9b98ce0-fc5b-48ca-9cb3-9e1d10682d41` | production | Remove blocking update screen - background OTA check | iOS + Android | 2026-06-30 | ✅ Live |
-| 3 | `26732af2-6900-441f-a523-62a2163eb618` | production | Diagnostic startup scroll logging & fixed chat jump | iOS + Android | 2026-06-30 | ✅ Live |
+| Date | Release Version | Update ID | Branch | Status | Notes |
+|------|-----------------|-----------|--------|--------|-------|
+| -    | -               | -         | -      | -      | -     |
 
----
+## [2b867ae3-30f4-423e-af2b-c63d8794336b] - 2026-06-30
+- Fix language preference bug where the local mock LLM fallback ignored injected prompt instructions.
+- Removed debug logs.
 
-## Rollback Guide
-
-To roll back to any previous OTA:
-
-```bash
-eas update --branch production --message "rollback: <reason>"
-# Then restore files from the relevant commit and re-publish
-```
-
-The production baseline commit is `c2c0fd0`. Any rollback should be based from this commit unless a safer baseline is established.
+## [2c07bf51-fbd1-4edc-a324-26d88b3bede3] - 2026-06-30

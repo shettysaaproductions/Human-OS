@@ -1,202 +1,43 @@
-# HumanOS Performance Audit
-> Last Updated: 2026-06-30 · Branch: feature-recover-ui
-
----
-
-## Summary
-
-| Area | Status | Priority |
-|------|--------|----------|
-| App Startup Time | ⚠️ Moderate issue | P1 |
-| FlatList Rendering | ⚠️ Moderate issue | P1 |
-| Unnecessary Re-renders | 🔴 Found | P1 |
-| Message Store (Zustand) | ✅ No issues | — |
-| Network Requests | ⚠️ No batching | P2 |
-| AsyncStorage | ✅ Not used in hot path | — |
-| Image Assets | ✅ Minimal usage | — |
-| Memory Usage | ⚠️ Unbounded history | P2 |
-
----
+# Performance Audit
 
 ## 1. App Startup Time
+- **Issue:** Hydration of messages blocks immediate interactivity; wait for SQLite/backend sync.
+- **Impact:** High (1-3 seconds blank list/spinner on cold start).
+- **Proposed Fix:** Implement skeleton loading state during `isHydrated === false`. Preload last 50 messages from AsyncStorage synchronously before fetching full history from backend.
+- **Priority:** P1
 
-### Root Cause
-Previously, the app blocked the entire navigation stack behind an `isCheckingUpdate` state that awaited a network call (`Updates.checkForUpdateAsync()`). On cold start, this added 500ms–3s of visible loading before users could interact.
+## 2. Unnecessary Rerenders
+- **Issue:** `messages.length` in dependency arrays for `renderItem` and `useEffect`s. `setStickyDate` triggers parent re-render frequently.
+- **Impact:** Moderate (React overhead on every message sent/received).
+- **Proposed Fix:** Use ref for `messages` in `renderItem` closure or rely solely on `item` props. Add bailout condition to `setStickyDate`.
+- **Priority:** P1
 
-### Fix Applied (OTA deployed)
-- Moved OTA check to a fully background `useEffect` that never gates navigation.
-- `AppNavigator` renders immediately on mount.
+## 3. FlatList Optimizations
+- **Issue:** `maxToRenderPerBatch` and `initialNumToRender` are default. Date separator is computed inside `renderItem` dynamically.
+- **Impact:** High (Dropping frames during fast scrolling).
+- **Proposed Fix:** Set `initialNumToRender={15}`, `maxToRenderPerBatch={5}`. Pre-compute date separators in the state/store.
+- **Priority:** P1
 
-### Remaining Concern
-- `ChatScreen` shows `ActivityIndicator` while `isHydrated === false` (waiting for `chatService.getHistory()`). This is a network call to the backend and cannot be avoided, but can be improved with skeleton loaders.
+## 4. AsyncStorage Size
+- **Issue:** Storing full conversation history in JSON string.
+- **Impact:** Low right now, but will degrade serialization time as chat history grows >10,000 messages.
+- **Proposed Fix:** Cap AsyncStorage storage to the most recent 500 messages. Older history remains on the backend.
+- **Priority:** P2
 
-### Recommendation
-- Replace solid `ActivityIndicator` during hydration with `Skeleton` component (already exists in `src/components/Skeleton.tsx`) for perceived performance.
-- Add `staleWhileRevalidate`: show last cached messages from AsyncStorage immediately, then update from network.
+## 5. Image Loading
+- **Issue:** Avatar and UI elements do not use aggressively cached image libraries.
+- **Impact:** Low (currently text-based or minimal SVG).
+- **Proposed Fix:** Introduce `expo-image` if complex image assets or user uploads are added.
+- **Priority:** P3
 
----
+## 6. Network Calls
+- **Issue:** Telemetry (`trackEvent`) fires individual unbatched POST requests.
+- **Impact:** Low (but wastes radio wakeups).
+- **Proposed Fix:** Batch telemetry events client-side and flush every 10 seconds or on backgrounding.
+- **Priority:** P2
 
-## 2. FlatList Rendering Performance
-
-### File: `src/screens/ChatScreen.tsx`
-
-### Findings
-
-**Good**
-- `renderItem` wrapped in `useCallback` — prevents re-creation on every render.
-- `keyExtractor` is stable (uses `item.id`).
-- `removeClippedSubviews` enabled — clips off-screen cells.
-- `windowSize={10}` — renders 10 screens of items in memory (reasonable).
-- `scrollEventThrottle={16}` — throttled to ~60fps.
-
-**Issue: IIFE console.log inside render tree**
-```tsx
-// ChatScreen.tsx line 242-245 - EXECUTES ON EVERY RENDER
-{(() => {
-   console.log("FlatList data length:", messages.length);
-   return null;
-})()}
-```
-This anonymous function executes on every single React render, causing:
-- Additional JS work on the UI thread.
-- Console output spam in production.
-- Prevents React render bail-out optimizations.
-
-**Fix:** Remove entirely (or gate behind `developerMode`).
-
-**Issue: renderItem closes over `messages` array**
-```tsx
-renderItem = useCallback(..., [retryMessage, colors, messages])
-```
-`messages` is in the deps array, so `renderItem` re-creates on every new message. This invalidates all React.memo memoization on rendered cells — even cells that didn't change.
-
-**Fix:** Use index-based lookup via `useRef(messages)` or extract item data from the `item` prop rather than the `messages` closure.
-
-**Issue: Date separator logic inside renderItem**
-The date comparison (`new Date(item.timestamp).toDateString()`) is called for every item on every render. With 100+ messages, this becomes expensive.
-
-**Fix:** Pre-compute a `showDateSeparator` boolean array outside of `renderItem` using `useMemo`.
-
-**Issue: No maxToRenderPerBatch**
-Default is 10. For a chat with 200 messages, this means 20 batches to render on first mount.
-
-**Recommendation:**
-```tsx
-maxToRenderPerBatch={5}
-initialNumToRender={15}
-updateCellsBatchingPeriod={50}
-```
-
----
-
-## 3. Unnecessary Re-renders
-
-### File: `src/screens/ChatScreen.tsx`
-
-**Issue: `messages` dep on renderItem**
-As described above — entire list re-renders on every message change, including unchanged historical messages.
-
-**Issue: `stickyDate` state fires on every scroll**
-`onViewableItemsChanged` calls `setStickyDate` frequently. Since it uses `useRef().current`, the callback is stable, but `setStickyDate` triggers re-renders of the parent `ChatScreen`. If the date hasn't changed, this is a wasted render.
-
-**Fix:**
-```tsx
-const onViewableItemsChanged = useRef(({ viewableItems }) => {
-  const topItem = viewableItems[0]?.item;
-  if (topItem?.timestamp) {
-    const newDate = formatDateSeparator(topItem.timestamp);
-    setStickyDate(prev => prev === newDate ? prev : newDate);
-  }
-}).current;
-```
-
-**Issue: `console.log` in `useEffect` fires on every messages.length change**
-```tsx
-useEffect(() => {
-  if (messages.length > 0) {
-    console.log('Messages stored in Zustand:', messages.length);
-  }
-}, [messages.length]);
-```
-This fires on every send/receive. Safe to remove in production (gate with `developerMode`).
-
----
-
-## 4. Message Store (Zustand)
-
-### File: `src/store/useChatStore.ts`
-
-**Good**
-- No `persist` middleware — avoids hydration conflicts with backend sync.
-- Queue-based sending prevents race conditions.
-- `processQueue` handles batch sends cleanly.
-
-**Issue: Unbounded `messages` array**
-History loads all messages into memory. A user with 10,000 messages will have the entire conversation in Zustand state. FlatList can handle long lists with virtualization, but Zustand state re-creation on each `set()` becomes expensive.
-
-**Recommendation:**
-- Cap display to last 200 messages from `hydrateMessages` (load older via pagination).
-- Pagination groundwork already exists — connect it.
-
----
-
-## 5. Network Requests
-
-- Every message sends a separate HTTP request — no debouncing when user types fast (queue handles batching).
-- `trackEvent` (telemetry) fires a POST on every `app_open`. No queue/batch.
-- OTA check on startup fires an extra network request, but now in background (fixed).
-
-**Recommendation:**
-- Batch telemetry events with a 5-second flush interval.
-
----
-
-## 6. AsyncStorage
-
-- Not used in main hot path. Chat history loaded from backend API.
-- `SecureStore` used only for `lastSeenVersion` (one read per startup) — no issue.
-
----
-
-## 7. Image Assets
-
-- No image-heavy screens observed.
-- Avatar is text (N in a colored View) — zero asset cost.
-- SplashScreen.tsx is minimal.
-
----
-
-## 8. Memory Usage
-
-**Risk: Full history in-memory**
-The entire chat history lives in Zustand. For alpha users with months of history, this could grow to megabytes of JSON in JS heap.
-
-**Recommendation:**
-- Implement windowed loading: load last 100 messages from API, paginate older on scroll-up.
-
----
-
-## Quick Wins (Zero regression risk)
-
-| Fix | File | Lines | Impact |
-|-----|------|-------|--------|
-| Remove IIFE console.log in render | ChatScreen.tsx | 242-245 | Removes wasted render work |
-| Bail-out on stickyDate setStickyDate | ChatScreen.tsx | 86-93 | Saves re-renders on scroll |
-| Gate console.log useEffect behind developerMode | ChatScreen.tsx | 72-79 | Removes log spam in prod |
-| Add initialNumToRender={15} to FlatList | ChatScreen.tsx | 246 | Faster initial paint |
-| Add maxToRenderPerBatch={5} to FlatList | ChatScreen.tsx | 246 | Smoother scroll batching |
-
----
-
-## Estimated Impact After All Fixes
-
-| Metric | Before | After (estimate) |
-|--------|--------|-----------------|
-| Cold start to interactive | ~2-4s | ~0.5-1s |
-| Scroll FPS (200 messages) | ~45 fps | ~58 fps |
-| Memory (200 messages) | ~15 MB | ~12 MB |
-| Unnecessary re-renders per message | 3-4x | 1x |
-
----
-
-*Generated by Antigravity autonomous engineering mode.*
+## 7. Bundle Size
+- **Issue:** Unused packages or large dependencies might be bundled.
+- **Impact:** Moderate (slower initial download).
+- **Proposed Fix:** Audit `package.json`. Use `react-native-bundle-visualizer` to remove bloat.
+- **Priority:** P2
