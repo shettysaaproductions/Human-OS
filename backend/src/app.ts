@@ -102,25 +102,32 @@ export function createApp(): express.Application {
   // ── Request logger ───────────────────────────────────────────────────────────
   app.use(requestLogger);
 
-  // ── Routes ───────────────────────────────────────────────────────────────────
+  const apiRouter = express.Router();
+  
+  apiRouter.use('/health', healthRouter);
+  apiRouter.use('/auth', authRouter);
+  apiRouter.use('/onboarding', authenticateUser, onboardingRouter);
+  apiRouter.use('/chat', authenticateUser, chatLimiter, chatRouter);
+  apiRouter.use('/memory/debug', authenticateUser, memoryDebugRouter);
+  apiRouter.use('/admin/diagnostics', authenticateUser, diagnosticsRouter);
+  apiRouter.use('/admin', authenticateUser, adminRouter);
+  apiRouter.use('/moments', authenticateUser, momentsRouter);
+  apiRouter.use('/reminders', authenticateUser, remindersRouter);
+  apiRouter.use('/analytics', authenticateUser, analyticsRouter);
+  apiRouter.use('/analytics/overview', authenticateUser, founderRouter);
+  apiRouter.use('/founder', authenticateUser, founderRouter);
+  apiRouter.use('/memories', authenticateUser, memoryManagementRouter);
+  apiRouter.use('/memories', authenticateUser, exportRouter);
+  apiRouter.use('/feedback', authenticateUser, feedbackRouter);
+  apiRouter.use('/telemetry', authenticateUser, telemetryRouter);
+  apiRouter.use('/admin/errors', authenticateUser, telemetryRouter);
+  apiRouter.use('/admin/beta', authenticateUser, betaAnalyticsRouter);
+
+  // Mount the API router
+  app.use('/api', apiRouter);
+
+  // Also mount health at the root for Render health checks
   app.use('/health', healthRouter);
-  app.use('/auth', authRouter);
-  app.use('/onboarding', authenticateUser, onboardingRouter);
-  app.use('/chat', authenticateUser, chatLimiter, chatRouter);
-  app.use('/memory/debug', authenticateUser, memoryDebugRouter);
-  app.use('/admin/diagnostics', authenticateUser, diagnosticsRouter);
-  app.use('/admin', authenticateUser, adminRouter);
-  app.use('/moments', authenticateUser, momentsRouter);
-  app.use('/reminders', authenticateUser, remindersRouter);
-  app.use('/analytics', authenticateUser, analyticsRouter);
-  app.use('/analytics/overview', authenticateUser, founderRouter);
-  app.use('/founder', authenticateUser, founderRouter);
-  app.use('/memories', authenticateUser, memoryManagementRouter);
-  app.use('/memories', authenticateUser, exportRouter);
-  app.use('/feedback', authenticateUser, feedbackRouter);
-  app.use('/telemetry', authenticateUser, telemetryRouter);
-  app.use('/admin/errors', authenticateUser, telemetryRouter);
-  app.use('/admin/beta', authenticateUser, betaAnalyticsRouter);
 
   // ── 404 handler ──────────────────────────────────────────────────────────────
   app.use((_req, res) => {
