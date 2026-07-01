@@ -332,10 +332,12 @@ export function ChatScreen() {
               </View>
             }
           />
-          {!isReadyToRender && (
+          {/* Loading overlay — only show if we have messages that haven't rendered yet.
+              For new users (empty chat), NEVER show this overlay. */}
+          {!isReadyToRender && messages.length > 0 && (
             <View style={[StyleSheet.absoluteFill, s.centerContainer, { backgroundColor: colors.background }]}>
               <ActivityIndicator size="large" color="#8B5CF6" />
-              <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing local companion database...</Text>
+              <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing messages...</Text>
             </View>
           )}
         </View>
