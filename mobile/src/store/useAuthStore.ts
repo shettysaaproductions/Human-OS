@@ -45,8 +45,25 @@ export const useAuthStore = create<AuthState>((set) => ({
           const user = await authService.getMe();
           set({ accessToken, user, onboardingStatus: user.onboardingCompleted || false, isLoading: false });
           return;
-        } catch {
-          // Token expired — fall through to refresh
+        } catch (err: any) {
+          // Only fall through to refresh on 401 (expired token).
+          // If there is NO response (network error / server down), keep the
+          // stored tokens and let the user stay "logged in" offline so we
+          // don't wipe their session just because Render is cold-starting.
+          const isNetworkError = !err?.response;
+          const isAuthError = err?.response?.status === 401 || err?.response?.status === 403;
+          if (isNetworkError) {
+            console.warn('[AuthStore] Backend unreachable during hydrate. Keeping stored session.');
+            set({ accessToken, user: null, isLoading: false });
+            return;
+          }
+          if (!isAuthError) {
+            // Server returned some non-auth error (5xx) — keep tokens, don't log out
+            console.warn('[AuthStore] Server error during hydrate. Keeping stored session.');
+            set({ accessToken, user: null, isLoading: false });
+            return;
+          }
+          // isAuthError (401/403) — token is genuinely invalid, fall through to refresh
         }
       }
 
@@ -58,18 +75,26 @@ export const useAuthStore = create<AuthState>((set) => ({
           await SecureStore.setItemAsync('refreshToken', data.refresh_token);
           set({ accessToken: data.access_token, user: data.user, onboardingStatus: data.user?.onboardingCompleted || false, isLoading: false });
           return;
-        } catch {
-          // Refresh token also expired — force re-login
+        } catch (err: any) {
+          const isNetworkError = !err?.response;
+          if (isNetworkError) {
+            // Backend down — keep tokens, don't force logout
+            console.warn('[AuthStore] Backend unreachable during token refresh. Keeping stored session.');
+            set({ accessToken, user: null, isLoading: false });
+            return;
+          }
+          // Real 401 from refresh endpoint — refresh token is genuinely expired
           console.warn('[AuthStore] Refresh token expired, clearing session.');
         }
       }
 
-      // All tokens invalid — wipe and go to login
+      // All tokens confirmed invalid by the server — wipe and go to login
       await SecureStore.deleteItemAsync('accessToken');
       await SecureStore.deleteItemAsync('refreshToken');
       set({ accessToken: null, user: null, isLoading: false });
     } catch (error) {
       console.error('[AuthStore] hydrate failed', error);
+      // On unexpected errors, do NOT wipe the session — just unblock the UI
       set({ isLoading: false });
     }
   },

@@ -24,7 +24,20 @@ export function LoginScreen() {
       // Save both tokens — the store persists them to SecureStore
       await login(data.access_token, data.refresh_token, data.user);
     } catch (err: any) {
-      Alert.alert('Login Failed', err.response?.data?.error || err.message);
+      const isNetworkError = !err.response;
+      if (isNetworkError) {
+        Alert.alert(
+          'Connection Error',
+          'The server is warming up. This can take up to 60 seconds on first use.\n\nPlease wait a moment and tap Retry.',
+          [
+            { text: 'Retry', onPress: handleLogin },
+            { text: 'OK' },
+          ]
+        );
+      } else {
+        const message = err.response?.data?.error || err.message || 'Login failed. Please try again.';
+        Alert.alert('Login Failed', message);
+      }
     } finally {
       setLoading(false);
     }
@@ -52,7 +65,10 @@ export function LoginScreen() {
       />
       
       {loading ? (
-        <ActivityIndicator size="large" color="#0000ff" />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#6366F1" />
+          <Text style={styles.loadingText}>Connecting to server...</Text>
+        </View>
       ) : (
         <Button title="Login" onPress={handleLogin} />
       )}
@@ -89,6 +105,15 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     fontSize: 16
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: '#888',
+    fontStyle: 'italic',
   },
   spacer: {
     height: 20
