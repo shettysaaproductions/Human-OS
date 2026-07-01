@@ -26,7 +26,7 @@ export interface ChatOptions {
 /**
  * Mock response generator when the NVIDIA API key fails or during testing.
  */
-function getMockResponse(
+export function getMockResponse(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions
 ): string {

@@ -58,7 +58,30 @@ onboardingRouter.get('/status', async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    res.status(200).json(data);
+    let answers: any = null;
+    if (data.onboarding_completed) {
+      const { data: memories } = await supabaseAdmin
+        .from('memories')
+        .select('key, value')
+        .eq('user_id', userId)
+        .in('key', ['passions_and_interests', 'current_goals', 'family_and_relationships', 'important_facts']);
+
+      answers = {
+        preferred_name: data.preferred_name || '',
+        companion_personality: data.companion_personality || '',
+        passions: memories?.find(m => m.key === 'passions_and_interests')?.value || '',
+        goals: memories?.find(m => m.key === 'current_goals')?.value || '',
+        family: memories?.find(m => m.key === 'family_and_relationships')?.value || '',
+        important_facts: memories?.find(m => m.key === 'important_facts')?.value || ''
+      };
+    }
+
+    res.status(200).json({
+      onboarding_completed: data.onboarding_completed,
+      preferred_name: data.preferred_name,
+      companion_personality: data.companion_personality,
+      answers
+    });
   } catch (err) {
     logger.error('Failed to get onboarding status', { error: err instanceof Error ? err.message : String(err) });
     next(err);
