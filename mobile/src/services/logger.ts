@@ -1,7 +1,10 @@
+// @ts-ignore
 import * as Sentry from '@sentry/react-native';
+// @ts-ignore
 import * as Application from 'expo-application';
 import * as Updates from 'expo-updates';
 import { Platform } from 'react-native';
+// @ts-ignore
 import * as Device from 'expo-device';
 
 // Setup Sentry routing (replace YOUR_DSN with actual project DSN when ready)
@@ -38,7 +41,7 @@ export const setUserContext = (user: { id?: string; email?: string; username?: s
 export const logError = (error: Error | unknown, context?: Record<string, any>) => {
   console.error('[Logger]', error);
   if (context) {
-    Sentry.withScope((scope) => {
+    Sentry.withScope((scope: any) => {
       scope.setExtras(context);
       Sentry.captureException(error);
     });
@@ -50,7 +53,7 @@ export const logError = (error: Error | unknown, context?: Record<string, any>) 
 export const logWarning = (message: string, context?: Record<string, any>) => {
   console.warn('[Logger]', message);
   if (context) {
-    Sentry.withScope((scope) => {
+    Sentry.withScope((scope: any) => {
       scope.setExtras(context);
       Sentry.captureMessage(message, 'warning');
     });

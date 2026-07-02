@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, getMockResponse, nvidiaClient } from '../lib/nvidia';
+import { config } from '../config';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
@@ -27,6 +28,7 @@ const ChatSchema = z.object({
   message: z.string().min(1).max(4000),
   conversation_id: z.string().uuid().optional(),
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
+  client_message_id: z.string().optional(),
 });
 
 const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
@@ -42,10 +44,20 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, language } = parseResult.data;
+      const { message, conversation_id, language, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
       const isDegraded = dbHealthService.isDegraded();
+
+      if (client_message_id) {
+        const dedupeKey = `dedupe:chat:${userId}:${client_message_id}`;
+        if (cache.get(dedupeKey)) {
+          logger.warn('[DIAGNOSTICS] DUPLICATE_BLOCKED', { client_message_id });
+          res.status(200).json({ reply: 'Message already being processed.', conversation_id: activeConversationId, meta: { duplicate: true } });
+          return;
+        }
+        cache.set(dedupeKey, true, 600000, 'dedupe');
+      }
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────
       if (isDegraded) {
@@ -74,30 +86,123 @@ chatRouter.post(
       }
 
       // ── Normal Mode ───────────────────────────────────────────
-      // 1. Profile (cached 5 min)
-      const profileCacheKey = `profile:${userId}`;
-      let profile = cache.get<{ preferred_name: string; companion_personality: string }>(profileCacheKey);
-      if (!profile) {
-        const { data: profileData } = await qt.track('get_profile', 'profiles', () =>
-          supabaseAdmin.from('profiles')
-            .select('preferred_name, companion_personality')
-            .eq('id', userId)
-            .maybeSingle()
-        );
-        if (profileData) {
-          profile = profileData;
-          cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
-        }
-      }
+      const dbStart = performance.now();
+      const keywords = extractKeywords(message);
+      const wmCacheKey = `working_memory:${userId}`;
 
-      // 2. Save user message
-      const { data: userMsgRecord, error: userMsgError } = await qt.track('save_user_message', 'chat_history', () =>
-        supabaseAdmin.from('chat_history')
-          .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message })
-          .select('id').single()
-      );
+      const [
+        profile,
+        historyDataResult,
+        memories,
+        stmDataResult,
+        userMsgResult,
+        workingMemories
+      ] = await Promise.all([
+        // 1. Profile (cached 5 min)
+        (async () => {
+          const profileCacheKey = `profile:${userId}`;
+          let cachedProfile = cache.get<{ preferred_name: string; companion_personality: string }>(profileCacheKey);
+          if (!cachedProfile) {
+            const { data: profileData } = await qt.track('get_profile', 'profiles', () =>
+              supabaseAdmin.from('profiles')
+                .select('preferred_name, companion_personality')
+                .eq('id', userId)
+                .maybeSingle()
+            );
+            if (profileData) {
+              cachedProfile = profileData;
+              cache.set(profileCacheKey, cachedProfile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
+            }
+          }
+          return cachedProfile;
+        })(),
+        // 2. Chat history (prior to this message)
+        qt.track('get_chat_history', 'chat_history', () =>
+          supabaseAdmin.from('chat_history')
+            .select('role, content')
+            .eq('user_id', userId)
+            .eq('conversation_id', activeConversationId)
+            .order('created_at', { ascending: false })
+            .limit(20)
+        ),
+        // 3. Long-Term Memories
+        memoryRepository.searchMemories(userId, keywords),
+        // 4. Short-Term Memories
+        qt.track('get_short_term_memories', 'short_term_memories', () =>
+          supabaseAdmin.from('short_term_memories')
+            .select('memory, emotion, importance, mention_count, expires_at, confidence')
+            .eq('user_id', userId)
+            .gte('confidence', 0.6)
+            .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+            .order('importance', { ascending: false })
+            .order('last_mentioned_at', { ascending: false })
+            .limit(20)
+        ),
+        // 5. Save user message concurrently
+        qt.track('save_user_message', 'chat_history', () =>
+          supabaseAdmin.from('chat_history')
+            .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message })
+            .select('id').single()
+        ),
+        // 6. Working Memory
+        (async () => {
+          const cachedWm = cache.get<{ key: string; value: string }[]>(wmCacheKey);
+          if (cachedWm) return cachedWm;
+          const { data: wmData } = await qt.track('get_working_memory', 'working_memory', () =>
+            supabaseAdmin.from('working_memory')
+              .select('key, value')
+              .eq('user_id', userId)
+              .gt('expires_at', new Date().toISOString())
+              .limit(10)
+          );
+          const wm = (wmData || []).map(wm => ({ key: wm.key, value: wm.value }));
+          cache.set(wmCacheKey, wm, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
+          return wm;
+        })()
+      ]);
+
+      const dbFetchMs = performance.now() - dbStart;
+
+      const userMsgRecord = userMsgResult.data;
+      const userMsgError = userMsgResult.error;
       if (userMsgError) logger.error('Failed to save user message', { error: userMsgError.message });
       const userMessageId = userMsgRecord?.id || 'msg_' + Date.now();
+
+      const historyData = historyDataResult.data || [];
+      const recentMessages = historyData.reverse().map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content
+      }));
+
+      // Ensure user message is appended to local context list if concurrent select didn't catch it
+      if (recentMessages.length === 0 || recentMessages[recentMessages.length - 1].content !== message) {
+        recentMessages.push({ role: 'user', content: message });
+      }
+
+      const stmData = stmDataResult.data || [];
+      const allFetched = stmData || [];
+      let stmTokens = 0;
+      const budgetMemories = [];
+      
+      for (const m of allFetched) {
+        const memTokens = Math.ceil(m.memory.length / 4);
+        if (stmTokens + memTokens > 1500) break;
+        stmTokens += memTokens;
+        budgetMemories.push(m);
+      }
+
+      const shortTermMemories = budgetMemories;
+      const importantShortTermCount = shortTermMemories.filter(m => m.expires_at === null).length;
+      
+      logger.info('ShortTermMemories Loaded:', { count: shortTermMemories.length });
+      logger.info('Important Memories:', { count: importantShortTermCount });
+      logger.info('Memory Tokens Injected:', { tokens: stmTokens });
+
+      // Count total short term memories for user
+      supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
+        .then(({ count }) => {
+          if (count !== null) logger.info('Total Memories For User:', { count });
+        });
 
       // 2.5 Track Session (fire & forget)
       const today = new Date().toISOString().split('T')[0];
@@ -124,79 +229,8 @@ chatRouter.post(
         }
       })();
 
-      // 3. Fetch recent chat history (last 20, bounded)
-      const { data: historyData } = await qt.track('get_chat_history', 'chat_history', () =>
-        supabaseAdmin.from('chat_history')
-          .select('role, content')
-          .eq('user_id', userId)
-          .eq('conversation_id', activeConversationId)
-          .order('created_at', { ascending: false })
-          .limit(20)
-      );
-      const recentMessages = (historyData || []).reverse().map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content
-      }));
-
-      // 4. Long-Term Memories + Working Memory (WM cached 30s)
-      const keywords = extractKeywords(message);
-      const wmCacheKey = `working_memory:${userId}`;
-      let workingMemories: { key: string; value: string }[] = [];
-
-      const cachedWm = cache.get<typeof workingMemories>(wmCacheKey);
-      if (cachedWm) {
-        workingMemories = cachedWm;
-      } else {
-        const { data: wmData } = await qt.track('get_working_memory', 'working_memory', () =>
-          supabaseAdmin.from('working_memory')
-            .select('key, value')
-            .eq('user_id', userId)
-            .gt('expires_at', new Date().toISOString())
-            .limit(10)
-        );
-        workingMemories = (wmData || []).map(wm => ({ key: wm.key, value: wm.value }));
-        cache.set(wmCacheKey, workingMemories, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
-      }
-
-      const memories = await memoryRepository.searchMemories(userId, keywords);
-
-      // 4.5 Fetch Short-Term Memories
-      const { data: stmData } = await qt.track('get_short_term_memories', 'short_term_memories', () =>
-        supabaseAdmin.from('short_term_memories')
-          .select('memory, emotion, importance, mention_count, expires_at, confidence')
-          .eq('user_id', userId)
-          .gte('confidence', 0.6)
-          .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
-          .order('importance', { ascending: false })
-          .order('last_mentioned_at', { ascending: false })
-          .limit(20)
-      );
-      
-      const allFetched = stmData || [];
-      let stmTokens = 0;
-      const budgetMemories = [];
-      
-      for (const m of allFetched) {
-        const memTokens = Math.ceil(m.memory.length / 4);
-        if (stmTokens + memTokens > 1500) break;
-        stmTokens += memTokens;
-        budgetMemories.push(m);
-      }
-
-      const shortTermMemories = budgetMemories;
-      const importantShortTermCount = shortTermMemories.filter(m => m.expires_at === null).length;
-      
-      logger.info('ShortTermMemories Loaded:', { count: shortTermMemories.length });
-      logger.info('Important Memories:', { count: importantShortTermCount });
-      logger.info('Memory Tokens Injected:', { tokens: stmTokens });
-
-      // Count total short term memories for user
-      supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
-        .then(({ count }) => {
-          if (count !== null) logger.info('Total Memories For User:', { count });
-        });
-
       // 5. Build prompt
+      const promptStart = performance.now();
       const systemPrompt = promptBuilder.buildSystemPrompt(
         BASE_SYSTEM_PROMPT,
         memories,
@@ -211,14 +245,18 @@ chatRouter.post(
         { role: 'system' as const, content: systemPrompt },
         ...recentMessages
       ];
+      const promptBuildMs = performance.now() - promptStart;
 
       // 6. Call NVIDIA
+      const llmStart = performance.now();
       let reply: string;
       try {
         reply = await chatCompletion(messagesForLLM, { maxTokens: 512, temperature: 0.7 });
       } catch (nvidiaError) {
         throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
       }
+      const llmTotalMs = performance.now() - llmStart;
+      const llmFirstTokenMs = llmTotalMs; // Non-streaming fallback
 
       // 7. Save AI response
       await qt.track('save_ai_response', 'chat_history', () =>
@@ -261,6 +299,13 @@ chatRouter.post(
       // Invalidate WM cache so next message sees fresh WM after extraction
       cache.invalidate(wmCacheKey);
 
+      logger.info('Performance Instrumentation metrics:', {
+        DB_FETCH_MS: dbFetchMs,
+        PROMPT_BUILD_MS: promptBuildMs,
+        LLM_FIRST_TOKEN_MS: llmFirstTokenMs,
+        LLM_TOTAL_MS: llmTotalMs
+      });
+
       res.status(200).json({
         reply,
         conversation_id: activeConversationId,
@@ -268,8 +313,260 @@ chatRouter.post(
           memories_retrieved: memories.length,
           keywords_searched: keywords,
           degraded: false,
+          DB_FETCH_MS: dbFetchMs,
+          PROMPT_BUILD_MS: promptBuildMs,
+          LLM_FIRST_TOKEN_MS: llmFirstTokenMs,
+          LLM_TOTAL_MS: llmTotalMs
         }
       });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+chatRouter.post(
+  '/stream',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const parseResult = ChatSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
+      }
+
+      const { message, conversation_id, language, client_message_id } = parseResult.data;
+      const userId = (req as any).user!.id;
+      const activeConversationId = conversation_id || crypto.randomUUID();
+
+      if (client_message_id) {
+        const dedupeKey = `dedupe:chat:${userId}:${client_message_id}`;
+        if (cache.get(dedupeKey)) {
+          logger.warn('[DIAGNOSTICS] DUPLICATE_BLOCKED', { client_message_id });
+          res.status(200).json({ reply: 'Message already being processed.', conversation_id: activeConversationId, meta: { duplicate: true } });
+          return;
+        }
+        cache.set(dedupeKey, true, 600000, 'dedupe');
+      }
+
+      const dbStart = performance.now();
+      const keywords = extractKeywords(message);
+      const wmCacheKey = `working_memory:${userId}`;
+
+      const [
+        profile,
+        historyDataResult,
+        memories,
+        stmDataResult,
+        userMsgResult,
+        workingMemories
+      ] = await Promise.all([
+        (async () => {
+          const profileCacheKey = `profile:${userId}`;
+          let cachedProfile = cache.get<{ preferred_name: string; companion_personality: string }>(profileCacheKey);
+          if (!cachedProfile) {
+            const { data: profileData } = await qt.track('get_profile', 'profiles', () =>
+              supabaseAdmin.from('profiles')
+                .select('preferred_name, companion_personality')
+                .eq('id', userId)
+                .maybeSingle()
+            );
+            if (profileData) {
+              cachedProfile = profileData;
+              cache.set(profileCacheKey, cachedProfile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
+            }
+          }
+          return cachedProfile;
+        })(),
+        qt.track('get_chat_history', 'chat_history', () =>
+          supabaseAdmin.from('chat_history')
+            .select('role, content')
+            .eq('user_id', userId)
+            .eq('conversation_id', activeConversationId)
+            .order('created_at', { ascending: false })
+            .limit(20)
+        ),
+        memoryRepository.searchMemories(userId, keywords),
+        qt.track('get_short_term_memories', 'short_term_memories', () =>
+          supabaseAdmin.from('short_term_memories')
+            .select('memory, emotion, importance, mention_count, expires_at, confidence')
+            .eq('user_id', userId)
+            .gte('confidence', 0.6)
+            .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+            .order('importance', { ascending: false })
+            .order('last_mentioned_at', { ascending: false })
+            .limit(20)
+        ),
+        qt.track('save_user_message', 'chat_history', () =>
+          supabaseAdmin.from('chat_history')
+            .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message })
+            .select('id').single()
+        ),
+        (async () => {
+          const cachedWm = cache.get<{ key: string; value: string }[]>(wmCacheKey);
+          if (cachedWm) return cachedWm;
+          const { data: wmData } = await qt.track('get_working_memory', 'working_memory', () =>
+            supabaseAdmin.from('working_memory')
+              .select('key, value')
+              .eq('user_id', userId)
+              .gt('expires_at', new Date().toISOString())
+              .limit(10)
+          );
+          const wm = (wmData || []).map(wm => ({ key: wm.key, value: wm.value }));
+          cache.set(wmCacheKey, wm, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
+          return wm;
+        })()
+      ]);
+
+      const dbFetchMs = performance.now() - dbStart;
+
+      const userMsgRecord = userMsgResult.data;
+      const userMsgError = userMsgResult.error;
+      if (userMsgError) logger.error('Failed to save user message', { error: userMsgError.message });
+      const userMessageId = userMsgRecord?.id || 'msg_' + Date.now();
+
+      const historyData = historyDataResult.data || [];
+      const recentMessages = historyData.reverse().map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content
+      }));
+
+      if (recentMessages.length === 0 || recentMessages[recentMessages.length - 1].content !== message) {
+        recentMessages.push({ role: 'user', content: message });
+      }
+
+      const stmData = stmDataResult.data || [];
+      const allFetched = stmData || [];
+      let stmTokens = 0;
+      const budgetMemories = [];
+      
+      for (const m of allFetched) {
+        const memTokens = Math.ceil(m.memory.length / 4);
+        if (stmTokens + memTokens > 1500) break;
+        stmTokens += memTokens;
+        budgetMemories.push(m);
+      }
+
+      const shortTermMemories = budgetMemories;
+
+      const promptStart = performance.now();
+      const systemPrompt = promptBuilder.buildSystemPrompt(
+        BASE_SYSTEM_PROMPT,
+        memories,
+        workingMemories,
+        profile?.preferred_name,
+        profile?.companion_personality,
+        shortTermMemories,
+        language
+      );
+
+      const messagesForLLM = [
+        { role: 'system' as const, content: systemPrompt },
+        ...recentMessages
+      ];
+      const promptBuildMs = performance.now() - promptStart;
+
+      // Set headers for SSE streaming
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      logger.info('[DIAGNOSTICS] STREAM_STARTED', { userId });
+      res.write(`event: start\ndata: ${JSON.stringify({ DB_FETCH_MS: dbFetchMs, PROMPT_BUILD_MS: promptBuildMs, conversation_id: activeConversationId })}\n\n`);
+
+      const llmStart = performance.now();
+      let isFirstToken = true;
+      let llmFirstTokenMs = 0;
+      let fullReply = '';
+      let isClientDisconnected = false;
+
+      req.on('close', () => {
+        isClientDisconnected = true;
+        logger.info('Client disconnected from SSE stream');
+      });
+
+      try {
+        const stream = await nvidiaClient.chat.completions.create({
+          model: config.nvidia.chatModel,
+          messages: messagesForLLM,
+          max_tokens: 512,
+          temperature: 0.7,
+          stream: true,
+        });
+
+        for await (const chunk of stream) {
+          if (isClientDisconnected) {
+            break;
+          }
+          if (isFirstToken) {
+            llmFirstTokenMs = performance.now() - llmStart;
+            isFirstToken = false;
+            logger.info('[DIAGNOSTICS] FIRST_TOKEN_RECEIVED', { LLM_FIRST_TOKEN_MS: llmFirstTokenMs });
+            res.write(`event: first_token\ndata: ${JSON.stringify({ LLM_FIRST_TOKEN_MS: llmFirstTokenMs })}\n\n`);
+          }
+          const content = chunk.choices[0]?.delta?.content || '';
+          if (content) {
+            fullReply += content;
+            res.write(`event: chunk\ndata: ${JSON.stringify({ content })}\n\n`);
+          }
+        }
+
+        if (!isClientDisconnected) {
+          const llmTotalMs = performance.now() - llmStart;
+          logger.info('[DIAGNOSTICS] STREAM_FINISHED', { LLM_TOTAL_MS: llmTotalMs });
+
+          // Background saves and extractions
+          supabaseAdmin.from('chat_history')
+            .insert({ user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: fullReply })
+            .then(({ error }) => {
+              if (error) logger.error('Failed to save AI response in stream route', { error: error.message });
+            });
+
+          const payload = { userId, messageId: userMessageId, message };
+          const backgroundJobs = [
+            memoryQueue.add('extract_semantic', payload),
+            memoryQueue.add('extract_working_memory', payload),
+            memoryQueue.add('extract_episodic', payload),
+            memoryQueue.add('extract_kg', payload),
+            memoryQueue.add('extract_emotional', payload),
+            memoryQueue.add('extract_milestone', payload)
+          ];
+          if (shouldExtractShortTermMemory(message)) {
+            backgroundJobs.push(memoryQueue.add('extract_short_term', payload));
+          }
+          Promise.all(backgroundJobs).catch(err => {
+            logger.error('Failed background extractions in stream route', { error: err.message });
+          });
+
+          cache.invalidate(wmCacheKey);
+
+          res.write(`event: done\ndata: ${JSON.stringify({ LLM_TOTAL_MS: llmTotalMs })}\n\n`);
+        }
+        res.end();
+      } catch (err: any) {
+        logger.warn('NVIDIA stream failed, falling back to mock stream', { error: err.message });
+        try {
+          const mockText = getMockResponse(messagesForLLM, { maxTokens: 512, temperature: 0.7 });
+          if (isFirstToken) {
+            llmFirstTokenMs = performance.now() - llmStart;
+            res.write(`event: first_token\ndata: ${JSON.stringify({ LLM_FIRST_TOKEN_MS: llmFirstTokenMs })}\n\n`);
+          }
+          const mockChunks = mockText.match(/.{1,4}/g) || [mockText];
+          for (const chunk of mockChunks) {
+            if (isClientDisconnected) break;
+            res.write(`event: chunk\ndata: ${JSON.stringify({ content: chunk })}\n\n`);
+            await new Promise(r => setTimeout(r, 10));
+          }
+          if (!isClientDisconnected) {
+            const llmTotalMs = performance.now() - llmStart;
+            res.write(`event: done\ndata: ${JSON.stringify({ LLM_TOTAL_MS: llmTotalMs })}\n\n`);
+          }
+          res.end();
+        } catch (fallbackErr: any) {
+          logger.error('[DIAGNOSTICS] STREAM_FAILED', { error: fallbackErr.message });
+          res.write(`event: error\ndata: ${JSON.stringify({ error: fallbackErr.message })}\n\n`);
+          res.end();
+        }
+      }
     } catch (err) {
       next(err);
     }

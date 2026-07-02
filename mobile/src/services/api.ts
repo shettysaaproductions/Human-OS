@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // ── Base URL ───────────────────────────────────────────────────────────────────
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onrender.com';
+export const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onrender.com';
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -92,13 +92,14 @@ api.interceptors.response.use(
     }
 
     // Only attempt token refresh on 401 for protected routes.
-    // NEVER intercept /auth/ endpoints (login, signup, refresh) — they don't
-    // use bearer tokens and intercepting them causes "No refresh token" errors
-    // to mask the real failure (bad credentials, cold backend, etc.).
+    // NEVER intercept /auth/ or /onboarding/ endpoints:
+    // - /auth/ doesn't use bearer tokens
+    // - /onboarding/ uses fresh tokens from signup; intercepting causes crashes
     if (
       error.response?.status !== 401 ||
       originalRequest._retried ||
-      originalRequest.url?.includes('/auth/')
+      originalRequest.url?.includes('/auth/') ||
+      originalRequest.url?.includes('/onboarding')
     ) {
       return Promise.reject(error);
     }
@@ -148,11 +149,19 @@ api.interceptors.response.use(
     } catch (refreshError) {
       drainQueue(refreshError, null);
 
-      // Refresh failed — wipe stored tokens so the app navigates to login
-      await SecureStore.deleteItemAsync('accessToken');
-      await SecureStore.deleteItemAsync('refreshToken');
+      // Refresh failed — wipe stored tokens.
+      // We delete from SecureStore but do NOT call useAuthStore here
+      // (circular dependency risk). The next hydrate() call will see no
+      // tokens and navigate to Login automatically.
+      try {
+        await SecureStore.deleteItemAsync('accessToken');
+        await SecureStore.deleteItemAsync('refreshToken');
+        await SecureStore.deleteItemAsync('onboardingCompleted');
+      } catch {
+        // SecureStore delete failures are non-fatal
+      }
 
-      console.error('[api] Token refresh failed — user must re-authenticate.', refreshError);
+      console.error('[api] Token refresh failed — clearing session.', refreshError);
       return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;

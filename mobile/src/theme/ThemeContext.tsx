@@ -87,9 +87,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const colors = isDark ? darkColors : lightColors;
 
-  if (loading) {
-    return null;
-  }
+  // CRITICAL FIX: Never return null — that causes a blank white screen.
+  // Render with default dark theme immediately; update when SecureStore resolves.
+  // The 'loading' state is only kept for correct initial SecureStore read.
 
   return (
     <ThemeContext.Provider value={{ themeMode, isDark, colors, setThemeMode }}>

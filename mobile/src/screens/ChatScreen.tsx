@@ -52,7 +52,7 @@ async function trackEvent(event_type: string, event_data?: object) {
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
+  const { messages, novaState, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [isReadyToRender, setIsReadyToRender] = useState(true);
@@ -139,6 +139,26 @@ export function ChatScreen() {
     const paddingToBottom = 150;
     isNearBottomRef.current = contentOffset.y < paddingToBottom;
   }, []);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (novaState === 'thinking') {
+      const statuses = [
+        'Nova is remembering...',
+        'Nova is reading our history...',
+        'Nova is thinking...',
+        'Nova is typing...'
+      ];
+      let i = 0;
+      setThinkingText(statuses[0]);
+      interval = setInterval(() => {
+        i = (i + 1) % statuses.length;
+        setThinkingText(statuses[i]);
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [novaState]);
+
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
     
@@ -307,12 +327,15 @@ export function ChatScreen() {
 
         </View>
 
-        {/* Typing indicator */}
-        {isTyping && (
+        {/* Thinking / Typing indicator */}
+        {novaState === 'thinking' && (
           <View style={s.typingContainer}>
-            <View style={s.typingDot} />
-            <View style={[s.typingDot, { opacity: 0.6 }]} />
-            <View style={[s.typingDot, { opacity: 0.3 }]} />
+            <Text style={[s.thinkingText, { color: colors.textSecondary }]}>{thinkingText}</Text>
+            <View style={s.typingDotsContainer}>
+              <View style={s.typingDot} />
+              <View style={[s.typingDot, { opacity: 0.6 }]} />
+              <View style={[s.typingDot, { opacity: 0.3 }]} />
+            </View>
           </View>
         )}
 
@@ -371,8 +394,10 @@ const s = StyleSheet.create({
   retryButton: { marginTop: 6 },
   retryText: { color: '#F59E0B', fontSize: 12, fontWeight: '600' },
   typingContainer: {
-    flexDirection: 'row', gap: 4, paddingHorizontal: 24, paddingVertical: 8, alignItems: 'center'
+    flexDirection: 'row', gap: 10, paddingHorizontal: 24, paddingVertical: 8, alignItems: 'center'
   },
+  thinkingText: { fontSize: 13, fontStyle: 'italic' },
+  typingDotsContainer: { flexDirection: 'row', gap: 4 },
   typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#8B5CF6' },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingTop: 80 },
   emptyChatEmoji: { fontSize: 48, marginBottom: 16 },

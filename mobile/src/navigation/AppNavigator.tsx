@@ -26,11 +26,16 @@ export function AppNavigator() {
     hydrate();
   }, []);
 
+  // Show splash ONLY on the very first render before hydrate has run at all.
+  // After hydrate reads local SecureStore data (~2ms), isLoading flips false
+  // and the user never sees a spinner.
   if (isLoading) {
     return <SplashScreen />;
   }
 
+  // accessToken exists = user is authenticated (may be offline, user still null)
   const isAuthenticated = !!accessToken;
+  // onboardingStatus is now persisted in SecureStore — available offline
   const hasCompletedOnboarding = onboardingStatus;
 
   return (
