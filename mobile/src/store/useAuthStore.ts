@@ -69,10 +69,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (accessToken) {
         try {
           const user = await authService.getMe();
-          // Update onboarding from server (source of truth) and persist locally
+          // CRITICAL: Only update onboardingStatus if server says true, OR if
+          // we don't have a cached true value. Never downgrade true→false from
+          // a background call — a DB query failure (null profile) returning
+          // false would kick a completed user back to OnboardingScreen.
           const serverOnboarding = user.onboardingCompleted || false;
-          await SecureStore.setItemAsync(ONBOARDING_KEY, String(serverOnboarding));
-          set({ user, onboardingStatus: serverOnboarding });
+          const finalOnboarding = serverOnboarding || cachedOnboardingStatus;
+          await SecureStore.setItemAsync(ONBOARDING_KEY, String(finalOnboarding));
+          set({ user, onboardingStatus: finalOnboarding });
           return;
         } catch (err: any) {
           const isNetworkError = !err?.response;
