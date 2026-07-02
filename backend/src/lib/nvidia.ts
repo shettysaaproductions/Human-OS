@@ -88,6 +88,10 @@ function getMockResponse(
   }
 
   // 5. Default text response
+  if (systemMessage.includes('CRITICAL INSTRUCTION: You MUST respond in Hindi')) {
+    return "नमस्ते! मैं नोवा हूँ। मैं जानना चाहती थी कि आज आप कैसे हैं!";
+  }
+  
   return "Hey! I'm Nova. I wanted to see how you're doing today!";
 }
 

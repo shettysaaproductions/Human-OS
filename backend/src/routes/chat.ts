@@ -26,6 +26,7 @@ export const chatRouter: import('express').Router = Router();
 const ChatSchema = z.object({
   message: z.string().min(1).max(4000),
   conversation_id: z.string().uuid().optional(),
+  language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
 });
 
 const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
@@ -41,7 +42,7 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id } = parseResult.data;
+      const { message, conversation_id, language } = parseResult.data;
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
       const isDegraded = dbHealthService.isDegraded();
@@ -202,7 +203,8 @@ chatRouter.post(
         workingMemories,
         profile?.preferred_name,
         profile?.companion_personality,
-        shortTermMemories
+        shortTermMemories,
+        language
       );
 
       const messagesForLLM = [
