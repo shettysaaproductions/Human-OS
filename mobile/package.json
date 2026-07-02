@@ -12,6 +12,7 @@
     "d3-shape": "^3.2.0",
     "expo": "~56.0.12",
     "expo-build-properties": "~56.0.19",
+    "expo-constants": "~56.0.19",
     "expo-secure-store": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "expo-updates": "~56.0.19",

@@ -7,7 +7,7 @@ Current Stable:
 `stable-v3-recovered`
 
 Latest OTA:
-`fd1565e0-f1d4-433d-b881-e73739e86aa8`
+`b3197e49-d585-4dce-84c0-7f6e20df5d81`
 
 Current Severity:
 P2
