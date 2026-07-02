@@ -16,6 +16,10 @@ function AppContent() {
   const [modalType, setModalType] = useState<'downloaded' | 'changelog'>('changelog');
 
   useEffect(() => {
+    console.log("UPDATE ID", Updates.updateId);
+    console.log("CHANNEL", Updates.channel);
+    console.log("RUNTIME", Updates.runtimeVersion);
+    console.log("IS EMBEDDED", Updates.isEmbeddedLaunch);
     // Run entirely in background — never block the UI
     runBackgroundChecks();
   }, []);
