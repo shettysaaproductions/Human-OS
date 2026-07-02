@@ -5,9 +5,14 @@ export const chatService = {
     const url = conversationId ? `/chat?conversation_id=${conversationId}` : '/chat';
     const response = await api.get(url);
     const data = response.data;
-    console.log("API messages received:", data?.length);
+    // Guard: if the backend returns null/undefined or a non-array, treat as empty history
+    if (!Array.isArray(data)) {
+      console.warn('[chatService] getHistory received non-array response:', data);
+      return [];
+    }
+    console.log("API messages received:", data.length);
     console.log("First message:", data[0]?.created_at);
-    console.log("Last message:", data[data?.length - 1]?.created_at);
+    console.log("Last message:", data[data.length - 1]?.created_at);
     return data; // array of { id, role, content, created_at, conversation_id }
   },
 

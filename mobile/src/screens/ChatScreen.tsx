@@ -55,7 +55,7 @@ export function ChatScreen() {
   const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
-  const [isReadyToRender, setIsReadyToRender] = useState(false);
+  const [isReadyToRender, setIsReadyToRender] = useState(true);
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
@@ -83,12 +83,13 @@ export function ChatScreen() {
     logEvent('FLATLIST_FIRST_RENDER');
   }
 
-  // If hydrated and there are no messages, show empty state immediately
+  // isReadyToRender is true by default; this effect is kept for any future
+  // logic that needs to react to hydration+message state changes.
   useEffect(() => {
-    if (isHydrated && messages.length === 0) {
+    if (isHydrated) {
       setIsReadyToRender(true);
     }
-  }, [isHydrated, messages.length]);
+  }, [isHydrated]);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
@@ -278,11 +279,8 @@ export function ChatScreen() {
             onContentSizeChange={() => {
               logEvent('ON_CONTENT_SIZE_CHANGE');
               if (isInitialScrollRef.current) {
-                if (messages.length > 0) {
-                  isInitialScrollRef.current = false;
-                  logEvent('INITIAL_SCROLL_COMPLETED');
-                  setIsReadyToRender(true);
-                }
+                isInitialScrollRef.current = false;
+                logEvent('INITIAL_SCROLL_COMPLETED');
               } else if (isNearBottomRef.current) {
                 logEvent('SCROLL_TO_END_CALLED');
                 flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -290,11 +288,6 @@ export function ChatScreen() {
             }}
             onLayout={() => {
               logEvent('ON_LAYOUT');
-              if (isInitialScrollRef.current) {
-                if (messages.length > 0) {
-                  setIsReadyToRender(true);
-                }
-              }
             }}
             removeClippedSubviews
             windowSize={10}
@@ -311,12 +304,7 @@ export function ChatScreen() {
               </View>
             }
           />
-          {!isReadyToRender && (
-            <View style={[StyleSheet.absoluteFill, s.centerContainer, { backgroundColor: colors.background }]}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
-              <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing local companion database...</Text>
-            </View>
-          )}
+
         </View>
 
         {/* Typing indicator */}
