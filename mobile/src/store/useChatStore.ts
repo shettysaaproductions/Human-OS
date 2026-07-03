@@ -36,62 +36,102 @@ interface ChatState {
   processQueue: () => Promise<void>;
 }
 
+// ── Processing lock ───────────────────────────────────────────────────────────
+// Module-level flag (outside Zustand state) used as a guaranteed mutex.
+// JS is single-threaded: setting this synchronously before the first `await`
+// ensures only one processQueue body can run at a time, with zero race window.
+let _isProcessing = false;
+
 export const useChatStore = create<ChatState>((set, get) => {
   const processQueue = async () => {
-    const state = get();
-    if (state.pendingQueue.length === 0) {
-      set({ isTyping: false });
-      return;
-    }
-
+    // Guard: if a processor is already running, new messages will be picked
+    // up by the existing while-loop on its next iteration. Return immediately.
+    if (_isProcessing) return;
+    _isProcessing = true;
     set({ isTyping: true });
 
-    // Grab everything in queue
-    const batch = [...state.pendingQueue];
-    set({ pendingQueue: [] });
-
-    const combinedContent = batch.map(q => q.content).join('\n\n');
-    const batchIds = batch.map(q => q.id);
+    console.log('[QUEUE] start');
 
     try {
-      const { reply, conversation_id } = await chatService.sendMessage(combinedContent, get().conversationId || undefined);
-      
-      const novaMsg: Message = {
-        id: Date.now().toString() + '_nova',
-        role: 'assistant',
-        content: reply,
-        status: 'sent',
-        timestamp: new Date().toISOString()
-      };
+      while (true) {
+        // Read fresh state on every iteration
+        const queue = get().pendingQueue;
+        if (queue.length === 0) break;
 
-      set((s) => {
-        const updated = s.messages.map(m => batchIds.includes(m.id) ? { ...m, status: 'sent' as const } : m);
-        return { 
-          messages: [...updated, novaMsg], 
-          conversationId: conversation_id // Save the active conversation ID
-        };
-      });
-    } catch (error: any) {
-      let errorMessage = 'Network error';
-      if (error.response) {
-        if (error.response.status === 401) {
-          errorMessage = 'Unauthorized';
-        } else if (error.response.status === 404) {
-          errorMessage = 'Endpoint not found';
-        } else if (error.response.status >= 500) {
-          errorMessage = 'Server error';
-        } else {
-          errorMessage = error.response.data?.error || 'Failed to send';
+        // Dequeue exactly ONE item from the front
+        const [item, ...rest] = queue;
+        set({ pendingQueue: rest });
+
+        // Safety guard: if the message no longer exists in 'sending' state
+        // (e.g. clearMessages was called), skip without making an API call.
+        const stillExists = get().messages.some(
+          m => m.id === item.id && m.status === 'sending'
+        );
+        if (!stillExists) {
+          console.log('[QUEUE] skipped — message no longer pending:', item.id);
+          continue;
+        }
+
+        console.log('[QUEUE] sending:', item.id);
+
+        try {
+          const { reply, conversation_id } = await chatService.sendMessage(
+            item.content,
+            get().conversationId || undefined
+          );
+
+          const novaMsg: Message = {
+            id: Date.now().toString() + '_nova',
+            role: 'assistant',
+            content: reply,
+            status: 'sent',
+            timestamp: new Date().toISOString(),
+          };
+
+          set((s) => ({
+            messages: [
+              ...s.messages.map(m =>
+                m.id === item.id ? { ...m, status: 'sent' as const } : m
+              ),
+              novaMsg,
+            ],
+            conversationId: conversation_id,
+          }));
+
+          console.log('[QUEUE] success:', item.id);
+        } catch (error: any) {
+          // Failure is scoped to this one message only.
+          // The while-loop continues to process any remaining queued messages.
+          let errorMessage = 'Network error';
+          if (error.response) {
+            if (error.response.status === 401) {
+              errorMessage = 'Unauthorized';
+            } else if (error.response.status === 404) {
+              errorMessage = 'Endpoint not found';
+            } else if (error.response.status >= 500) {
+              errorMessage = 'Server error';
+            } else {
+              errorMessage = error.response.data?.error || 'Failed to send';
+            }
+          }
+
+          set((s) => ({
+            messages: s.messages.map(m =>
+              m.id === item.id
+                ? { ...m, status: 'error' as const, errorMessage }
+                : m
+            ),
+          }));
+
+          console.log('[QUEUE] error:', item.id, errorMessage);
         }
       }
-      set((s) => {
-        const updated = s.messages.map(m => batchIds.includes(m.id) ? { ...m, status: 'error' as const, errorMessage } : m);
-        return { messages: updated };
-      });
+    } finally {
+      // Guaranteed cleanup regardless of success, error, or unexpected exception.
+      _isProcessing = false;
+      set({ isTyping: false });
+      console.log('[QUEUE] finished');
     }
-
-    // Process any new messages that arrived while we were waiting
-    get().processQueue();
   };
 
   return {
@@ -156,10 +196,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         pendingQueue: [...state.pendingQueue, { id: userMsg.id, content }]
       }));
 
-      if (!get().isTyping) {
-        set({ isTyping: true });
-        get().processQueue();
-      }
+      // processQueue is idempotent — safe to call unconditionally.
+      // If _isProcessing is true, it returns immediately and the running
+      // while-loop will pick up the new item on its next iteration.
+      get().processQueue();
     },
 
     retryMessage: async (messageId: string) => {
@@ -172,13 +212,13 @@ export const useChatStore = create<ChatState>((set, get) => {
         pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content }]
       }));
 
-      if (!get().isTyping) {
-        set({ isTyping: true });
-        get().processQueue();
-      }
+      // Same idempotent call — safe whether or not a processor is already running.
+      get().processQueue();
     },
     
     clearMessages: () => {
+      // Setting pendingQueue: [] means the while-loop will find nothing on its
+      // next iteration and exit cleanly, resetting _isProcessing itself via finally.
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
     },
     

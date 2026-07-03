@@ -138,63 +138,72 @@ chatRouter.post(
         content: msg.content
       }));
 
-      // 4. Long-Term Memories + Working Memory (WM cached 30s)
-      const keywords = extractKeywords(message);
-      const wmCacheKey = `working_memory:${userId}`;
+      // 4 + 4.5. Memory fetch — skipped when DISABLE_MEMORY=true
+      let keywords: string[] = [];
       let workingMemories: { key: string; value: string }[] = [];
+      let memories: any[] = [];
+      let shortTermMemories: any[] = [];
+      let wmCacheKey = `working_memory:${userId}`;
 
-      const cachedWm = cache.get<typeof workingMemories>(wmCacheKey);
-      if (cachedWm) {
-        workingMemories = cachedWm;
-      } else {
-        const { data: wmData } = await qt.track('get_working_memory', 'working_memory', () =>
-          supabaseAdmin.from('working_memory')
-            .select('key, value')
+      if (process.env.DISABLE_MEMORY !== 'true') {
+        // 4. Long-Term Memories + Working Memory (WM cached 30s)
+        keywords = extractKeywords(message);
+
+        const cachedWm = cache.get<typeof workingMemories>(wmCacheKey);
+        if (cachedWm) {
+          workingMemories = cachedWm;
+        } else {
+          const { data: wmData } = await qt.track('get_working_memory', 'working_memory', () =>
+            supabaseAdmin.from('working_memory')
+              .select('key, value')
+              .eq('user_id', userId)
+              .gt('expires_at', new Date().toISOString())
+              .limit(10)
+          );
+          workingMemories = (wmData || []).map(wm => ({ key: wm.key, value: wm.value }));
+          cache.set(wmCacheKey, workingMemories, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
+        }
+
+        memories = await memoryRepository.searchMemories(userId, keywords);
+
+        // 4.5 Fetch Short-Term Memories
+        const { data: stmData } = await qt.track('get_short_term_memories', 'short_term_memories', () =>
+          supabaseAdmin.from('short_term_memories')
+            .select('memory, emotion, importance, mention_count, expires_at, confidence')
             .eq('user_id', userId)
-            .gt('expires_at', new Date().toISOString())
-            .limit(10)
+            .gte('confidence', 0.6)
+            .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+            .order('importance', { ascending: false })
+            .order('last_mentioned_at', { ascending: false })
+            .limit(20)
         );
-        workingMemories = (wmData || []).map(wm => ({ key: wm.key, value: wm.value }));
-        cache.set(wmCacheKey, workingMemories, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
+
+        const allFetched = stmData || [];
+        let stmTokens = 0;
+        const budgetMemories = [];
+
+        for (const m of allFetched) {
+          const memTokens = Math.ceil(m.memory.length / 4);
+          if (stmTokens + memTokens > 1500) break;
+          stmTokens += memTokens;
+          budgetMemories.push(m);
+        }
+
+        shortTermMemories = budgetMemories;
+        const importantShortTermCount = shortTermMemories.filter(m => m.expires_at === null).length;
+
+        logger.info('ShortTermMemories Loaded:', { count: shortTermMemories.length });
+        logger.info('Important Memories:', { count: importantShortTermCount });
+        logger.info('Memory Tokens Injected:', { tokens: stmTokens });
+
+        // Count total short term memories for user
+        supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
+          .then(({ count }) => {
+            if (count !== null) logger.info('Total Memories For User:', { count });
+          });
+      } else {
+        logger.info('[DEBUG] DISABLE_MEMORY=true — skipping all memory fetches');
       }
-
-      const memories = await memoryRepository.searchMemories(userId, keywords);
-
-      // 4.5 Fetch Short-Term Memories
-      const { data: stmData } = await qt.track('get_short_term_memories', 'short_term_memories', () =>
-        supabaseAdmin.from('short_term_memories')
-          .select('memory, emotion, importance, mention_count, expires_at, confidence')
-          .eq('user_id', userId)
-          .gte('confidence', 0.6)
-          .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
-          .order('importance', { ascending: false })
-          .order('last_mentioned_at', { ascending: false })
-          .limit(20)
-      );
-      
-      const allFetched = stmData || [];
-      let stmTokens = 0;
-      const budgetMemories = [];
-      
-      for (const m of allFetched) {
-        const memTokens = Math.ceil(m.memory.length / 4);
-        if (stmTokens + memTokens > 1500) break;
-        stmTokens += memTokens;
-        budgetMemories.push(m);
-      }
-
-      const shortTermMemories = budgetMemories;
-      const importantShortTermCount = shortTermMemories.filter(m => m.expires_at === null).length;
-      
-      logger.info('ShortTermMemories Loaded:', { count: shortTermMemories.length });
-      logger.info('Important Memories:', { count: importantShortTermCount });
-      logger.info('Memory Tokens Injected:', { tokens: stmTokens });
-
-      // Count total short term memories for user
-      supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
-        .then(({ count }) => {
-          if (count !== null) logger.info('Total Memories For User:', { count });
-        });
 
       // 5. Build prompt
       const systemPrompt = promptBuilder.buildSystemPrompt(
@@ -230,36 +239,40 @@ chatRouter.post(
       degradedMode.appendMessage(userId, 'user', message);
       degradedMode.appendMessage(userId, 'assistant', reply);
 
-      // 9. Background extraction (fire & forget)
-      const payload = { userId, messageId: userMessageId, message };
-      
-      const backgroundJobs = [
-        memoryQueue.add('extract_semantic', payload),
-        memoryQueue.add('extract_working_memory', payload),
-        memoryQueue.add('extract_episodic', payload),
-        memoryQueue.add('extract_kg', payload),
-        memoryQueue.add('extract_emotional', payload),
-        memoryQueue.add('extract_milestone', payload)
-      ];
+      // 9. Background extraction — skipped when DISABLE_MEMORY=true
+      if (process.env.DISABLE_MEMORY !== 'true') {
+        const payload = { userId, messageId: userMessageId, message };
 
-      if (shouldExtractShortTermMemory(message)) {
-        const rateKey = `stm_rate_${userId}`;
-        const currentCount = cache.get<number>(rateKey) || 0;
-        
-        if (currentCount >= 50) {
-          logger.info('Memory Extraction Skipped:', { reason: 'Rate limit exceeded (50/hr)' });
-        } else {
-          cache.set(rateKey, currentCount + 1, 60 * 60 * 1000, 'rate_limit');
-          backgroundJobs.push(memoryQueue.add('extract_short_term', payload));
+        const backgroundJobs = [
+          memoryQueue.add('extract_semantic', payload),
+          memoryQueue.add('extract_working_memory', payload),
+          memoryQueue.add('extract_episodic', payload),
+          memoryQueue.add('extract_kg', payload),
+          memoryQueue.add('extract_emotional', payload),
+          memoryQueue.add('extract_milestone', payload)
+        ];
+
+        if (shouldExtractShortTermMemory(message)) {
+          const rateKey = `stm_rate_${userId}`;
+          const currentCount = cache.get<number>(rateKey) || 0;
+
+          if (currentCount >= 50) {
+            logger.info('Memory Extraction Skipped:', { reason: 'Rate limit exceeded (50/hr)' });
+          } else {
+            cache.set(rateKey, currentCount + 1, 60 * 60 * 1000, 'rate_limit');
+            backgroundJobs.push(memoryQueue.add('extract_short_term', payload));
+          }
         }
+
+        Promise.all(backgroundJobs).catch(err => {
+          logger.error('Failed to enqueue background extraction jobs', { error: err instanceof Error ? err.message : String(err) });
+        });
+
+        // Invalidate WM cache so next message sees fresh WM after extraction
+        cache.invalidate(wmCacheKey);
+      } else {
+        logger.info('[DEBUG] DISABLE_MEMORY=true — skipping background extraction jobs');
       }
-
-      Promise.all(backgroundJobs).catch(err => {
-        logger.error('Failed to enqueue background extraction jobs', { error: err instanceof Error ? err.message : String(err) });
-      });
-
-      // Invalidate WM cache so next message sees fresh WM after extraction
-      cache.invalidate(wmCacheKey);
 
       res.status(200).json({
         reply,
