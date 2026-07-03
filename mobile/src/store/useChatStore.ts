@@ -204,7 +204,11 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     retryMessage: async (messageId: string) => {
       const state = get();
-      const msg = state.messages.find(m => m.id === messageId);
+      // Only retry if the message is actually in error state.
+      // If the user taps Retry twice rapidly the first tap moves status to
+      // 'sending' — the second tap finds no 'error' message and returns,
+      // preventing a duplicate API call.
+      const msg = state.messages.find(m => m.id === messageId && m.status === 'error');
       if (!msg) return;
 
       set((s) => ({

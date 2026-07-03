@@ -6,27 +6,15 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onren
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 60000, // 60s timeout — wait for cold boot if needed
+  // 45s: gives NVIDIA's 30s timeout + ~10s of DB work some headroom,
+  // while staying below the 60s window that causes ghost replies on reopen.
+  timeout: 45000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// ── Retry on network errors (not auth errors) ─────────────────────────────────
-const MAX_RETRIES = 2;
-async function withRetry(fn: () => Promise<any>, retries = MAX_RETRIES): Promise<any> {
-  try {
-    return await fn();
-  } catch (err: any) {
-    const isNetworkError = !err.response && err.code !== 'ECONNABORTED';
-    if (isNetworkError && retries > 0) {
-      const delay = (MAX_RETRIES - retries + 1) * 1000;
-      await new Promise(r => setTimeout(r, delay));
-      return withRetry(fn, retries - 1);
-    }
-    throw err;
-  }
-}
+// NOTE: withRetry was removed — retry logic lives in the response interceptor below.
 
 // ── Request interceptor: attach the current access token ─────────────────────
 api.interceptors.request.use(
@@ -113,12 +101,20 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // If a refresh is already in flight, queue this request
+    // If a refresh is already in flight, queue this request.
+    // When the refresh completes, drainQueue() replays each queued request.
+    // We must restore originalRequest.data from string back to object first —
+    // Axios serializes config.data to a JSON string during the first send,
+    // and replaying the stale config without restoring it sends a double-encoded
+    // string body, causing the backend's JSON schema validation to fail.
     if (isRefreshing) {
       return new Promise((resolve, reject) => {
         pendingQueue.push({
           resolve: (token) => {
             originalRequest.headers.Authorization = `Bearer ${token}`;
+            if (typeof originalRequest.data === 'string') {
+              try { originalRequest.data = JSON.parse(originalRequest.data); } catch (_) {}
+            }
             resolve(api(originalRequest));
           },
           reject,
@@ -152,8 +148,14 @@ api.interceptors.response.use(
 
       drainQueue(null, newAccessToken);
 
-      // Retry the original failed request with the new token
+      // Retry the original failed request with the new token.
+      // Restore data from string to object: Axios serializes config.data to a
+      // JSON string during the first send. Replaying without restoring causes
+      // the backend to receive a double-encoded string body instead of an object.
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+      if (typeof originalRequest.data === 'string') {
+        try { originalRequest.data = JSON.parse(originalRequest.data); } catch (_) {}
+      }
       return api(originalRequest);
     } catch (refreshError) {
       drainQueue(refreshError, null);
