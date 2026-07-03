@@ -16,6 +16,36 @@ export const nvidiaClient = new OpenAI({
   baseURL: config.nvidia.baseUrl,
 });
 
+/** Thrown when the NVIDIA API does not respond within NVIDIA_TIMEOUT_MS. */
+export class NvidiaTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`NVIDIA API did not respond within ${timeoutMs}ms`);
+    this.name = 'NvidiaTimeoutError';
+  }
+}
+
+const NVIDIA_TIMEOUT_MS = 30_000; // 30 seconds hard deadline
+
+/**
+ * Races an NVIDIA SDK call against a 30-second AbortSignal.
+ * Throws NvidiaTimeoutError if the deadline is exceeded.
+ */
+function withNvidiaTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NVIDIA_TIMEOUT_MS);
+
+  return fn(controller.signal).then(
+    (result) => { clearTimeout(timer); return result; },
+    (err) => {
+      clearTimeout(timer);
+      if (controller.signal.aborted) {
+        throw new NvidiaTimeoutError(NVIDIA_TIMEOUT_MS);
+      }
+      throw err;
+    }
+  );
+}
+
 export interface ChatOptions {
   model?: string;
   maxTokens?: number;
@@ -98,7 +128,11 @@ function getMockResponse(
 /**
  * Sends a chat completion request to NVIDIA's API.
  * Returns the full response text (non-streaming).
- * Falls back to a high-fidelity local mock completion if the API key fails.
+ *
+ * - Enforces a 30-second hard timeout via AbortSignal.
+ * - In development: falls back to getMockResponse on any failure.
+ * - In production: throws so the caller returns a proper error to the client.
+ *   Production users must never receive a silent mock fallback.
  */
 export async function chatCompletion(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
@@ -117,17 +151,34 @@ export async function chatCompletion(
   }
 
   try {
-    const response = await nvidiaClient.chat.completions.create(payload);
+    // Race the SDK call against a 30-second hard deadline.
+    const response = await withNvidiaTimeout((signal) =>
+      nvidiaClient.chat.completions.create(payload, { signal })
+    );
     const content = response.choices[0]?.message?.content;
     if (!content) {
       throw new Error('NVIDIA API returned an empty response');
     }
     return content;
   } catch (err: any) {
-    logger.warn('NVIDIA API call failed, falling back to mock response generator', {
+    const isDev = process.env.NODE_ENV === 'development';
+
+    if (isDev) {
+      // Development only: use mock so local dev works without a live API key.
+      logger.warn('NVIDIA API call failed — returning mock response (development only)', {
+        error: err.message,
+        name: err.name,
+      });
+      return getMockResponse(messages, options);
+    }
+
+    // Production: surface the real error so the caller can return HTTP 503.
+    // Do NOT silently return a fake response to real users.
+    logger.error('NVIDIA API call failed', {
       error: err.message,
-      status: err.status
+      name: err.name,
+      status: err.status,
     });
-    return getMockResponse(messages, options);
+    throw err;
   }
 }

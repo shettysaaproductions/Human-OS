@@ -80,15 +80,25 @@ api.interceptors.response.use(
       }
     }
 
-    // 2. Auto-retry on network errors or timeouts (max 2 retries)
+    // 2. Auto-retry on network errors or timeouts (max 2 retries).
+    // POST /chat is explicitly excluded: if the request timed out the backend
+    // may have already processed it and saved to the DB. Auto-retrying would
+    // create a second AI response and cause duplicate messages. The user can
+    // tap "Retry" manually instead.
     const isTimeout = error.code === 'ECONNABORTED';
     const isNetworkErr = !error.response;
-    if ((isTimeout || isNetworkErr) && (!originalRequest._retryCount || originalRequest._retryCount < 2)) {
+    const isChatPost =
+      originalRequest.method?.toLowerCase() === 'post' &&
+      originalRequest.url?.includes('/chat');
+    if (!isChatPost && (isTimeout || isNetworkErr) && (!originalRequest._retryCount || originalRequest._retryCount < 2)) {
       originalRequest._retryCount = (originalRequest._retryCount || 0) + 1;
       const delay = originalRequest._retryCount * 2000; // Exponential backoff (2s, 4s)
       console.warn(`[api] Retrying request to ${originalRequest?.url} (Attempt ${originalRequest._retryCount}/2) in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return api(originalRequest);
+    }
+    if (isChatPost && (isTimeout || isNetworkErr)) {
+      console.warn(`[api] POST /chat failed — not retrying automatically to prevent duplicate messages. User can retry manually.`);
     }
 
     // Only attempt token refresh on 401 for protected routes.

@@ -25,54 +25,64 @@ async function main(): Promise<void> {
   });
 
   // Initialize Background Queue Workers
-  startWorkers();
+  // DISABLE_REFLECTIONS=true → skip all background workers for debugging
+  if (process.env.DISABLE_REFLECTIONS !== 'true') {
+    startWorkers();
+  } else {
+    logger.warn('[DEBUG] DISABLE_REFLECTIONS=true — background queue workers NOT started');
+  }
 
-  // Start Moment Engine Scheduler (runs once every 24 hours)
-  const momentInterval = setInterval(async () => {
-    try {
-      logger.info('Scheduler: Triggering daily Moment Engine checks...');
-      await momentEngineService.runEngineForAllUsers();
-    } catch (err) {
-      logger.error('Error in Moment Engine scheduled run', { error: err instanceof Error ? err.message : String(err) });
-    }
-  }, 24 * 60 * 60 * 1000); // 24 hours
-  if (momentInterval.unref) momentInterval.unref();
-
-  // Reminders Polling Engine (runs every 10 seconds)
-  const remindersInterval = setInterval(async () => {
-    try {
-      await reminderSchedulerService.checkAndFireReminders();
-    } catch (err) {
-      logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
-    }
-  }, 10 * 1000); // 10 seconds
-  if (remindersInterval.unref) remindersInterval.unref();
-
-  // Daily Reflection Scheduler (runs once per day)
-  const dailyReflectionInterval = setInterval(async () => {
-    try {
-      logger.info('Scheduler: Triggering daily reflections...');
-      await reflectionScheduler.runDailyForAllUsers();
-      await shortTermMemoryCleanupService.run();
-    } catch (err) {
-      logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });
-    }
-  }, 24 * 60 * 60 * 1000); // 24 hours
-  if (dailyReflectionInterval.unref) dailyReflectionInterval.unref();
-
-  // Weekly Reflection Scheduler (runs on Sundays)
-  const weeklyReflectionInterval = setInterval(async () => {
-    const day = new Date().getDay();
-    if (day === 0) { // Sunday
+  // DISABLE_REFLECTIONS=true → skip all scheduled reflection/reminder/moment workers
+  if (process.env.DISABLE_REFLECTIONS !== 'true') {
+    // Start Moment Engine Scheduler (runs once every 24 hours)
+    const momentInterval = setInterval(async () => {
       try {
-        logger.info('Scheduler: Triggering weekly reflections...');
-        await reflectionScheduler.runWeeklyForAllUsers();
+        logger.info('Scheduler: Triggering daily Moment Engine checks...');
+        await momentEngineService.runEngineForAllUsers();
       } catch (err) {
-        logger.error('Error in weekly reflection scheduled run', { error: err instanceof Error ? err.message : String(err) });
+        logger.error('Error in Moment Engine scheduled run', { error: err instanceof Error ? err.message : String(err) });
       }
-    }
-  }, 24 * 60 * 60 * 1000); // Check daily, run on Sunday
-  if (weeklyReflectionInterval.unref) weeklyReflectionInterval.unref();
+    }, 24 * 60 * 60 * 1000); // 24 hours
+    if (momentInterval.unref) momentInterval.unref();
+
+    // Reminders Polling Engine (runs every 10 seconds)
+    const remindersInterval = setInterval(async () => {
+      try {
+        await reminderSchedulerService.checkAndFireReminders();
+      } catch (err) {
+        logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 10 * 1000); // 10 seconds
+    if (remindersInterval.unref) remindersInterval.unref();
+
+    // Daily Reflection Scheduler (runs once per day)
+    const dailyReflectionInterval = setInterval(async () => {
+      try {
+        logger.info('Scheduler: Triggering daily reflections...');
+        await reflectionScheduler.runDailyForAllUsers();
+        await shortTermMemoryCleanupService.run();
+      } catch (err) {
+        logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 24 * 60 * 60 * 1000); // 24 hours
+    if (dailyReflectionInterval.unref) dailyReflectionInterval.unref();
+
+    // Weekly Reflection Scheduler (runs on Sundays)
+    const weeklyReflectionInterval = setInterval(async () => {
+      const day = new Date().getDay();
+      if (day === 0) { // Sunday
+        try {
+          logger.info('Scheduler: Triggering weekly reflections...');
+          await reflectionScheduler.runWeeklyForAllUsers();
+        } catch (err) {
+          logger.error('Error in weekly reflection scheduled run', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }, 24 * 60 * 60 * 1000); // Check daily, run on Sunday
+    if (weeklyReflectionInterval.unref) weeklyReflectionInterval.unref();
+  } else {
+    logger.warn('[DEBUG] DISABLE_REFLECTIONS=true — all reflection/reminder/moment schedulers NOT started');
+  }
 
   const app = createApp();
 
