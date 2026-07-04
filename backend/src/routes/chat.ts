@@ -14,6 +14,74 @@ import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
 import crypto from 'crypto';
 
+export const MAX_OUTPUT_TOKENS = 2048;
+export const MAX_CHUNKS = 5;
+export const MAX_CHARS_PER_CHUNK = 1500;
+export const MAX_TOTAL_RESPONSE_CHARS = 7500;
+export const MAX_INPUT_CHARS = 10000;
+
+function isExcessiveRequest(message: string): boolean {
+  if (message.length > MAX_INPUT_CHARS) return true;
+
+  const lower = message.toLowerCase();
+  const match = lower.match(/\b(\d+[,.]?\d*)\b\s*(words|pages|articles|essays)/);
+  if (match) {
+    const num = parseInt(match[1].replace(/[,.]/g, ''), 10);
+    if (match[2] === 'words' && num > 2000) return true;
+    if (match[2] === 'pages' && num > 10) return true;
+    if (match[2] === 'articles' && num > 5) return true;
+    if (match[2] === 'essays' && num > 5) return true;
+  }
+  return false;
+}
+
+function chunkResponse(text: string): string[] {
+  if (text.length <= MAX_CHARS_PER_CHUNK) return [text];
+
+  const chunks: string[] = [];
+  const paragraphs = text.split(/\n\n+/);
+  let current = '';
+
+  const pushChunk = (str: string) => {
+    let remaining = str.trim();
+    while (remaining.length > MAX_CHARS_PER_CHUNK) {
+      chunks.push(remaining.substring(0, MAX_CHARS_PER_CHUNK));
+      remaining = remaining.substring(MAX_CHARS_PER_CHUNK);
+    }
+    if (remaining.length > 0) {
+      chunks.push(remaining);
+    }
+  };
+
+  for (const para of paragraphs) {
+    const candidate = current ? `${current}\n\n${para}` : para;
+
+    if (candidate.length <= MAX_CHARS_PER_CHUNK) {
+      current = candidate;
+    } else {
+      if (current) { pushChunk(current); current = ''; }
+
+      if (para.length > MAX_CHARS_PER_CHUNK) {
+        const sentences = para.match(/[^.!?]+[.!?]+\s*/g) ?? [para];
+        for (const sentence of sentences) {
+          const sc = current ? `${current} ${sentence}` : sentence;
+          if (sc.length <= MAX_CHARS_PER_CHUNK) {
+            current = sc;
+          } else {
+            if (current) { pushChunk(current); }
+            current = sentence.trim();
+          }
+        }
+      } else {
+        current = para;
+      }
+    }
+  }
+
+  if (current.trim()) pushChunk(current);
+  return chunks.length ? chunks : [text];
+}
+
 function shouldExtractShortTermMemory(message: string): boolean {
   if (message.length > 25) return true;
   const keywords = ['feel', 'sad', 'happy', 'mad', 'angry', 'wife', 'husband', 'friend', 'boss', 'office', 'work', 'issue', 'problem', 'task', 'todo', 'buy', 'going', 'went', 'saw', 'met'];
@@ -54,14 +122,26 @@ chatRouter.post(
         const recentMessages = degradedMode.getRecentMessages(userId);
 
         let reply: string;
-        try {
-          reply = await chatCompletion([
-            { role: 'system', content: BASE_SYSTEM_PROMPT + '\n[Note: Running in degraded mode — some memories may be unavailable.]' },
-            ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
-          ], { maxTokens: 512, temperature: 0.7 });
-        } catch (nvidiaError) {
-          throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
+        if (isExcessiveRequest(message)) {
+          reply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
+        } else {
+          try {
+            reply = await chatCompletion([
+              { role: 'system', content: BASE_SYSTEM_PROMPT + '\n[Note: Running in degraded mode — some memories may be unavailable.]' },
+              ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
+            ], { maxTokens: 1024, temperature: 0.7 });
+          } catch (nvidiaError) {
+            throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
+          }
         }
+
+        const textChunks = chunkResponse(reply);
+        const totalChunks = textChunks.length;
+        const chunks = textChunks.map((content, idx) => ({
+          index: idx + 1,
+          total: totalChunks,
+          content
+        }));
 
         degradedMode.appendMessage(userId, 'assistant', reply);
 
@@ -69,7 +149,7 @@ chatRouter.post(
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, created_at: new Date().toISOString() } });
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: reply, created_at: new Date().toISOString() } });
 
-        res.status(200).json({ reply, conversation_id: activeConversationId, meta: { degraded: true } });
+        res.status(200).json({ reply, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
         return;
       }
 
@@ -223,17 +303,30 @@ chatRouter.post(
 
       // 6. Call NVIDIA
       let reply: string;
-      try {
-        reply = await chatCompletion(messagesForLLM, { maxTokens: 512, temperature: 0.7 });
-      } catch (nvidiaError) {
-        throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
+      if (isExcessiveRequest(message)) {
+        reply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
+      } else {
+        try {
+          reply = await chatCompletion(messagesForLLM, { maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.7 });
+        } catch (nvidiaError) {
+          throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
+        }
       }
 
-      // 7. Save AI response
+      // 7. Save AI response ONCE
       await qt.track('save_ai_response', 'chat_history', () =>
         supabaseAdmin.from('chat_history')
           .insert({ user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: reply })
       );
+
+      // Generate chunks for UI
+      const textChunks = chunkResponse(reply);
+      const totalChunks = textChunks.length;
+      const chunks = textChunks.map((content, idx) => ({
+        index: idx + 1,
+        total: totalChunks,
+        content
+      }));
 
       // 8. Also buffer to in-memory (for degraded mode recovery continuity)
       degradedMode.appendMessage(userId, 'user', message);
@@ -276,6 +369,7 @@ chatRouter.post(
 
       res.status(200).json({
         reply,
+        chunks,
         conversation_id: activeConversationId,
         meta: {
           memories_retrieved: memories.length,

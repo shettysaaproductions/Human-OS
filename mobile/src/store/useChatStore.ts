@@ -75,27 +75,44 @@ export const useChatStore = create<ChatState>((set, get) => {
         console.log('[QUEUE] sending:', item.id);
 
         try {
-          const { reply, conversation_id } = await chatService.sendMessage(
+          const data = await chatService.sendMessage(
             item.content,
             get().conversationId || undefined
           );
+          
+          let chunkMessages: Message[];
 
-          const novaMsg: Message = {
-            id: Date.now().toString() + '_nova',
-            role: 'assistant',
-            content: reply,
-            status: 'sent',
-            timestamp: new Date().toISOString(),
-          };
+          if (data.chunks && Array.isArray(data.chunks)) {
+            chunkMessages = data.chunks.map((c: any, idx: number) => {
+              const label = c.total > 1 ? `Part ${c.index} of ${c.total}\n\n` : '';
+              const randomSuffix = Math.random().toString(36).substring(2, 7);
+              return {
+                id: Date.now().toString() + '_nova_' + idx + '_' + randomSuffix,
+                role: 'assistant',
+                content: label + c.content,
+                status: 'sent',
+                timestamp: new Date().toISOString(),
+              };
+            });
+          } else {
+            // legacy fallback
+            chunkMessages = [{
+              id: Date.now().toString() + '_nova_0',
+              role: 'assistant',
+              content: data.reply,
+              status: 'sent',
+              timestamp: new Date().toISOString(),
+            }];
+          }
 
           set((s) => ({
             messages: [
               ...s.messages.map(m =>
                 m.id === item.id ? { ...m, status: 'sent' as const } : m
               ),
-              novaMsg,
+              ...chunkMessages,
             ],
-            conversationId: conversation_id,
+            conversationId: data.conversation_id,
           }));
 
           console.log('[QUEUE] success:', item.id);
