@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { chatService } from '../services/chatService';
 
+console.log('USECHATSTORE_LOADED');
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
@@ -86,6 +88,7 @@ function chunkText(text: string): string[] {
 
 export const useChatStore = create<ChatState>((set, get) => {
   const processQueue = async () => {
+    console.log('PROCESS_QUEUE_ENTERED');
     // Guard: if a processor is already running, new messages will be picked
     // up by the existing while-loop on its next iteration. Return immediately.
     if (_isProcessing) return;
@@ -122,12 +125,13 @@ export const useChatStore = create<ChatState>((set, get) => {
             get().conversationId || undefined
           );
           
-          if (__DEV__) {
-            console.log(
-              'CHAT_RESPONSE',
-              JSON.stringify(data, null, 2)
-            );
-          }
+          console.log('SEND_MESSAGE_RETURNED');
+          console.log('DATA_KEYS', Object.keys(data));
+          
+          console.log(
+            'CHAT_RESPONSE',
+            JSON.stringify(data, null, 2)
+          );
           
           // 1. Mark user's message as sent
           set((s) => ({
@@ -170,12 +174,10 @@ export const useChatStore = create<ChatState>((set, get) => {
               timestamp: new Date().toISOString(),
             };
             
-            if (__DEV__) {
-              console.log(
-                'CHUNKS_TO_RENDER',
-                JSON.stringify(chunkMessages, null, 2)
-              );
-            }
+            console.log(
+              'CHUNKS_TO_RENDER',
+              JSON.stringify(chunkMessages, null, 2)
+            );
             set((s) => ({
               messages: [...s.messages, newMsg],
               isTyping: false
