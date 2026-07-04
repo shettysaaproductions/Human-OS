@@ -42,6 +42,48 @@ interface ChatState {
 // ensures only one processQueue body can run at a time, with zero race window.
 let _isProcessing = false;
 
+// ── Client-side chunking for hydration ────────────────────────────────────────
+function chunkText(text: string): string[] {
+  if (text.length <= 1500) return [text];
+  const chunks: string[] = [];
+  const paragraphs = text.split(/\n\n+/);
+  let current = '';
+
+  const pushChunk = (str: string) => {
+    let remaining = str.trim();
+    while (remaining.length > 1500) {
+      chunks.push(remaining.substring(0, 1500));
+      remaining = remaining.substring(1500);
+    }
+    if (remaining.length > 0) chunks.push(remaining);
+  };
+
+  for (const para of paragraphs) {
+    const candidate = current ? `${current}\n\n${para}` : para;
+    if (candidate.length <= 1500) {
+      current = candidate;
+    } else {
+      if (current) { pushChunk(current); current = ''; }
+      if (para.length > 1500) {
+        const sentences = para.match(/[^.!?]+[.!?]+\s*/g) ?? [para];
+        for (const sentence of sentences) {
+          const sc = current ? `${current} ${sentence}` : sentence;
+          if (sc.length <= 1500) {
+            current = sc;
+          } else {
+            if (current) pushChunk(current);
+            current = sentence.trim();
+          }
+        }
+      } else {
+        current = para;
+      }
+    }
+  }
+  if (current.trim()) pushChunk(current);
+  return chunks.length ? chunks : [text];
+}
+
 export const useChatStore = create<ChatState>((set, get) => {
   const processQueue = async () => {
     // Guard: if a processor is already running, new messages will be picked
@@ -80,40 +122,50 @@ export const useChatStore = create<ChatState>((set, get) => {
             get().conversationId || undefined
           );
           
-          let chunkMessages: Message[];
-
-          if (data.chunks && Array.isArray(data.chunks)) {
-            chunkMessages = data.chunks.map((c: any, idx: number) => {
-              const label = c.total > 1 ? `Part ${c.index} of ${c.total}\n\n` : '';
-              const randomSuffix = Math.random().toString(36).substring(2, 7);
-              return {
-                id: Date.now().toString() + '_nova_' + idx + '_' + randomSuffix,
-                role: 'assistant',
-                content: label + c.content,
-                status: 'sent',
-                timestamp: new Date().toISOString(),
-              };
-            });
-          } else {
-            // legacy fallback
-            chunkMessages = [{
-              id: Date.now().toString() + '_nova_0',
-              role: 'assistant',
-              content: data.reply,
-              status: 'sent',
-              timestamp: new Date().toISOString(),
-            }];
-          }
-
+          // 1. Mark user's message as sent
           set((s) => ({
-            messages: [
-              ...s.messages.map(m =>
-                m.id === item.id ? { ...m, status: 'sent' as const } : m
-              ),
-              ...chunkMessages,
-            ],
+            messages: s.messages.map(m =>
+              m.id === item.id ? { ...m, status: 'sent' as const } : m
+            ),
             conversationId: data.conversation_id,
           }));
+
+          // 2. Deliver assistant chunks with natural delay
+          const chunksToDeliver = (data.chunks && Array.isArray(data.chunks)) 
+            ? data.chunks 
+            : [{ content: data.reply, total: 1, index: 1 }];
+          
+          for (let i = 0; i < chunksToDeliver.length; i++) {
+            // Check if user cleared messages while we were waiting
+            if (get().messages.length === 0) break;
+
+            const c = chunksToDeliver[i];
+            const label = c.total > 1 ? `Part ${c.index} of ${c.total}\n\n` : '';
+            const randomSuffix = Math.random().toString(36).substring(2, 7);
+            const content = label + c.content;
+            
+            set({ isTyping: true });
+            
+            // Dynamic delay: min 500, max 2500 based on text length
+            const delay = Math.min(Math.max(content.length * 12, 500), 2500);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            // Re-check after delay just in case
+            if (get().messages.length === 0) break;
+
+            const newMsg: Message = {
+              id: Date.now().toString() + '_nova_' + i + '_' + randomSuffix,
+              role: 'assistant',
+              content: content,
+              status: 'sent',
+              timestamp: new Date().toISOString(),
+            };
+            
+            set((s) => ({
+              messages: [...s.messages, newMsg],
+              isTyping: false
+            }));
+          }
 
           console.log('[QUEUE] success:', item.id);
         } catch (error: any) {
@@ -166,13 +218,33 @@ export const useChatStore = create<ChatState>((set, get) => {
         const history = await chatService.getHistory();
         console.log('Diagnostics - Messages received from API:', history?.length);
         if (history && history.length > 0) {
-          const formattedHistory = history.map((msg: any) => ({
-            id: msg.id,
-            role: msg.role === 'nova' ? 'assistant' : msg.role,
-            content: msg.content,
-            status: 'sent',
-            timestamp: msg.created_at || new Date().toISOString()
-          }));
+          const formattedHistory: Message[] = [];
+          for (const msg of history) {
+            const role = msg.role === 'nova' ? 'assistant' : msg.role;
+            const timestamp = msg.created_at || new Date().toISOString();
+            
+            if (role === 'assistant' && msg.content.length > 1500) {
+              const chunks = chunkText(msg.content);
+              chunks.forEach((chunkContent, idx) => {
+                const label = chunks.length > 1 ? `Part ${idx + 1} of ${chunks.length}\n\n` : '';
+                formattedHistory.push({
+                  id: `${msg.id}_part_${idx + 1}`,
+                  role,
+                  content: label + chunkContent,
+                  status: 'sent',
+                  timestamp
+                });
+              });
+            } else {
+              formattedHistory.push({
+                id: msg.id,
+                role,
+                content: msg.content,
+                status: 'sent',
+                timestamp
+              });
+            }
+          }
           
           console.log('Diagnostics - Oldest message from API:', formattedHistory[0]?.timestamp);
           console.log('Diagnostics - Newest message from API:', formattedHistory[formattedHistory.length - 1]?.timestamp);

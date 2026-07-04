@@ -98,7 +98,8 @@ const ChatSchema = z.object({
 });
 
 const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
-Be friendly, concise, and genuine. Never say "As an AI..." — you are Nova, not a generic chatbot.`;
+Be friendly, concise, and genuine. Never say "As an AI..." — you are Nova, not a generic chatbot.
+If the user asks for multiple separate things, or if you want to intentionally pause for effect, you can separate your messages by inserting <NOVA_MESSAGE_BREAK> on a new line.`;
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 chatRouter.post(
@@ -121,12 +122,12 @@ chatRouter.post(
         degradedMode.appendMessage(userId, 'user', message);
         const recentMessages = degradedMode.getRecentMessages(userId);
 
-        let reply: string;
+        let rawReply: string;
         if (isExcessiveRequest(message)) {
-          reply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
+          rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
         } else {
           try {
-            reply = await chatCompletion([
+            rawReply = await chatCompletion([
               { role: 'system', content: BASE_SYSTEM_PROMPT + '\n[Note: Running in degraded mode — some memories may be unavailable.]' },
               ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
             ], { maxTokens: 1024, temperature: 0.7 });
@@ -135,7 +136,10 @@ chatRouter.post(
           }
         }
 
-        const textChunks = chunkResponse(reply);
+        const messages = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
+        const reply = messages.join('\n\n');
+
+        const textChunks = messages.flatMap(m => chunkResponse(m));
         const totalChunks = textChunks.length;
         const chunks = textChunks.map((content, idx) => ({
           index: idx + 1,
@@ -149,7 +153,7 @@ chatRouter.post(
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, created_at: new Date().toISOString() } });
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: reply, created_at: new Date().toISOString() } });
 
-        res.status(200).json({ reply, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
+        res.status(200).json({ reply, messages, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
         return;
       }
 
@@ -302,16 +306,19 @@ chatRouter.post(
       ];
 
       // 6. Call NVIDIA
-      let reply: string;
+      let rawReply: string;
       if (isExcessiveRequest(message)) {
-        reply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
+        rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
       } else {
         try {
-          reply = await chatCompletion(messagesForLLM, { maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.7 });
+          rawReply = await chatCompletion(messagesForLLM, { maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.7 });
         } catch (nvidiaError) {
           throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
         }
       }
+
+      const parsedMessages = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
+      const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE
       await qt.track('save_ai_response', 'chat_history', () =>
@@ -320,7 +327,7 @@ chatRouter.post(
       );
 
       // Generate chunks for UI
-      const textChunks = chunkResponse(reply);
+      const textChunks = parsedMessages.flatMap(m => chunkResponse(m));
       const totalChunks = textChunks.length;
       const chunks = textChunks.map((content, idx) => ({
         index: idx + 1,
@@ -369,6 +376,7 @@ chatRouter.post(
 
       res.status(200).json({
         reply,
+        messages: parsedMessages,
         chunks,
         conversation_id: activeConversationId,
         meta: {
