@@ -99,7 +99,61 @@ const ChatSchema = z.object({
 
 const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
 Be friendly, concise, and genuine. Never say "As an AI..." — you are Nova, not a generic chatbot.
-If the user asks for multiple separate things, or if you want to intentionally pause for effect, you can separate your messages by inserting <NOVA_MESSAGE_BREAK> on a new line.`;
+
+When the user requests multiple separate messages, you MUST separate each message using:
+
+<NOVA_MESSAGE_BREAK>
+
+Example:
+
+Hello
+<NOVA_MESSAGE_BREAK>
+How are you?
+<NOVA_MESSAGE_BREAK>
+Goodbye
+
+Never replace this delimiter with blank lines.
+Never remove it.`;
+
+/**
+ * Splits the LLM response into WhatsApp-style bubbles using a 4-level fallback hierarchy.
+ * Level 1: Explicit <NOVA_MESSAGE_BREAK>
+ * Level 2: "Message X:" pattern
+ * Level 3: Intent detection (lists, bullets, distinct paragraphs)
+ * Level 4 (external): chunkResponse max length limit
+ */
+function parseLLMResponse(rawReply: string): string[] {
+  // Level 1: Explicit <NOVA_MESSAGE_BREAK>
+  if (rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
+    const segments = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
+    if (segments.length > 1) {
+      return segments;
+    }
+  }
+
+  const text = '\n' + rawReply; 
+  
+  // Level 2: Message X: pattern
+  const msgXSegments = text.split(/(?=\nMessage \d+:)/i)
+    .map(m => m.trim())
+    .filter(Boolean);
+  if (msgXSegments.length > 1) {
+    return msgXSegments;
+  }
+
+  // Level 3: Intent detection (lists, multiple distinct paragraphs for separate bubbles)
+  // We split on newlines that introduce lists. We NO LONGER split on plain double newlines (\n\n) 
+  // because paragraphs are common in essays and should remain in one bubble.
+  const intentSegments = text.split(/(?=\n\d+\.\s|\n[•\-*]\s)/)
+    .map(m => m.trim())
+    .filter(Boolean);
+    
+  if (intentSegments.length > 1) {
+    return intentSegments;
+  }
+  
+  return rawReply.trim() ? [rawReply.trim()] : [];
+}
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 chatRouter.post(
@@ -136,7 +190,7 @@ chatRouter.post(
           }
         }
 
-        const messages = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
+        const messages = parseLLMResponse(rawReply);
         const reply = messages.join('\n\n');
 
         const textChunks = messages.flatMap(m => chunkResponse(m));
@@ -317,7 +371,7 @@ chatRouter.post(
         }
       }
 
-      const parsedMessages = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
+      const parsedMessages = parseLLMResponse(rawReply);
       const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE
