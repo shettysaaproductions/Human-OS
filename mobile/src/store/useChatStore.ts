@@ -122,6 +122,13 @@ export const useChatStore = create<ChatState>((set, get) => {
             get().conversationId || undefined
           );
           
+          if (__DEV__) {
+            console.log(
+              'CHAT_RESPONSE',
+              JSON.stringify(data, null, 2)
+            );
+          }
+          
           // 1. Mark user's message as sent
           set((s) => ({
             messages: s.messages.map(m =>
@@ -134,6 +141,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           const chunksToDeliver = (data.chunks && Array.isArray(data.chunks)) 
             ? data.chunks 
             : [{ content: data.reply, total: 1, index: 1 }];
+          
+          const chunkMessages = chunksToDeliver;
           
           for (let i = 0; i < chunksToDeliver.length; i++) {
             // Check if user cleared messages while we were waiting
@@ -161,6 +170,12 @@ export const useChatStore = create<ChatState>((set, get) => {
               timestamp: new Date().toISOString(),
             };
             
+            if (__DEV__) {
+              console.log(
+                'CHUNKS_TO_RENDER',
+                JSON.stringify(chunkMessages, null, 2)
+              );
+            }
             set((s) => ({
               messages: [...s.messages, newMsg],
               isTyping: false
