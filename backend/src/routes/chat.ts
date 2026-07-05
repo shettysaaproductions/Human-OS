@@ -141,16 +141,8 @@ function parseLLMResponse(rawReply: string): string[] {
     return msgXSegments;
   }
 
-  // Level 3: Intent detection (lists, multiple distinct paragraphs for separate bubbles)
-  // We split on newlines that introduce lists, markdown headers, or bold lines. We NO LONGER split on plain double newlines (\n\n) 
-  // because paragraphs are common in essays and should remain in one bubble.
-  const intentSegments = text.split(/(?=\n\d+\.\s|\n[•\-*]\s|\n#{1,6}\s|\n\*\*[^\n]+\*\*\s*\n)/)
-    .map(m => m.trim())
-    .filter(Boolean);
-    
-  if (intentSegments.length > 1) {
-    return intentSegments;
-  }
+  // We now rely solely on <NOVA_MESSAGE_BREAK> or "Message X:" for splitting. 
+  // Blindly splitting on lists/headers ruins formatting for emails and articles.
   
   return rawReply.trim() ? [rawReply.trim()] : [];
 }
