@@ -182,12 +182,16 @@ export function ChatScreen() {
             {!isUser ? (
               <Markdown style={{
                 body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
-                heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
-                heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
+                heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 12 },
+                heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 10 },
                 heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
                 strong: { fontWeight: 'bold' },
                 em: { fontStyle: 'italic' },
-                u: { textDecorationLine: 'underline' }
+                u: { textDecorationLine: 'underline' },
+                blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+                code_block: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
+                fence: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
+                hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 }
               }}>
                 {item.content}
               </Markdown>
