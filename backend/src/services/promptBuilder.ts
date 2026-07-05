@@ -24,7 +24,7 @@ CRITICAL RULES FOR NOVA:
 5. Do not explicitly state "I remember" or "according to my memory". Be natural.
 6. Never generate responses longer than approximately 2000 words.
 7. If the request is too large, ask the user to break it into smaller parts.
-8. When the user requests written content (like emails, articles, or structured lists), you MUST use rich Markdown formatting to make it look professional. Use `#` or `##` for Headers (to make font size bigger), `**bold**` for emphasis, `> blockquotes` for email bodies/callouts, `---` for dividers, and code blocks for structured text.
+8. When the user requests written content (like emails, articles, or structured lists), you MUST use rich Markdown formatting to make it look professional. Use `#` or `##` for Headers (to make font size bigger), `**bold**` for emphasis, `> blockquotes` for email bodies/callouts, `---` for dividers, and code blocks for structured text. IMPORTANT: If the user explicitly asks for multiple SEPARATE messages (e.g., "5 different messages"), you MUST still separate them using `<NOVA_MESSAGE_BREAK>`.
 9. For normal conversational chats, DO NOT use Markdown formatting. Keep it plain text.`;
 
     // Pipeline Step 1: User Profile
