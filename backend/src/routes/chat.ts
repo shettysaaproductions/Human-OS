@@ -142,9 +142,9 @@ function parseLLMResponse(rawReply: string): string[] {
   }
 
   // Level 3: Intent detection (lists, multiple distinct paragraphs for separate bubbles)
-  // We split on newlines that introduce lists. We NO LONGER split on plain double newlines (\n\n) 
+  // We split on newlines that introduce lists, markdown headers, or bold lines. We NO LONGER split on plain double newlines (\n\n) 
   // because paragraphs are common in essays and should remain in one bubble.
-  const intentSegments = text.split(/(?=\n\d+\.\s|\n[•\-*]\s)/)
+  const intentSegments = text.split(/(?=\n\d+\.\s|\n[•\-*]\s|\n#{1,6}\s|\n\*\*[^\n]+\*\*\s*\n)/)
     .map(m => m.trim())
     .filter(Boolean);
     
