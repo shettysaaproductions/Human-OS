@@ -21,6 +21,7 @@
     "react-native-gesture-handler": "~2.31.1",
     "react-native-gifted-charts": "^1.4.77",
     "react-native-graph": "^1.2.0",
+    "react-native-markdown-display": "^7.0.2",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
