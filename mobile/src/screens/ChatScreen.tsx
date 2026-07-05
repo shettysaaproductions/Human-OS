@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { useTheme } from '../theme/ThemeContext';
+import Markdown from 'react-native-markdown-display';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -178,12 +179,26 @@ export function ChatScreen() {
               ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4 }
               : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4 }
           ]}>
-            <Text style={[
-              s.messageText,
-              isUser ? { color: colors.buttonText } : { color: colors.assistantText }
-            ]}>
-              {item.content}
-            </Text>
+            {!isUser ? (
+              <Markdown style={{
+                body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
+                heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
+                heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
+                heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
+                strong: { fontWeight: 'bold' },
+                em: { fontStyle: 'italic' },
+                u: { textDecorationLine: 'underline' }
+              }}>
+                {item.content}
+              </Markdown>
+            ) : (
+              <Text style={[
+                s.messageText,
+                { color: colors.buttonText }
+              ]}>
+                {item.content}
+              </Text>
+            )}
             <View style={s.timestampContainer}>
               <Text style={[
                 s.timestampText,
