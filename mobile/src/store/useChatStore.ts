@@ -243,17 +243,29 @@ export const useChatStore = create<ChatState>((set, get) => {
             const role = msg.role === 'nova' ? 'assistant' : msg.role;
             const timestamp = msg.created_at || new Date().toISOString();
             
-            if (role === 'assistant' && msg.content.length > 1500) {
-              const chunks = chunkText(msg.content);
-              chunks.forEach((chunkContent, idx) => {
+            if (role === 'assistant') {
+              const initialChunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
+                ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
+                : [msg.content];
+                
+              const finalChunks: string[] = [];
+              initialChunks.forEach((c: string) => {
+                if (c.length > 1500) {
+                  finalChunks.push(...chunkText(c));
+                } else {
+                  finalChunks.push(c);
+                }
+              });
+
+              finalChunks.forEach((chunkContent, idx) => {
                 formattedHistory.push({
                   id: `${msg.id}_part_${idx + 1}`,
                   role,
                   content: chunkContent,
                   status: 'sent',
                   timestamp,
-                  chunkIndex: chunks.length > 1 ? idx + 1 : undefined,
-                  chunkTotal: chunks.length > 1 ? chunks.length : undefined,
+                  chunkIndex: finalChunks.length > 1 ? idx + 1 : undefined,
+                  chunkTotal: finalChunks.length > 1 ? finalChunks.length : undefined,
                 });
               });
             } else {
