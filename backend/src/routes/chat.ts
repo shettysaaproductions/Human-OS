@@ -122,7 +122,7 @@ Never remove it.`;
  * Level 3: Intent detection (lists, bullets, distinct paragraphs)
  * Level 4 (external): chunkResponse max length limit
  */
-function parseLLMResponse(rawReply: string): string[] {
+function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] {
   // Level 1: Explicit <NOVA_MESSAGE_BREAK>
   if (rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
     const segments = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
@@ -141,9 +141,23 @@ function parseLLMResponse(rawReply: string): string[] {
     return msgXSegments;
   }
 
-  // We now rely solely on <NOVA_MESSAGE_BREAK> or "Message X:" for splitting. 
-  // Blindly splitting on lists/headers ruins formatting for emails and articles.
-  
+  // Level 3: Intent Fallback
+  // If the user explicitly asks for multiple messages, fallback to splitting by paragraphs
+  const lowerUser = userMessage.toLowerCase();
+  const askedForMultiple = /\b(\d+)\s+(messages|msgs|bubbles|jokes|parts|tweets|posts)\b/.test(lowerUser) || 
+                           lowerUser.includes('different msgs') || 
+                           lowerUser.includes('separate msgs') ||
+                           lowerUser.includes('different messages') ||
+                           lowerUser.includes('separate messages');
+                           
+  if (askedForMultiple) {
+    const paragraphs = rawReply.split(/\n\n+/).map(m => m.trim()).filter(Boolean);
+    if (paragraphs.length > 1) {
+      return paragraphs;
+    }
+  }
+
+  // Default: single bubble
   return rawReply.trim() ? [rawReply.trim()] : [];
 }
 
@@ -182,7 +196,7 @@ chatRouter.post(
           }
         }
 
-        const messages = parseLLMResponse(rawReply);
+        const messages = parseLLMResponse(rawReply, message);
         const reply = messages.join('\n\n');
 
         const textChunks = messages.flatMap(m => chunkResponse(m));
@@ -363,7 +377,7 @@ chatRouter.post(
         }
       }
 
-      const parsedMessages = parseLLMResponse(rawReply);
+      const parsedMessages = parseLLMResponse(rawReply, message);
       const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE
