@@ -259,7 +259,7 @@ export function ChatScreen() {
         </Pressable>
       </View>
     );
-  }, [retryMessage, colors, reversedMessages, developerMode]);
+  }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage]);
 
   if (!isHydrated) {
     return (
@@ -364,6 +364,7 @@ export function ChatScreen() {
             ref={flatListRef}
             inverted
             data={reversedMessages}
+            extraData={selectedMessageIds}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
