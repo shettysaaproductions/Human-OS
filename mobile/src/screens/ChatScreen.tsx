@@ -281,7 +281,10 @@ export function ChatScreen() {
                 <Text style={s.headerBtnText}>📋</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => {
-                // Future edit logic
+                const msg = reversedMessages.find(m => m.id === selectedMessageId);
+                if (msg) {
+                  setInputText(msg.content);
+                }
                 setSelectedMessageId(null);
               }} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>✏️</Text>
