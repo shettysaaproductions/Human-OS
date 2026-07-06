@@ -220,8 +220,33 @@ export function ChatScreen() {
                 u: { textDecorationLine: 'underline' },
                 blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
                 code_block: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
-                fence: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
                 hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 }
+              }}
+              rules={{
+                fence: (node, children, parent, styles) => {
+                  const content = node.content;
+                  const language = node.sourceInfo;
+                  const isCopyable = language === 'copyable';
+                  
+                  return (
+                    <View key={node.key} style={s.fenceContainer}>
+                      <View style={s.fenceHeader}>
+                        <Text style={s.fenceLanguage}>{isCopyable ? 'Content' : (language || 'Code')}</Text>
+                        <TouchableOpacity 
+                          style={s.copyButton}
+                          onPress={async () => {
+                            await Clipboard.setStringAsync(content);
+                          }}
+                        >
+                          <Text style={s.copyButtonText}>Copy</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={[s.fenceContent, isCopyable ? { color: colors.assistantText, fontSize: 16, lineHeight: 24 } : { color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }]}>
+                        {content}
+                      </Text>
+                    </View>
+                  );
+                }
               }}>
                 {item.content}
               </Markdown>
@@ -545,5 +570,44 @@ const s = StyleSheet.create({
     fontSize: 10,
     marginRight: 6,
     fontWeight: '600',
+  },
+  fenceContainer: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 8,
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+    overflow: 'hidden',
+    width: '100%',
+  },
+  fenceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  fenceLanguage: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  copyButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 6,
+  },
+  copyButtonText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+  },
+  fenceContent: {
+    padding: 12,
   }
 });
