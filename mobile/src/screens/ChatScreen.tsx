@@ -59,8 +59,20 @@ export function ChatScreen() {
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [isReadyToRender, setIsReadyToRender] = useState(false);
-  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const flatListRef = useRef<FlatList>(null);
+
+  const isSelectionMode = selectedMessageIds.length > 0;
+  
+  const toggleSelectMessage = useCallback((id: string) => {
+    setSelectedMessageIds(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(item => item !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
+  }, []);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
   const isInitialScrollRef = useRef(true);
@@ -173,17 +185,20 @@ export function ChatScreen() {
           </View>
         )}
         <Pressable 
-          onLongPress={() => setSelectedMessageId(item.id)}
+          onLongPress={() => toggleSelectMessage(item.id)}
           onPress={() => {
-            if (selectedMessageId) {
-              setSelectedMessageId(selectedMessageId === item.id ? null : item.id);
+            if (isSelectionMode) {
+              toggleSelectMessage(item.id);
             }
           }}
-          style={[
-            s.bubbleContainer,
-            selectedMessageId === item.id && { backgroundColor: 'rgba(139, 92, 246, 0.15)' }
-          ]}
+          style={s.bubbleContainer}
         >
+          {selectedMessageIds.includes(item.id) && (
+            <View 
+              pointerEvents="none" 
+              style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(139, 92, 246, 0.15)', zIndex: 10 }]} 
+            />
+          )}
           <View style={[s.bubble, isUser ? s.userBubble : s.novaBubble]}>
           {!isUser && (
             <View style={s.avatarDot} />
@@ -262,33 +277,38 @@ export function ChatScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         {/* Header */}
-        {selectedMessageId ? (
+        {isSelectionMode ? (
           <View style={[s.header, { borderBottomColor: colors.border, backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}>
             <View style={s.headerLeft}>
-              <TouchableOpacity onPress={() => setSelectedMessageId(null)} style={s.headerBtn}>
+              <TouchableOpacity onPress={() => setSelectedMessageIds([])} style={s.headerBtn}>
                 <Text style={[s.headerBtnText, { color: colors.textPrimary }]}>✕</Text>
               </TouchableOpacity>
-              <Text style={[s.headerTitle, { color: colors.textPrimary, marginLeft: 8 }]}>1 Selected</Text>
+              <Text style={[s.headerTitle, { color: colors.textPrimary, marginLeft: 8 }]}>{selectedMessageIds.length} Selected</Text>
             </View>
             <View style={s.headerRight}>
               <TouchableOpacity onPress={async () => {
-                const msg = reversedMessages.find(m => m.id === selectedMessageId);
-                if (msg) {
-                  await Clipboard.setStringAsync(msg.content);
-                  setSelectedMessageId(null);
+                const selectedMsgs = messages
+                  .filter(m => selectedMessageIds.includes(m.id))
+                  .map(m => m.content)
+                  .join('\n\n');
+                if (selectedMsgs) {
+                  await Clipboard.setStringAsync(selectedMsgs);
+                  setSelectedMessageIds([]);
                 }
               }} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>📋</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => {
-                const msg = reversedMessages.find(m => m.id === selectedMessageId);
-                if (msg) {
-                  setInputText(msg.content);
-                }
-                setSelectedMessageId(null);
-              }} style={s.headerBtn}>
-                <Text style={s.headerBtnText}>✏️</Text>
-              </TouchableOpacity>
+              {selectedMessageIds.length === 1 && (
+                <TouchableOpacity onPress={() => {
+                  const msg = messages.find(m => m.id === selectedMessageIds[0]);
+                  if (msg) {
+                    setInputText(msg.content);
+                  }
+                  setSelectedMessageIds([]);
+                }} style={s.headerBtn}>
+                  <Text style={s.headerBtnText}>✏️</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         ) : (
