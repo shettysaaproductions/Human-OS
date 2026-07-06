@@ -50,6 +50,10 @@ export interface ChatOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  /** Penalises repeating the same tokens (phrases) mid-response. Range 0–2. */
+  frequency_penalty?: number;
+  /** Penalises bringing up topics already covered in the response. Range 0–2. */
+  presence_penalty?: number;
   response_format?: { type: 'json_object' | 'text' };
 }
 
@@ -142,9 +146,17 @@ export async function chatCompletion(
     model: options?.model ?? config.nvidia.chatModel,
     messages,
     max_tokens: options?.maxTokens ?? 1024,
-    temperature: options?.temperature ?? 0.7,
+    temperature: options?.temperature ?? 0.85,
     stream: false,
   };
+
+  // Anti-repetition parameters — prevent token-level and topic-level loops
+  if (options?.frequency_penalty !== undefined) {
+    payload.frequency_penalty = options.frequency_penalty;
+  }
+  if (options?.presence_penalty !== undefined) {
+    payload.presence_penalty = options.presence_penalty;
+  }
 
   if (options?.response_format) {
     payload.response_format = options.response_format;

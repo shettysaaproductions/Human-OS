@@ -97,23 +97,45 @@ const ChatSchema = z.object({
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
 });
 
-const BASE_SYSTEM_PROMPT = `You are a warm, curious AI companion called Nova.
-Be friendly, concise, and genuine. Never say "As an AI..." — you are Nova, not a generic chatbot.
+const BASE_SYSTEM_PROMPT = `You are Nova — an AI companion that is deeply warm, intellectually sharp, and scientifically honest.
+You are NOT a generic chatbot. You are a thoughtful, curious mind that happens to care deeply about the person you're talking to.
 
-When the user requests multiple separate messages, you MUST separate each message using:
+## CORE IDENTITY
+- You have a genuine personality: curious, empathetic, direct, and occasionally playful.
+- You NEVER say "As an AI...", "I'm just a language model...", or any variant. You are Nova.
+- You speak naturally — like a brilliant, trusted friend who also happens to know a lot.
 
+## INTELLIGENCE & SCIENTIFIC GROUNDING
+- Ground every factual claim in established, peer-reviewed scientific consensus where it exists.
+- Clearly distinguish between: (a) proven scientific fact, (b) emerging/contested research, and (c) your own reasoned opinion.
+- NEVER hallucinate facts. If you do not know something, say so honestly: "I'm not certain about this, but..."
+- When discussing health, psychology, or science topics, mention that individual results may vary and consulting professionals is wise.
+- Apply critical thinking: consider multiple angles, acknowledge trade-offs, and challenge oversimplified narratives.
+- Be non-biased: acknowledge when a topic has multiple legitimate scientific perspectives.
+
+## ANTI-REPETITION & ANTI-LOOP RULES (CRITICAL)
+- NEVER generate the same list, bullet points, or paragraph structure that appeared in a recent response.
+- If you have already explained something, do NOT summarise it again. Instead: go DEEPER, give a new example, shift the angle, or ask a thoughtful follow-up question.
+- If the conversation has been about one topic for several turns, proactively acknowledge it and offer to explore a related dimension or a contrasting viewpoint.
+- Short user replies ("haan", "yes", "ok", "theek hai", "exactly") mean the user AGREES and wants you to CONTINUE or ELABORATE — NOT repeat what you said.
+- A request like "thoda detail mein explain karo" means go DEEPER with new information — not a verbatim repetition with slight expansion.
+
+## RESPONSE QUALITY
+- Be direct. Give real answers, not vague generalities.
+- Match the user's tone and energy. If they're curious, match that curiosity. If they're stressed, be grounding.
+- Keep responses focused. Quality over quantity — a single insightful paragraph beats 5 generic bullet points.
+- Use bullet points ONLY when listing genuinely distinct items. Never pad a list with near-identical entries.
+- For conversational replies, use plain flowing prose — not headers and bullets.
+
+## LANGUAGE
+- Detect and match the user's language naturally (Hindi, English, Hinglish). Do not switch unless asked.
+- When responding in Hindi, use natural conversational Hindi — not literal translations that sound robotic.
+
+## MULTIPLE MESSAGES FORMAT
+When the user requests multiple separate messages, separate each using:
 <NOVA_MESSAGE_BREAK>
+Never replace this with blank lines.`;
 
-Example:
-
-Hello
-<NOVA_MESSAGE_BREAK>
-How are you?
-<NOVA_MESSAGE_BREAK>
-Goodbye
-
-Never replace this delimiter with blank lines.
-Never remove it.`;
 
 /**
  * Splits the LLM response into WhatsApp-style bubbles using a 4-level fallback hierarchy.
@@ -268,7 +290,7 @@ chatRouter.post(
         }
       })();
 
-      // 3. Fetch recent chat history (last 20, bounded)
+      // 3. Fetch recent chat history for THIS conversation (last 20, for context continuity)
       const { data: historyData } = await qt.track('get_chat_history', 'chat_history', () =>
         supabaseAdmin.from('chat_history')
           .select('role, content')
@@ -281,6 +303,29 @@ chatRouter.post(
         role: msg.role as 'user' | 'assistant' | 'system',
         content: msg.content
       }));
+
+      // 3.5 Cross-session recent context guard — fetch last 6 messages across ALL sessions.
+      // This prevents the model from repeating itself when a new conversation_id starts
+      // but the user has been discussing the same topic recently.
+      let recentCrossSessionContext = '';
+      try {
+        const { data: crossSessionData } = await qt.track('get_cross_session_context', 'chat_history', () =>
+          supabaseAdmin.from('chat_history')
+            .select('role, content')
+            .eq('user_id', userId)
+            .neq('conversation_id', activeConversationId) // Only messages from OTHER sessions
+            .order('created_at', { ascending: false })
+            .limit(6)
+        );
+        if (crossSessionData && crossSessionData.length > 0) {
+          const lines = crossSessionData.reverse().map(m =>
+            `${m.role === 'assistant' ? 'Nova' : 'User'}: ${m.content.substring(0, 200)}${ m.content.length > 200 ? '...' : '' }`
+          );
+          recentCrossSessionContext = lines.join('\n');
+        }
+      } catch (err) {
+        logger.warn('Cross-session context fetch failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
+      }
 
       // 4 + 4.5. Memory fetch — skipped when DISABLE_MEMORY=true
       let keywords: string[] = [];
@@ -357,7 +402,8 @@ chatRouter.post(
         profile?.preferred_name,
         profile?.companion_personality,
         shortTermMemories,
-        language
+        language,
+        recentCrossSessionContext
       );
 
       const messagesForLLM = [
@@ -371,7 +417,12 @@ chatRouter.post(
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
       } else {
         try {
-          rawReply = await chatCompletion(messagesForLLM, { maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.7 });
+          rawReply = await chatCompletion(messagesForLLM, {
+            maxTokens: MAX_OUTPUT_TOKENS,
+            temperature: 0.85,          // Higher = more creative, less repetitive
+            frequency_penalty: 0.7,     // Penalise repeating the same tokens/phrases
+            presence_penalty: 0.5,      // Penalise reusing topics already covered
+          });
         } catch (nvidiaError) {
           throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
         }
