@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.8",
+    "title": "✨ Smart Mode in Offline/Degraded Mode",
+    "message": [
+      "Fixed a bug where the backend running in Degraded Mode bypassed the new intelligence settings.",
+      "Nova will now maintain high temperature and anti-repetition rules even during server slowdowns."
+    ],
+    "date": "2026-07-06"
+  },
+  {
     "version": "1.2.7",
     "title": "✨ I'm much smarter now",
     "message": [
