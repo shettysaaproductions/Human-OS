@@ -204,6 +204,14 @@ export function ChatScreen() {
               </Text>
             )}
             <View style={s.timestampContainer}>
+              {item.chunkIndex && item.chunkTotal && (
+                <Text style={[
+                  s.chunkIndicatorText,
+                  isUser ? { color: colors.buttonText, opacity: 0.5 } : { color: colors.assistantText, opacity: 0.4 }
+                ]}>
+                  {item.chunkIndex}/{item.chunkTotal}
+                </Text>
+              )}
               <Text style={[
                 s.timestampText,
                 isUser ? { color: colors.buttonText, opacity: 0.7 } : { color: colors.assistantText, opacity: 0.6 }
@@ -451,11 +459,18 @@ const s = StyleSheet.create({
     overflow: 'hidden'
   },
   timestampContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-end',
     marginTop: 4,
     marginLeft: 12,
   },
   timestampText: {
     fontSize: 10,
+  },
+  chunkIndicatorText: {
+    fontSize: 10,
+    marginRight: 6,
+    fontWeight: '600',
   }
 });
