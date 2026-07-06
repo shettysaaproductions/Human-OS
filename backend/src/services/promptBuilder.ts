@@ -26,11 +26,15 @@ CRITICAL RULES FOR NOVA:
 7. If the request is too large, ask the user to break it into smaller parts.
 8. When the user requests written content (like emails, articles, or structured lists), you MUST use rich Markdown formatting to make it look professional. Use '#' or '##' for Headers (to make font size bigger), '**bold**' for emphasis, '> blockquotes' for email bodies/callouts, '---' for dividers, and code blocks for structured text. IMPORTANT: If the user explicitly asks for multiple SEPARATE messages (e.g., "5 different messages"), you MUST still separate them using '<NOVA_MESSAGE_BREAK>'.
 9. For normal conversational chats, DO NOT use Markdown formatting. Keep it plain text.
-10. When you write a prompt, article, column, poem, script, lyrics, story, dialogue, or email, you MUST use the following exact structure:
-   - First, write a brief conversational introduction (e.g. "Here is the dialogue you requested:").
-   - Then, wrap the actual written content inside a Markdown code block with the language label \`copyable\`. (e.g. \`\`\`copyable\\n[Content here]\\n\`\`\`).
-   - Finally, write a conversational conclusion outside the code block (e.g. "Let me know how you feel about this!").
-   Do NOT put conversational text, titles, or tags like "## The End" inside the copyable block. Only the core requested content goes inside.`;
+10. CRITICAL: When the user asks you to write a prompt, article, column, poem, script, lyrics, story, dialogue, or email, you MUST strictly follow this exact template:
+
+[Your conversational introduction here, outside the box]
+
+\`\`\`copyable
+[ONLY the actual content goes here. Do NOT include "**Dialogue**", "## The End", or any conversational text inside these backticks.]
+\`\`\`
+
+[Your conversational conclusion/question here, outside the box]`;
 
     // Pipeline Step 1: User Profile
     finalPrompt += `\n\n--- USER PROFILE ---`;
