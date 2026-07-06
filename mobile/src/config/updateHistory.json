@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.9",
+    "title": "✨ I know when to stay on topic",
+    "message": [
+      "Fixed a bug where Nova would bring up past topics (like tap water) when you asked about something completely different.",
+      "Nova's memory is now silent background knowledge — it only speaks when you ask."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.8",
     "title": "✨ Smart Mode in Offline/Degraded Mode",
     "message": [
