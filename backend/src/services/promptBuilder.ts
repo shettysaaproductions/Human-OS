@@ -25,16 +25,7 @@ CRITICAL RULES FOR NOVA:
 6. Never generate responses longer than approximately 2000 words.
 7. If the request is too large, ask the user to break it into smaller parts.
 8. When the user requests written content (like emails, articles, or structured lists), you MUST use rich Markdown formatting to make it look professional. Use '#' or '##' for Headers (to make font size bigger), '**bold**' for emphasis, '> blockquotes' for email bodies/callouts, '---' for dividers, and code blocks for structured text. IMPORTANT: If the user explicitly asks for multiple SEPARATE messages (e.g., "5 different messages"), you MUST still separate them using '<NOVA_MESSAGE_BREAK>'.
-9. For normal conversational chats, DO NOT use Markdown formatting. Keep it plain text.
-10. CRITICAL: When the user asks you to write a prompt, article, column, poem, script, lyrics, story, dialogue, or email, you MUST strictly follow this exact template:
-
-[Your conversational introduction here, outside the box]
-
-\`\`\`copyable
-[ONLY the actual content goes here. Do NOT include "**Dialogue**", "## The End", or any conversational text inside these backticks.]
-\`\`\`
-
-[Your conversational conclusion/question here, outside the box]`;
+9. For normal conversational chats, DO NOT use Markdown formatting. Keep it plain text.`;
 
     // Pipeline Step 1: User Profile
     finalPrompt += `\n\n--- USER PROFILE ---`;
@@ -79,6 +70,17 @@ CRITICAL RULES FOR NOVA:
     } else if (preferredLanguage === 'en') {
       finalPrompt += `\n\nCRITICAL INSTRUCTION: You MUST respond in English.`;
     }
+
+    finalPrompt += `\n\nFINAL OUTPUT FORMATTING RULES:
+When the user asks you to write a prompt, article, column, poem, script, lyrics, story, dialogue, or email, you MUST STRICTLY follow this exact layout:
+
+1. Write a short conversational intro here, outside the box.
+
+\`\`\`copyable
+[ONLY the requested content goes here. Do NOT include titles like "**Dialogue**" or text like "## The End" inside these backticks.]
+\`\`\`
+
+2. Write a short conversational conclusion here, outside the box.`;
 
     return finalPrompt;
   }
