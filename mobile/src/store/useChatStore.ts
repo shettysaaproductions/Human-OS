@@ -10,6 +10,8 @@ export interface Message {
   status: 'sending' | 'sent' | 'error';
   errorMessage?: string;
   timestamp: string;
+  chunkIndex?: number;
+  chunkTotal?: number;
 }
 
 export interface ChatDiagnostics {
@@ -153,9 +155,8 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (get().messages.length === 0) break;
 
             const c = chunksToDeliver[i];
-            const label = c.total > 1 ? `Part ${c.index} of ${c.total}\n\n` : '';
             const randomSuffix = Math.random().toString(36).substring(2, 7);
-            const content = label + c.content;
+            const content = c.content;
             
             set({ isTyping: true });
             
@@ -172,6 +173,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               content: content,
               status: 'sent',
               timestamp: new Date().toISOString(),
+              chunkIndex: c.total > 1 ? c.index : undefined,
+              chunkTotal: c.total > 1 ? c.total : undefined,
             };
             
             console.log(
@@ -243,13 +246,14 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (role === 'assistant' && msg.content.length > 1500) {
               const chunks = chunkText(msg.content);
               chunks.forEach((chunkContent, idx) => {
-                const label = chunks.length > 1 ? `Part ${idx + 1} of ${chunks.length}\n\n` : '';
                 formattedHistory.push({
                   id: `${msg.id}_part_${idx + 1}`,
                   role,
-                  content: label + chunkContent,
+                  content: chunkContent,
                   status: 'sent',
-                  timestamp
+                  timestamp,
+                  chunkIndex: chunks.length > 1 ? idx + 1 : undefined,
+                  chunkTotal: chunks.length > 1 ? chunks.length : undefined,
                 });
               });
             } else {
