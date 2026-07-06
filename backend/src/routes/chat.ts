@@ -369,7 +369,7 @@ chatRouter.post(
       // 7. Save AI response ONCE
       await qt.track('save_ai_response', 'chat_history', () =>
         supabaseAdmin.from('chat_history')
-          .insert({ user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: reply })
+          .insert({ user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: rawReply })
       );
 
       // Generate chunks for UI
