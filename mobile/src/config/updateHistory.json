@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.4",
+    "title": "✨ I've learned something new",
+    "message": [
+      "You can now long-press to select multiple messages and copy them.",
+      "You can now edit your past messages to correct typos.",
+      "Multi-message replies now show clean corner fraction indicators."
+    ],
+    "date": "2026-07-06"
+  },
+  {
     "version": "1.2.3",
     "title": "✨ I've learned something new",
     "message": [
