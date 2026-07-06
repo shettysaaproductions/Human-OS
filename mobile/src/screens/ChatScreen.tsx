@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
-  KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator
+  KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
+  Pressable
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -9,6 +10,7 @@ import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
+import * as Clipboard from 'expo-clipboard';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -57,6 +59,7 @@ export function ChatScreen() {
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [isReadyToRender, setIsReadyToRender] = useState(false);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const didTrackOpen = useRef(false);
   const isNearBottomRef = useRef(true);
@@ -169,7 +172,19 @@ export function ChatScreen() {
             </Text>
           </View>
         )}
-        <View style={[s.bubble, isUser ? s.userBubble : s.novaBubble]}>
+        <Pressable 
+          onLongPress={() => setSelectedMessageId(item.id)}
+          onPress={() => {
+            if (selectedMessageId) {
+              setSelectedMessageId(selectedMessageId === item.id ? null : item.id);
+            }
+          }}
+          style={[
+            s.bubbleContainer,
+            selectedMessageId === item.id && { backgroundColor: 'rgba(139, 92, 246, 0.15)' }
+          ]}
+        >
+          <View style={[s.bubble, isUser ? s.userBubble : s.novaBubble]}>
           {!isUser && (
             <View style={s.avatarDot} />
           )}
@@ -226,6 +241,7 @@ export function ChatScreen() {
             )}
           </View>
         </View>
+        </Pressable>
       </View>
     );
   }, [retryMessage, colors, reversedMessages, developerMode]);
@@ -246,25 +262,53 @@ export function ChatScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         {/* Header */}
-        <View style={[s.header, { borderBottomColor: colors.border }]}>
-          <View style={s.headerLeft}>
-            <View style={s.novaAvatar}>
-              <Text style={s.novaAvatarText}>N</Text>
+        {selectedMessageId ? (
+          <View style={[s.header, { borderBottomColor: colors.border, backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}>
+            <View style={s.headerLeft}>
+              <TouchableOpacity onPress={() => setSelectedMessageId(null)} style={s.headerBtn}>
+                <Text style={[s.headerBtnText, { color: colors.textPrimary }]}>✕</Text>
+              </TouchableOpacity>
+              <Text style={[s.headerTitle, { color: colors.textPrimary, marginLeft: 8 }]}>1 Selected</Text>
             </View>
-            <View>
-              <Text style={[s.headerTitle, { color: colors.textPrimary }]}>Nova</Text>
-              <Text style={[s.headerSubtitle, { color: colors.textSecondary }]}>Your AI companion</Text>
+            <View style={s.headerRight}>
+              <TouchableOpacity onPress={async () => {
+                const msg = reversedMessages.find(m => m.id === selectedMessageId);
+                if (msg) {
+                  await Clipboard.setStringAsync(msg.content);
+                  setSelectedMessageId(null);
+                }
+              }} style={s.headerBtn}>
+                <Text style={s.headerBtnText}>📋</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => {
+                // Future edit logic
+                setSelectedMessageId(null);
+              }} style={s.headerBtn}>
+                <Text style={s.headerBtnText}>✏️</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          <View style={s.headerRight}>
-            <TouchableOpacity onPress={() => navigation.navigate('Brain')} style={s.headerBtn}>
-              <Text style={s.headerBtnText}>🧠</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={s.headerBtn}>
-              <Text style={s.headerBtnText}>⚙️</Text>
-            </TouchableOpacity>
+        ) : (
+          <View style={[s.header, { borderBottomColor: colors.border }]}>
+            <View style={s.headerLeft}>
+              <View style={s.novaAvatar}>
+                <Text style={s.novaAvatarText}>N</Text>
+              </View>
+              <View>
+                <Text style={[s.headerTitle, { color: colors.textPrimary }]}>Nova</Text>
+                <Text style={[s.headerSubtitle, { color: colors.textSecondary }]}>Your AI companion</Text>
+              </View>
+            </View>
+            <View style={s.headerRight}>
+              <TouchableOpacity onPress={() => navigation.navigate('Brain')} style={s.headerBtn}>
+                <Text style={s.headerBtnText}>🧠</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={s.headerBtn}>
+                <Text style={s.headerBtnText}>⚙️</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Diagnostics Card */}
         {developerMode && diagnostics && (
@@ -401,7 +445,12 @@ const s = StyleSheet.create({
   headerBtn: { padding: 8 },
   headerBtnText: { fontSize: 20 },
   listContent: { padding: 16, paddingBottom: 8 },
-  bubble: { flexDirection: 'row', marginVertical: 4, alignItems: 'flex-end' },
+  bubbleContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 2,
+    marginHorizontal: -16,
+  },
+  bubble: { flexDirection: 'row', marginVertical: 2, alignItems: 'flex-end' },
   userBubble: { justifyContent: 'flex-end' },
   novaBubble: { justifyContent: 'flex-start', gap: 8 },
   avatarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#8B5CF6', marginBottom: 6 },

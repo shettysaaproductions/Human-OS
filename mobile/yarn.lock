@@ -2253,6 +2253,11 @@ expo-build-properties@~56.0.19:
     resolve-from "^5.0.0"
     semver "^7.6.0"
 
+expo-clipboard@^57.0.0:
+  version "57.0.0"
+  resolved "https://registry.npmjs.org/expo-clipboard/-/expo-clipboard-57.0.0.tgz"
+  integrity sha512-eIt47f6kvR33HOnIEWvs9l1AUAY4GeLY27szwamSuwRl7nntNythSFFbmnrEtiSUaz//y8XVqCG9WLpdMkOpjA==
+
 expo-constants@^56.0.18, expo-constants@~56.0.18, expo-constants@~56.0.19:
   version "56.0.19"
   resolved "https://registry.npmjs.org/expo-constants/-/expo-constants-56.0.19.tgz"
