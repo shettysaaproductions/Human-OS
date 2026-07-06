@@ -212,7 +212,12 @@ chatRouter.post(
             rawReply = await chatCompletion([
               { role: 'system', content: BASE_SYSTEM_PROMPT + '\n[Note: Running in degraded mode — some memories may be unavailable.]' },
               ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
-            ], { maxTokens: 1024, temperature: 0.7 });
+            ], {
+              maxTokens: 1024,
+              temperature: 0.85,
+              frequency_penalty: 0.7,
+              presence_penalty: 0.5,
+            });
           } catch (nvidiaError) {
             throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
           }
