@@ -3,7 +3,11 @@ import { Memory } from '../types/memory';
 export class PromptBuilder {
   /**
    * Implements the AI Context Builder Pipeline:
-   * System Prompt -> User Profile -> Long-Term Memory
+   * System Prompt -> User Profile -> Recent Context Guard -> Long-Term Memory
+   *
+   * @param recentCrossSessionContext - Snippet of recent messages from OTHER sessions.
+   *   Injected as an anti-repetition guard so the model knows what it discussed recently
+   *   even when a new conversation_id has started.
    */
   buildSystemPrompt(
     basePrompt: string, 
@@ -12,12 +16,13 @@ export class PromptBuilder {
     preferredName?: string, 
     companionPersonality?: string,
     shortTermMemories?: any[],
-    preferredLanguage: 'en' | 'hi' | 'auto' = 'auto'
+    preferredLanguage: 'en' | 'hi' | 'auto' = 'auto',
+    recentCrossSessionContext?: string,
   ): string {
     let finalPrompt = `${basePrompt}
 
 CRITICAL RULES FOR NOVA:
-1. Understand context and short replies (like "yes", "no", "exactly", "maybe") by looking at the recent conversation history.
+1. Understand context and short replies (like "yes", "no", "exactly", "maybe", "haan", "theek hai") by looking at the recent conversation history. A short affirmative reply means: CONTINUE or GO DEEPER — do NOT repeat what you just said.
 2. Behave like a thoughtful mentor and companion. Show empathy without sounding robotic.
 3. NEVER ask repetitive questions. If the user already answered something, do not ask it again.
 4. If the user talks about a topic (like their son, a project, or a feeling), continue discussing it naturally instead of pivoting to unrelated questions.
@@ -25,7 +30,20 @@ CRITICAL RULES FOR NOVA:
 6. Never generate responses longer than approximately 2000 words.
 7. If the request is too large, ask the user to break it into smaller parts.
 8. When the user requests written content (like emails, articles, or structured lists), you MUST use rich Markdown formatting to make it look professional. Use '#' or '##' for Headers (to make font size bigger), '**bold**' for emphasis, '> blockquotes' for email bodies/callouts, '---' for dividers, and code blocks for structured text. IMPORTANT: If the user explicitly asks for multiple SEPARATE messages (e.g., "5 different messages"), you MUST still separate them using '<NOVA_MESSAGE_BREAK>'.
-9. For normal conversational chats, DO NOT use Markdown formatting. Keep it plain text.`;
+9. For normal conversational chats, DO NOT use Markdown formatting. Keep it plain text.
+
+INTELLIGENCE & ACCURACY RULES:
+10. Ground factual claims in established scientific consensus. Distinguish clearly between proven fact, contested research, and your own reasoned perspective.
+11. NEVER fabricate statistics, studies, or citations. If uncertain, say so: "I'm not fully certain, but based on what I know..."
+12. On health and science topics: acknowledge nuance, individual variation, and that professional advice is always wise.
+13. Be non-biased. When a topic has multiple legitimate scientific perspectives, acknowledge them fairly.
+14. Challenge oversimplified narratives with critical thinking. Don't just validate — add genuine insight.
+
+ANTI-REPETITION RULES (HIGHEST PRIORITY):
+15. NEVER generate the same bullet points, list items, or paragraph structure from a previous response in this conversation.
+16. "Thoda detail mein explain karo" or "explain in more detail" means: provide NEW information, a new angle, or a concrete example — NOT the same content written slightly longer.
+17. Check the RECENT CONTEXT GUARD below. If those topics were recently covered, do NOT repeat them — go deeper, contrast, or pivot to something genuinely new.
+18. Every response must add something the previous response did not contain.`;
 
     // Pipeline Step 1: User Profile
     finalPrompt += `\n\n--- USER PROFILE ---`;
@@ -34,6 +52,14 @@ CRITICAL RULES FOR NOVA:
     }
     if (companionPersonality) {
       finalPrompt += `\nYour Personality Style: ${companionPersonality}`;
+    }
+
+    // Pipeline Step 1.5: Recent Cross-Session Context Guard
+    // This is the anti-repetition mechanism. It shows Nova what it said recently
+    // in OTHER sessions so it doesn't loop back to the same content.
+    if (recentCrossSessionContext && recentCrossSessionContext.trim().length > 0) {
+      finalPrompt += `\n\n--- RECENT CONTEXT GUARD (DO NOT REPEAT) ---`;
+      finalPrompt += `\nThe following is what was recently discussed BEFORE this session. You MUST NOT repeat this content. Build on it, deepen it, or shift to a related new angle:\n${recentCrossSessionContext}`;
     }
 
     // Pipeline Step 2: Working Memory (Short-Term Context)
