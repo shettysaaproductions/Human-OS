@@ -241,9 +241,25 @@ export function ChatScreen() {
                           <Text style={s.copyButtonText}>Copy</Text>
                         </TouchableOpacity>
                       </View>
-                      <Text style={[s.fenceContent, isCopyable ? { color: colors.assistantText, fontSize: 16, lineHeight: 24 } : { color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }]}>
-                        {content}
-                      </Text>
+                      <View style={s.fenceContent}>
+                        {isCopyable ? (
+                          <Markdown style={{
+                            body: { color: colors.assistantText, fontSize: 16, lineHeight: 24 },
+                            strong: { fontWeight: 'bold' },
+                            em: { fontStyle: 'italic' },
+                            heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
+                            heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
+                            heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
+                            blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+                          }}>
+                            {content}
+                          </Markdown>
+                        ) : (
+                          <Text style={{ color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                            {content}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                   );
                 }

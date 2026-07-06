@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.2.6",
+    "title": "✨ I've learned something new",
+    "message": [
+      "Gray boxes now support rich text formatting like **bold**, *italics*, and headers!"
+    ],
+    "date": "2026-07-06"
+  },
+  {
     "version": "1.2.5",
     "title": "✨ I've learned something new",
     "message": [
