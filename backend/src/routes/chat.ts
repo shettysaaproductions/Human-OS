@@ -126,7 +126,7 @@ function parseLLMResponse(rawReply: string): string[] {
   // Level 1: Explicit <NOVA_MESSAGE_BREAK>
   if (rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
     const segments = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
-    if (segments.length > 1) {
+    if (segments.length > 0) {
       return segments;
     }
   }
