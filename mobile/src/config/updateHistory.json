@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.5",
+    "title": "✨ I've learned something new",
+    "message": [
+      "Added beautifully styled gray boxes for stories, poems, and scripts.",
+      "Added a brand new 'Copy' button inside every code/text box!"
+    ],
+    "date": "2026-07-06"
+  },
+  {
     "version": "1.2.4",
     "title": "✨ I've learned something new",
     "message": [
