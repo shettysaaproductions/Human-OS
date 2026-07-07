@@ -329,7 +329,7 @@ function sanitizeContent(raw: string): string {
 
 
 // Top-level SmartMarkdown component that splits content into table/non-table segments
-function SmartMarkdown({ content, mdStyle, mdRules, colors }: { content: string; mdStyle: any; mdRules: any; colors: any }) {
+function SmartMarkdown({ content, mdStyle, mdRules, colors, onLongPress, onPress }: { content: string; mdStyle: any; mdRules: any; colors: any; onLongPress?: () => void; onPress?: () => void }) {
   const segments = useMemo(() => parseMarkdownWithTables(sanitizeContent(content)), [content]);
   return (
     <View>
@@ -339,9 +339,11 @@ function SmartMarkdown({ content, mdStyle, mdRules, colors }: { content: string;
         }
         if (seg.content.trim() === '') return null;
         return (
-          <Markdown key={idx} style={mdStyle} rules={mdRules}>
-            {seg.content}
-          </Markdown>
+          <Pressable key={idx} onLongPress={onLongPress} onPress={onPress} delayLongPress={150}>
+            <Markdown style={mdStyle} rules={mdRules}>
+              {seg.content}
+            </Markdown>
+          </Pressable>
         );
       })}
     </View>
@@ -480,16 +482,7 @@ export function ChatScreen() {
             </Text>
           </View>
         )}
-        <TouchableWithoutFeedback 
-          delayPressIn={150}
-          onLongPress={() => toggleSelectMessage(item.id)}
-          onPress={() => {
-            if (isSelectionMode) {
-              toggleSelectMessage(item.id);
-            }
-          }}
-        >
-          <View style={s.bubbleContainer}>
+        <View style={s.bubbleContainer}>
           {selectedMessageIds.includes(item.id) && (
             <View 
               pointerEvents="none" 
@@ -510,6 +503,12 @@ export function ChatScreen() {
               <SmartMarkdown
                 content={item.content}
                 colors={colors}
+                onLongPress={() => toggleSelectMessage(item.id)}
+                onPress={() => {
+                  if (isSelectionMode) {
+                    toggleSelectMessage(item.id);
+                  }
+                }}
                 mdStyle={{
                   body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
                   heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 12 },
@@ -573,12 +572,21 @@ export function ChatScreen() {
                 }}
               />
             ) : (
-              <Text style={[
-                s.messageText,
-                { color: colors.buttonText }
-              ]}>
-                {item.content}
-              </Text>
+              <Pressable
+                onLongPress={() => toggleSelectMessage(item.id)}
+                onPress={() => {
+                  if (isSelectionMode) {
+                    toggleSelectMessage(item.id);
+                  }
+                }}
+              >
+                <Text style={[
+                  s.messageText,
+                  { color: colors.buttonText }
+                ]}>
+                  {item.content}
+                </Text>
+              </Pressable>
             )}
             <View style={s.timestampContainer}>
               {item.chunkIndex && item.chunkTotal && (
@@ -604,7 +612,7 @@ export function ChatScreen() {
           </View>
           </View>
           </View>
-        </TouchableWithoutFeedback>
+          </View>
       </View>
     );
   }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage]);

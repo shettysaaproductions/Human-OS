@@ -1,15 +1,15 @@
 [
   {
-    "version": "1.2.24",
-    "title": "📜 Ultimate Android Table Scroll Fix",
+    "version": "1.2.25",
+    "title": "📜 Ultimate Table Scroll Fix (For Real)",
     "message": [
-      "We completely replaced the native scroll engine for tables with a high-performance gesture handler.",
-      "Horizontal scrolling on tables is now 100% guaranteed to work flawlessly, regardless of keyboard state."
+      "Removed all message-level touch wrappers to completely isolate the table's scroll engine.",
+      "Horizontal table scrolling is now definitively fixed on Android. To select a message, you must now long-press its text."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.23",
+    "version": "1.2.24",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
