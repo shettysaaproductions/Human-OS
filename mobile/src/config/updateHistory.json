@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.12",
+    "title": "🐛 Fixed Table & Gray Box Formatting",
+    "message": [
+      "Fixed a bug where bold text inside tables and gray boxes was still displaying raw asterisks.",
+      "The custom bold text renderer now applies everywhere!"
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.11",
     "title": "🐛 Fixed Bold Text Rendering",
     "message": [
