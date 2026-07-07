@@ -144,64 +144,112 @@ function CellText({ text, style }: { text: string; style: any }) {
   );
 }
 
-// The beautiful custom table component — ChatGPT style
+// Converts table data to plain text (tab-separated) for clipboard
+function tableToPlainText(headers: string[], rows: string[][]): string {
+  const headerLine = headers.join('\t');
+  const rowLines = rows.map(row => row.join('\t'));
+  return [headerLine, ...rowLines].join('\n');
+}
+
+// The beautiful custom table component — ChatGPT style with horizontal scroll + copy button
 function CustomTable({ headers, rows, colors }: { headers: string[]; rows: string[][]; colors: any }) {
-  const COL_MIN_WIDTH = 120;
+  const [copied, setCopied] = React.useState(false);
+  const COL_MIN_WIDTH = 130;
   const colWidth = Math.max(COL_MIN_WIDTH, 180);
   const tableWidth = headers.length * colWidth;
 
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(tableToPlainText(headers, rows));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator
-      bounces={false}
-      style={{ marginVertical: 10 }}
-      contentContainerStyle={{ flexDirection: 'column' }}
-    >
-      <View style={{
-        width: tableWidth,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: colors.border,
-        overflow: 'hidden',
-      }}>
-        {/* Header Row */}
-        <View style={{ flexDirection: 'row', backgroundColor: 'rgba(139,92,246,0.12)' }}>
-          {headers.map((h, ci) => (
-            <View key={ci} style={{
-              width: colWidth,
-              borderRightWidth: ci < headers.length - 1 ? 1 : 0,
-              borderRightColor: colors.border,
-              borderBottomWidth: 2,
-              borderBottomColor: colors.border,
-              padding: 10,
-            }}>
-              <CellText text={h} style={{ fontWeight: 'bold', fontSize: 14, color: colors.assistantText }} />
-            </View>
-          ))}
-        </View>
-        {/* Data Rows */}
-        {rows.map((row, ri) => (
-          <View key={ri} style={{
+    <View style={{ marginVertical: 10 }}>
+      {/* Copy button row above the table */}
+      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4, paddingRight: 2 }}>
+        <TouchableOpacity
+          onPress={handleCopy}
+          activeOpacity={0.7}
+          style={{
             flexDirection: 'row',
-            backgroundColor: ri % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.03)',
+            alignItems: 'center',
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            backgroundColor: copied ? 'rgba(34,197,94,0.15)' : 'rgba(139,92,246,0.12)',
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: copied ? 'rgba(34,197,94,0.4)' : 'rgba(139,92,246,0.3)',
+          }}
+        >
+          <Text style={{ fontSize: 11, marginRight: 4 }}>{copied ? '✅' : '📋'}</Text>
+          <Text style={{
+            fontSize: 11,
+            fontWeight: '700',
+            color: copied ? '#22C55E' : '#8B5CF6',
           }}>
-            {headers.map((_, ci) => (
+            {copied ? 'Copied!' : 'Copy table'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Horizontally scrollable table — nestedScrollEnabled fixes FlatList conflict */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={true}
+        bounces={false}
+        nestedScrollEnabled={true}
+        directionalLockEnabled={false}
+        scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{ flexDirection: 'column' }}
+      >
+        <View style={{
+          width: tableWidth,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: colors.border,
+          overflow: 'hidden',
+        }}>
+          {/* Header Row */}
+          <View style={{ flexDirection: 'row', backgroundColor: 'rgba(139,92,246,0.12)' }}>
+            {headers.map((h, ci) => (
               <View key={ci} style={{
                 width: colWidth,
                 borderRightWidth: ci < headers.length - 1 ? 1 : 0,
                 borderRightColor: colors.border,
-                borderBottomWidth: ri < rows.length - 1 ? 1 : 0,
+                borderBottomWidth: 2,
                 borderBottomColor: colors.border,
                 padding: 10,
               }}>
-                <CellText text={row[ci] ?? ''} style={{ fontSize: 14, color: colors.assistantText, lineHeight: 20 }} />
+                <CellText text={h} style={{ fontWeight: 'bold', fontSize: 14, color: colors.assistantText }} />
               </View>
             ))}
           </View>
-        ))}
-      </View>
-    </ScrollView>
+          {/* Data Rows */}
+          {rows.map((row, ri) => (
+            <View key={ri} style={{
+              flexDirection: 'row',
+              backgroundColor: ri % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.03)',
+            }}>
+              {headers.map((_, ci) => (
+                <View key={ci} style={{
+                  width: colWidth,
+                  borderRightWidth: ci < headers.length - 1 ? 1 : 0,
+                  borderRightColor: colors.border,
+                  borderBottomWidth: ri < rows.length - 1 ? 1 : 0,
+                  borderBottomColor: colors.border,
+                  padding: 10,
+                }}>
+                  <CellText text={row[ci] ?? ''} style={{ fontSize: 14, color: colors.assistantText, lineHeight: 20 }} />
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -454,7 +502,7 @@ export function ChatScreen() {
             s.bubbleInner,
             isUser
               ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4, maxWidth: '80%' }
-              : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4, maxWidth: '95%', minWidth: '60%' }
+              : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4, maxWidth: '95%', minWidth: '60%', overflow: 'visible' }
           ]}>
             {!isUser ? (
               <SmartMarkdown
