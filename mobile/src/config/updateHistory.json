@@ -1,15 +1,16 @@
 [
   {
-    "version": "1.2.28",
-    "title": "📜 Perfected Layouts & Scroll Indicators",
+    "version": "1.2.29",
+    "title": "📜 Ultimate Scrollbar Inset Fix",
     "message": [
-      "Fixed an issue where the input bar was hidden behind the keyboard on some Android devices.",
-      "Added fading edge effects and robust viewport padding to tables so horizontal scrollbars render flawlessly."
+      "Removed the fading edge (blur) effect from the tables.",
+      "Shifted the main chat scrollbar inwards slightly so it is no longer hidden by the phone's physical screen bezel.",
+      "Fixed Android scrollbar clipping inside tables by enforcing clipToPadding=false."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.27",
+    "version": "1.2.28",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",

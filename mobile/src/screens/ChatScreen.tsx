@@ -199,14 +199,15 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
         horizontal
         showsHorizontalScrollIndicator={true}
         persistentScrollbar={true}
-        fadingEdgeLength={50}
+        indicatorStyle={colors.background === '#1A1A1A' ? 'white' : 'black'}
         bounces={false}
         nestedScrollEnabled={true}
         directionalLockEnabled={false}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
-        style={{ flexGrow: 0, paddingBottom: 16 }}
+        style={{ flexGrow: 0, paddingBottom: 10 }}
         contentContainerStyle={{ flexDirection: 'column' }}
+        clipToPadding={false}
       >
         <View style={{
           width: tableWidth,
@@ -722,6 +723,8 @@ export function ChatScreen() {
             inverted
             data={reversedMessages}
             showsVerticalScrollIndicator={true}
+            style={{ paddingRight: 4 }}
+            indicatorStyle={colors.background === '#1A1A1A' ? 'white' : 'black'}
             extraData={selectedMessageIds}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
