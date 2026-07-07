@@ -412,6 +412,23 @@ export function ChatScreen() {
   const isNearBottomRef = useRef(true);
   const isInitialScrollRef = useRef(true);
   const currentOffsetRef = useRef(0);
+  
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const showScrollDownRef = useRef(false);
+
+  useEffect(() => {
+    const listenerId = mainScrollY.addListener(({ value }) => {
+      currentOffsetRef.current = value;
+      isNearBottomRef.current = value < 100;
+      
+      const shouldShow = value > 250;
+      if (shouldShow !== showScrollDownRef.current) {
+        showScrollDownRef.current = shouldShow;
+        setShowScrollDown(shouldShow);
+      }
+    });
+    return () => mainScrollY.removeListener(listenerId);
+  }, [mainScrollY]);
 
   const logEvent = (eventName: string, explicitOffset?: number) => {
     const offset = explicitOffset !== undefined ? explicitOffset : currentOffsetRef.current;
@@ -839,6 +856,37 @@ export function ChatScreen() {
               <ActivityIndicator size="large" color="#8B5CF6" />
               <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing local companion database...</Text>
             </View>
+          )}
+
+          {/* Scroll to Bottom FAB */}
+          {showScrollDown && (
+            <Animated.View style={{
+              position: 'absolute',
+              bottom: 12,
+              right: 16,
+              zIndex: 100,
+            }}>
+              <TouchableOpacity
+                onPress={() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: colors.background === '#1A1A1A' ? '#2A2A2A' : '#FFFFFF',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 6,
+                  elevation: 5,
+                  borderWidth: 1,
+                  borderColor: colors.border
+                }}
+              >
+                <Text style={{ fontSize: 20, color: colors.textSecondary, marginTop: -2 }}>↓</Text>
+              </TouchableOpacity>
+            </Animated.View>
           )}
         </View>
 
