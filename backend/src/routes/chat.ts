@@ -204,50 +204,55 @@ function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] 
 }
 
 /**
+ * Cleans a single table cell's content to plain text.
+ * Handles all garbage the LLM may produce: markdown images, bare URLs,
+ * complete HTML tags, UNCLOSED HTML tags (e.g. <img src="), backslashes, etc.
+ */
+function sanitizeTableCell(cell: string): string {
+  let c = cell;
+  // 1. Remove markdown images/links: ![alt](url) and ! [alt](url) and [alt](url)
+  c = c.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
+  // 2. Remove bare URLs (http / https)
+  c = c.replace(/https?:\/\/\S+/g, '');
+  // 3. Remove HTML tags — including UNCLOSED ones like <img src="  (no closing >)
+  //    Regex: < followed by a letter/slash, then anything up to > or end-of-string
+  c = c.replace(/<[a-zA-Z\/][^>]*/g, '');
+  c = c.replace(/>/g, ''); // stray closing >
+  // 4. Remove all backslashes
+  c = c.replace(/\\/g, '');
+  // 5. Remove lone ! symbols left after image stripping
+  c = c.replace(/!/g, '');
+  // 6. Remove empty brackets [] and empty parens ()
+  c = c.replace(/\[\s*\]/g, '').replace(/\(\s*\)/g, '');
+  // 7. Normalize whitespace
+  return c.replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Post-processes the raw LLM reply to sanitize any table corruption.
- *
- * BUG FIXES applied here:
- * 1. isTableLine only checks startsWith('|') — AI garbage rows end with URLs not '|',
- *    so the old endsWith('|') check was silently skipping the worst rows.
- * 2. Regex covers both '![alt](url)' AND '! [alt](url)' (space between ! and [).
- * 3. Strips lone '!' and empty '[]' left behind after URL removal.
+ * Uses a cell-by-cell approach so unclosed HTML, partial URLs, and other
+ * per-cell garbage cannot survive regardless of row structure.
  */
 function sanitizeMarkdown(raw: string): string {
   const lines = raw.split('\n');
   const cleaned = lines.map(line => {
     const trimmed = line.trim();
-    // FIX 1: Only require startsWith('|') — don't require endsWith('|')
-    // because malformed AI rows end with image URLs, not a closing pipe.
-    const isTableLine = trimmed.startsWith('|');
-    if (isTableLine) {
-      let l = line;
-      // FIX 2: Handle both ![alt](url) and ! [alt](url) (optional space after !)
-      l = l.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
-      // Remove bare URLs (http/https) — catches anything the above missed
-      l = l.replace(/https?:\/\/\S+/g, '');
-      // Remove HTML tags
-      l = l.replace(/<[^>]+>/g, '');
-      // Remove escaped pipes \|
-      l = l.replace(/\\\|/g, '|');
-      // Remove backslashes before letters
-      l = l.replace(/\\([a-zA-Z_>])/g, '$1');
-      // FIX 3: Remove lone '!' characters left behind after image stripping
-      l = l.replace(/!\s*/g, '');
-      // Remove empty brackets [] left after URL stripping
-      l = l.replace(/\[\s*\]/g, '');
-      // Remove empty parens () left behind
-      l = l.replace(/\(\s*\)/g, '');
-      // Collapse multiple spaces between pipes
-      l = l.replace(/\|\s{2,}/g, '| ').replace(/\s{2,}\|/g, ' |');
-      // Ensure the row ends with | (normalize malformed rows)
-      const lt = l.trim();
-      if (lt.startsWith('|') && !lt.endsWith('|')) l = l.trimEnd() + ' |';
-      return l;
+    // ANY line starting with | is treated as a table row
+    if (trimmed.startsWith('|')) {
+      // Split by | and clean each cell individually
+      const parts = line.split('|');
+      const sanitizedParts = parts.map(cell => sanitizeTableCell(cell));
+      // Reconstruct with proper | separators
+      let result = sanitizedParts.join(' | ').replace(/\|\s*\|/g, '|');
+      // Normalize leading/trailing structure
+      result = '| ' + sanitizedParts.filter((_, i) => i > 0 && i < parts.length - 1).join(' | ') + ' |';
+      return result;
     }
-    // For non-table lines: strip HTML and fix escaped pipes
+    // Non-table lines: strip HTML (including unclosed) and fix escaped pipes
     return line
       .replace(/<br\s*\/?>\s*/gi, '\n')
-      .replace(/<[^>]+>/g, '')
+      .replace(/<[a-zA-Z\/][^>]*/g, '')
+      .replace(/>/g, '')
       .replace(/\\\|/g, '|');
   });
   return cleaned.join('\n');
