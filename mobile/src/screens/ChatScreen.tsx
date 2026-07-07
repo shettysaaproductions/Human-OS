@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
-  Pressable, ScrollView
+  Pressable, ScrollView, TouchableWithoutFeedback
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -165,10 +165,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
   };
 
   return (
-    <View 
-      style={{ marginVertical: 10 }}
-      onTouchStart={(e) => e.stopPropagation()}
-    >
+    <View style={{ marginVertical: 10 }}>
       {/* Copy button row above the table */}
       <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4, paddingRight: 2 }}>
         <TouchableOpacity
@@ -200,13 +197,12 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={true}
-        persistentScrollbar={true}
         bounces={false}
         nestedScrollEnabled={true}
         directionalLockEnabled={false}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
-        style={{ flexGrow: 0, paddingBottom: 8 }}
+        style={{ flexGrow: 0 }}
         contentContainerStyle={{ flexDirection: 'column' }}
       >
         <View style={{
@@ -483,7 +479,7 @@ export function ChatScreen() {
             </Text>
           </View>
         )}
-        <Pressable 
+        <TouchableWithoutFeedback 
           delayPressIn={150}
           onLongPress={() => toggleSelectMessage(item.id)}
           onPress={() => {
@@ -491,8 +487,8 @@ export function ChatScreen() {
               toggleSelectMessage(item.id);
             }
           }}
-          style={s.bubbleContainer}
         >
+          <View style={s.bubbleContainer}>
           {selectedMessageIds.includes(item.id) && (
             <View 
               pointerEvents="none" 
@@ -605,8 +601,8 @@ export function ChatScreen() {
               </TouchableOpacity>
             )}
           </View>
-        </View>
-        </Pressable>
+          </View>
+        </TouchableWithoutFeedback>
       </View>
     );
   }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage]);
