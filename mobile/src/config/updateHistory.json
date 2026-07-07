@@ -1,15 +1,14 @@
 [
   {
-    "version": "1.2.30",
-    "title": "🎨 Beautiful Custom Scrollbars",
+    "version": "1.2.31",
+    "title": "🚨 Hotfix: App Crash",
     "message": [
-      "Completely replaced the thin native Android scrollbars with beautiful, thick, custom-animated purple scrollbars for both the main chat and all tables.",
-      "Scrollbars are now impossible to miss and perfectly match Nova's premium aesthetic."
+      "Fixed an import error that caused the app to crash immediately after the previous scrollbar update."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.29",
+    "version": "1.2.30",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
