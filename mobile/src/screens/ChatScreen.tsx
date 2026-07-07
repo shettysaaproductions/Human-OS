@@ -197,6 +197,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={true}
+        persistentScrollbar={true}
         bounces={false}
         nestedScrollEnabled={true}
         directionalLockEnabled={false}
@@ -480,6 +481,7 @@ export function ChatScreen() {
           </View>
         )}
         <Pressable 
+          delayPressIn={150}
           onLongPress={() => toggleSelectMessage(item.id)}
           onPress={() => {
             if (isSelectionMode) {
@@ -743,6 +745,7 @@ export function ChatScreen() {
             updateCellsBatchingPeriod={50}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
+            keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               <View style={s.emptyChat}>
                 <Text style={s.emptyChatEmoji}>🌌</Text>
