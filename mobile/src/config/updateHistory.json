@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.21",
+    "title": "📜 Table Scroll & Copy Fixes",
+    "message": [
+      "Fixed horizontal scrolling on tables when the keyboard is closed.",
+      "Added a persistent horizontal scrollbar to tables.",
+      "Added a convenient 'Copy table' button to copy table data directly."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.20",
     "title": "🏗️ NOVA_TABLE — New Table Engine",
     "message": [
