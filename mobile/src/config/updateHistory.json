@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.16",
+    "title": "🛡️ Table Sanitizer Shield",
+    "message": [
+      "Added a triple-layer protection system to prevent AI from generating broken table content.",
+      "Nova's instructions now have nuclear-level bans on images, HTML, and URLs inside tables.",
+      "A backend sanitizer and a client-side sanitizer both clean output before it reaches you."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.15",
     "title": "🏆 Pro-Level Table Rendering",
     "message": [

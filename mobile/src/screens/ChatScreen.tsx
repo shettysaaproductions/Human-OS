@@ -205,9 +205,32 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
   );
 }
 
+// Client-side last-resort sanitizer for markdown content
+function sanitizeContent(raw: string): string {
+  return raw
+    .split('\n')
+    .map(line => {
+      const trimmed = line.trim();
+      const isTableLine = trimmed.startsWith('|') && trimmed.endsWith('|');
+      if (isTableLine) {
+        return line
+          .replace(/!\[[^\]]*\]\([^)]*\)/g, '')   // remove ![alt](url)
+          .replace(/https?:\/\/\S+/g, '')           // remove bare URLs
+          .replace(/<[^>]+>/g, '')                   // remove HTML tags
+          .replace(/\\\|/g, '|')                     // fix \| → |
+          .replace(/\\([a-zA-Z_>])/g, '$1');         // fix other escaped chars
+      }
+      return line
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\\\|/g, '|');
+    })
+    .join('\n');
+}
+
 // Top-level SmartMarkdown component that splits content into table/non-table segments
 function SmartMarkdown({ content, mdStyle, mdRules, colors }: { content: string; mdStyle: any; mdRules: any; colors: any }) {
-  const segments = useMemo(() => parseMarkdownWithTables(content), [content]);
+  const segments = useMemo(() => parseMarkdownWithTables(sanitizeContent(content)), [content]);
   return (
     <View>
       {segments.map((seg, idx) => {
