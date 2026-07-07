@@ -1,15 +1,15 @@
 [
   {
-    "version": "1.2.33",
-    "title": "🎨 Apple-Style Premium Scrollbars",
+    "version": "1.2.34",
+    "title": "⏬ Scroll-to-Bottom Button",
     "message": [
-      "Changed the custom scrollbar color from purple to a sleek, premium, neutral gray that perfectly matches Apple's operating systems.",
-      "Automatically adjusts for both light mode and dark mode."
+      "Added a new Telegram-style floating arrow button that appears when you scroll up.",
+      "Fixed an annoying bug that forcefully yanked you to the bottom when new messages arrived while you were reading history."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.32",
+    "version": "1.2.33",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
