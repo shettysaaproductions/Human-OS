@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.20",
+    "title": "🏗️ NOVA_TABLE — New Table Engine",
+    "message": [
+      "Complete rethink: Nova now outputs tables in a custom format, not raw markdown.",
+      "The app converts this to clean, perfectly structured tables every time.",
+      "No more broken rows, HTML garbage, or empty cells from icon images."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.19",
     "title": "✅ Smart Yes/No Table Decoder",
     "message": [
