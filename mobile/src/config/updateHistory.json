@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.22",
+    "title": "📜 Final Table Scroll Fixes",
+    "message": [
+      "Completely isolated table touch events — scrolling is now buttery smooth whether the keyboard is open or closed.",
+      "Fixed a bug where the horizontal scrollbar was clipped and hidden on Android devices."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.21",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [

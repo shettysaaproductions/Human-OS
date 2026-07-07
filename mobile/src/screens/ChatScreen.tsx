@@ -165,7 +165,10 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
   };
 
   return (
-    <View style={{ marginVertical: 10 }}>
+    <View 
+      style={{ marginVertical: 10 }}
+      onTouchStart={(e) => e.stopPropagation()}
+    >
       {/* Copy button row above the table */}
       <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4, paddingRight: 2 }}>
         <TouchableOpacity
@@ -203,7 +206,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
         directionalLockEnabled={false}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
-        style={{ flexGrow: 0 }}
+        style={{ flexGrow: 0, paddingBottom: 8 }}
         contentContainerStyle={{ flexDirection: 'column' }}
       >
         <View style={{
