@@ -1,14 +1,14 @@
 [
   {
-    "version": "1.2.31",
-    "title": "🚨 Hotfix: App Crash",
+    "version": "1.2.32",
+    "title": "🚨 Hotfix: Event Pooling Crash",
     "message": [
-      "Fixed an import error that caused the app to crash immediately after the previous scrollbar update."
+      "Fixed a React Native SyntheticEvent pooling crash that occurred when extracting layout data during the scrollbar initialization."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.30",
+    "version": "1.2.31",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
