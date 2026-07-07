@@ -199,13 +199,14 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
         horizontal
         showsHorizontalScrollIndicator={true}
         persistentScrollbar={true}
+        fadingEdgeLength={50}
         bounces={false}
         nestedScrollEnabled={true}
         directionalLockEnabled={false}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
-        style={{ flexGrow: 0 }}
-        contentContainerStyle={{ flexDirection: 'column', paddingBottom: 12 }}
+        style={{ flexGrow: 0, paddingBottom: 16 }}
+        contentContainerStyle={{ flexDirection: 'column' }}
       >
         <View style={{
           width: tableWidth,
@@ -629,8 +630,8 @@ export function ChatScreen() {
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={[s.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         {/* Header */}
         {isSelectionMode ? (
