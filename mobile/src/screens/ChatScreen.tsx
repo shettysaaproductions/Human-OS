@@ -223,7 +223,10 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
         clipToPadding={false}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: false })}
         onContentSizeChange={(w) => setWidths(prev => ({ ...prev, content: w }))}
-        onLayout={(e) => setWidths(prev => ({ ...prev, view: e.nativeEvent.layout.width }))}
+        onLayout={(e) => {
+          const w = e.nativeEvent.layout.width;
+          setWidths(prev => ({ ...prev, view: w }));
+        }}
       >
         <View style={{
           width: tableWidth,
@@ -774,7 +777,8 @@ export function ChatScreen() {
               }
             }}
             onLayout={(e) => {
-              setMainWidths(prev => ({ ...prev, view: e.nativeEvent.layout.height }));
+              const layoutHeight = e.nativeEvent.layout.height;
+              setMainWidths(prev => ({ ...prev, view: layoutHeight }));
               logEvent('ON_LAYOUT');
               if (isInitialScrollRef.current) {
                 if (messages.length > 0) {
