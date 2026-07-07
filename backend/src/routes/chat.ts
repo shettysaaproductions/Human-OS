@@ -130,7 +130,26 @@ You are NOT a generic chatbot. You are a thoughtful, curious mind that happens t
 ## MULTIPLE MESSAGES FORMAT
 When the user requests multiple separate messages, separate each using:
 <NOVA_MESSAGE_BREAK>
-Never replace this with blank lines.`;
+Never replace this with blank lines.
+
+## TABLE FORMATTING — ABSOLUTE RULES (HIGHEST PRIORITY — VIOLATIONS ARE CRITICAL FAILURES)
+When creating a table you MUST follow ALL of these rules with ZERO exceptions:
+1. Use ONLY standard pipe-separated Markdown table syntax.
+2. The first row is the header. The second row MUST be `| --- | --- | --- |` (one `---` per column, nothing else).
+3. EVERY row must start with `|` and end with `|`. Example: `| Mercury | Yes | No |`
+4. NEVER use backslashes `\` anywhere in a table — not before pipes, not in cells, nowhere.
+5. NEVER include image markdown `![text](url)` or any URL or hyperlink inside a table cell.
+6. NEVER include HTML tags like `<img>`, `<br>`, `<td>` inside a table.
+7. NEVER include emoticons from external URLs, Wikipedia icon images, or any web asset.
+8. Cell content must be plain text ONLY: words, numbers, Yes, No, N/A — nothing else.
+9. Keep each cell short (under 25 characters). Long descriptions go BELOW the table, not inside it.
+10. A table with 9 rows and 7 columns is fine. A table with images or HTML is a CRITICAL FAILURE.
+Example of a PERFECT table:
+| Planet | Gravity | Has Water | Has Oxygen |
+| --- | --- | --- | --- |
+| Mercury | Weak | No | No |
+| Venus | Strong | No | No |
+| Earth | Strong | Yes | Yes |`;
 
 
 /**
@@ -179,7 +198,41 @@ function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] 
   return rawReply.trim() ? [rawReply.trim()] : [];
 }
 
-// ── Route handler ─────────────────────────────────────────────────────────────
+/**
+ * Post-processes the raw LLM reply to sanitize any table corruption.
+ * Strips: markdown images, HTML tags, bare URLs in table rows, leading backslashes before pipes.
+ */
+function sanitizeMarkdown(raw: string): string {
+  const lines = raw.split('\n');
+  const cleaned = lines.map(line => {
+    const trimmed = line.trim();
+    const isTableLine = trimmed.startsWith('|') && trimmed.endsWith('|');
+    if (isTableLine) {
+      let l = line;
+      // Remove markdown images: ![alt](url)
+      l = l.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+      // Remove bare URLs (http/https links)
+      l = l.replace(/https?:\/\/[^\s|)]+/g, '');
+      // Remove HTML tags
+      l = l.replace(/<[^>]+>/g, '');
+      // Remove leading backslashes before pipes \|
+      l = l.replace(/\\\|/g, '|');
+      // Remove any backslash before a letter (escaped markdown)
+      l = l.replace(/\\([a-zA-Z_>])/g, '$1');
+      // Collapse multiple spaces inside cells
+      l = l.replace(/\|\s{2,}/g, '| ').replace(/\s{2,}\|/g, ' |');
+      return l;
+    }
+    // For non-table lines, still strip HTML and fix escaped backslashes
+    return line
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\\\|/g, '|');
+  });
+  return cleaned.join('\n');
+}
+
+
 chatRouter.post(
   '/',
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -219,7 +272,7 @@ chatRouter.post(
           }
         }
 
-        const messages = parseLLMResponse(rawReply, message);
+        const messages = parseLLMResponse(sanitizeMarkdown(rawReply), message);
         const reply = messages.join('\n\n');
 
         const textChunks = messages.flatMap(m => chunkResponse(m));
@@ -429,7 +482,7 @@ chatRouter.post(
         }
       }
 
-      const parsedMessages = parseLLMResponse(rawReply, message);
+      const parsedMessages = parseLLMResponse(sanitizeMarkdown(rawReply), message);
       const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE
