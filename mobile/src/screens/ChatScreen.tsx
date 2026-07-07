@@ -612,7 +612,6 @@ export function ChatScreen() {
           </View>
           </View>
           </View>
-          </View>
       </View>
     );
   }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage]);
