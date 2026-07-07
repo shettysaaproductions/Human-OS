@@ -207,24 +207,30 @@ function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] 
  * Cleans a single table cell's content to plain text.
  * Handles all garbage the LLM may produce: markdown images, bare URLs,
  * complete HTML tags, UNCLOSED HTML tags (e.g. <img src="), backslashes, etc.
+ * Also converts Wikipedia Yes/No icon images to actual 'Yes' / 'No' text.
  */
 function sanitizeTableCell(cell: string): string {
   let c = cell;
-  // 1. Remove markdown images/links: ![alt](url) and ! [alt](url) and [alt](url)
+  // Step 0: Convert known Yes/No icon image URLs to plain text BEFORE stripping.
+  // The AI uses Wikipedia checkmark/X icons to represent Yes/No — decode them.
+  c = c.replace(/!?\s*\[[^\]]*\]\(https?:\/\/[^)]*(?:green|yes|check|tick|correct)[^)]*\)/gi, 'Yes');
+  c = c.replace(/!?\s*\[[^\]]*\]\(https?:\/\/[^)]*(?:red|nope|\bno\b|x_icon|wrong|false|cross)[^)]*\)/gi, 'No');
+  c = c.replace(/!?\s*\[[^\]]*\]\(https?:\/\/[^)]*(?:question|unknown|maybe|partial)[^)]*\)/gi, 'Partial');
+  // Step 1. Remove remaining markdown images/links: ![alt](url) and ! [alt](url) and [alt](url)
   c = c.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
-  // 2. Remove bare URLs (http / https)
+  // Step 2. Remove bare URLs (http / https)
   c = c.replace(/https?:\/\/\S+/g, '');
-  // 3. Remove HTML tags — including UNCLOSED ones like <img src="  (no closing >)
+  // Step 3. Remove HTML tags — including UNCLOSED ones like <img src="  (no closing >)
   //    Regex: < followed by a letter/slash, then anything up to > or end-of-string
   c = c.replace(/<[a-zA-Z\/][^>]*/g, '');
   c = c.replace(/>/g, ''); // stray closing >
-  // 4. Remove all backslashes
+  // Step 4. Remove all backslashes
   c = c.replace(/\\/g, '');
-  // 5. Remove lone ! symbols left after image stripping
+  // Step 5. Remove lone ! symbols left after image stripping
   c = c.replace(/!/g, '');
-  // 6. Remove empty brackets [] and empty parens ()
+  // Step 6. Remove empty brackets [] and empty parens ()
   c = c.replace(/\[\s*\]/g, '').replace(/\(\s*\)/g, '');
-  // 7. Normalize whitespace
+  // Step 7. Normalize whitespace
   return c.replace(/\s+/g, ' ').trim();
 }
 
