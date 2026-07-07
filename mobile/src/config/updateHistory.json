@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.2.11",
+    "title": "🐛 Fixed Bold Text Rendering",
+    "message": [
+      "Fixed an issue where **bold** text with newlines inside them would render as raw asterisks."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.10",
     "title": "🐛 Fixed List Formatting Bug",
     "message": [
