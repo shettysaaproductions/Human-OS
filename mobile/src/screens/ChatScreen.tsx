@@ -206,25 +206,31 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
 }
 
 // Cleans a single table cell — mirrors backend sanitizeTableCell exactly.
+// Also converts Wikipedia Yes/No icon images to actual 'Yes' / 'No' text.
 function sanitizeTableCell(cell: string): string {
   let c = cell;
-  // Remove markdown images/links: ![alt](url), ! [alt](url), [alt](url)
+  // Step 0: Convert known Yes/No icon image URLs to plain text BEFORE stripping.
+  // The AI uses Wikipedia checkmark/X icons — we decode them to readable text.
+  c = c.replace(/!?\s*\[[^\]]*\]\(https?:\/\/[^)]*(?:green|yes|check|tick|correct)[^)]*\)/gi, 'Yes');
+  c = c.replace(/!?\s*\[[^\]]*\]\(https?:\/\/[^)]*(?:red|nope|\bno\b|x_icon|wrong|false|cross)[^)]*\)/gi, 'No');
+  c = c.replace(/!?\s*\[[^\]]*\]\(https?:\/\/[^)]*(?:question|unknown|maybe|partial)[^)]*\)/gi, 'Partial');
+  // Step 1. Remove remaining markdown images/links
   c = c.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
-  // Remove bare URLs
+  // Step 2. Remove bare URLs
   c = c.replace(/https?:\/\/\S+/g, '');
-  // CRITICAL FIX: catch UNCLOSED HTML tags like <img src=" (no closing >)
-  // Old regex /<[^>]+>/g required a closing > — this one does not.
+  // Step 3. Remove HTML tags including UNCLOSED (e.g. <img src=" has no closing >)
   c = c.replace(/<[a-zA-Z/][^>]*/g, '');
   c = c.replace(/>/g, ''); // stray closing >
-  // Remove all backslashes
+  // Step 4. Remove all backslashes
   c = c.replace(/\\/g, '');
-  // Remove lone !
+  // Step 5. Remove lone !
   c = c.replace(/!/g, '');
-  // Remove empty brackets and parens
+  // Step 6. Remove empty brackets and parens
   c = c.replace(/\[\s*\]/g, '').replace(/\(\s*\)/g, '');
-  // Normalize whitespace
+  // Step 7. Normalize whitespace
   return c.replace(/\s+/g, ' ').trim();
 }
+
 
 // Client-side last-resort sanitizer — cell-by-cell approach, immune to unclosed HTML.
 function sanitizeContent(raw: string): string {

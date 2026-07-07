@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.19",
+    "title": "✅ Smart Yes/No Table Decoder",
+    "message": [
+      "Nova sometimes uses icon images for Yes/No — we now decode them to actual text.",
+      "Green checkmark icons → Yes. Red X icons → No.",
+      "Tables now show real data instead of empty cells."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.18",
     "title": "🔬 Table Cell-by-Cell Sanitizer",
     "message": [
