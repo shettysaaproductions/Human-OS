@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.18",
+    "title": "🔬 Table Cell-by-Cell Sanitizer",
+    "message": [
+      "Fixed the root cause: unclosed HTML like <img src= now correctly stripped.",
+      "Every table cell is individually cleaned before rendering.",
+      "Tables can no longer be polluted by partial or garbage HTML from Nova."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.17",
     "title": "🔧 Table Renderer Deep Fix",
     "message": [

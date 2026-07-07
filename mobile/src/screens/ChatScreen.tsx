@@ -205,42 +205,42 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
   );
 }
 
-// Client-side last-resort sanitizer for markdown content
-// MIRRORS the backend sanitizeMarkdown fixes exactly.
+// Cleans a single table cell — mirrors backend sanitizeTableCell exactly.
+function sanitizeTableCell(cell: string): string {
+  let c = cell;
+  // Remove markdown images/links: ![alt](url), ! [alt](url), [alt](url)
+  c = c.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
+  // Remove bare URLs
+  c = c.replace(/https?:\/\/\S+/g, '');
+  // CRITICAL FIX: catch UNCLOSED HTML tags like <img src=" (no closing >)
+  // Old regex /<[^>]+>/g required a closing > — this one does not.
+  c = c.replace(/<[a-zA-Z/][^>]*/g, '');
+  c = c.replace(/>/g, ''); // stray closing >
+  // Remove all backslashes
+  c = c.replace(/\\/g, '');
+  // Remove lone !
+  c = c.replace(/!/g, '');
+  // Remove empty brackets and parens
+  c = c.replace(/\[\s*\]/g, '').replace(/\(\s*\)/g, '');
+  // Normalize whitespace
+  return c.replace(/\s+/g, ' ').trim();
+}
+
+// Client-side last-resort sanitizer — cell-by-cell approach, immune to unclosed HTML.
 function sanitizeContent(raw: string): string {
   return raw
     .split('\n')
     .map(line => {
       const trimmed = line.trim();
-      // FIX 1: Only require startsWith('|') — AI garbage rows end with URLs not '|'
-      const isTableLine = trimmed.startsWith('|');
-      if (isTableLine) {
-        let l = line;
-        // FIX 2: Handle both ![alt](url) AND ! [alt](url) (optional space after !)
-        l = l.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
-        // Remove bare URLs
-        l = l.replace(/https?:\/\/\S+/g, '');
-        // Remove HTML tags
-        l = l.replace(/<[^>]+>/g, '');
-        // Fix \|
-        l = l.replace(/\\\|/g, '|');
-        // Fix other escaped chars
-        l = l.replace(/\\([a-zA-Z_>])/g, '$1');
-        // FIX 3: Remove lone '!' left behind after image stripping
-        l = l.replace(/!\s*/g, '');
-        // Remove empty brackets and parens
-        l = l.replace(/\[\s*\]/g, '');
-        l = l.replace(/\(\s*\)/g, '');
-        // Collapse multiple spaces between pipes
-        l = l.replace(/\|\s{2,}/g, '| ').replace(/\s{2,}\|/g, ' |');
-        // Normalize: ensure row ends with |
-        const lt = l.trim();
-        if (lt.startsWith('|') && !lt.endsWith('|')) l = l.trimEnd() + ' |';
-        return l;
+      if (trimmed.startsWith('|')) {
+        const parts = line.split('|');
+        const sanitizedParts = parts.map(cell => sanitizeTableCell(cell));
+        return '| ' + sanitizedParts.filter((_, i) => i > 0 && i < parts.length - 1).join(' | ') + ' |';
       }
       return line
         .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
+        .replace(/<[a-zA-Z/][^>]*/g, '') // catches unclosed HTML too
+        .replace(/>/g, '')
         .replace(/\\\|/g, '|');
     })
     .join('\n');
