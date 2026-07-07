@@ -11,6 +11,7 @@ import { api } from '../services/api';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -194,7 +195,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
       </View>
 
       {/* Horizontally scrollable table — nestedScrollEnabled fixes FlatList conflict */}
-      <ScrollView
+      <GHScrollView
         horizontal
         showsHorizontalScrollIndicator={true}
         bounces={false}
@@ -248,7 +249,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
             </View>
           ))}
         </View>
-      </ScrollView>
+      </GHScrollView>
     </View>
   );
 }
