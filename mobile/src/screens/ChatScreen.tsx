@@ -61,17 +61,11 @@ const customTextRule = (node: any, children: any, parent: any, styles: any) => {
   content = content.replace(/\\\*\\\*/g, '**');
   
   if (content.includes('**')) {
-    // We split by **. Every odd index is inside **, every even index is outside.
-    // If the string doesn't end with **, the last element will be unbolded unless we treat it as bold.
     const parts = content.split('**');
-    
-    // If there is only one '**', parts length is 2. The second part should be bold.
     return (
       <Text key={node.key} style={styles.text}>
         {parts.map((part: string, index: number) => {
           if (part.length === 0) return null;
-          // If the AI forgot to close the asterisks at the end of the text node,
-          // the index will be odd and it's the last element.
           const isBold = index % 2 !== 0; 
           if (isBold) {
             return (
@@ -87,6 +81,149 @@ const customTextRule = (node: any, children: any, parent: any, styles: any) => {
   }
   return <Text key={node.key} style={styles.text}>{content}</Text>;
 };
+
+// ─── Custom Markdown Table Parser ───────────────────────────────────────────
+// Splits raw markdown into segments: either plain text or detected table blocks.
+// This avoids relying on react-native-markdown-display's buggy table renderer.
+type Segment = { type: 'markdown'; content: string } | { type: 'table'; headers: string[]; rows: string[][] };
+
+function parseMarkdownWithTables(raw: string): Segment[] {
+  const lines = raw.split('\n');
+  const segments: Segment[] = [];
+  let i = 0;
+  let mdBuffer: string[] = [];
+
+  const flushMd = () => {
+    if (mdBuffer.length > 0) {
+      segments.push({ type: 'markdown', content: mdBuffer.join('\n') });
+      mdBuffer = [];
+    }
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+    // A table line is one that starts and ends with a pipe (after trim)
+    const isTableLine = (l: string) => l.trim().startsWith('|') && l.trim().endsWith('|');
+    const isSeparatorLine = (l: string) => /^\|[\s|:-]+\|$/.test(l.trim());
+
+    if (isTableLine(line) && i + 1 < lines.length && isSeparatorLine(lines[i + 1])) {
+      flushMd();
+      // Parse header
+      const headerCells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+      const tableRows: string[][] = [];
+      i += 2; // skip header and separator
+      while (i < lines.length && isTableLine(lines[i])) {
+        const rowCells = lines[i].trim().slice(1, -1).split('|').map(c => c.trim());
+        tableRows.push(rowCells);
+        i++;
+      }
+      segments.push({ type: 'table', headers: headerCells, rows: tableRows });
+    } else {
+      mdBuffer.push(line);
+      i++;
+    }
+  }
+  flushMd();
+  return segments;
+}
+
+// Renders a single cell's text content, handling **bold** markers
+function CellText({ text, style }: { text: string; style: any }) {
+  if (!text.includes('**')) {
+    return <Text style={style}>{text}</Text>;
+  }
+  const parts = text.split('**');
+  return (
+    <Text style={style}>
+      {parts.map((part, idx) =>
+        idx % 2 !== 0
+          ? <Text key={idx} style={[style, { fontWeight: 'bold' }]}>{part}</Text>
+          : <Text key={idx}>{part}</Text>
+      )}
+    </Text>
+  );
+}
+
+// The beautiful custom table component — ChatGPT style
+function CustomTable({ headers, rows, colors }: { headers: string[]; rows: string[][]; colors: any }) {
+  const COL_MIN_WIDTH = 120;
+  const colWidth = Math.max(COL_MIN_WIDTH, 180);
+  const tableWidth = headers.length * colWidth;
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator
+      bounces={false}
+      style={{ marginVertical: 10 }}
+      contentContainerStyle={{ flexDirection: 'column' }}
+    >
+      <View style={{
+        width: tableWidth,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: colors.border,
+        overflow: 'hidden',
+      }}>
+        {/* Header Row */}
+        <View style={{ flexDirection: 'row', backgroundColor: 'rgba(139,92,246,0.12)' }}>
+          {headers.map((h, ci) => (
+            <View key={ci} style={{
+              width: colWidth,
+              borderRightWidth: ci < headers.length - 1 ? 1 : 0,
+              borderRightColor: colors.border,
+              borderBottomWidth: 2,
+              borderBottomColor: colors.border,
+              padding: 10,
+            }}>
+              <CellText text={h} style={{ fontWeight: 'bold', fontSize: 14, color: colors.assistantText }} />
+            </View>
+          ))}
+        </View>
+        {/* Data Rows */}
+        {rows.map((row, ri) => (
+          <View key={ri} style={{
+            flexDirection: 'row',
+            backgroundColor: ri % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.03)',
+          }}>
+            {headers.map((_, ci) => (
+              <View key={ci} style={{
+                width: colWidth,
+                borderRightWidth: ci < headers.length - 1 ? 1 : 0,
+                borderRightColor: colors.border,
+                borderBottomWidth: ri < rows.length - 1 ? 1 : 0,
+                borderBottomColor: colors.border,
+                padding: 10,
+              }}>
+                <CellText text={row[ci] ?? ''} style={{ fontSize: 14, color: colors.assistantText, lineHeight: 20 }} />
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+// Top-level SmartMarkdown component that splits content into table/non-table segments
+function SmartMarkdown({ content, mdStyle, mdRules, colors }: { content: string; mdStyle: any; mdRules: any; colors: any }) {
+  const segments = useMemo(() => parseMarkdownWithTables(content), [content]);
+  return (
+    <View>
+      {segments.map((seg, idx) => {
+        if (seg.type === 'table') {
+          return <CustomTable key={idx} headers={seg.headers} rows={seg.rows} colors={colors} />;
+        }
+        if (seg.content.trim() === '') return null;
+        return (
+          <Markdown key={idx} style={mdStyle} rules={mdRules}>
+            {seg.content}
+          </Markdown>
+        );
+      })}
+    </View>
+  );
+}
 
 export function ChatScreen() {
   const navigation = useNavigation<any>();
@@ -246,95 +383,71 @@ export function ChatScreen() {
               : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4, maxWidth: '95%', minWidth: '60%' }
           ]}>
             {!isUser ? (
-              <Markdown style={{
-                body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
-                heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 12 },
-                heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 10 },
-                heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
-                strong: { fontWeight: 'bold', color: colors.assistantText },
-                em: { fontStyle: 'italic', color: colors.assistantText },
-                u: { textDecorationLine: 'underline' },
-                blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
-                code_block: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
-                hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 },
-                list_item: { flexShrink: 1 },
-                bullet_list_content: { flexShrink: 1 },
-                ordered_list_content: { flexShrink: 1 },
-                table: { borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
-                th: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)', width: 160 },
-                td: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, width: 160 }
-              }}
-              rules={{
-                table: (node, children, parent, styles) => (
-                  <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} bounces={false} style={{ marginVertical: 8 }}>
-                    <View style={styles.table}>
-                      {children}
-                    </View>
-                  </ScrollView>
-                ),
-                fence: (node, children, parent, styles) => {
-                  const content = node.content;
-                  const language = node.sourceInfo;
-                  const isCopyable = language === 'copyable';
-                  
-                  return (
-                    <View key={node.key} style={s.fenceContainer}>
-                      <View style={s.fenceHeader}>
-                        <Text style={s.fenceLanguage}>{isCopyable ? 'Content' : (language || 'Code')}</Text>
-                        <TouchableOpacity 
-                          style={s.copyButton}
-                          onPress={async () => {
-                            await Clipboard.setStringAsync(content);
-                          }}
-                        >
-                          <Text style={s.copyButtonText}>Copy</Text>
-                        </TouchableOpacity>
+              <SmartMarkdown
+                content={item.content}
+                colors={colors}
+                mdStyle={{
+                  body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
+                  heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 12 },
+                  heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 10 },
+                  heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
+                  strong: { fontWeight: 'bold', color: colors.assistantText },
+                  em: { fontStyle: 'italic', color: colors.assistantText },
+                  u: { textDecorationLine: 'underline' },
+                  blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+                  code_block: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
+                  hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 },
+                  list_item: { flexShrink: 1 },
+                  bullet_list_content: { flexShrink: 1 },
+                  ordered_list_content: { flexShrink: 1 },
+                }}
+                mdRules={{
+                  fence: (node: any, _c: any, _p: any, _s: any) => {
+                    const content = node.content;
+                    const language = node.sourceInfo;
+                    const isCopyable = language === 'copyable';
+                    return (
+                      <View key={node.key} style={s.fenceContainer}>
+                        <View style={s.fenceHeader}>
+                          <Text style={s.fenceLanguage}>{isCopyable ? 'Content' : (language || 'Code')}</Text>
+                          <TouchableOpacity
+                            style={s.copyButton}
+                            onPress={async () => { await Clipboard.setStringAsync(content); }}
+                          >
+                            <Text style={s.copyButtonText}>Copy</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={s.fenceContent}>
+                          {isCopyable ? (
+                            <SmartMarkdown
+                              content={content}
+                              colors={colors}
+                              mdStyle={{
+                                body: { color: colors.assistantText, fontSize: 16, lineHeight: 24 },
+                                strong: { fontWeight: 'bold' },
+                                em: { fontStyle: 'italic' },
+                                heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
+                                heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
+                                heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
+                                blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+                              }}
+                              mdRules={{ text: customTextRule }}
+                            />
+                          ) : (
+                            <Text style={{ color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                              {content}
+                            </Text>
+                          )}
+                        </View>
                       </View>
-                      <View style={s.fenceContent}>
-                        {isCopyable ? (
-                          <Markdown style={{
-                            body: { color: colors.assistantText, fontSize: 16, lineHeight: 24 },
-                            strong: { fontWeight: 'bold' },
-                            em: { fontStyle: 'italic' },
-                            heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
-                            heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
-                            heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
-                            blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
-                            table: { borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
-                            th: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)', width: 160 },
-                            td: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, width: 160 }
-                          }} rules={{ 
-                            text: customTextRule,
-                            table: (node, children, parent, styles) => (
-                              <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} bounces={false} style={{ marginVertical: 8 }}>
-                                <View style={styles.table}>
-                                  {children}
-                                </View>
-                              </ScrollView>
-                            )
-                          }}>
-                            {content}
-                          </Markdown>
-                        ) : (
-                          <Text style={{ color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-                            {content}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                  );
-                },
-                textgroup: (node, children, parent, styles) => {
-                  return (
-                    <Text key={node.key} style={styles.textgroup}>
-                      {children}
-                    </Text>
-                  );
-                },
-                text: customTextRule
-              }}>
-                {item.content}
-              </Markdown>
+                    );
+                  },
+                  textgroup: (node: any, children: any, _p: any, styles: any) => (
+                    <Text key={node.key} style={styles.textgroup}>{children}</Text>
+                  ),
+                  text: customTextRule,
+                }}
+              />
             ) : (
               <Text style={[
                 s.messageText,
