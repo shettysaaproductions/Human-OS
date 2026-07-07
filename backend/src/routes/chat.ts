@@ -140,11 +140,11 @@ Never replace this with blank lines.
 ## TABLE FORMATTING — ABSOLUTE RULES (HIGHEST PRIORITY — VIOLATIONS ARE CRITICAL FAILURES)
 When creating a table you MUST follow ALL of these rules with ZERO exceptions:
 1. Use ONLY standard pipe-separated Markdown table syntax.
-2. The first row is the header. The second row MUST be `| --- | --- | --- |` (one `---` per column, nothing else).
-3. EVERY row must start with `|` and end with `|`. Example: `| Mercury | Yes | No |`
-4. NEVER use backslashes `\` anywhere in a table — not before pipes, not in cells, nowhere.
-5. NEVER include image markdown `![text](url)` or any URL or hyperlink inside a table cell.
-6. NEVER include HTML tags like `<img>`, `<br>`, `<td>` inside a table.
+2. The first row is the header. The second row MUST be | --- | --- | --- | (one --- per column, nothing else).
+3. EVERY row must start with | and end with |. Example: | Mercury | Yes | No |
+4. NEVER use backslashes anywhere in a table — not before pipes, not in cells, nowhere.
+5. NEVER include image markdown or any URL or hyperlink inside a table cell.
+6. NEVER include HTML tags like img, br, td inside a table.
 7. NEVER include emoticons from external URLs, Wikipedia icon images, or any web asset.
 8. Cell content must be plain text ONLY: words, numbers, Yes, No, N/A — nothing else.
 9. Keep each cell short (under 25 characters). Long descriptions go BELOW the table, not inside it.
