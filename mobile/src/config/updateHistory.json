@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.14",
+    "title": "📜 Horizontally Scrollable Tables",
+    "message": [
+      "Tables now support horizontal scrolling!",
+      "If a table is too wide to fit on your screen, you can simply swipe left and right on the table to see the rest of the columns, just like in ChatGPT."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.13",
     "title": "✨ Better Table Formatting",
     "message": [

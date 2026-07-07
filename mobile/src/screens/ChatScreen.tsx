@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
-  Pressable
+  Pressable, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -260,11 +260,18 @@ export function ChatScreen() {
                 list_item: { flexShrink: 1 },
                 bullet_list_content: { flexShrink: 1 },
                 ordered_list_content: { flexShrink: 1 },
-                table: { width: '100%', borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
-                th: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)' },
-                td: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border }
+                table: { borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
+                th: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)', width: 160 },
+                td: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, width: 160 }
               }}
               rules={{
+                table: (node, children, parent, styles) => (
+                  <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} bounces={false} style={{ marginVertical: 8 }}>
+                    <View style={styles.table}>
+                      {children}
+                    </View>
+                  </ScrollView>
+                ),
                 fence: (node, children, parent, styles) => {
                   const content = node.content;
                   const language = node.sourceInfo;
@@ -293,10 +300,19 @@ export function ChatScreen() {
                             heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
                             heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
                             blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
-                            table: { width: '100%', borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
-                            th: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)' },
-                            td: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border }
-                          }} rules={{ text: customTextRule }}>
+                            table: { borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
+                            th: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)', width: 160 },
+                            td: { padding: 8, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, width: 160 }
+                          }} rules={{ 
+                            text: customTextRule,
+                            table: (node, children, parent, styles) => (
+                              <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} bounces={false} style={{ marginVertical: 8 }}>
+                                <View style={styles.table}>
+                                  {children}
+                                </View>
+                              </ScrollView>
+                            )
+                          }}>
                             {content}
                           </Markdown>
                         ) : (
