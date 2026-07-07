@@ -52,6 +52,42 @@ async function trackEvent(event_type: string, event_data?: object) {
   } catch {}
 }
 
+// Custom text rule to robustly handle bold text even if linebreaks break the parser, 
+// or if AI forgets to close the bold tags in narrow table cells.
+const customTextRule = (node: any, children: any, parent: any, styles: any) => {
+  let content = node.content;
+  if (!content) return <Text key={node.key} style={styles.text}>{content}</Text>;
+  
+  content = content.replace(/\\\*\\\*/g, '**');
+  
+  if (content.includes('**')) {
+    // We split by **. Every odd index is inside **, every even index is outside.
+    // If the string doesn't end with **, the last element will be unbolded unless we treat it as bold.
+    const parts = content.split('**');
+    
+    // If there is only one '**', parts length is 2. The second part should be bold.
+    return (
+      <Text key={node.key} style={styles.text}>
+        {parts.map((part: string, index: number) => {
+          if (part.length === 0) return null;
+          // If the AI forgot to close the asterisks at the end of the text node,
+          // the index will be odd and it's the last element.
+          const isBold = index % 2 !== 0; 
+          if (isBold) {
+            return (
+              <Text key={index} style={{ fontWeight: 'bold', color: styles.body?.color || '#000' }}>
+                {part}
+              </Text>
+            );
+          }
+          return <Text key={index}>{part}</Text>;
+        })}
+      </Text>
+    );
+  }
+  return <Text key={node.key} style={styles.text}>{content}</Text>;
+};
+
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
@@ -254,7 +290,7 @@ export function ChatScreen() {
                             heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
                             heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
                             blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
-                          }}>
+                          }} rules={{ text: customTextRule }}>
                             {content}
                           </Markdown>
                         ) : (
@@ -273,31 +309,7 @@ export function ChatScreen() {
                     </Text>
                   );
                 },
-                text: (node, children, parent, styles) => {
-                  let content = node.content;
-                  // If content contains escaped asterisks \*\* or unparsed **, force bolding manually.
-                  // We'll replace \*\* with ** first if they exist.
-                  content = content.replace(/\\\*\\\*/g, '**');
-                  
-                  if (content.includes('**')) {
-                    const parts = content.split(/(\*\*[\s\S]*?\*\*)/g);
-                    return (
-                      <Text key={node.key} style={styles.text}>
-                        {parts.map((part, index) => {
-                          if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-                            return (
-                              <Text key={index} style={{ fontWeight: 'bold', color: styles.body?.color || '#000' }}>
-                                {part.slice(2, -2)}
-                              </Text>
-                            );
-                          }
-                          return <Text key={index}>{part}</Text>;
-                        })}
-                      </Text>
-                    );
-                  }
-                  return <Text key={node.key} style={styles.text}>{content}</Text>;
-                }
+                text: customTextRule
               }}>
                 {item.content}
               </Markdown>
