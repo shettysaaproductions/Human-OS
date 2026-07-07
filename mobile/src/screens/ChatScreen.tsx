@@ -165,6 +165,21 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
     setTimeout(() => setCopied(false), 1800);
   };
 
+  const scrollX = React.useRef(new Animated.Value(0)).current;
+  const [widths, setWidths] = React.useState({ content: 1, view: 1 });
+
+  const { content: cw, view: vw } = widths;
+  const showScrollbar = cw > vw;
+  const thumbWidth = Math.max((vw / cw) * vw, 30);
+  const maxScrollX = cw - vw;
+  const maxThumbX = vw - thumbWidth;
+  
+  const thumbTranslateX = scrollX.interpolate({
+    inputRange: [0, Math.max(maxScrollX, 1)],
+    outputRange: [0, Math.max(maxThumbX, 0)],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View style={{ marginVertical: 10 }}>
       {/* Copy button row above the table */}
@@ -197,17 +212,18 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
       {/* Horizontally scrollable table — nestedScrollEnabled fixes FlatList conflict */}
       <ScrollView
         horizontal
-        showsHorizontalScrollIndicator={true}
-        persistentScrollbar={true}
-        indicatorStyle={colors.background === '#1A1A1A' ? 'white' : 'black'}
+        showsHorizontalScrollIndicator={false}
         bounces={false}
         nestedScrollEnabled={true}
         directionalLockEnabled={false}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
-        style={{ flexGrow: 0, paddingBottom: 10 }}
+        style={{ flexGrow: 0 }}
         contentContainerStyle={{ flexDirection: 'column' }}
         clipToPadding={false}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: false })}
+        onContentSizeChange={(w) => setWidths(prev => ({ ...prev, content: w }))}
+        onLayout={(e) => setWidths(prev => ({ ...prev, view: e.nativeEvent.layout.width }))}
       >
         <View style={{
           width: tableWidth,
@@ -253,6 +269,19 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
           ))}
         </View>
       </ScrollView>
+
+      {/* Custom Table Scrollbar */}
+      {showScrollbar && (
+        <View style={{ height: 6, width: '100%', backgroundColor: 'rgba(139,92,246,0.15)', borderRadius: 3, marginTop: 8 }}>
+          <Animated.View style={{
+            height: '100%',
+            width: thumbWidth,
+            backgroundColor: 'rgba(139,92,246,0.6)',
+            borderRadius: 3,
+            transform: [{ translateX: thumbTranslateX }]
+          }} />
+        </View>
+      )}
     </View>
   );
 }
@@ -362,6 +391,8 @@ export function ChatScreen() {
   const [isReadyToRender, setIsReadyToRender] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const flatListRef = useRef<FlatList>(null);
+  const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
+  const mainScrollY = React.useRef(new Animated.Value(0)).current;
 
   const isSelectionMode = selectedMessageIds.length > 0;
   
@@ -722,16 +753,14 @@ export function ChatScreen() {
             ref={flatListRef}
             inverted
             data={reversedMessages}
-            showsVerticalScrollIndicator={true}
-            style={{ paddingRight: 4 }}
-            indicatorStyle={colors.background === '#1A1A1A' ? 'white' : 'black'}
+            showsVerticalScrollIndicator={false}
             extraData={selectedMessageIds}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onContentSizeChange={() => {
+            onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: mainScrollY } } }], { useNativeDriver: false })}
+            onContentSizeChange={(w, h) => {
+              setMainWidths(prev => ({ ...prev, content: h }));
               logEvent('ON_CONTENT_SIZE_CHANGE');
               if (isInitialScrollRef.current) {
                 if (messages.length > 0) {
@@ -744,7 +773,8 @@ export function ChatScreen() {
                 flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
               }
             }}
-            onLayout={() => {
+            onLayout={(e) => {
+              setMainWidths(prev => ({ ...prev, view: e.nativeEvent.layout.height }));
               logEvent('ON_LAYOUT');
               if (isInitialScrollRef.current) {
                 if (messages.length > 0) {
@@ -768,6 +798,38 @@ export function ChatScreen() {
               </View>
             }
           />
+
+          {/* Custom Main Chat Scrollbar */}
+          {mainWidths.content > mainWidths.view && (
+            <View style={{
+              position: 'absolute',
+              right: 2,
+              top: 4,
+              bottom: 4,
+              width: 6,
+              backgroundColor: 'rgba(139,92,246,0.1)',
+              borderRadius: 3,
+              pointerEvents: 'none',
+              zIndex: 10
+            }}>
+              <Animated.View style={{
+                position: 'absolute',
+                bottom: 0,
+                width: '100%',
+                height: Math.max((mainWidths.view / mainWidths.content) * mainWidths.view, 40),
+                backgroundColor: 'rgba(139,92,246,0.5)',
+                borderRadius: 3,
+                transform: [{
+                  translateY: mainScrollY.interpolate({
+                    inputRange: [0, Math.max(mainWidths.content - mainWidths.view, 1)],
+                    outputRange: [0, -Math.max(mainWidths.view - Math.max((mainWidths.view / mainWidths.content) * mainWidths.view, 40), 0)],
+                    extrapolate: 'clamp',
+                  })
+                }]
+              }} />
+            </View>
+          )}
+
           {!isReadyToRender && (
             <View style={[StyleSheet.absoluteFill, s.centerContainer, { backgroundColor: colors.background }]}>
               <ActivityIndicator size="large" color="#8B5CF6" />

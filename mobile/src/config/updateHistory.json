@@ -1,16 +1,15 @@
 [
   {
-    "version": "1.2.29",
-    "title": "📜 Ultimate Scrollbar Inset Fix",
+    "version": "1.2.30",
+    "title": "🎨 Beautiful Custom Scrollbars",
     "message": [
-      "Removed the fading edge (blur) effect from the tables.",
-      "Shifted the main chat scrollbar inwards slightly so it is no longer hidden by the phone's physical screen bezel.",
-      "Fixed Android scrollbar clipping inside tables by enforcing clipToPadding=false."
+      "Completely replaced the thin native Android scrollbars with beautiful, thick, custom-animated purple scrollbars for both the main chat and all tables.",
+      "Scrollbars are now impossible to miss and perfectly match Nova's premium aesthetic."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.28",
+    "version": "1.2.29",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
