@@ -242,8 +242,8 @@ export function ChatScreen() {
           <View style={[
             s.bubbleInner,
             isUser
-              ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4 }
-              : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4 }
+              ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4, maxWidth: '80%' }
+              : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4, maxWidth: '95%', minWidth: '60%' }
           ]}>
             {!isUser ? (
               <Markdown style={{
@@ -259,7 +259,10 @@ export function ChatScreen() {
                 hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 },
                 list_item: { flexShrink: 1 },
                 bullet_list_content: { flexShrink: 1 },
-                ordered_list_content: { flexShrink: 1 }
+                ordered_list_content: { flexShrink: 1 },
+                table: { width: '100%', borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
+                th: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)' },
+                td: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border }
               }}
               rules={{
                 fence: (node, children, parent, styles) => {
@@ -290,6 +293,9 @@ export function ChatScreen() {
                             heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
                             heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
                             blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+                            table: { width: '100%', borderColor: colors.border, borderWidth: 1, borderRadius: 4, marginVertical: 8 },
+                            th: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.05)' },
+                            td: { padding: 6, borderBottomWidth: 1, borderRightWidth: 1, borderColor: colors.border }
                           }} rules={{ text: customTextRule }}>
                             {content}
                           </Markdown>
@@ -566,7 +572,7 @@ const s = StyleSheet.create({
   userBubble: { justifyContent: 'flex-end' },
   novaBubble: { justifyContent: 'flex-start', gap: 8 },
   avatarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#8B5CF6', marginBottom: 6 },
-  bubbleInner: { maxWidth: '80%', padding: 12, borderRadius: 18 },
+  bubbleInner: { padding: 12, borderRadius: 18 },
   messageText: { fontSize: 16, lineHeight: 22 },
   retryButton: { marginTop: 6 },
   retryText: { color: '#F59E0B', fontSize: 12, fontWeight: '600' },

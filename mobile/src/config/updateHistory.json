@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.13",
+    "title": "✨ Better Table Formatting",
+    "message": [
+      "AI chat bubbles now expand to 95% of the screen width to give tables more room.",
+      "Tables now automatically expand to fill 100% of the bubble's width, eliminating empty space."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.12",
     "title": "🐛 Fixed Table & Gray Box Formatting",
     "message": [
