@@ -602,6 +602,7 @@ export function ChatScreen() {
             )}
           </View>
           </View>
+          </View>
         </TouchableWithoutFeedback>
       </View>
     );
