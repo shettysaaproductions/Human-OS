@@ -35,7 +35,12 @@ function isExcessiveRequest(message: string): boolean {
   return false;
 }
 
-function chunkResponse(text: string): string[] {
+function chunkResponse(text: string, preserveTables: boolean = false): string[] {
+  // CRITICAL: Never split a response that contains a markdown table.
+  // Splitting a table across bubbles destroys the renderer.
+  const hasTable = /^\|.+/m.test(text);
+  if (hasTable || preserveTables) return [text];
+
   if (text.length <= MAX_CHARS_PER_CHUNK) return [text];
 
   const chunks: string[] = [];
@@ -200,38 +205,53 @@ function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] 
 
 /**
  * Post-processes the raw LLM reply to sanitize any table corruption.
- * Strips: markdown images, HTML tags, bare URLs in table rows, leading backslashes before pipes.
+ *
+ * BUG FIXES applied here:
+ * 1. isTableLine only checks startsWith('|') — AI garbage rows end with URLs not '|',
+ *    so the old endsWith('|') check was silently skipping the worst rows.
+ * 2. Regex covers both '![alt](url)' AND '! [alt](url)' (space between ! and [).
+ * 3. Strips lone '!' and empty '[]' left behind after URL removal.
  */
 function sanitizeMarkdown(raw: string): string {
   const lines = raw.split('\n');
   const cleaned = lines.map(line => {
     const trimmed = line.trim();
-    const isTableLine = trimmed.startsWith('|') && trimmed.endsWith('|');
+    // FIX 1: Only require startsWith('|') — don't require endsWith('|')
+    // because malformed AI rows end with image URLs, not a closing pipe.
+    const isTableLine = trimmed.startsWith('|');
     if (isTableLine) {
       let l = line;
-      // Remove markdown images: ![alt](url)
-      l = l.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
-      // Remove bare URLs (http/https links)
-      l = l.replace(/https?:\/\/[^\s|)]+/g, '');
+      // FIX 2: Handle both ![alt](url) and ! [alt](url) (optional space after !)
+      l = l.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
+      // Remove bare URLs (http/https) — catches anything the above missed
+      l = l.replace(/https?:\/\/\S+/g, '');
       // Remove HTML tags
       l = l.replace(/<[^>]+>/g, '');
-      // Remove leading backslashes before pipes \|
+      // Remove escaped pipes \|
       l = l.replace(/\\\|/g, '|');
-      // Remove any backslash before a letter (escaped markdown)
+      // Remove backslashes before letters
       l = l.replace(/\\([a-zA-Z_>])/g, '$1');
-      // Collapse multiple spaces inside cells
+      // FIX 3: Remove lone '!' characters left behind after image stripping
+      l = l.replace(/!\s*/g, '');
+      // Remove empty brackets [] left after URL stripping
+      l = l.replace(/\[\s*\]/g, '');
+      // Remove empty parens () left behind
+      l = l.replace(/\(\s*\)/g, '');
+      // Collapse multiple spaces between pipes
       l = l.replace(/\|\s{2,}/g, '| ').replace(/\s{2,}\|/g, ' |');
+      // Ensure the row ends with | (normalize malformed rows)
+      const lt = l.trim();
+      if (lt.startsWith('|') && !lt.endsWith('|')) l = l.trimEnd() + ' |';
       return l;
     }
-    // For non-table lines, still strip HTML and fix escaped backslashes
+    // For non-table lines: strip HTML and fix escaped pipes
     return line
-      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<br\s*\/?>\s*/gi, '\n')
       .replace(/<[^>]+>/g, '')
       .replace(/\\\|/g, '|');
   });
   return cleaned.join('\n');
 }
-
 
 chatRouter.post(
   '/',
