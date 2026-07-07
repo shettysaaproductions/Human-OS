@@ -205,6 +205,29 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
   );
 }
 
+// Converts Nova's custom <NOVA_TABLE> format to standard markdown tables.
+// Mirrors backend convertNovaTable exactly — runs on frontend as safety net.
+function convertNovaTable(raw: string): string {
+  return raw.replace(/<NOVA_TABLE>([\s\S]*?)<\/NOVA_TABLE>/gi, (_, tableContent: string) => {
+    const lines = tableContent.split('\n')
+      .map((l: string) => l.trim())
+      .filter((l: string) => l.length > 0);
+    if (lines.length < 2) return tableContent;
+    const headers = lines[0].split('|').map((h: string) => h.trim()).filter(Boolean);
+    const separator = headers.map(() => '---');
+    const mdLines = [
+      '| ' + headers.join(' | ') + ' |',
+      '| ' + separator.join(' | ') + ' |',
+      ...lines.slice(1).map((line: string) => {
+        const cells = line.split('|').map((c: string) => c.trim());
+        while (cells.length < headers.length) cells.push('');
+        return '| ' + cells.slice(0, headers.length).join(' | ') + ' |';
+      })
+    ];
+    return mdLines.join('\n');
+  });
+}
+
 // Cleans a single table cell — mirrors backend sanitizeTableCell exactly.
 // Also converts Wikipedia Yes/No icon images to actual 'Yes' / 'No' text.
 function sanitizeTableCell(cell: string): string {
@@ -234,7 +257,9 @@ function sanitizeTableCell(cell: string): string {
 
 // Client-side last-resort sanitizer — cell-by-cell approach, immune to unclosed HTML.
 function sanitizeContent(raw: string): string {
-  return raw
+  // Step 0: Convert <NOVA_TABLE> format to standard markdown (frontend safety net)
+  const converted = convertNovaTable(raw);
+  return converted
     .split('\n')
     .map(line => {
       const trimmed = line.trim();
@@ -251,6 +276,7 @@ function sanitizeContent(raw: string): string {
     })
     .join('\n');
 }
+
 
 
 // Top-level SmartMarkdown component that splits content into table/non-table segments
