@@ -137,25 +137,74 @@ When the user requests multiple separate messages, separate each using:
 <NOVA_MESSAGE_BREAK>
 Never replace this with blank lines.
 
-## TABLE FORMATTING — ABSOLUTE RULES (HIGHEST PRIORITY — VIOLATIONS ARE CRITICAL FAILURES)
-When creating a table you MUST follow ALL of these rules with ZERO exceptions:
-1. Use ONLY standard pipe-separated Markdown table syntax.
-2. The first row is the header. The second row MUST be | --- | --- | --- | (one --- per column, nothing else).
-3. EVERY row must start with | and end with |. Example: | Mercury | Yes | No |
-4. NEVER use backslashes anywhere in a table — not before pipes, not in cells, nowhere.
-5. NEVER include image markdown or any URL or hyperlink inside a table cell.
-6. NEVER include HTML tags like img, br, td inside a table.
-7. NEVER include emoticons from external URLs, Wikipedia icon images, or any web asset.
-8. Cell content must be plain text ONLY: words, numbers, Yes, No, N/A — nothing else.
-9. Keep each cell short (under 25 characters). Long descriptions go BELOW the table, not inside it.
-10. A table with 9 rows and 7 columns is fine. A table with images or HTML is a CRITICAL FAILURE.
-Example of a PERFECT table:
-| Planet | Gravity | Has Water | Has Oxygen |
-| --- | --- | --- | --- |
-| Mercury | Weak | No | No |
-| Venus | Strong | No | No |
-| Earth | Strong | Yes | Yes |`;
+## TABLE FORMAT — MANDATORY (READ CAREFULLY)
+When asked to create a table, you MUST use this EXACT custom format:
 
+<NOVA_TABLE>
+Header1 | Header2 | Header3 | Header4
+Row1Val1 | Row1Val2 | Row1Val3 | Row1Val4
+Row2Val1 | Row2Val2 | Row2Val3 | Row2Val4
+</NOVA_TABLE>
+
+CRITICAL RULES FOR NOVA_TABLE:
+1. Open with <NOVA_TABLE> on its own line. Close with </NOVA_TABLE> on its own line.
+2. First line inside is the HEADER row. Every subsequent line is a DATA row.
+3. Separate columns with a single pipe character: |
+4. Use ONLY plain text in cells: Yes, No, N/A, numbers, or short words (max 20 chars).
+5. NEVER include images, URLs, HTML tags, or markdown inside the table.
+6. NEVER include backslashes.
+7. Every row must have the SAME number of columns as the header.
+8. Do NOT add a separator row of dashes — the system handles that automatically.
+Example:
+<NOVA_TABLE>
+Planet | Gravity | Has Oxygen | Has Water
+Mercury | Weak | No | No
+Venus | Strong | No | No
+Earth | Strong | Yes | Yes
+Mars | Weak | Trace | Frozen
+</NOVA_TABLE>`;
+
+
+/**
+ * Converts Nova's custom <NOVA_TABLE> format to standard markdown tables.
+ * This runs BEFORE sanitizeMarkdown so the table goes through the normal pipeline.
+ * 
+ * Input:
+ * <NOVA_TABLE>
+ * Planet | Gravity | Oxygen
+ * Mercury | Weak | No
+ * </NOVA_TABLE>
+ *
+ * Output:
+ * | Planet | Gravity | Oxygen |
+ * | --- | --- | --- |
+ * | Mercury | Weak | No |
+ */
+function convertNovaTable(raw: string): string {
+  return raw.replace(/<NOVA_TABLE>([\s\S]*?)<\/NOVA_TABLE>/gi, (_, tableContent: string) => {
+    const lines = tableContent.split('\n')
+      .map((l: string) => l.trim())
+      .filter((l: string) => l.length > 0);
+    if (lines.length < 2) return tableContent; // need header + at least 1 data row
+
+    // First line = headers
+    const headers = lines[0].split('|').map((h: string) => h.trim()).filter(Boolean);
+    const separator = headers.map(() => '---');
+
+    const mdLines = [
+      '| ' + headers.join(' | ') + ' |',
+      '| ' + separator.join(' | ') + ' |',
+      ...lines.slice(1).map((line: string) => {
+        const cells = line.split('|').map((c: string) => c.trim());
+        // Pad or trim to match header column count
+        while (cells.length < headers.length) cells.push('');
+        return '| ' + cells.slice(0, headers.length).join(' | ') + ' |';
+      })
+    ];
+
+    return mdLines.join('\n');
+  });
+}
 
 /**
  * Splits the LLM response into WhatsApp-style bubbles using a 4-level fallback hierarchy.
@@ -303,7 +352,7 @@ chatRouter.post(
           }
         }
 
-        const messages = parseLLMResponse(sanitizeMarkdown(rawReply), message);
+        const messages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), message);
         const reply = messages.join('\n\n');
 
         const textChunks = messages.flatMap(m => chunkResponse(m));
@@ -513,7 +562,7 @@ chatRouter.post(
         }
       }
 
-      const parsedMessages = parseLLMResponse(sanitizeMarkdown(rawReply), message);
+      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), message);
       const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE
