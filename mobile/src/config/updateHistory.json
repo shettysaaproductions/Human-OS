@@ -1,14 +1,15 @@
 [
   {
-    "version": "1.2.32",
-    "title": "🚨 Hotfix: Event Pooling Crash",
+    "version": "1.2.33",
+    "title": "🎨 Apple-Style Premium Scrollbars",
     "message": [
-      "Fixed a React Native SyntheticEvent pooling crash that occurred when extracting layout data during the scrollbar initialization."
+      "Changed the custom scrollbar color from purple to a sleek, premium, neutral gray that perfectly matches Apple's operating systems.",
+      "Automatically adjusts for both light mode and dark mode."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.31",
+    "version": "1.2.32",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",

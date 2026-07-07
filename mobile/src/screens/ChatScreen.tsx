@@ -275,11 +275,11 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
 
       {/* Custom Table Scrollbar */}
       {showScrollbar && (
-        <View style={{ height: 6, width: '100%', backgroundColor: 'rgba(139,92,246,0.15)', borderRadius: 3, marginTop: 8 }}>
+        <View style={{ height: 6, width: '100%', backgroundColor: colors.background === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 3, marginTop: 8 }}>
           <Animated.View style={{
             height: '100%',
             width: thumbWidth,
-            backgroundColor: 'rgba(139,92,246,0.6)',
+            backgroundColor: colors.background === '#1A1A1A' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
             borderRadius: 3,
             transform: [{ translateX: thumbTranslateX }]
           }} />
@@ -811,7 +811,7 @@ export function ChatScreen() {
               top: 4,
               bottom: 4,
               width: 6,
-              backgroundColor: 'rgba(139,92,246,0.1)',
+              backgroundColor: colors.background === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
               borderRadius: 3,
               pointerEvents: 'none',
               zIndex: 10
@@ -821,7 +821,7 @@ export function ChatScreen() {
                 bottom: 0,
                 width: '100%',
                 height: Math.max((mainWidths.view / mainWidths.content) * mainWidths.view, 40),
-                backgroundColor: 'rgba(139,92,246,0.5)',
+                backgroundColor: colors.background === '#1A1A1A' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
                 borderRadius: 3,
                 transform: [{
                   translateY: mainScrollY.interpolate({
