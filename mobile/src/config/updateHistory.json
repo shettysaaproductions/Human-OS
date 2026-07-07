@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.15",
+    "title": "🏆 Pro-Level Table Rendering",
+    "message": [
+      "Tables are now rendered with a completely custom, built-from-scratch engine.",
+      "Nova now understands how to format tables correctly — clean columns, bold headers, proper scrolling.",
+      "Tables look and work just like ChatGPT. Swipe left or right to explore wide tables."
+    ],
+    "date": "2026-07-07"
+  },
+  {
     "version": "1.2.14",
     "title": "📜 Horizontally Scrollable Tables",
     "message": [
