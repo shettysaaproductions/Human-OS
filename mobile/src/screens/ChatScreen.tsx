@@ -198,6 +198,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
       <GHScrollView
         horizontal
         showsHorizontalScrollIndicator={true}
+        persistentScrollbar={true}
         bounces={false}
         nestedScrollEnabled={true}
         directionalLockEnabled={false}
@@ -628,8 +629,8 @@ export function ChatScreen() {
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={[s.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
         {/* Header */}
         {isSelectionMode ? (
@@ -719,6 +720,9 @@ export function ChatScreen() {
             ref={flatListRef}
             inverted
             data={reversedMessages}
+            showsVerticalScrollIndicator={true}
+            persistentScrollbar={true}
+            indicatorStyle={colors.background === '#1A1A1A' ? 'white' : 'black'}
             extraData={selectedMessageIds}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}

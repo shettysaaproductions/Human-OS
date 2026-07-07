@@ -1,15 +1,15 @@
 [
   {
-    "version": "1.2.25",
-    "title": "📜 Ultimate Table Scroll Fix (For Real)",
+    "version": "1.2.26",
+    "title": "📜 Scrollbar & Layout Fixes",
     "message": [
-      "Removed all message-level touch wrappers to completely isolate the table's scroll engine.",
-      "Horizontal table scrolling is now definitively fixed on Android. To select a message, you must now long-press its text."
+      "Scrollbars are now fully visible across all tables and the main chat.",
+      "Fixed an Android layout bug that caused excessive empty space below the message input box."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.24",
+    "version": "1.2.25",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
