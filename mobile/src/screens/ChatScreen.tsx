@@ -206,19 +206,37 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
 }
 
 // Client-side last-resort sanitizer for markdown content
+// MIRRORS the backend sanitizeMarkdown fixes exactly.
 function sanitizeContent(raw: string): string {
   return raw
     .split('\n')
     .map(line => {
       const trimmed = line.trim();
-      const isTableLine = trimmed.startsWith('|') && trimmed.endsWith('|');
+      // FIX 1: Only require startsWith('|') — AI garbage rows end with URLs not '|'
+      const isTableLine = trimmed.startsWith('|');
       if (isTableLine) {
-        return line
-          .replace(/!\[[^\]]*\]\([^)]*\)/g, '')   // remove ![alt](url)
-          .replace(/https?:\/\/\S+/g, '')           // remove bare URLs
-          .replace(/<[^>]+>/g, '')                   // remove HTML tags
-          .replace(/\\\|/g, '|')                     // fix \| → |
-          .replace(/\\([a-zA-Z_>])/g, '$1');         // fix other escaped chars
+        let l = line;
+        // FIX 2: Handle both ![alt](url) AND ! [alt](url) (optional space after !)
+        l = l.replace(/!?\s*\[[^\]]*\]\([^)]*\)/g, '');
+        // Remove bare URLs
+        l = l.replace(/https?:\/\/\S+/g, '');
+        // Remove HTML tags
+        l = l.replace(/<[^>]+>/g, '');
+        // Fix \|
+        l = l.replace(/\\\|/g, '|');
+        // Fix other escaped chars
+        l = l.replace(/\\([a-zA-Z_>])/g, '$1');
+        // FIX 3: Remove lone '!' left behind after image stripping
+        l = l.replace(/!\s*/g, '');
+        // Remove empty brackets and parens
+        l = l.replace(/\[\s*\]/g, '');
+        l = l.replace(/\(\s*\)/g, '');
+        // Collapse multiple spaces between pipes
+        l = l.replace(/\|\s{2,}/g, '| ').replace(/\s{2,}\|/g, ' |');
+        // Normalize: ensure row ends with |
+        const lt = l.trim();
+        if (lt.startsWith('|') && !lt.endsWith('|')) l = l.trimEnd() + ' |';
+        return l;
       }
       return line
         .replace(/<br\s*\/?>/gi, '\n')
@@ -227,6 +245,7 @@ function sanitizeContent(raw: string): string {
     })
     .join('\n');
 }
+
 
 // Top-level SmartMarkdown component that splits content into table/non-table segments
 function SmartMarkdown({ content, mdStyle, mdRules, colors }: { content: string; mdStyle: any; mdRules: any; colors: any }) {
