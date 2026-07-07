@@ -265,6 +265,38 @@ export function ChatScreen() {
                       </View>
                     </View>
                   );
+                },
+                textgroup: (node, children, parent, styles) => {
+                  return (
+                    <Text key={node.key} style={styles.textgroup}>
+                      {children}
+                    </Text>
+                  );
+                },
+                text: (node, children, parent, styles) => {
+                  let content = node.content;
+                  // If content contains escaped asterisks \*\* or unparsed **, force bolding manually.
+                  // We'll replace \*\* with ** first if they exist.
+                  content = content.replace(/\\\*\\\*/g, '**');
+                  
+                  if (content.includes('**')) {
+                    const parts = content.split(/(\*\*[\s\S]*?\*\*)/g);
+                    return (
+                      <Text key={node.key} style={styles.text}>
+                        {parts.map((part, index) => {
+                          if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+                            return (
+                              <Text key={index} style={{ fontWeight: 'bold', color: styles.body?.color || '#000' }}>
+                                {part.slice(2, -2)}
+                              </Text>
+                            );
+                          }
+                          return <Text key={index}>{part}</Text>;
+                        })}
+                      </Text>
+                    );
+                  }
+                  return <Text key={node.key} style={styles.text}>{content}</Text>;
                 }
               }}>
                 {item.content}
