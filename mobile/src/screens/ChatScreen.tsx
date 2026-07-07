@@ -195,7 +195,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
       </View>
 
       {/* Horizontally scrollable table — nestedScrollEnabled fixes FlatList conflict */}
-      <GHScrollView
+      <ScrollView
         horizontal
         showsHorizontalScrollIndicator={true}
         persistentScrollbar={true}
@@ -205,7 +205,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
         style={{ flexGrow: 0 }}
-        contentContainerStyle={{ flexDirection: 'column' }}
+        contentContainerStyle={{ flexDirection: 'column', paddingBottom: 12 }}
       >
         <View style={{
           width: tableWidth,
@@ -250,7 +250,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
             </View>
           ))}
         </View>
-      </GHScrollView>
+      </ScrollView>
     </View>
   );
 }
@@ -721,8 +721,6 @@ export function ChatScreen() {
             inverted
             data={reversedMessages}
             showsVerticalScrollIndicator={true}
-            persistentScrollbar={true}
-            indicatorStyle={colors.background === '#1A1A1A' ? 'white' : 'black'}
             extraData={selectedMessageIds}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}

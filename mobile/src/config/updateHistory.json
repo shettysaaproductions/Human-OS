@@ -1,15 +1,15 @@
 [
   {
-    "version": "1.2.26",
-    "title": "📜 Scrollbar & Layout Fixes",
+    "version": "1.2.27",
+    "title": "📜 Scrollbar Visibility Polish",
     "message": [
-      "Scrollbars are now fully visible across all tables and the main chat.",
-      "Fixed an Android layout bug that caused excessive empty space below the message input box."
+      "Reverted main chat scrollbar to its original broader style.",
+      "Added physical padding beneath tables to ensure the horizontal scrollbar renders clearly without being clipped."
     ],
     "date": "2026-07-07"
   },
   {
-    "version": "1.2.25",
+    "version": "1.2.26",
     "title": "📜 Table Scroll & Copy Fixes",
     "message": [
       "Fixed horizontal scrolling on tables when the keyboard is closed.",
