@@ -604,10 +604,19 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
 
       const finalSystemPrompt = datetimeBlock + '\n\n' + systemPrompt + (temporalContextBlock || '') + conversationFlowBlock;
 
-      const messagesForLLM = [
-        { role: 'system' as const, content: finalSystemPrompt },
+      const messagesForLLM: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
+        { role: 'system', content: finalSystemPrompt },
         ...recentMessages
       ];
+
+      // CRITICAL RECENCY BIAS FIX: Append a final system reminder *after* the chat history.
+      // This forces the 8B LLM to ignore any bad habits it might see in its own past messages.
+      if (responseConfig.mode === 'HUMAN_CHAT') {
+        messagesForLLM.push({
+          role: 'system',
+          content: 'FINAL REMINDER: You are in HUMAN_CHAT mode. Keep your response extremely SHORT (1-2 sentences max). DO NOT write paragraphs. NO formal Hindi words (no Parantu, Dhanyavad). Just natural, casual WhatsApp texting.'
+        });
+      }
 
       // 6. Call NVIDIA
       let rawReply: string;
