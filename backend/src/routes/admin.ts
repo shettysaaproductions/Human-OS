@@ -4,6 +4,7 @@ import { reflectionQueue } from '../services/QueueService';
 import { memoryDecayService } from '../services/MemoryDecayService';
 import { momentEngineService } from '../services/MomentEngineService';
 import { reflectionScheduler } from '../services/ReflectionSchedulerService';
+import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
 
 export const adminRouter: import('express').Router = Router();
 
@@ -101,3 +102,16 @@ adminRouter.post('/trigger-reflections-weekly', async (_req: Request, res: Respo
     next(err);
   }
 });
+
+/**
+ * Triggers the Chat History Pruning Service to clear old messages and stay within the free-tier character budget.
+ */
+adminRouter.post('/prune-history', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await chatHistoryPruningService.runAll();
+    res.status(200).json({ success: true, message: 'Pruning initiated.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
