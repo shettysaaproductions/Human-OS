@@ -631,7 +631,7 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
       if (responseConfig.mode === 'HUMAN_CHAT') {
         messagesForLLM.push({
           role: 'system',
-          content: 'FINAL REMINDER: Keep your response SHORT (1-2 sentences). DO NOT start your message with "Bhai". DO NOT act like a helpful assistant trying to solve problems. If the user corrects a fact about their life, ACCEPT IT IMMEDIATELY and apologize casually. NO formal Hindi words (no Parantu, swasthya). Just casual WhatsApp texting.'
+          content: 'FINAL REMINDER: Keep your response SHORT (1-2 sentences). DO NOT parrot what the user just said. DO NOT start your message with "Bhai". BE A SMART FRIEND: If the user is confused (e.g. about SpO2), briefly explain it. Do NOT tell them to ask a doctor. If they state a preference, agree casually. If they just say "Ok", do NOT act like an interviewer ("ab kya?"), just react. NO formal Hindi.'
         });
       }
 
