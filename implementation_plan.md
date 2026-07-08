@@ -251,13 +251,14 @@ cd mobile && npx tsc --noEmit
 
 ---
 
-## Open Questions for Final Approval
+## Resolved Decisions (Based on App Motive & Limits)
 
-> [!CAUTION]
-> **Two final things to confirm before I start coding:**
+✅ **1. Character budget: 150,000 chars (1.5 lakh)**
+*Reasoning:* To get the "most juice" (context) for business strategy and problem-solving without hitting limits, 150,000 characters is optimal.
+- Storage: 150,000 chars is ~0.375 MB per user. We can support ~1,333 active users before hitting the 500 MB Supabase limit.
+- AI Context: Provides ~50% more raw conversational history for Nova to draw from before compressing into short-term memory, leading to more hyper-realistic and accurate responses.
 
-1. **Character budget: 100,000 chars (1 lakh)?** Or would you prefer 150,000 (1.5 lakh)? Both are safe for Supabase. 1 lakh is more conservative; 1.5 lakh gives heavier users a bit more raw history.
+✅ **2. Admin manual prune endpoint: Included**
+*Reasoning:* Adding `POST /admin/prune-history` is essential for the Founder Dashboard. It provides a safety valve to manually clear space if we ever approach the 500 MB limit unexpectedly, without needing to touch the database directly.
 
-2. **Admin manual prune endpoint:** Should I add a `POST /admin/prune-history` endpoint so you can trigger a manual cleanup any time from the Founder Dashboard? (Recommended: yes — good for testing and emergencies)
-
-Once you confirm, I'll begin Phase 1 immediately.
+I am ready to begin **Phase 1 (Paginated FlatList)** on the mobile app. Do I have your approval to start execution?

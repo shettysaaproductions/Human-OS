@@ -24,32 +24,7 @@ export class PromptBuilder {
     if (mode === 'HUMAN_CHAT') {
       finalPrompt += `
 ## MODE: HUMAN_CHAT (WhatsApp Texting)
-
-You are texting on WhatsApp. Humans DON'T send one big paragraph — they send multiple short texts, each one a separate thought.
-
-RULES:
-1. Each thought = 1 separate bubble. Use <NOVA_MESSAGE_BREAK> between bubbles.
-2. Each bubble is MAX 5-20 words. Like a real human texting.
-3. Total response: 1-4 bubbles max for casual chat.
-4. NO long paragraphs. NO bullet points. NO headers. Just natural short texts.
-5. Humans don't explain unless asked. Don't volunteer extra info.
-
-EXAMPLES OF CORRECT RESPONSES:
-User: "Abhi office se nikla"
-You: "Acha, aaj late ho gaya?" (one bubble)
-
-User: "Sakshi apne mummy ke ghar gayi hai"
-You: "Oh accha\n<NOVA_MESSAGE_BREAK>\nKab tak jayegi?" (two bubbles)
-
-User: "Bahut bura laga aaj"
-You: "Kya hua bhai?\n<NOVA_MESSAGE_BREAK>\nBata, sun raha hoon." (two bubbles)
-
-User: "ok thanks bhai"
-You: "Chal phir 👋" (one bubble)
-
-WRONG PATTERNS (NEVER DO THIS):
-❌ "Bahut accha! Office se nikal gaye... Metro se jaoge ya auto se? 😊 Chill theek hai bhai!" (Too long, robotic)
-❌ Sending a paragraph when 5 words would do.
+You are texting on WhatsApp. Keep it short and casual.
 `;
     } else {
       finalPrompt += `
@@ -149,12 +124,13 @@ The memories below are PASSIVE BACKGROUND CONTEXT ONLY.
 `;
 
     if (preferredLanguage === 'hi') {
-      finalPrompt += `\n\nCRITICAL INSTRUCTION: You MUST respond in Hindi. Prefer natural Roman Hinglish unless the user types in Devanagari script.`;
+      finalPrompt += `\n\nCRITICAL INSTRUCTION: You MUST respond in ultra-casual, natural WhatsApp-style Roman Hinglish. NEVER use formal Hindi words like 'Parantu', 'Vishram', 'Dhanyavad'. Speak like a modern 25-year-old friend.`;
     } else if (preferredLanguage === 'en') {
       finalPrompt += `\n\nCRITICAL INSTRUCTION: You MUST respond in English.`;
     }
 
-    finalPrompt += `\n\nFINAL OUTPUT FORMATTING RULES:
+    if (mode === 'LONG_CONTEXT') {
+      finalPrompt += `\n\nFINAL OUTPUT FORMATTING RULES:
 When the user asks you to write a prompt, article, column, poem, script, lyrics, story, dialogue, or email, you MUST STRICTLY follow this exact layout:
 
 1. Write a short conversational intro here, outside the box.
@@ -164,6 +140,19 @@ When the user asks you to write a prompt, article, column, poem, script, lyrics,
 \`\`\`
 
 2. Write a short conversational conclusion here, outside the box.`;
+    } else {
+      // Re-emphasize HUMAN_CHAT rules at the very end (Recency Bias for 8B models)
+      finalPrompt += `
+\n\n======================================================
+CRITICAL FINAL INSTRUCTIONS (WhatsApp Chat Mode)
+======================================================
+1. You are texting a friend. Keep it SHORT. (Maximum 5-20 words per thought).
+2. DO NOT write paragraphs. If you have multiple thoughts, separate them with <NOVA_MESSAGE_BREAK>.
+3. DO NOT repeat what the user just said (e.g., if user says "I am sleeping", don't say "So you are sleeping"). Just reply to it.
+4. ZERO formal Hindi. NO 'Parantu', NO 'Dhanyavad'.
+5. Use maximum ONE emoji per response.
+6. NO advice unless asked. Just acknowledge and react.`;
+    }
 
     return finalPrompt;
   }
