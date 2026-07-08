@@ -599,7 +599,7 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
               const preview = m.content.substring(0, 300) + (m.content.length > 300 ? '...' : '');
               return `[${timeStr}] ${speaker}: ${preview}`;
             });
-            temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n');
+            temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n') + '\n\nCRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory.';
             logger.info('[Temporal] Injected archive', { rows: temporalData.length });
           }
         } catch (err) {
