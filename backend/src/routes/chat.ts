@@ -178,6 +178,16 @@ function convertNovaTable(raw: string): string {
   });
 }
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} days ago`;
+}
+
 /**
  * Splits the LLM response into WhatsApp-style bubbles using a 4-level fallback hierarchy.
  * Level 1: Explicit <NOVA_MESSAGE_BREAK>
@@ -464,7 +474,7 @@ chatRouter.post(
         // 4.5 Fetch Short-Term Memories
         const { data: stmData } = await qt.track('get_short_term_memories', 'short_term_memories', () =>
           supabaseAdmin.from('short_term_memories')
-            .select('memory, emotion, importance, mention_count, expires_at, confidence')
+            .select('memory, emotion, importance, mention_count, expires_at, confidence, created_at')
             .eq('user_id', userId)
             .gte('confidence', 0.6)
             .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
@@ -478,10 +488,17 @@ chatRouter.post(
         const budgetMemories = [];
 
         for (const m of allFetched) {
-          const memTokens = Math.ceil(m.memory.length / 4);
-          if (stmTokens + memTokens > 1500) break;
-          stmTokens += memTokens;
-          budgetMemories.push(m);
+          const memStr = `${m.memory} ${m.emotion || ''}`;
+          const tokens = Math.ceil(memStr.length / 4);
+          if (stmTokens + tokens > 600) break;
+          
+          budgetMemories.push({
+            memory: m.memory,
+            emotion: m.emotion,
+            importance: m.importance,
+            timestamp: m.created_at ? timeAgo(m.created_at) : null
+          });
+          stmTokens += tokens;
         }
 
         shortTermMemories = budgetMemories;

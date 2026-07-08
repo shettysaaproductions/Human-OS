@@ -96,7 +96,8 @@ CRITICAL RULES FOR NOVA_TABLE:
       finalPrompt += `\n\n--- SHORT-TERM MEMORY (RECENT EVENTS & EMOTIONS) ---`;
       for (const stm of shortTermMemories) {
         const emotionContext = stm.emotion ? ` [Emotion: ${stm.emotion}]` : '';
-        finalPrompt += `\n- ${stm.memory}${emotionContext}`;
+        const timeContext = stm.timestamp ? ` (Recorded: ${stm.timestamp})` : '';
+        finalPrompt += `\n- ${stm.memory}${emotionContext}${timeContext}`;
       }
     }
 
