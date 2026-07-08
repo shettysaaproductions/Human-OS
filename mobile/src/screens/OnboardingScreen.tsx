@@ -85,11 +85,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 24,
-    justifyContent: 'center'
+    justifyContent: 'center',
+    backgroundColor: '#09090B',
   },
   progress: {
     fontSize: 14,
-    color: '#666',
+    color: '#A1A1AA',
     marginBottom: 8,
     textAlign: 'center'
   },
@@ -97,18 +98,21 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 24,
-    textAlign: 'center'
+    textAlign: 'center',
+    color: '#FFFFFF',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 8,
     padding: 16,
     fontSize: 16,
     minHeight: 50,
     maxHeight: 150,
     marginBottom: 32,
-    textAlignVertical: 'top'
+    textAlignVertical: 'top',
+    color: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.07)',
   },
   buttonRow: {
     flexDirection: 'row',
@@ -116,3 +120,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20
   }
 });
+
