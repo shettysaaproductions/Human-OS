@@ -451,12 +451,25 @@ export function ChatScreen() {
     logEvent('FLATLIST_FIRST_RENDER');
   }
 
-  // If hydrated and there are no messages, show empty state immediately
+  // Set ready to render as soon as hydration completes — covers both empty
+  // and non-empty message states. The FlatList's onContentSizeChange was
+  // previously the only trigger for non-empty, but it can fail to fire on
+  // fresh installs / cold starts, causing a permanent white screen.
   useEffect(() => {
-    if (isHydrated && messages.length === 0) {
+    if (isHydrated) {
       setIsReadyToRender(true);
     }
-  }, [isHydrated, messages.length]);
+  }, [isHydrated]);
+
+  // Hard timeout safety net: if isReadyToRender is still false after 3 seconds
+  // (e.g. hydration hangs silently), force the screen visible so user never
+  // sees a blank screen permanently.
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setIsReadyToRender(true);
+    }, 3000);
+    return () => clearTimeout(timeout);
+  }, []);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
