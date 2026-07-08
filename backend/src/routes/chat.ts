@@ -584,13 +584,14 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
               .select('role, content, created_at')
               .eq('user_id', userId)
               .gte('created_at', thirtyDaysAgo)
-              .order('created_at', { ascending: true })
+              .order('created_at', { ascending: false })
               .limit(80)
           );
 
           if (temporalData && temporalData.length > 0) {
+            const chronologicalData = temporalData.reverse(); // put back in chronological order
             const istOffset = 5.5 * 60 * 60 * 1000; // IST = UTC+5:30
-            const lines = temporalData.map(m => {
+            const lines = chronologicalData.map(m => {
               const d = new Date(new Date(m.created_at).getTime() + istOffset);
               const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
               const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -631,7 +632,7 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
       if (responseConfig.mode === 'HUMAN_CHAT') {
         messagesForLLM.push({
           role: 'system',
-          content: 'FINAL REMINDER: Keep your response SHORT (1-2 sentences). DO NOT echo/repeat the user\'s phrases. DO NOT start your message with "Bhai". BE A SMART FRIEND. NO formal Hindi. If the user makes a typo or says something confusing, do NOT invent fake Hindi words, just casually ask what they mean (e.g. "kya matlab?").'
+          content: 'FINAL REMINDER: Keep your response SHORT (1-2 sentences). DO NOT echo/repeat the user\'s phrases. DO NOT start your message with "Bhai". BE A SMART FRIEND. NO formal Hindi. If the user makes a typo, do NOT invent fake Hindi words. If the user says goodbye/gn, just wish them well naturally (DO NOT say "welcome back").'
         });
       }
 
