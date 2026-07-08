@@ -29,20 +29,27 @@ export class ShortTermMemoryAgent extends BaseAgent {
 Extract temporary memories from the user's message, using the recent conversation snapshot and Nova's reply for context.
 Focus on: people mentioned, events, emotions, ongoing tasks, and concerns.
 
-CRITICAL RULES:
-1. Always store facts about the User, not Nova.
-2. If the user corrects a fact, extract the CORRECTED fact so Nova learns it.
-3. Output heavily summarized fragments. 
-   Bad: "User said he watched Family Man season 1 with wife on Sunday."
-   Good: "Watched Family Man with wife."
+CRITICAL EXTRACTION RULES:
+1. Extract deep FACTS and MEANINGS, not just raw chat text. Focus on the user's life, character traits, daily habits, and schedule patterns.
+   BAD: "User said he is leaving office at 10 PM."
+   GOOD: "Daily commute pattern: leaves office around 10 PM."
+2. Always store facts about the User, not Nova.
+3. Extract RELATIONSHIPS and NAMES as structured facts.
+   BAD: "User mentioned Sakshi"
+   GOOD: "Sakshi (wife) went to her mother's house with Shreshth (son)"
+4. If the user corrects a fact, extract the CORRECTED fact so Nova learns it.
+   BAD: (ignores correction)
+   GOOD: "Mother's name is Rajeshree (corrected from previous error)"
+5. Output heavily summarized, context-rich fragments. 
+   Bad: "User watched Family Man season 1 with wife on Sunday."
+   Good: "Watched Family Man with wife on Sunday."
 
-Assign an emotion_score from 0 to 10 based on intensity. Examples:
-- "wife kept fast for me" -> 9
-- "office issue" -> 5
-- "good morning" -> 1
-
-Assign an importance score from 1 to 10 (10 = very important).
-Assign a category from: [relationship, family, work, health, entertainment, finance, goals, preference, task, emotion, miscellaneous].
+Assign an emotion_score from 0 to 10 based on intensity.
+Assign an importance score from 1 to 10:
+- 9-10: Names, relationships, major corrections, health facts.
+- 7-8: Daily routines, schedules, strong preferences.
+- 4-6: One-off events, casual mentions.
+Assign a category from: [relationship, family, work, health, entertainment, finance, goals, preference, task, emotion, routine, miscellaneous].
 Assign a confidence score from 0.0 to 1.0.
 
 Return ONLY a valid JSON object with the exact key:
