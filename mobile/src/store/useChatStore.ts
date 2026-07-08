@@ -28,12 +28,16 @@ interface ChatState {
   conversationId: string | null;
   isTyping: boolean;
   isHydrated: boolean;
+  hasMoreMessages: boolean;
+  isLoadingMore: boolean;
+  oldestMessageId: string | null;
   pendingQueue: { id: string, content: string }[];
   diagnostics: ChatDiagnostics | null;
   developerMode: boolean;
   setDeveloperMode: (val: boolean) => void;
   
   hydrateMessages: () => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
@@ -228,6 +232,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     conversationId: null,
     isTyping: false,
     isHydrated: false,
+    hasMoreMessages: false,
+    isLoadingMore: false,
+    oldestMessageId: null,
     pendingQueue: [],
     diagnostics: null,
     developerMode: false,
@@ -235,7 +242,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     
     hydrateMessages: async () => {
       try {
-        const history = await chatService.getHistory();
+        const PAGE_SIZE = 50;
+        const history = await chatService.getHistory(undefined, PAGE_SIZE);
         console.log('Diagnostics - Messages received from API:', history?.length);
         if (history && history.length > 0) {
           const formattedHistory: Message[] = [];
@@ -282,10 +290,15 @@ export const useChatStore = create<ChatState>((set, get) => {
           console.log('Diagnostics - Oldest message from API:', formattedHistory[0]?.timestamp);
           console.log('Diagnostics - Newest message from API:', formattedHistory[formattedHistory.length - 1]?.timestamp);
           
+          // The oldest raw message ID is the cursor for loading more
+          const oldestRawId = history[0]?.id || null;
+          
           set({ 
             messages: formattedHistory, 
-            conversationId: history[0].conversation_id, // Get ID from most recent message
+            conversationId: history[0].conversation_id,
             isHydrated: true,
+            hasMoreMessages: history.length >= PAGE_SIZE,
+            oldestMessageId: oldestRawId,
             diagnostics: {
               apiCount: history.length,
               storeCount: formattedHistory.length,
@@ -296,11 +309,64 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           });
         } else {
-          set({ isHydrated: true });
+          set({ isHydrated: true, hasMoreMessages: false });
         }
       } catch (e) {
         console.error('Failed to hydrate history from backend:', e);
         set({ isHydrated: true });
+      }
+    },
+
+    loadOlderMessages: async () => {
+      const { isLoadingMore, hasMoreMessages, oldestMessageId, messages } = get();
+      if (isLoadingMore || !hasMoreMessages) return;
+
+      set({ isLoadingMore: true });
+      try {
+        const PAGE_SIZE = 50;
+        const older = await chatService.getHistory(undefined, PAGE_SIZE, oldestMessageId || undefined);
+        if (!older || older.length === 0) {
+          set({ hasMoreMessages: false, isLoadingMore: false });
+          return;
+        }
+
+        const formattedOlder: Message[] = [];
+        for (const msg of older) {
+          const role = msg.role === 'nova' ? 'assistant' : msg.role;
+          const timestamp = msg.created_at || new Date().toISOString();
+
+          if (role === 'assistant') {
+            const initialChunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
+              ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
+              : [msg.content];
+            const finalChunks: string[] = [];
+            initialChunks.forEach((c: string) => {
+              finalChunks.push(...(c.length > 1500 ? chunkText(c) : [c]));
+            });
+            finalChunks.forEach((chunkContent, idx) => {
+              formattedOlder.push({
+                id: `${msg.id}_part_${idx + 1}`,
+                role, content: chunkContent, status: 'sent', timestamp,
+                chunkIndex: finalChunks.length > 1 ? idx + 1 : undefined,
+                chunkTotal: finalChunks.length > 1 ? finalChunks.length : undefined,
+              });
+            });
+          } else {
+            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp });
+          }
+        }
+
+        const newOldestRawId = older[0]?.id || null;
+        // Prepend older messages BEFORE the existing ones — preserves scroll position
+        set({
+          messages: [...formattedOlder, ...messages],
+          hasMoreMessages: older.length >= PAGE_SIZE,
+          oldestMessageId: newOldestRawId,
+          isLoadingMore: false,
+        });
+      } catch (e) {
+        console.error('Failed to load older messages:', e);
+        set({ isLoadingMore: false });
       }
     },
 

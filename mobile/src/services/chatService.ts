@@ -1,8 +1,10 @@
 import { api } from './api';
 
 export const chatService = {
-  getHistory: async (conversationId?: string) => {
-    const url = conversationId ? `/chat?conversation_id=${conversationId}` : '/chat';
+  getHistory: async (conversationId?: string, limit: number = 50, beforeId?: string) => {
+    let url = conversationId ? `/chat?conversation_id=${conversationId}` : '/chat';
+    url += (url.includes('?') ? '&' : '?') + `limit=${limit}`;
+    if (beforeId) url += `&before_id=${beforeId}`;
     const response = await api.get(url);
     const data = response.data;
     console.log("API messages received:", data?.length);

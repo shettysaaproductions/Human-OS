@@ -541,8 +541,49 @@ chatRouter.post(
         recentCrossSessionContext
       );
 
+      // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
+      let temporalContextBlock = '';
+      const TEMPORAL_KEYWORDS = ['yesterday', 'days ago', 'last week', 'last month', 'do you remember',
+        'what time', 'what day', 'when did', 'earlier today', 'this morning', 'last night',
+        'tell me what', 'you said', 'i said', 'we talked', 'kal', 'parso', 'yaad hai'];
+      const lowerMsg = message.toLowerCase();
+      const isTemporalQuery = TEMPORAL_KEYWORDS.some(kw => lowerMsg.includes(kw));
+
+      if (isTemporalQuery) {
+        try {
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+          const { data: temporalData } = await qt.track('get_temporal_context', 'chat_history', () =>
+            supabaseAdmin.from('chat_history')
+              .select('role, content, created_at')
+              .eq('user_id', userId)
+              .gte('created_at', thirtyDaysAgo)
+              .order('created_at', { ascending: true })
+              .limit(80)
+          );
+
+          if (temporalData && temporalData.length > 0) {
+            const istOffset = 5.5 * 60 * 60 * 1000; // IST = UTC+5:30
+            const lines = temporalData.map(m => {
+              const d = new Date(new Date(m.created_at).getTime() + istOffset);
+              const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const timeStr = `${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')} IST`;
+              const speaker = m.role === 'assistant' ? 'Nova' : 'You';
+              const preview = m.content.substring(0, 300) + (m.content.length > 300 ? '...' : '');
+              return `[${timeStr}] ${speaker}: ${preview}`;
+            });
+            temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n');
+            logger.info('[Temporal] Injected archive', { rows: temporalData.length });
+          }
+        } catch (err) {
+          logger.warn('[Temporal] Context fetch failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      const finalSystemPrompt = temporalContextBlock ? systemPrompt + temporalContextBlock : systemPrompt;
+
       const messagesForLLM = [
-        { role: 'system' as const, content: systemPrompt },
+        { role: 'system' as const, content: finalSystemPrompt },
         ...recentMessages
       ];
 
@@ -645,19 +686,39 @@ chatRouter.get(
       const userId = (req as any).user!.id;
       const conversationId = req.query.conversation_id as string | undefined;
 
+      // Pagination params
+      const rawLimit = parseInt(req.query.limit as string || '50', 10);
+      const limit = Math.min(Math.max(rawLimit, 1), 200); // clamp 1–200
+      const beforeId = req.query.before_id as string | undefined;
+
       let query = supabaseAdmin
         .from('chat_history')
         .select('id, role, content, created_at, conversation_id, user_id')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
-        .limit(1000); // Increased limit to allow fetching older messages
+        .limit(limit);
 
       if (conversationId) query = query.eq('conversation_id', conversationId);
+
+      // Cursor: if before_id provided, get the timestamp of that message and
+      // return only messages strictly older than it.
+      if (beforeId) {
+        const { data: cursorRow } = await supabaseAdmin
+          .from('chat_history')
+          .select('created_at')
+          .eq('id', beforeId)
+          .eq('user_id', userId)
+          .single();
+        if (cursorRow?.created_at) {
+          query = (query as any).lt('created_at', cursorRow.created_at);
+        }
+      }
 
       const { data, error } = await qt.track('get_history', 'chat_history', () => query);
       if (error) throw new Error(error.message);
 
-      res.status(200).json(data.reverse());
+      // Return in ascending order (oldest first) so the client can prepend correctly
+      res.status(200).json((data || []).reverse());
     } catch (err) {
       next(err);
     }

@@ -16,6 +16,7 @@ import { momentEngineService } from './services/MomentEngineService';
 import { reflectionScheduler } from './services/ReflectionSchedulerService';
 import { reminderSchedulerService } from './services/ReminderSchedulerService';
 import { shortTermMemoryCleanupService } from './services/ShortTermMemoryCleanupService';
+import { chatHistoryPruningService } from './services/ChatHistoryPruningService';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -55,12 +56,19 @@ async function main(): Promise<void> {
     }, 10 * 1000); // 10 seconds
     if (remindersInterval.unref) remindersInterval.unref();
 
-    // Daily Reflection Scheduler (runs once per day)
+    // Daily Reflection + Memory Pruning Scheduler (runs once per day)
     const dailyReflectionInterval = setInterval(async () => {
       try {
         logger.info('Scheduler: Triggering daily reflections...');
         await reflectionScheduler.runDailyForAllUsers();
         await shortTermMemoryCleanupService.run();
+
+        // Nightly chat history pruning — only run between 2AM-3AM server time
+        const hour = new Date().getHours();
+        if (hour === 2) {
+          logger.info('Scheduler: Triggering nightly chat history pruning...');
+          await chatHistoryPruningService.runAll();
+        }
       } catch (err) {
         logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });
       }
