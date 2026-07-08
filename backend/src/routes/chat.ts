@@ -134,37 +134,7 @@ You are NOT a generic chatbot. You are a thoughtful, curious mind that happens t
 - If you think something related might be interesting, you may ask at the END: "Want me to also cover X?" — never just add it uninvited.
 - The user's CURRENT question is your only job. Past topics are context, not content.
 
-## MULTIPLE MESSAGES FORMAT
-When the user requests multiple separate messages, separate each using:
-<NOVA_MESSAGE_BREAK>
-Never replace this with blank lines.
-
-## TABLE FORMAT — MANDATORY (READ CAREFULLY)
-When asked to create a table, you MUST use this EXACT custom format:
-
-<NOVA_TABLE>
-Header1 | Header2 | Header3 | Header4
-Row1Val1 | Row1Val2 | Row1Val3 | Row1Val4
-Row2Val1 | Row2Val2 | Row2Val3 | Row2Val4
-</NOVA_TABLE>
-
-CRITICAL RULES FOR NOVA_TABLE:
-1. Open with <NOVA_TABLE> on its own line. Close with </NOVA_TABLE> on its own line.
-2. First line inside is the HEADER row. Every subsequent line is a DATA row.
-3. Separate columns with a single pipe character: |
-4. Use ONLY plain text in cells: Yes, No, N/A, numbers, or short words (max 20 chars).
-5. NEVER include images, URLs, HTML tags, or markdown inside the table.
-6. NEVER include backslashes.
-7. Every row must have the SAME number of columns as the header.
-8. Do NOT add a separator row of dashes — the system handles that automatically.
-Example:
-<NOVA_TABLE>
-Planet | Gravity | Has Oxygen | Has Water
-Mercury | Weak | No | No
-Venus | Strong | No | No
-Earth | Strong | Yes | Yes
-Mars | Weak | Trace | Frozen
-</NOVA_TABLE>`;
+- The user's CURRENT question is your only job. Past topics are context, not content.`;
 
 
 /**
@@ -531,6 +501,7 @@ chatRouter.post(
       }
 
       // 5. Build prompt
+      const responseConfig = classifyIntent(message, recentMessages.map(m => m.content));
       const systemPrompt = promptBuilder.buildSystemPrompt(
         BASE_SYSTEM_PROMPT,
         memories,
@@ -539,7 +510,8 @@ chatRouter.post(
         profile?.companion_personality,
         shortTermMemories,
         language,
-        recentCrossSessionContext
+        recentCrossSessionContext,
+        responseConfig.mode
       );
 
       // 5.1 ALWAYS inject current real-world datetime — Nova must never say she doesn't know the date/time.
@@ -643,16 +615,9 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
       } else {
         try {
-          const responseConfig = classifyIntent(message, recentMessages.map(m => m.content));
+          // No need to inject mode tag manually as promptBuilder now builds it dynamically
           
-          // Inject mode tag into the system prompt so the LLM knows which mode to use
-          const modeTag = `\n\n[MODE: ${responseConfig.mode}]\n`;
-          const messagesForLLMWithMode = [
-            { ...messagesForLLM[0], content: messagesForLLM[0].content + modeTag },
-            ...messagesForLLM.slice(1)
-          ];
-          
-          rawReply = await chatCompletion(messagesForLLMWithMode, {
+          rawReply = await chatCompletion(messagesForLLM, {
             maxTokens: responseConfig.maxTokens,
             temperature: responseConfig.temperature,
             frequency_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.9 : 0.7,

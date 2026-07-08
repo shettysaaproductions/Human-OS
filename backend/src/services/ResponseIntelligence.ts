@@ -11,10 +11,11 @@ export function classifyIntent(message: string, _recentHistory: string[]): Respo
   const lower = message.toLowerCase();
   const len = message.length;
   
-  // ── LONG_CONTEXT triggers (explicit depth requests) ──
+  // ── TABLE / LONG_CONTEXT triggers (explicit depth requests) ──
   const explainPatterns = /\b(explain|detail|difference|compare|research|samjhao|batao in detail|deep dive|analysis|pros and cons|list.*(options|features)|step by step)\b/i;
   if (explainPatterns.test(lower)) {
-    return { mode: 'LONG_CONTEXT', maxTokens: 1500, temperature: 0.7, shouldOfferTable: true };
+    // Start with HUMAN_CHAT (short answer) but auto-probe with a table offer
+    return { mode: 'HUMAN_CHAT', maxTokens: 400, temperature: 0.7, shouldOfferTable: true };
   }
   
   const creativePatterns = /\b(write|poem|story|email|draft|script|lyrics|article|letter|essay|speech)\b/i;
@@ -24,6 +25,7 @@ export function classifyIntent(message: string, _recentHistory: string[]): Respo
   
   const tablePatterns = /\b(table|chart|comparison|spreadsheet|excel)\b/i;
   if (tablePatterns.test(lower)) {
+    // User explicitly asked for a table — go straight to LONG_CONTEXT
     return { mode: 'LONG_CONTEXT', maxTokens: 1500, temperature: 0.5, shouldOfferTable: false };
   }
   
