@@ -1,9 +1,9 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.35",
   "notes": [
-    "Fixed network retry behavior during cold boot.",
-    "Resolved auto-appearing update popups.",
-    "Cleaned up development diagnostics overlay.",
-    "Improved OTA changelog version tracking."
+    "🧠 Nova Brain Overhaul: Massive intelligence upgrade with Hyper-Realistic Human Thinking Engine.",
+    "💬 Dual-Mode Architecture: Automatically switches between casual WhatsApp-style texting and deep-dive long-form answers.",
+    "⏱️ Flawless memory recall for timestamps, vastly improved Hinglish, and smart activity pattern detection.",
+    "📊 Smart Table Proactive Offers: Nova will naturally ask if you want data in a table format before generating one."
   ]
 }

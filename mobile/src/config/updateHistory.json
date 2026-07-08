@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.2.35",
+    "title": "🧠 Nova Brain Overhaul",
+    "message": [
+      "Massive intelligence upgrade! Nova now features a Hyper-Realistic Human Thinking Engine.",
+      "Dual-Mode Architecture: Automatically switches between casual WhatsApp-style texting and deep-dive long-form answers.",
+      "Nova will now send multiple short texts in rapid succession instead of one long robotic paragraph.",
+      "Flawless memory recall for timestamps, vastly improved Hinglish, and smart activity pattern detection.",
+      "Smart Table Proactive Offers: Nova will naturally ask if you want data in a table format before generating one."
+    ],
+    "date": "2026-07-09"
+  },
+  {
     "version": "1.2.34",
     "title": "⏬ Scroll-to-Bottom Button",
     "message": [
