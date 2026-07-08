@@ -16,8 +16,9 @@ export class SemanticAgent extends BaseAgent {
       {
         role: 'system',
         content: `You are the Semantic Memory Agent for HumanOS.
-Analyze the user's message and extract ONLY long-term facts, preferences, goals, and important dates.
-Do NOT extract temporary states, tasks for today, or recent events.
+Analyze the user's message and extract ONLY long-term facts, preferences, goals, and important dates/times.
+CRITICAL: If the user mentions any important time, date, schedule, or appointment that is worth remembering for a long period (e.g., "my exam is on 15th", "I always wake up at 6 AM", "doctor appointment next Tuesday"), you MUST extract it as an 'important_dates' memory immediately.
+Do NOT extract temporary states or insignificant daily chatter.
 
 Return ONLY a valid JSON object with the exact key:
 {
