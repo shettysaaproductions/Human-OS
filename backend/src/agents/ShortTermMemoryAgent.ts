@@ -20,17 +20,21 @@ export class ShortTermMemoryAgent extends BaseAgent {
   }
 
   protected async execute(job: Job): Promise<number> {
-    const { messageId, userId, message } = job.payload;
+    const { messageId, userId, message, novaReply, conversationSnapshot } = job.payload;
 
     const response = await chatCompletion([
       {
         role: 'system',
         content: `You are the Short-Term Memory Agent for Nova.
-Extract temporary memories from the user's message.
+Extract temporary memories from the user's message, using the recent conversation snapshot and Nova's reply for context.
 Focus on: people mentioned, events, emotions, ongoing tasks, and concerns.
-Output heavily summarized fragments. 
-Bad: "User said he watched Family Man season 1 with wife on Sunday."
-Good: "Watched Family Man with wife."
+
+CRITICAL RULES:
+1. Always store facts about the User, not Nova.
+2. If the user corrects a fact, extract the CORRECTED fact so Nova learns it.
+3. Output heavily summarized fragments. 
+   Bad: "User said he watched Family Man season 1 with wife on Sunday."
+   Good: "Watched Family Man with wife."
 
 Assign an emotion_score from 0 to 10 based on intensity. Examples:
 - "wife kept fast for me" -> 9
@@ -60,7 +64,14 @@ If there are no meaningful short-term memories, return {"short_term_memories": [
       },
       {
         role: 'user',
-        content: message
+        content: `[CONVERSATION SNAPSHOT (Last 6 messages)]
+${conversationSnapshot || '(No recent history)'}
+
+[USER'S LATEST MESSAGE]
+${message}
+
+[NOVA'S REPLY]
+${novaReply || '(No reply generated)'}`
       }
     ], {
       response_format: { type: 'json_object' },

@@ -553,6 +553,49 @@ Return JSON:
   }
 
   /**
+   * Analyzes chat history timestamps to detect repeating daily patterns
+   */
+  async detectActivityPatterns(userId: string): Promise<void> {
+    const { data } = await supabaseAdmin
+      .from('chat_history')
+      .select('created_at, content')
+      .eq('user_id', userId)
+      .eq('role', 'user')
+      .gte('created_at', new Date(Date.now() - 14 * 86400000).toISOString())
+      .order('created_at', { ascending: true });
+    
+    if (!data || data.length < 10) return;
+    
+    const hourBuckets: Map<number, string[]> = new Map();
+    for (const msg of data) {
+      const hour = new Date(msg.created_at).getUTCHours();
+      if (!hourBuckets.has(hour)) hourBuckets.set(hour, []);
+      hourBuckets.get(hour)!.push(msg.content.substring(0, 50));
+    }
+    
+    let peakSummary = '';
+    for (const [hour, msgs] of hourBuckets.entries()) {
+      if (msgs.length >= 3) {
+        const istHour = (hour + 5) % 24; // roughly +5:30 IST
+        const ampm = istHour >= 12 ? 'PM' : 'AM';
+        const displayHour = (istHour % 12) || 12;
+        peakSummary += `- Active around ${displayHour} ${ampm} (IST). Topics: ${msgs.slice(0, 2).join(' | ')}\n`;
+      }
+    }
+
+    if (peakSummary) {
+      await qt.track('update_activity_pattern', 'working_memory', () =>
+        supabaseAdmin.from('working_memory').upsert({
+          user_id: userId,
+          key: 'user_activity_pattern',
+          value: `Detected Routine Activity:\n${peakSummary}`,
+          expires_at: new Date(Date.now() + 7 * 86400000).toISOString()
+        })
+      );
+    }
+  }
+
+  /**
    * Triggers the engine run for all onboarded users.
    */
   async runEngineForAllUsers(): Promise<number> {
@@ -570,6 +613,11 @@ Return JSON:
       }
 
       for (const p of profiles) {
+        // Detect activity patterns proactively
+        this.detectActivityPatterns(p.id).catch(err => {
+          logger.error('Failed detecting patterns', { error: String(err) });
+        });
+
         const canNotify = await this.shouldNotify(p.id);
         if (!canNotify) continue;
 

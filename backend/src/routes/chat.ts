@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { classifyIntent } from '../services/ResponseIntelligence';
 import { z } from 'zod';
 import { chatCompletion } from '../lib/nvidia';
 import { logger } from '../lib/logger';
@@ -573,9 +574,16 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
 
       // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
       let temporalContextBlock = '';
-      const TEMPORAL_KEYWORDS = ['yesterday', 'days ago', 'last week', 'last month', 'do you remember',
-        'what time', 'what day', 'when did', 'earlier today', 'this morning', 'last night',
-        'tell me what', 'you said', 'i said', 'we talked', 'kal', 'parso', 'yaad hai'];
+      const TEMPORAL_KEYWORDS = [
+        'yesterday', 'days ago', 'last week', 'last month', 'do you remember',
+        'what time', 'what day', 'when did', 'earlier today', 'this morning', 
+        'last night', 'tell me what', 'you said', 'i said', 'we talked',
+        // Hindi/Hinglish
+        'kal', 'parso', 'yaad hai', 'yaad karo', 'kab', 'kitne baje', 
+        'time kya tha', 'exact time', 'pehle', 'abhi', 'aaj subah',
+        'raat ko', 'dopahar', 'shaam ko', 'maine kaha tha', 'tune kaha tha',
+        'bataya tha', 'bola tha', 'likha tha'
+      ];
       const lowerMsg = message.toLowerCase();
       const isTemporalQuery = TEMPORAL_KEYWORDS.some(kw => lowerMsg.includes(kw));
 
@@ -610,7 +618,19 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
         }
       }
 
-      const finalSystemPrompt = datetimeBlock + '\n\n' + systemPrompt + (temporalContextBlock || '');
+      // Build conversation flow digest for the LLM
+      let conversationFlowBlock = '';
+      if (recentMessages.length > 0) {
+        const last10 = recentMessages.slice(-10);
+        const digest = last10.map(m => {
+          const speaker = m.role === 'user' ? 'User' : 'Nova';
+          const preview = m.content.substring(0, 100);
+          return `${speaker}: ${preview}`;
+        }).join('\n');
+        conversationFlowBlock = `\n\n## CURRENT CONVERSATION FLOW (What just happened — stay contextual)\n${digest}`;
+      }
+
+      const finalSystemPrompt = datetimeBlock + '\n\n' + systemPrompt + (temporalContextBlock || '') + conversationFlowBlock;
 
       const messagesForLLM = [
         { role: 'system' as const, content: finalSystemPrompt },
@@ -623,12 +643,26 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
       } else {
         try {
-          rawReply = await chatCompletion(messagesForLLM, {
-            maxTokens: MAX_OUTPUT_TOKENS,
-            temperature: 0.85,          // Higher = more creative, less repetitive
-            frequency_penalty: 0.7,     // Penalise repeating the same tokens/phrases
-            presence_penalty: 0.5,      // Penalise reusing topics already covered
+          const responseConfig = classifyIntent(message, recentMessages.map(m => m.content));
+          
+          // Inject mode tag into the system prompt so the LLM knows which mode to use
+          const modeTag = `\n\n[MODE: ${responseConfig.mode}]\n`;
+          const messagesForLLMWithMode = [
+            { ...messagesForLLM[0], content: messagesForLLM[0].content + modeTag },
+            ...messagesForLLM.slice(1)
+          ];
+          
+          rawReply = await chatCompletion(messagesForLLMWithMode, {
+            maxTokens: responseConfig.maxTokens,
+            temperature: responseConfig.temperature,
+            frequency_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.9 : 0.7,
+            presence_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.7 : 0.5,
           });
+
+          // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
+          if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
+            rawReply += '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
+          }
         } catch (nvidiaError) {
           throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
         }
@@ -677,7 +711,13 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
             logger.info('Memory Extraction Skipped:', { reason: 'Rate limit exceeded (50/hr)' });
           } else {
             cache.set(rateKey, currentCount + 1, 60 * 60 * 1000, 'rate_limit');
-            backgroundJobs.push(memoryQueue.add('extract_short_term', payload));
+            backgroundJobs.push(memoryQueue.add('extract_short_term', {
+              ...payload,
+              novaReply: rawReply,
+              conversationSnapshot: recentMessages.slice(-6).map(m => 
+                `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content.substring(0, 200)}`
+              ).join('\n')
+            }));
           }
         }
 
