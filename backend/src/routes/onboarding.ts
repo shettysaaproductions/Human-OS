@@ -39,7 +39,7 @@ onboardingRouter.get('/status', async (req: Request, res: Response, next: NextFu
 
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('onboarding_completed, preferred_name, companion_personality')
+      .select('onboarding_completed, preferred_name, companion_personality, country')
       .eq('id', userId)
       .single();
 
@@ -61,6 +61,47 @@ onboardingRouter.get('/status', async (req: Request, res: Response, next: NextFu
     res.status(200).json(data);
   } catch (err) {
     logger.error('Failed to get onboarding status', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+/**
+ * PATCH /onboarding/profile
+ * Updates individual profile fields (country, preferred_name, companion_personality, etc.)
+ * without requiring a full onboarding re-submission.
+ */
+onboardingRouter.patch('/profile', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = (req as any).user!.id;
+    const ALLOWED_FIELDS = ['country', 'preferred_name', 'companion_personality'];
+
+    // Only pick fields that are explicitly allowed — never let raw body touch the DB directly
+    const updates: Record<string, string> = {};
+    for (const field of ALLOWED_FIELDS) {
+      if (req.body[field] !== undefined && typeof req.body[field] === 'string') {
+        updates[field] = req.body[field].trim().substring(0, 100); // max 100 chars per field
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: 'No valid fields provided' });
+      return;
+    }
+
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update(updates)
+      .eq('id', userId);
+
+    if (error) {
+      logger.error('Profile patch failed', { userId, error: error.message });
+      res.status(500).json({ error: 'Failed to update profile' });
+      return;
+    }
+
+    logger.info('Profile patched', { userId, fields: Object.keys(updates) });
+    res.status(200).json({ success: true, updated: Object.keys(updates) });
+  } catch (err) {
+    logger.error('Profile patch error', { error: err instanceof Error ? err.message : String(err) });
     next(err);
   }
 });

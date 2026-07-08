@@ -377,11 +377,11 @@ chatRouter.post(
       // ── Normal Mode ───────────────────────────────────────────
       // 1. Profile (cached 5 min)
       const profileCacheKey = `profile:${userId}`;
-      let profile = cache.get<{ preferred_name: string; companion_personality: string }>(profileCacheKey);
+      let profile = cache.get<{ preferred_name: string; companion_personality: string; country?: string }>(profileCacheKey);
       if (!profile) {
         const { data: profileData } = await qt.track('get_profile', 'profiles', () =>
           supabaseAdmin.from('profiles')
-            .select('preferred_name, companion_personality')
+            .select('preferred_name, companion_personality, country')
             .eq('id', userId)
             .maybeSingle()
         );
@@ -541,6 +541,36 @@ chatRouter.post(
         recentCrossSessionContext
       );
 
+      // 5.1 ALWAYS inject current real-world datetime — Nova must never say she doesn't know the date/time.
+      // Weekend detection respects the user's country (Middle East = Fri+Sat, default = Sat+Sun).
+      const userCountry = (profile as any)?.country || 'IN';
+      const TIMEZONE_OFFSETS: Record<string, number> = {
+        IN: 5.5, US: -5, UK: 0,  AU: 10, AE: 4,  SA: 3,
+        PK: 5,   BD: 6,  SG: 8,  JP: 9,  DE: 1,  FR: 1,
+        CA: -5,  NZ: 12, ZA: 2,  NG: 1,  KE: 3,  BR: -3,
+      };
+      const FRIDAY_SAT_WEEKEND = ['AE', 'SA', 'QA', 'BH', 'KW', 'OM', 'AF', 'IR'];
+      const tzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
+      const nowLocal = new Date(Date.now() + tzOffset * 3600 * 1000);
+      const DAY_NAMES   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const dayIdx  = nowLocal.getUTCDay();
+      const dateStr = `${DAY_NAMES[dayIdx]}, ${MONTH_NAMES[nowLocal.getUTCMonth()]} ${nowLocal.getUTCDate()}, ${nowLocal.getUTCFullYear()}`;
+      const hh = nowLocal.getUTCHours(), mm = nowLocal.getUTCMinutes();
+      const ampm = hh >= 12 ? 'PM' : 'AM';
+      const timeStr = `${hh % 12 || 12}:${mm.toString().padStart(2,'0')} ${ampm}`;
+      const tzLabel = tzOffset === 5.5 ? 'IST' : `UTC${tzOffset >= 0 ? '+' : ''}${tzOffset}`;
+      const isWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
+        ? dayIdx === 5 || dayIdx === 6
+        : dayIdx === 0 || dayIdx === 6;
+      const datetimeBlock = `## CURRENT DATE & TIME (Always accurate — use this when the user asks about today, the date, the day, or the time)
+Date     : ${dateStr}
+Time     : ${timeStr} ${tzLabel}
+Day type : ${isWeekend ? 'Weekend' : 'Weekday'}
+Country  : ${userCountry}
+
+IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say you do not know the date or day. Use this confidently and naturally.`;
+
       // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
       let temporalContextBlock = '';
       const TEMPORAL_KEYWORDS = ['yesterday', 'days ago', 'last week', 'last month', 'do you remember',
@@ -580,7 +610,7 @@ chatRouter.post(
         }
       }
 
-      const finalSystemPrompt = temporalContextBlock ? systemPrompt + temporalContextBlock : systemPrompt;
+      const finalSystemPrompt = datetimeBlock + '\n\n' + systemPrompt + (temporalContextBlock || '');
 
       const messagesForLLM = [
         { role: 'system' as const, content: finalSystemPrompt },
