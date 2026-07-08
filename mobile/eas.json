@@ -23,6 +23,16 @@
         "buildType": "apk"
       }
     },
+    "apk-embedded": {
+      "distribution": "internal",
+      "channel": "production",
+      "env": {
+        "EXPO_NO_OTA": "1"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "channel": "production",
