@@ -74,21 +74,25 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     justifyContent: 'center', 
-    padding: 20 
+    padding: 20,
+    backgroundColor: '#09090B',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 40,
-    textAlign: 'center'
+    textAlign: 'center',
+    color: '#FFFFFF',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
-    fontSize: 16
+    fontSize: 16,
+    color: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.07)',
   },
   spacer: {
     height: 20
@@ -100,3 +104,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   }
 });
+

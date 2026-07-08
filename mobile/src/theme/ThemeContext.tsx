@@ -87,9 +87,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const colors = isDark ? darkColors : lightColors;
 
-  if (loading) {
-    return null;
-  }
+  // NEVER return null — that causes a white screen on cold start while
+  // SecureStore is reading the stored theme preference.
+  // Instead, render children immediately with the default ('dark') and
+  // let the theme update silently once SecureStore resolves.
+  // The visual diff is imperceptible since the update is nearly instant.
 
   return (
     <ThemeContext.Provider value={{ themeMode, isDark, colors, setThemeMode }}>
