@@ -7,15 +7,29 @@ export interface ResponseConfig {
   shouldOfferTable: boolean; // Whether to append table offer as follow-up bubble
 }
 
-export function classifyIntent(message: string, _recentHistory: string[]): ResponseConfig {
+export function classifyIntent(message: string, recentHistory: string[] = []): ResponseConfig {
   const lower = message.toLowerCase();
   const len = message.length;
   
+  // ── CONTEXT-AWARE OVERRIDES ──
+  // If the AI just offered a table (in the last 2 messages) and the user agreed, force LONG_CONTEXT
+  const lastAiMessage = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1]?.toLowerCase() : '';
+  const secondLastAiMessage = recentHistory.length > 1 ? recentHistory[recentHistory.length - 2]?.toLowerCase() : '';
+  
+  const aiOfferedTable = (lastAiMessage && lastAiMessage.includes('table format')) || 
+                         (secondLastAiMessage && secondLastAiMessage.includes('table format'));
+  
+  const userAgreed = /\b(sure|yes|ha|haan|dikha|bata|ok|okay|karo|give|please|yep|yeah)\b/i.test(lower) || len < 10;
+  
+  if (aiOfferedTable && userAgreed) {
+    return { mode: 'LONG_CONTEXT', maxTokens: 1500, temperature: 0.5, shouldOfferTable: false };
+  }
+
   // ── TABLE / LONG_CONTEXT triggers (explicit depth requests) ──
   const explainPatterns = /\b(explain|detail|difference|compare|research|samjhao|batao in detail|deep dive|analysis|pros and cons|list.*(options|features)|step by step)\b/i;
   if (explainPatterns.test(lower)) {
-    // Start with HUMAN_CHAT (short answer) but auto-probe with a table offer
-    return { mode: 'HUMAN_CHAT', maxTokens: 400, temperature: 0.7, shouldOfferTable: true };
+    // Provide a detailed explanation, then auto-probe with a table offer
+    return { mode: 'LONG_CONTEXT', maxTokens: 1000, temperature: 0.7, shouldOfferTable: true };
   }
   
   const creativePatterns = /\b(write|poem|story|email|draft|script|lyrics|article|letter|essay|speech)\b/i;
