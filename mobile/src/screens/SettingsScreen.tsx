@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, Alert, Linking
+  Switch, Alert, Linking, Modal, FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -10,6 +10,28 @@ import { useTheme, ThemeMode } from '../theme/ThemeContext';
 import { useChatStore } from '../store/useChatStore';
 
 const APP_VERSION = '0.2.0-beta';
+
+// Countries Nova understands for local time + weekend detection
+const COUNTRIES = [
+  { code: 'IN', flag: '🇮🇳', name: 'India',          tz: 'IST (UTC+5:30)',  weekend: 'Sat–Sun' },
+  { code: 'US', flag: '🇺🇸', name: 'United States',  tz: 'EST (UTC−5)',     weekend: 'Sat–Sun' },
+  { code: 'UK', flag: '🇬🇧', name: 'United Kingdom', tz: 'GMT (UTC+0)',     weekend: 'Sat–Sun' },
+  { code: 'AU', flag: '🇦🇺', name: 'Australia',      tz: 'AEST (UTC+10)',  weekend: 'Sat–Sun' },
+  { code: 'CA', flag: '🇨🇦', name: 'Canada',         tz: 'EST (UTC−5)',    weekend: 'Sat–Sun' },
+  { code: 'AE', flag: '🇦🇪', name: 'UAE',            tz: 'GST (UTC+4)',    weekend: 'Fri–Sat' },
+  { code: 'SA', flag: '🇸🇦', name: 'Saudi Arabia',   tz: 'AST (UTC+3)',    weekend: 'Fri–Sat' },
+  { code: 'PK', flag: '🇵🇰', name: 'Pakistan',       tz: 'PKT (UTC+5)',    weekend: 'Sat–Sun' },
+  { code: 'BD', flag: '🇧🇩', name: 'Bangladesh',     tz: 'BST (UTC+6)',    weekend: 'Fri–Sat' },
+  { code: 'SG', flag: '🇸🇬', name: 'Singapore',      tz: 'SGT (UTC+8)',    weekend: 'Sat–Sun' },
+  { code: 'JP', flag: '🇯🇵', name: 'Japan',          tz: 'JST (UTC+9)',    weekend: 'Sat–Sun' },
+  { code: 'DE', flag: '🇩🇪', name: 'Germany',        tz: 'CET (UTC+1)',    weekend: 'Sat–Sun' },
+  { code: 'FR', flag: '🇫🇷', name: 'France',         tz: 'CET (UTC+1)',    weekend: 'Sat–Sun' },
+  { code: 'BR', flag: '🇧🇷', name: 'Brazil',         tz: 'BRT (UTC−3)',    weekend: 'Sat–Sun' },
+  { code: 'ZA', flag: '🇿🇦', name: 'South Africa',   tz: 'SAST (UTC+2)',   weekend: 'Sat–Sun' },
+  { code: 'NG', flag: '🇳🇬', name: 'Nigeria',        tz: 'WAT (UTC+1)',    weekend: 'Sat–Sun' },
+  { code: 'KE', flag: '🇰🇪', name: 'Kenya',          tz: 'EAT (UTC+3)',    weekend: 'Sat–Sun' },
+  { code: 'NZ', flag: '🇳🇿', name: 'New Zealand',    tz: 'NZST (UTC+12)',  weekend: 'Sat–Sun' },
+];
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -22,6 +44,36 @@ export function SettingsScreen() {
   const [goalNotifs, setGoalNotifs] = useState(true);
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(true);
   const [exporting, setExporting] = useState(false);
+
+  // Country / timezone selector
+  const [country, setCountry] = useState('IN');
+  const [countryModalVisible, setCountryModalVisible] = useState(false);
+  const [savingCountry, setSavingCountry] = useState(false);
+
+  // Load saved country from profile on mount
+  useEffect(() => {
+    api.get('/onboarding/status').then(res => {
+      const c = res.data?.country || res.data?.profile?.country;
+      if (c) setCountry(c);
+    }).catch(() => {});
+  }, []);
+
+  const handleSelectCountry = useCallback(async (code: string) => {
+    setCountryModalVisible(false);
+    if (code === country) return;
+    setSavingCountry(true);
+    setCountry(code);
+    try {
+      await api.patch('/onboarding/profile', { country: code });
+    } catch {
+      Alert.alert('Error', 'Could not save country. Please try again.');
+      setCountry(country); // revert
+    } finally {
+      setSavingCountry(false);
+    }
+  }, [country]);
+
+  const selectedCountry = COUNTRIES.find(c => c.code === country) || COUNTRIES[0];
 
   const handleExport = useCallback(async () => {
     try {
@@ -69,8 +121,62 @@ export function SettingsScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Theme Settings */}
-        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🎨 THEME</Text>
+
+        {/* ── Location & Time ───────────────────────────── */}
+        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🌍 LOCATION & TIME</Text>
+        <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity style={st.row} onPress={() => setCountryModalVisible(true)} disabled={savingCountry}>
+            <View>
+              <Text style={[st.rowLabel, { color: colors.textPrimary }]}>
+                {selectedCountry.flag}  {selectedCountry.name}
+              </Text>
+              <Text style={[st.rowSub, { color: colors.textSecondary }]}>
+                {selectedCountry.tz}  ·  Weekend: {selectedCountry.weekend}
+              </Text>
+            </View>
+            <Text style={[st.chevron, { color: colors.textSecondary }]}>
+              {savingCountry ? '...' : '›'}
+            </Text>
+          </TouchableOpacity>
+          <View style={[st.divider, { backgroundColor: colors.divider }]} />
+          <View style={st.row}>
+            <Text style={[st.rowSub, { color: colors.textSecondary, flex: 1 }]}>
+              Nova uses this to know your current time, day of the week, and what counts as a weekend for you.
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Country Picker Modal ──────────────────────── */}
+        <Modal visible={countryModalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setCountryModalVisible(false)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+            <View style={[st.modalHeader, { borderBottomColor: colors.divider }]}>
+              <Text style={[st.modalTitle, { color: colors.textPrimary }]}>Select Your Country</Text>
+              <TouchableOpacity onPress={() => setCountryModalVisible(false)}>
+                <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '600' }}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={COUNTRIES}
+              keyExtractor={item => item.code}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[st.countryRow, { borderBottomColor: colors.divider },
+                    item.code === country && { backgroundColor: colors.card }]}
+                  onPress={() => handleSelectCountry(item.code)}
+                >
+                  <Text style={{ fontSize: 26, marginRight: 12 }}>{item.flag}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[{ fontSize: 15, fontWeight: '500' }, { color: colors.textPrimary }]}>{item.name}</Text>
+                    <Text style={[{ fontSize: 12 }, { color: colors.textSecondary }]}>{item.tz}  ·  Weekend: {item.weekend}</Text>
+                  </View>
+                  {item.code === country && <Text style={{ color: '#8B5CF6', fontWeight: 'bold', fontSize: 18 }}>✓</Text>}
+                </TouchableOpacity>
+              )}
+            />
+          </SafeAreaView>
+        </Modal>
+
+        {/* ── Theme ────────────────────────────────────── */}
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('system')}>
             <Text style={[st.rowLabel, { color: colors.textPrimary }]}>System Default</Text>
@@ -217,8 +323,12 @@ const st = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
   rowLabel: { fontSize: 15 },
+  rowSub: { fontSize: 12, marginTop: 2 },
   rowValue: { fontSize: 15 },
   chevron: { fontSize: 20 },
   checkmark: { color: '#8B5CF6', fontWeight: 'bold', fontSize: 16 },
   divider: { height: 1, marginHorizontal: 16 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
+  modalTitle: { fontSize: 17, fontWeight: '700' },
+  countryRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
 });
