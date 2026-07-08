@@ -388,7 +388,7 @@ function SmartMarkdown({ content, mdStyle, mdRules, colors, onLongPress, onPress
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [isReadyToRender, setIsReadyToRender] = useState(false);
@@ -823,6 +823,21 @@ export function ChatScreen() {
             updateCellsBatchingPeriod={50}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
+            onEndReached={() => {
+              // In an inverted list, "end" is visually the TOP = oldest messages
+              if (hasMoreMessages && !isLoadingMore) {
+                loadOlderMessages();
+              }
+            }}
+            onEndReachedThreshold={0.3}
+            ListFooterComponent={
+              isLoadingMore ? (
+                <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>Loading older messages...</Text>
+                </View>
+              ) : null
+            }
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               <View style={s.emptyChat}>
