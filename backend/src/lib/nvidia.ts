@@ -46,6 +46,13 @@ function withNvidiaTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<
   );
 }
 
+/**
+ * Lightweight model used by background extraction agents (Semantic, Emotional, Episodic, etc.).
+ * These agents only extract structured JSON from a single message — 8B is ideal for this.
+ * The main chat model (70B) is configured via NVIDIA_CHAT_MODEL env var.
+ */
+export const EXTRACTION_MODEL = 'meta/llama-3.1-8b-instruct';
+
 export interface ChatOptions {
   model?: string;
   maxTokens?: number;
