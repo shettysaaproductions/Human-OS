@@ -33,7 +33,7 @@ export const config = {
   nvidia: {
     apiKey: requireEnv('NVIDIA_API_KEY'),
     baseUrl: optionalEnv('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
-    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.3-70b-instruct'),
+    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.1-70b-instruct'),
   },
 
   // Optional in Phase 1 — Supabase is not yet used.
