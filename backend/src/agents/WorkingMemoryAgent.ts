@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { WorkingMemory } from '../types/memory';
 
@@ -36,6 +36,7 @@ If there is no short-term context, return {"working_memories": []}.`
         content: message
       }
     ], {
+      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });

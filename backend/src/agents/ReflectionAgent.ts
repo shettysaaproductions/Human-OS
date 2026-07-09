@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
@@ -62,6 +62,7 @@ Return ONLY a valid JSON object:
         content: `Synthesize this day (${date}):\n\n${contextStr}`
       }
     ], {
+      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.2
     });

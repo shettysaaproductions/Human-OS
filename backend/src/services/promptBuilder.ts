@@ -18,9 +18,17 @@ export class PromptBuilder {
     shortTermMemories?: any[],
     preferredLanguage: 'en' | 'hi' | 'auto' = 'auto',
     recentCrossSessionContext?: string,
-    mode: 'HUMAN_CHAT' | 'LONG_CONTEXT' = 'HUMAN_CHAT'
+    mode: 'HUMAN_CHAT' | 'LONG_CONTEXT' = 'HUMAN_CHAT',
+    situationBrief?: string
   ): string {
     let finalPrompt = `${basePrompt}\n`;
+    
+    // Inject Situation Brief at the very top (before mode/memory blocks)
+    // This gives the LLM a pre-synthesized understanding of the user's current moment.
+    if (situationBrief && situationBrief.trim().length > 0) {
+      finalPrompt += `\n${situationBrief}\n`;
+    }
+    
     if (mode === 'HUMAN_CHAT') {
       finalPrompt += `
 ## MODE: HUMAN_CHAT (WhatsApp Texting)

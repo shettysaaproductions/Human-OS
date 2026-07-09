@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
 import { memoryRepository } from '../services/memoryRepository';
 import { ExtractedMemory } from '../types/memory';
 
@@ -48,6 +48,7 @@ If there are no critical life milestones to extract, return {"milestone_memories
         content: message
       }
     ], {
+      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.0 
     });

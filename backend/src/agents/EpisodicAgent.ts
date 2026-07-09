@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { EpisodicMemory } from '../types/memory';
 
@@ -35,6 +35,7 @@ If there are no events to extract, return {"episodic_memories": []}.`
         content: message
       }
     ], {
+      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });

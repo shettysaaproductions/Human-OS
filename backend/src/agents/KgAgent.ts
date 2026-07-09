@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { KgNode } from '../types/memory';
 import { logger } from '../lib/logger';
@@ -45,6 +45,7 @@ If no graph entities are found, return {"kg_nodes": [], "kg_edges": []}.`
         content: message
       }
     ], {
+      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1
     });

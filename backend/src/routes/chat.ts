@@ -13,6 +13,7 @@ import { cache, CACHE_NS, CACHE_TTL } from '../lib/cache';
 import { qt } from '../lib/queryTracker';
 import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
+import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -519,20 +520,8 @@ chatRouter.post(
 
       // 5. Build prompt
       const responseConfig = classifyIntent(message, recentMessages.map(m => m.content));
-      const systemPrompt = promptBuilder.buildSystemPrompt(
-        BASE_SYSTEM_PROMPT,
-        memories,
-        workingMemories,
-        profile?.preferred_name,
-        profile?.companion_personality,
-        shortTermMemories,
-        language,
-        recentCrossSessionContext,
-        responseConfig.mode
-      );
 
-      // 5.1 ALWAYS inject current real-world datetime — Nova must never say she doesn't know the date/time.
-      // Weekend detection respects the user's country (Middle East = Fri+Sat, default = Sat+Sun).
+      // 5.1 Situational Awareness: Fetch context from disconnected engines (parallel, lightweight)
       const userCountry = (profile as any)?.country || 'IN';
       const TIMEZONE_OFFSETS: Record<string, number> = {
         IN: 5.5, US: -5, UK: 0,  AU: 10, AE: 4,  SA: 3,
@@ -553,13 +542,98 @@ chatRouter.post(
       const isWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
         ? dayIdx === 5 || dayIdx === 6
         : dayIdx === 0 || dayIdx === 6;
-      const datetimeBlock = `## CURRENT DATE & TIME (Always accurate — use this when the user asks about today, the date, the day, or the time)
-Date     : ${dateStr}
-Time     : ${timeStr} ${tzLabel}
-Day type : ${isWeekend ? 'Weekend' : 'Weekday'}
-Country  : ${userCountry}
 
-IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say you do not know the date or day. Use this confidently and naturally.`;
+      // Fetch disconnected engine data in parallel (all lightweight, single-row queries)
+      let latestEmotion: { mood: string; intensity: number; notes: string } | null = null;
+      let recentEpisodes: { summary: string; emotion: string | null; created_at: string }[] = [];
+      let latestReflection: { summary: string; key_takeaways: any } | null = null;
+      let gapMinutes: number | null = null;
+
+      try {
+        const [emotionResult, episodicResult, reflectionResult, lastMsgResult] = await Promise.all([
+          // Latest emotional state
+          qt.track('get_latest_emotion', 'emotional_states', () =>
+            supabaseAdmin.from('emotional_states')
+              .select('mood, intensity, notes')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          ),
+          // Recent episodic memories (last 5 life events)
+          qt.track('get_recent_episodes', 'episodic_memories', () =>
+            supabaseAdmin.from('episodic_memories')
+              .select('summary, emotion, created_at')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(5)
+          ),
+          // Latest daily reflection
+          qt.track('get_latest_reflection', 'reflections', () =>
+            supabaseAdmin.from('reflections')
+              .select('summary, key_takeaways')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          ),
+          // Last message timestamp (for gap calculation)
+          qt.track('get_last_msg_time', 'chat_history', () =>
+            supabaseAdmin.from('chat_history')
+              .select('created_at')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          )
+        ]);
+
+        if (emotionResult.data) latestEmotion = emotionResult.data;
+        if (episodicResult.data) recentEpisodes = episodicResult.data;
+        if (reflectionResult.data) latestReflection = reflectionResult.data;
+        if (lastMsgResult.data?.created_at) {
+          gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;
+        }
+        logger.info('[SituationalAwareness] Context loaded', {
+          hasEmotion: !!latestEmotion,
+          episodes: recentEpisodes.length,
+          hasReflection: !!latestReflection,
+          gapMinutes: gapMinutes ? Math.round(gapMinutes) : null
+        });
+      } catch (err) {
+        logger.warn('[SituationalAwareness] Context fetch failed (non-critical)', {
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+
+      // Build the Situation Brief
+      const situationCtx: SituationContext = {
+        nowLocal,
+        tzLabel,
+        country: userCountry,
+        gapMinutes,
+        latestEmotion,
+        recentEpisodes,
+        latestReflection,
+        isWeekend,
+        dayName: DAY_NAMES[dayIdx],
+        dateStr,
+        timeStr
+      };
+      const situationBrief = situationalAwareness.buildBrief(situationCtx);
+
+      const systemPrompt = promptBuilder.buildSystemPrompt(
+        BASE_SYSTEM_PROMPT,
+        memories,
+        workingMemories,
+        profile?.preferred_name,
+        profile?.companion_personality,
+        shortTermMemories,
+        language,
+        recentCrossSessionContext,
+        responseConfig.mode,
+        situationBrief
+      );
 
       // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
       let temporalContextBlock = '';
@@ -589,16 +663,16 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
           );
 
           if (temporalData && temporalData.length > 0) {
-            const chronologicalData = temporalData.reverse(); // put back in chronological order
-            const istOffset = 5.5 * 60 * 60 * 1000; // IST = UTC+5:30
+            const chronologicalData = temporalData.reverse();
+            const istOffset = 5.5 * 60 * 60 * 1000;
             const lines = chronologicalData.map(m => {
               const d = new Date(new Date(m.created_at).getTime() + istOffset);
               const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
               const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const timeStr = `${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')} IST`;
+              const tStr = `${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')} IST`;
               const speaker = m.role === 'assistant' ? 'Nova' : 'You';
               const preview = m.content.substring(0, 300) + (m.content.length > 300 ? '...' : '');
-              return `[${timeStr}] ${speaker}: ${preview}`;
+              return `[${tStr}] ${speaker}: ${preview}`;
             });
             temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n') + '\n\nCRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory.';
             logger.info('[Temporal] Injected archive', { rows: temporalData.length });
@@ -620,7 +694,7 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
         conversationFlowBlock = `\n\n## CURRENT CONVERSATION FLOW (What just happened — stay contextual)\n${digest}`;
       }
 
-      const finalSystemPrompt = datetimeBlock + '\n\n' + systemPrompt + (temporalContextBlock || '') + conversationFlowBlock;
+      const finalSystemPrompt = systemPrompt + (temporalContextBlock || '') + conversationFlowBlock;
 
       const messagesForLLM: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
         { role: 'system', content: finalSystemPrompt },
@@ -686,14 +760,24 @@ IMPORTANT: You ALWAYS know the current date and time from this block. NEVER say 
       if (process.env.DISABLE_MEMORY !== 'true') {
         const payload = { userId, messageId: userMessageId, message };
 
-        const backgroundJobs = [
-          memoryQueue.add('extract_semantic', payload),
-          memoryQueue.add('extract_working_memory', payload),
-          memoryQueue.add('extract_episodic', payload),
-          memoryQueue.add('extract_kg', payload),
-          memoryQueue.add('extract_emotional', payload),
-          memoryQueue.add('extract_milestone', payload)
-        ];
+        // Optimization: Skip extraction for ultra-short filler messages (e.g., "ok", "hmm", "gn")
+        // to save NVIDIA NIM API limits.
+        const isFiller = message.length < 10 && !shouldExtractShortTermMemory(message);
+        
+        const backgroundJobs: Promise<any>[] = [];
+        
+        if (!isFiller) {
+          backgroundJobs.push(
+            memoryQueue.add('extract_semantic', payload),
+            memoryQueue.add('extract_working_memory', payload),
+            memoryQueue.add('extract_episodic', payload),
+            memoryQueue.add('extract_kg', payload),
+            memoryQueue.add('extract_emotional', payload),
+            memoryQueue.add('extract_milestone', payload)
+          );
+        } else {
+          logger.info('Memory Extraction Skipped:', { reason: 'Ultra-short filler message' });
+        }
 
         if (shouldExtractShortTermMemory(message)) {
           const rateKey = `stm_rate_${userId}`;
