@@ -126,70 +126,60 @@ export const useChatStore = create<ChatState>((set, get) => {
         console.log('[QUEUE] sending:', item.id);
 
         try {
-          const data = await chatService.sendMessage(
-            item.content,
-            get().conversationId || undefined
-          );
-          
-          console.log('SEND_MESSAGE_RETURNED');
-          console.log('DATA_KEYS', Object.keys(data));
-          
-          console.log(
-            'CHAT_RESPONSE',
-            JSON.stringify(data, null, 2)
-          );
-          
-          // 1. Mark user's message as sent
-          set((s) => ({
-            messages: s.messages.map(m =>
-              m.id === item.id ? { ...m, status: 'sent' as const } : m
-            ),
-            conversationId: data.conversation_id,
-          }));
-
-          // 2. Deliver assistant chunks with natural delay
-          const chunksToDeliver = (data.chunks && Array.isArray(data.chunks)) 
-            ? data.chunks 
-            : [{ content: data.reply, total: 1, index: 1 }];
-          
-          const chunkMessages = chunksToDeliver;
-          
-          for (let i = 0; i < chunksToDeliver.length; i++) {
-            // Check if user cleared messages while we were waiting
-            if (get().messages.length === 0) break;
-
-            const c = chunksToDeliver[i];
-            const randomSuffix = Math.random().toString(36).substring(2, 7);
-            const content = c.content;
+          await new Promise<void>((resolve, reject) => {
+            let messageIdCreated = false;
+            let currentAssistantMsgId = Date.now().toString() + '_nova_' + Math.random().toString(36).substring(2, 7);
             
-            set({ isTyping: true });
-            
-            // Dynamic delay: min 500, max 2500 based on text length
-            const delay = Math.min(Math.max(content.length * 12, 500), 2500);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            
-            // Re-check after delay just in case
-            if (get().messages.length === 0) break;
-
-            const newMsg: Message = {
-              id: Date.now().toString() + '_nova_' + i + '_' + randomSuffix,
-              role: 'assistant',
-              content: content,
-              status: 'sent',
-              timestamp: new Date().toISOString(),
-              chunkIndex: c.total > 1 ? c.index : undefined,
-              chunkTotal: c.total > 1 ? c.total : undefined,
-            };
-            
-            console.log(
-              'CHUNKS_TO_RENDER',
-              JSON.stringify(chunkMessages, null, 2)
-            );
+            // Mark user message as sent immediately since the request is firing
             set((s) => ({
-              messages: [...s.messages, newMsg],
-              isTyping: false
+              messages: s.messages.map(m => m.id === item.id ? { ...m, status: 'sent' as const } : m)
             }));
-          }
+
+            chatService.streamMessage(
+              item.content,
+              get().conversationId || undefined,
+              (convId) => {
+                // onSetup
+                set({ conversationId: convId });
+              },
+              (chunk) => {
+                // onChunk
+                set((s) => {
+                  if (!messageIdCreated) {
+                    messageIdCreated = true;
+                    // First chunk: add the assistant message
+                    return {
+                      messages: [...s.messages, {
+                        id: currentAssistantMsgId,
+                        role: 'assistant',
+                        content: chunk,
+                        status: 'sent',
+                        timestamp: new Date().toISOString()
+                      }],
+                      isTyping: false
+                    };
+                  } else {
+                    // Subsequent chunks: append to existing message
+                    return {
+                      messages: s.messages.map(m => 
+                        m.id === currentAssistantMsgId 
+                          ? { ...m, content: m.content + chunk } 
+                          : m
+                      )
+                    };
+                  }
+                });
+              },
+              () => {
+                // onDone
+                resolve();
+              },
+              (errorStr) => {
+                // onError
+                reject(new Error(errorStr));
+              }
+            );
+          });
 
           console.log('[QUEUE] success:', item.id);
         } catch (error: any) {

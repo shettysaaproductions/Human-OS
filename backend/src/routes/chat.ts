@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { classifyIntent } from '../services/ResponseIntelligence';
 import { z } from 'zod';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, chatCompletionStream } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
@@ -710,28 +710,63 @@ chatRouter.post(
         });
       }
 
+      const isStreaming = req.headers.accept === 'text/event-stream';
+
+      if (isStreaming) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        // Initial setup payload to give the client conversation ID
+        res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
+      }
+
       // 6. Call NVIDIA
-      let rawReply: string;
+      let rawReply = '';
       if (isExcessiveRequest(message)) {
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
+        if (isStreaming) res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
       } else {
         try {
-          // No need to inject mode tag manually as promptBuilder now builds it dynamically
-          
-          rawReply = await chatCompletion(messagesForLLM, {
+          const nvidiaOptions = {
             maxTokens: responseConfig.maxTokens,
             temperature: responseConfig.temperature,
             frequency_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.9 : 0.7,
             presence_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.7 : 0.5,
-          });
+          };
+
+          if (isStreaming) {
+            const stream = chatCompletionStream(messagesForLLM, nvidiaOptions);
+            for await (const chunk of stream) {
+              rawReply += chunk;
+              res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+            }
+          } else {
+            rawReply = await chatCompletion(messagesForLLM, nvidiaOptions);
+          }
 
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
           if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
-            rawReply += '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
+            const extraText = '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
+            rawReply += extraText;
+            if (isStreaming) {
+              res.write(`data: ${JSON.stringify({ type: 'chunk', content: extraText })}\n\n`);
+            }
           }
         } catch (nvidiaError) {
-          throw new ExternalServiceError('NVIDIA', nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError));
+          const errStr = nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError);
+          if (isStreaming) {
+            res.write(`data: ${JSON.stringify({ type: 'error', error: errStr })}\n\n`);
+            res.end();
+            return;
+          } else {
+            throw new ExternalServiceError('NVIDIA', errStr);
+          }
         }
+      }
+
+      if (isStreaming) {
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        res.end();
       }
 
       const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), message);
@@ -743,14 +778,20 @@ chatRouter.post(
           .insert({ user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: rawReply })
       );
 
-      // Generate chunks for UI
-      const textChunks = parsedMessages.flatMap(m => chunkResponse(m));
-      const totalChunks = textChunks.length;
-      const chunks = textChunks.map((content, idx) => ({
-        index: idx + 1,
-        total: totalChunks,
-        content
-      }));
+      // Generate chunks for UI (only needed for REST response)
+      let chunks: any[] = [];
+      let parsedMessagesArray: string[] = [];
+      
+      if (!isStreaming) {
+        parsedMessagesArray = parsedMessages;
+        const textChunks = parsedMessages.flatMap(m => chunkResponse(m));
+        const totalChunks = textChunks.length;
+        chunks = textChunks.map((content, idx) => ({
+          index: idx + 1,
+          total: totalChunks,
+          content
+        }));
+      }
 
       // 8. Also buffer to in-memory (for degraded mode recovery continuity)
       degradedMode.appendMessage(userId, 'user', message);
@@ -760,8 +801,6 @@ chatRouter.post(
       if (process.env.DISABLE_MEMORY !== 'true') {
         const payload = { userId, messageId: userMessageId, message };
 
-        // Optimization: Skip extraction for ultra-short filler messages (e.g., "ok", "hmm", "gn")
-        // to save NVIDIA NIM API limits.
         const isFiller = message.length < 10 && !shouldExtractShortTermMemory(message);
         
         const backgroundJobs: Promise<any>[] = [];
@@ -801,23 +840,24 @@ chatRouter.post(
           logger.error('Failed to enqueue background extraction jobs', { error: err instanceof Error ? err.message : String(err) });
         });
 
-        // Invalidate WM cache so next message sees fresh WM after extraction
         cache.invalidate(wmCacheKey);
       } else {
         logger.info('[DEBUG] DISABLE_MEMORY=true — skipping background extraction jobs');
       }
 
-      res.status(200).json({
-        reply,
-        messages: parsedMessages,
-        chunks,
-        conversation_id: activeConversationId,
-        meta: {
-          memories_retrieved: memories.length,
-          keywords_searched: keywords,
-          degraded: false,
-        }
-      });
+      if (!isStreaming) {
+        res.status(200).json({
+          reply,
+          messages: parsedMessagesArray,
+          chunks,
+          conversation_id: activeConversationId,
+          meta: {
+            memories_retrieved: memories.length,
+            keywords_searched: keywords,
+            degraded: false,
+          }
+        });
+      }
     } catch (err) {
       next(err);
     }

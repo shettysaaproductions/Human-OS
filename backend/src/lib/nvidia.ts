@@ -201,3 +201,37 @@ export async function chatCompletion(
     throw err;
   }
 }
+
+/**
+ * Streams a chat completion response from NVIDIA's API.
+ * Yields chunks of text as they arrive.
+ */
+export async function* chatCompletionStream(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: ChatOptions,
+): AsyncGenerator<string, void, unknown> {
+  const payload: any = {
+    model: options?.model ?? config.nvidia.chatModel,
+    messages,
+    max_tokens: options?.maxTokens ?? 1024,
+    temperature: options?.temperature ?? 0.85,
+    stream: true,
+  };
+
+  if (options?.frequency_penalty !== undefined) payload.frequency_penalty = options.frequency_penalty;
+  if (options?.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty;
+
+  try {
+    const stream = await nvidiaClient.chat.completions.create(payload);
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) yield content;
+    }
+  } catch (err: any) {
+    logger.error('NVIDIA API streaming call failed', {
+      error: err.message,
+      name: err.name,
+    });
+    throw err;
+  }
+}
