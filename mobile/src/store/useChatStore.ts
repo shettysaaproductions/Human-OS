@@ -194,7 +194,6 @@ export const useChatStore = create<ChatState>((set, get) => {
           console.log('[QUEUE] success:', item.id);
         } catch (error: any) {
           // Failure is scoped to this one message only.
-          // The while-loop continues to process any remaining queued messages.
           let errorMessage = 'Network error';
           if (error.response) {
             if (error.response.status === 401) {
@@ -208,15 +207,16 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           }
 
+          console.log('[QUEUE] error (auto-retrying):', item.id, errorMessage);
+          
+          // Wait 3 seconds before retrying
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // Put the message back at the FRONT of the queue
+          // Note: The message status stays 'sending' in the UI.
           set((s) => ({
-            messages: s.messages.map(m =>
-              m.id === item.id
-                ? { ...m, status: 'error' as const, errorMessage }
-                : m
-            ),
+            pendingQueue: [item, ...s.pendingQueue]
           }));
-
-          console.log('[QUEUE] error:', item.id, errorMessage);
         }
       }
     } finally {
