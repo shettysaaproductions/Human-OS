@@ -206,6 +206,16 @@ export const useChatStore = create<ChatState>((set, get) => {
           // Wait 3 seconds before retrying
           await new Promise(resolve => setTimeout(resolve, 3000));
           
+          // If the SSE failed due to an expired token, react-native-sse cannot auto-refresh it
+          // because it bypasses our axios interceptors. By making a lightweight axios call here,
+          // we force the interceptor to catch any 401s and refresh the token BEFORE we retry!
+          try {
+            const { api } = await import('../services/api');
+            await api.get('/onboarding/status');
+          } catch (e) {
+            console.log('[QUEUE] Token refresh ping failed, but continuing retry loop...');
+          }
+          
           // Put the message back at the FRONT of the queue
           // Note: The message status stays 'sending' in the UI.
           set((s) => ({
