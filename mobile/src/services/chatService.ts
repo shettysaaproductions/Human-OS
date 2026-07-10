@@ -1,4 +1,6 @@
 import { api } from './api';
+import EventSource from 'react-native-sse';
+import * as SecureStore from 'expo-secure-store';
 
 export const chatService = {
   getHistory: async (conversationId?: string, limit: number = 50, beforeId?: string) => {
@@ -29,9 +31,6 @@ export const chatService = {
     onDone: () => void,
     onError: (error: string) => void
   ) => {
-    const { default: EventSource } = await import('react-native-sse');
-    const SecureStore = await import('expo-secure-store');
-    
     const token = await SecureStore.getItemAsync('accessToken');
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;

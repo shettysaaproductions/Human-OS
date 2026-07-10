@@ -716,6 +716,8 @@ chatRouter.post(
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        // Important: flush headers to force the proxy/compression to start streaming
+        res.flushHeaders();
         // Initial setup payload to give the client conversation ID
         res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
       }
@@ -739,6 +741,7 @@ chatRouter.post(
             for await (const chunk of stream) {
               rawReply += chunk;
               res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+              if (typeof (res as any).flush === 'function') (res as any).flush();
             }
           } else {
             rawReply = await chatCompletion(messagesForLLM, nvidiaOptions);
@@ -750,12 +753,14 @@ chatRouter.post(
             rawReply += extraText;
             if (isStreaming) {
               res.write(`data: ${JSON.stringify({ type: 'chunk', content: extraText })}\n\n`);
+              if (typeof (res as any).flush === 'function') (res as any).flush();
             }
           }
         } catch (nvidiaError) {
           const errStr = nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError);
           if (isStreaming) {
             res.write(`data: ${JSON.stringify({ type: 'error', error: errStr })}\n\n`);
+            if (typeof (res as any).flush === 'function') (res as any).flush();
             res.end();
             return;
           } else {

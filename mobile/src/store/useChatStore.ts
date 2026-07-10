@@ -130,17 +130,21 @@ export const useChatStore = create<ChatState>((set, get) => {
             let messageIdCreated = false;
             let currentAssistantMsgId = Date.now().toString() + '_nova_' + Math.random().toString(36).substring(2, 7);
             
-            // Mark user message as sent immediately since the request is firing
-            set((s) => ({
-              messages: s.messages.map(m => m.id === item.id ? { ...m, status: 'sent' as const } : m)
-            }));
+            // Mark user message as sent ONLY when the server confirms connection via setup event.
+            // Leaving it as 'sending' ensures it shows as Red while the request is in-flight.
+            // set((s) => ({
+            //   messages: s.messages.map(m => m.id === item.id ? { ...m, status: 'sent' as const } : m)
+            // }));
 
             chatService.streamMessage(
               item.content,
               get().conversationId || undefined,
               (convId) => {
-                // onSetup
-                set({ conversationId: convId });
+                // onSetup (The server has saved the message and begun streaming)
+                set((s) => ({
+                  conversationId: convId,
+                  messages: s.messages.map(m => m.id === item.id ? { ...m, status: 'sent' as const } : m)
+                }));
               },
               (chunk) => {
                 // onChunk
@@ -178,7 +182,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 // onError
                 reject(new Error(errorStr));
               }
-            );
+            ).catch(reject);
           });
 
           console.log('[QUEUE] success:', item.id);
