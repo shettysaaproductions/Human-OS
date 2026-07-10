@@ -522,6 +522,17 @@ export function ChatScreen() {
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
     
+    let ledColor = 'transparent';
+    if (isUser) {
+      if (item.status === 'sending') {
+        ledColor = '#EF4444'; // Red
+      } else {
+        // Check if there is an assistant message after this one (which means index < current index in reversed array)
+        const hasReply = reversedMessages.slice(0, index).some(m => m.role === 'assistant');
+        ledColor = hasReply ? '#10B981' : '#F59E0B'; // Green : Yellow
+      }
+    }
+    
     let showDateSeparator = false;
     if (index === reversedMessages.length - 1) {
       showDateSeparator = true;
@@ -670,6 +681,16 @@ export function ChatScreen() {
               ]}>
                 {formatTime(item.timestamp)}
               </Text>
+              {isUser && (
+                <View style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: ledColor,
+                  marginLeft: 6,
+                  marginTop: 1
+                }} />
+              )}
             </View>
             {isUser && item.status === 'error' && (
               <View style={s.retryButton}>
