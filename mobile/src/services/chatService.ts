@@ -1,5 +1,4 @@
 import { api } from './api';
-import EventSource from 'react-native-sse';
 import * as SecureStore from 'expo-secure-store';
 
 export const chatService = {
@@ -9,80 +8,131 @@ export const chatService = {
     if (beforeId) url += `&before_id=${beforeId}`;
     const response = await api.get(url);
     const data = response.data;
-    console.log("API messages received:", data?.length);
-    console.log("First message:", data[0]?.created_at);
-    console.log("Last message:", data[data?.length - 1]?.created_at);
-    return data; // array of { id, role, content, created_at, conversation_id }
+    console.log('API messages received:', data?.length);
+    console.log('First message:', data[0]?.created_at);
+    console.log('Last message:', data[data?.length - 1]?.created_at);
+    return data;
   },
 
   sendMessage: async (message: string, conversationId?: string) => {
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;
-
     const response = await api.post('/chat', payload);
-    return response.data; // { reply, conversation_id, meta }
+    return response.data;
   },
 
-  streamMessage: async (
+  streamMessage: (
     message: string,
     conversationId: string | undefined,
     onSetup: (convId: string) => void,
     onChunk: (chunk: string) => void,
     onDone: () => void,
     onError: (error: string) => void
-  ) => {
-    const token = await SecureStore.getItemAsync('accessToken');
-    const payload: any = { message };
-    if (conversationId) payload.conversation_id = conversationId;
+  ): Promise<void> => {
+    return new Promise(async (resolve, reject) => {
+      let settled = false;
+      const controller = new AbortController();
 
-    const url = `${api.defaults.baseURL}/chat`;
-    
-    const es = new EventSource(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-      },
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        fn();
+      };
 
-    es.addEventListener('message', (event: any) => {
-      if (event.data) {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'setup') {
-            onSetup(data.conversation_id);
-          } else if (data.type === 'chunk') {
-            onChunk(data.content);
-          } else if (data.type === 'done') {
-            es.close();
-            onDone();
-          } else if (data.type === 'error') {
-            es.close();
-            onError(data.error || 'Server error');
+      // 45-second hard timeout
+      const timeout = setTimeout(() => {
+        controller.abort();
+        settle(() => reject(new Error('Request timed out')));
+      }, 45000);
+
+      try {
+        const token = await SecureStore.getItemAsync('accessToken');
+        const payload: any = { message };
+        if (conversationId) payload.conversation_id = conversationId;
+
+        const url = `${api.defaults.baseURL}/chat`;
+        console.log('[STREAM] Connecting to:', url);
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        console.log('[STREAM] Response status:', response.status);
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          settle(() => reject(new Error(`HTTP ${response.status}: ${text}`)));
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          settle(() => reject(new Error('No response body')));
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        const processLine = (line: string) => {
+          if (!line.startsWith('data: ')) return;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) return;
+          try {
+            const data = JSON.parse(jsonStr);
+            if (data.type === 'setup') {
+              onSetup(data.conversation_id);
+            } else if (data.type === 'chunk') {
+              onChunk(data.content);
+            } else if (data.type === 'done') {
+              onDone();
+              settle(() => resolve());
+            } else if (data.type === 'error') {
+              settle(() => reject(new Error(data.error || 'Server error')));
+            }
+          } catch (e) {
+            console.error('[STREAM] Parse error on line:', line, e);
           }
-        } catch (e) {
-          console.error("Failed to parse SSE data", e);
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (buffer.trim()) {
+              buffer.split('\n').forEach(processLine);
+            }
+            // Stream ended — resolve if not already settled (handles proxies that drop 'done')
+            settle(() => { onDone(); resolve(); });
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          lines.forEach(processLine);
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          settle(() => reject(new Error('Request timed out')));
+        } else {
+          console.error('[STREAM] Fetch error:', err);
+          settle(() => reject(err));
         }
       }
     });
-
-    es.addEventListener('error', (event: any) => {
-      console.error('SSE Error:', event);
-      if (event.type === 'error') {
-        es.close();
-        onError(event.message || 'Network error');
-      }
-    });
-
-    return () => {
-      es.close();
-    };
   },
-  
+
   getDiagnostics: async () => {
     const response = await api.get('/admin/diagnostics');
     return response.data;
-  }
+  },
 };
