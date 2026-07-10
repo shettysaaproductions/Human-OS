@@ -222,7 +222,7 @@ export async function* chatCompletionStream(
   if (options?.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty;
 
   try {
-    const stream = await nvidiaClient.chat.completions.create(payload);
+    const stream = await nvidiaClient.chat.completions.create(payload) as any;
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content || '';
       if (content) yield content;

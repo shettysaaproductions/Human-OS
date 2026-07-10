@@ -1,0 +1,1 @@
+import { config } from 'dotenv'; config(); import { chatCompletionStream } from './lib/nvidia'; async function test() { const stream = chatCompletionStream([{ role: 'user', content: 'Say hello' }]); try { for await (const chunk of stream) { console.log('CHUNK:', chunk); } } catch(e) { console.error('ERROR:', e); } } test();  

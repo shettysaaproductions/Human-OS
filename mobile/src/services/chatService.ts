@@ -35,7 +35,7 @@ export const chatService = {
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;
 
-    const url = (process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onrender.com') + '/api/chat';
+    const url = `${api.defaults.baseURL}/chat`;
     
     const es = new EventSource(url, {
       headers: {
