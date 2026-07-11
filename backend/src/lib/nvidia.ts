@@ -152,7 +152,7 @@ export async function chatCompletion(
   const payload: any = {
     model: options?.model ?? config.nvidia.chatModel,
     messages,
-    max_tokens: options?.maxTokens ?? 1024,
+    max_tokens: options?.maxTokens ?? 512,
     temperature: options?.temperature ?? 0.85,
     stream: false,
   };
