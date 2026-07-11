@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
@@ -385,13 +386,42 @@ function SmartMarkdown({ content, mdStyle, mdRules, colors, onLongPress, onPress
   );
 }
 
+// ── Branded Nova Loader — shown on cold start before cache hydrates ───────────
+function NovaLoader() {
+  const pulse = React.useRef(new Animated.Value(1)).current;
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0D0D0D', alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={{
+        width: 72, height: 72, borderRadius: 36,
+        backgroundColor: '#8B5CF6',
+        alignItems: 'center', justifyContent: 'center',
+        transform: [{ scale: pulse }],
+        shadowColor: '#8B5CF6', shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8, shadowRadius: 24, elevation: 20,
+      }}>
+        <Text style={{ color: '#fff', fontSize: 32, fontWeight: 'bold' }}>N</Text>
+      </Animated.View>
+      <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 24, fontSize: 14, letterSpacing: 1 }}>
+        Connecting to Nova...
+      </Text>
+    </View>
+  );
+}
+
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
-  const [isReadyToRender, setIsReadyToRender] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const flatListRef = useRef<FlatList>(null);
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
@@ -451,25 +481,7 @@ export function ChatScreen() {
     logEvent('FLATLIST_FIRST_RENDER');
   }
 
-  // Set ready to render as soon as hydration completes — covers both empty
-  // and non-empty message states. The FlatList's onContentSizeChange was
-  // previously the only trigger for non-empty, but it can fail to fire on
-  // fresh installs / cold starts, causing a permanent white screen.
-  useEffect(() => {
-    if (isHydrated) {
-      setIsReadyToRender(true);
-    }
-  }, [isHydrated]);
 
-  // Hard timeout safety net: if isReadyToRender is still false after 3 seconds
-  // (e.g. hydration hangs silently), force the screen visible so user never
-  // sees a blank screen permanently.
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setIsReadyToRender(true);
-    }, 3000);
-    return () => clearTimeout(timeout);
-  }, []);
   
   const [stickyDate, setStickyDate] = useState<string | null>(null);
 
@@ -504,6 +516,16 @@ export function ChatScreen() {
       didTrackOpen.current = true;
       trackEvent('app_open');
     }
+
+    // ── AppState listener: refresh messages when app comes to foreground ────────
+    // This picks up any Nova proactive messages sent while the app was minimized.
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        checkProactiveMessages();
+      }
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
   }, []);
 
   const handleSend = useCallback(() => {
@@ -707,7 +729,7 @@ export function ChatScreen() {
   if (!isHydrated) {
     return (
       <View style={[s.centerContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
+        <NovaLoader />
       </View>
     );
   }
@@ -820,7 +842,6 @@ export function ChatScreen() {
                 if (messages.length > 0) {
                   isInitialScrollRef.current = false;
                   logEvent('INITIAL_SCROLL_COMPLETED');
-                  setIsReadyToRender(true);
                 }
               } else if (isNearBottomRef.current) {
                 logEvent('SCROLL_TO_END_CALLED');
@@ -831,11 +852,6 @@ export function ChatScreen() {
               const layoutHeight = e.nativeEvent.layout.height;
               setMainWidths(prev => ({ ...prev, view: layoutHeight }));
               logEvent('ON_LAYOUT');
-              if (isInitialScrollRef.current) {
-                if (messages.length > 0) {
-                  setIsReadyToRender(true);
-                }
-              }
             }}
             removeClippedSubviews
             windowSize={10}
@@ -900,12 +916,7 @@ export function ChatScreen() {
             </View>
           )}
 
-          {!isReadyToRender && (
-            <View style={[StyleSheet.absoluteFill, s.centerContainer, { backgroundColor: colors.background }]}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
-              <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Syncing local companion database...</Text>
-            </View>
-          )}
+
 
           {/* Scroll to Bottom FAB */}
           {showScrollDown && (

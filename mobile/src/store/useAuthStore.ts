@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { authService } from '../services/authService';
+import { notificationService } from '../services/notificationService';
 
 interface AuthState {
   user: any | null;
@@ -44,6 +45,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           // Fast path: existing token is still valid
           const user = await authService.getMe();
           set({ accessToken, user, onboardingStatus: user.onboardingCompleted || false, isLoading: false });
+          notificationService.registerAfterAuth().catch(() => {});
           return;
         } catch {
           // Token expired — fall through to refresh
@@ -57,6 +59,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           await SecureStore.setItemAsync('accessToken', data.access_token);
           await SecureStore.setItemAsync('refreshToken', data.refresh_token);
           set({ accessToken: data.access_token, user: data.user, onboardingStatus: data.user?.onboardingCompleted || false, isLoading: false });
+          notificationService.registerAfterAuth().catch(() => {});
           return;
         } catch {
           // Refresh token also expired — force re-login
@@ -85,6 +88,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       await SecureStore.setItemAsync('refreshToken', refreshToken);
     }
     set({ accessToken, user, onboardingStatus: user?.onboardingCompleted || false });
+    notificationService.registerAfterAuth().catch(() => {});
   },
 
   logout: async () => {

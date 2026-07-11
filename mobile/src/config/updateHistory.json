@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.1.0",
+    "title": "🧠 Nova Virtual Human Upgrade",
+    "message": [
+      "Nova is now a true Virtual Human! She will understand when you are busy, match your energy, and act like a real companion.",
+      "Nova can now set reminders for you (Jarvis mode). Just ask her to remind you!",
+      "Nova will proactively message you if she hasn't heard from you in a while.",
+      "Fixed an issue with the loading spinner on app start.",
+      "Fixed an issue with push notifications not arriving when minimized.",
+      "Fixed an issue with auto-resending messages on app open."
+    ],
+    "date": "2026-07-12"
+  },
+  {
     "version": "1.2.35",
     "title": "🧠 Nova Brain Overhaul",
     "message": [
