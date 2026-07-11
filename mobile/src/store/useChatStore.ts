@@ -7,7 +7,7 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
   content: string;
-  status: 'sending' | 'sent' | 'error';
+  status: 'sending' | 'sent' | 'responded' | 'error';
   errorMessage?: string;
   timestamp: string;
   chunkIndex?: number;
@@ -44,11 +44,12 @@ interface ChatState {
   processQueue: () => Promise<void>;
 }
 
-// ── Processing lock ───────────────────────────────────────────────────────────
-// Module-level flag (outside Zustand state) used as a guaranteed mutex.
-// JS is single-threaded: setting this synchronously before the first `await`
-// ensures only one processQueue body can run at a time, with zero race window.
+// ── Processing lock + in-flight deduplication ────────────────────────────────
+// _isProcessing prevents concurrent processQueue calls in the same JS context.
+// _inFlightIds prevents the SAME message ID from being sent twice — even if
+// _isProcessing resets (e.g. app backgrounded and JS module reloaded).
 let _isProcessing = false;
+const _inFlightIds = new Set<string>();
 
 // ── Client-side chunking for hydration ────────────────────────────────────────
 function chunkText(text: string): string[] {
@@ -95,17 +96,14 @@ function chunkText(text: string): string[] {
 export const useChatStore = create<ChatState>((set, get) => {
   const processQueue = async () => {
     console.log('PROCESS_QUEUE_ENTERED');
-    // Guard: if a processor is already running, new messages will be picked
-    // up by the existing while-loop on its next iteration. Return immediately.
+    // Guard: only ONE processor runs at a time in this JS context.
     if (_isProcessing) return;
     _isProcessing = true;
-    set({ isTyping: true });
 
     console.log('[QUEUE] start');
 
     try {
       while (true) {
-        // Read fresh state on every iteration
         const queue = get().pendingQueue;
         if (queue.length === 0) break;
 
@@ -113,8 +111,14 @@ export const useChatStore = create<ChatState>((set, get) => {
         const [item, ...rest] = queue;
         set({ pendingQueue: rest });
 
-        // Safety guard: if the message no longer exists in 'sending' state
-        // (e.g. clearMessages was called), skip without making an API call.
+        // DEDUPLICATION: if this message ID is already in-flight (e.g. due to
+        // _isProcessing resetting after app backgrounded), skip it entirely.
+        if (_inFlightIds.has(item.id)) {
+          console.log('[QUEUE] skipped — already in-flight:', item.id);
+          continue;
+        }
+
+        // Safety guard: message must still exist in 'sending' state
         const stillExists = get().messages.some(
           m => m.id === item.id && m.status === 'sending'
         );
@@ -124,107 +128,71 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
 
         console.log('[QUEUE] sending:', item.id);
+        _inFlightIds.add(item.id);
+        set({ isTyping: true });
 
         try {
-          await new Promise<void>((resolve, reject) => {
-            let messageIdCreated = false;
-            let currentAssistantMsgId = Date.now().toString() + '_nova_' + Math.random().toString(36).substring(2, 7);
-            
-            // Mark user message as sent ONLY when the server confirms connection via setup event.
-            // Leaving it as 'sending' ensures it shows as Red while the request is in-flight.
-            // set((s) => ({
-            //   messages: s.messages.map(m => m.id === item.id ? { ...m, status: 'sent' as const } : m)
-            // }));
+          // Use simple axios POST — proven reliable, no streaming complexity.
+          // This returns the full response including Nova's reply in one shot.
+          const data = await chatService.sendMessage(
+            item.content,
+            get().conversationId || undefined
+          );
 
-            chatService.streamMessage(
-              item.content,
-              get().conversationId || undefined,
-              (convId) => {
-                // onSetup (The server has saved the message and begun streaming)
-                set((s) => ({
-                  conversationId: convId,
-                  messages: s.messages.map(m => m.id === item.id ? { ...m, status: 'sent' as const } : m)
-                }));
-              },
-              (chunk) => {
-                // onChunk
-                set((s) => {
-                  if (!messageIdCreated) {
-                    messageIdCreated = true;
-                    // First chunk: add the assistant message
-                    return {
-                      messages: [...s.messages, {
-                        id: currentAssistantMsgId,
-                        role: 'assistant',
-                        content: chunk,
-                        status: 'sent',
-                        timestamp: new Date().toISOString()
-                      }],
-                      isTyping: false
-                    };
-                  } else {
-                    // Subsequent chunks: append to existing message
-                    return {
-                      messages: s.messages.map(m => 
-                        m.id === currentAssistantMsgId 
-                          ? { ...m, content: m.content + chunk } 
-                          : m
-                      )
-                    };
-                  }
-                });
-              },
-              () => {
-                // onDone
-                resolve();
-              },
-              (errorStr) => {
-                // onError
-                reject(new Error(errorStr));
-              }
-            ).catch(reject);
-          });
+          // Backend returns { reply, messages: string[], conversation_id }
+          // 'messages' is an array of parsed bubbles (split on NOVA_MESSAGE_BREAK).
+          // Use it if available, otherwise fall back to the raw 'reply' string.
+          const replyBubbles: string[] = (data?.messages && data.messages.length > 0)
+            ? data.messages
+            : (data?.reply ? [data.reply] : []);
+          const convId: string = data?.conversation_id || get().conversationId || '';
+          const now = new Date().toISOString();
+
+          const novaMessages = replyBubbles.map((content: string, idx: number) => ({
+            id: `${Date.now()}_nova_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+            role: 'assistant' as const,
+            content,
+            status: 'responded' as const,
+            timestamp: now,
+          }));
+
+          set((s) => ({
+            conversationId: convId,
+            isTyping: false,
+            messages: [
+              // Mark user message as sent (Yellow dot)
+              ...s.messages.map(m =>
+                m.id === item.id ? { ...m, status: 'sent' as const } : m
+              ),
+              // Append Nova's reply bubbles (no LED dot on assistant messages)
+              ...novaMessages,
+            ],
+          }));
 
           console.log('[QUEUE] success:', item.id);
         } catch (error: any) {
-          // Failure is scoped to this one message only.
-          let errorMessage = 'Network error';
-          if (error.response) {
-            if (error.response.status === 401) {
-              errorMessage = 'Unauthorized';
-            } else if (error.response.status === 404) {
-              errorMessage = 'Endpoint not found';
-            } else if (error.response.status >= 500) {
-              errorMessage = 'Server error';
-            } else {
-              errorMessage = error.response.data?.error || 'Failed to send';
-            }
-          }
+          // Mark message as FAILED — user taps to retry (like WhatsApp).
+          // Do NOT silently re-enqueue: that is what caused duplicate sends.
+          const isNetworkError = !error.response;
+          const errorMessage = error.response?.data?.error
+            || error.message
+            || 'Failed to send';
 
-          console.log('[QUEUE] error (auto-retrying):', item.id, errorMessage);
-          
-          // Wait 3 seconds before retrying
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          
-          // If the SSE failed due to an expired token, react-native-sse cannot auto-refresh it
-          // because it bypasses our axios interceptors. By making a lightweight axios call here,
-          // we force the interceptor to catch any 401s and refresh the token BEFORE we retry!
-          try {
-            const { api } = await import('../services/api');
-            await api.get('/onboarding/status');
-          } catch (e) {
-            console.log('[QUEUE] Token refresh ping failed, but continuing retry loop...');
-          }
-          
-          // Put the message back at the FRONT of the queue
-          // Note: The message status stays 'sending' in the UI.
+          console.log('[QUEUE] failed:', item.id, errorMessage);
+
           set((s) => ({
-            pendingQueue: [item, ...s.pendingQueue]
+            isTyping: false,
+            messages: s.messages.map(m =>
+              m.id === item.id
+                ? { ...m, status: 'error' as const, errorMessage }
+                : m
+            ),
           }));
+        } finally {
+          _inFlightIds.delete(item.id);
         }
       }
     } finally {
-      // Guaranteed cleanup regardless of success, error, or unexpected exception.
       _isProcessing = false;
       set({ isTyping: false });
       console.log('[QUEUE] finished');
