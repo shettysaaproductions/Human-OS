@@ -525,14 +525,13 @@ export function ChatScreen() {
     let ledColor = 'transparent';
     if (isUser) {
       if (item.status === 'sending') {
-        ledColor = '#EF4444'; // Red — in transit
+        ledColor = '#F59E0B'; // Yellow — in transit (online, awaiting response)
       } else if (item.status === 'error') {
-        ledColor = '#DC2626'; // Darker Red — failed
+        ledColor = '#EF4444'; // Red — network error / offline / server unreachable
       } else if (item.status === 'responded') {
         ledColor = '#10B981'; // Green — Nova replied
       } else {
-        // 'sent' — delivered, awaiting Nova
-        // Also fallback: check if there's an assistant message after this one
+        // 'sent' — delivered, awaiting Nova reply
         const hasReply = reversedMessages.slice(0, index).some(m => m.role === 'assistant');
         ledColor = hasReply ? '#10B981' : '#F59E0B'; // Green : Yellow
       }
@@ -697,11 +696,7 @@ export function ChatScreen() {
                 }} />
               )}
             </View>
-            {isUser && item.status === 'sending' && (
-              <View style={s.retryButton}>
-                <Text style={s.retryText}>Sending...</Text>
-              </View>
-            )}
+
           </View>
           </View>
           </View>
