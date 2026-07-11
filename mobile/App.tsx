@@ -6,6 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
+import { notificationService } from './src/services/notificationService';
 import updateHistory from './src/config/updateHistory.json';
 
 const latestUpdate = updateHistory[0];
@@ -21,8 +22,10 @@ function AppContent() {
     console.log('CHANNEL', Updates.channel);
     console.log('RUNTIME_VERSION', Updates.runtimeVersion);
     console.log('IS_EMBEDDED', Updates.isEmbeddedLaunch);
-    // Run entirely in background — never block the UI
+    // All background — never block the UI
     runBackgroundChecks();
+    // Initialize push notifications silently in background
+    notificationService.initialize();
   }, []);
 
   const runBackgroundChecks = async () => {

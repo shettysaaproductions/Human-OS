@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { chatCompletion } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
+import { sendMomentNotification } from '../lib/pushNotifications';
 
 export enum MomentType {
   GOAL_FOLLOW_UP = 'GOAL_FOLLOW_UP',
@@ -635,6 +636,27 @@ Return JSON:
           await this.saveMoment(refined);
           logger.info(`Generated and saved moment for user ${p.id} (${moment.moment_type})`);
           processedCount++;
+
+          // Send push notification for proactive moment (fire & forget)
+          try {
+            const { data: profileData } = await supabaseAdmin
+              .from('profiles')
+              .select('push_token')
+              .eq('id', p.id)
+              .maybeSingle();
+            if (profileData?.push_token) {
+              await sendMomentNotification(
+                profileData.push_token,
+                refined.title || 'Nova',
+                refined.body
+              );
+              logger.info(`Push notification sent for moment to user ${p.id}`);
+            }
+          } catch (pushErr) {
+            logger.warn('Failed to send moment push notification (non-critical)', {
+              error: pushErr instanceof Error ? pushErr.message : String(pushErr)
+            });
+          }
         }
       }
     } catch (err) {

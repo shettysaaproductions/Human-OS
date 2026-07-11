@@ -135,4 +135,9 @@ export const chatService = {
     const response = await api.get('/admin/diagnostics');
     return response.data;
   },
+
+  registerPushToken: async (token: string) => {
+    const response = await api.post('/auth/push-token', { token });
+    return response.data;
+  },
 };

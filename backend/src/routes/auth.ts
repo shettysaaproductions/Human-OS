@@ -185,3 +185,37 @@ authRouter.get('/me', authenticateUser, async (req: Request, res: Response): Pro
     res.status(500).json({ error: 'Failed to fetch user profile' });
   }
 });
+
+/**
+ * POST /auth/push-token
+ * Saves the user's Expo Push Token so Nova can send notifications to their device.
+ */
+authRouter.post('/push-token', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req as any).user?.id;
+    const { token } = req.body;
+
+    if (!token || !token.startsWith('ExponentPushToken[')) {
+      res.status(400).json({ error: 'Invalid push token format' });
+      return;
+    }
+
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update({ push_token: token, push_token_updated_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    if (error) {
+      logger.error('Failed to save push token', { error: error.message, userId });
+      res.status(500).json({ error: 'Failed to save push token' });
+      return;
+    }
+
+    logger.info('Push token registered', { userId });
+    res.status(200).json({ success: true });
+  } catch (err) {
+    logger.error('Failed to register push token', { error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+

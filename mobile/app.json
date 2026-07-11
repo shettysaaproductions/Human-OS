@@ -9,8 +9,8 @@
     "updates": {
       "url": "https://u.expo.dev/17e73685-4785-47b5-8302-82d1df185f8c",
       "enabled": true,
-      "fallbackToCacheTimeout": 10000,
-      "checkAutomatically": "ON_LOAD"
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_ERROR_RECOVERY"
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -26,7 +26,13 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.humanos.mobile"
+      "package": "com.humanos.mobile",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -34,6 +40,15 @@
     "plugins": [
       "expo-secure-store",
       "expo-updates",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#8B5CF6",
+          "defaultChannel": "nova_messages",
+          "sounds": []
+        }
+      ],
       [
         "expo-build-properties",
         {
