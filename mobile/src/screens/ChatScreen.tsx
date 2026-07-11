@@ -697,9 +697,9 @@ export function ChatScreen() {
                 }} />
               )}
             </View>
-            {isUser && item.status === 'error' && (
+            {isUser && item.status === 'sending' && (
               <View style={s.retryButton}>
-                <Text style={s.retryText}>⚠️ {item.errorMessage || 'Failed'} · Retrying...</Text>
+                <Text style={s.retryText}>Sending...</Text>
               </View>
             )}
           </View>

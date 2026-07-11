@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { chatService } from '../services/chatService';
+import * as SecureStore from 'expo-secure-store';
 
 console.log('USECHATSTORE_LOADED');
 
@@ -45,11 +46,26 @@ interface ChatState {
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
-// _isProcessing prevents concurrent processQueue calls in the same JS context.
-// _inFlightIds prevents the SAME message ID from being sent twice — even if
-// _isProcessing resets (e.g. app backgrounded and JS module reloaded).
 let _isProcessing = false;
 const _inFlightIds = new Set<string>();
+
+// ── Pending queue persistence (survives app swipe-away) ─────────────────────
+const QUEUE_KEY = 'humanOs_pendingQueue';
+async function savePendingQueue(queue: { id: string; content: string }[]) {
+  try {
+    await SecureStore.setItemAsync(QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.warn('[QUEUE] Failed to persist queue:', e);
+  }
+}
+async function loadPendingQueue(): Promise<{ id: string; content: string }[]> {
+  try {
+    const raw = await SecureStore.getItemAsync(QUEUE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
 
 // ── Client-side chunking for hydration ────────────────────────────────────────
 function chunkText(text: string): string[] {
@@ -95,11 +111,8 @@ function chunkText(text: string): string[] {
 
 export const useChatStore = create<ChatState>((set, get) => {
   const processQueue = async () => {
-    console.log('PROCESS_QUEUE_ENTERED');
-    // Guard: only ONE processor runs at a time in this JS context.
     if (_isProcessing) return;
     _isProcessing = true;
-
     console.log('[QUEUE] start');
 
     try {
@@ -107,94 +120,86 @@ export const useChatStore = create<ChatState>((set, get) => {
         const queue = get().pendingQueue;
         if (queue.length === 0) break;
 
-        // Dequeue exactly ONE item from the front
         const [item, ...rest] = queue;
         set({ pendingQueue: rest });
+        await savePendingQueue(rest); // persist after dequeue
 
-        // DEDUPLICATION: if this message ID is already in-flight (e.g. due to
-        // _isProcessing resetting after app backgrounded), skip it entirely.
+        // Skip if already being sent (deduplication against parallel processQueue calls)
         if (_inFlightIds.has(item.id)) {
           console.log('[QUEUE] skipped — already in-flight:', item.id);
           continue;
         }
 
-        // Safety guard: message must still exist in 'sending' state
+        // Skip if message no longer in 'sending' state (e.g. user cleared chat)
         const stillExists = get().messages.some(
           m => m.id === item.id && m.status === 'sending'
         );
-        if (!stillExists) {
-          console.log('[QUEUE] skipped — message no longer pending:', item.id);
-          continue;
-        }
+        if (!stillExists) continue;
 
-        console.log('[QUEUE] sending:', item.id);
         _inFlightIds.add(item.id);
         set({ isTyping: true });
 
-        try {
-          // Use simple axios POST — proven reliable, no streaming complexity.
-          // This returns the full response including Nova's reply in one shot.
-          const data = await chatService.sendMessage(
-            item.content,
-            get().conversationId || undefined
-          );
+        let retryDelay = 3000; // start at 3s, cap at 30s
+        let succeeded = false;
 
-          // Backend returns { reply, messages: string[], conversation_id }
-          // 'messages' is an array of parsed bubbles (split on NOVA_MESSAGE_BREAK).
-          // Use it if available, otherwise fall back to the raw 'reply' string.
-          const replyBubbles: string[] = (data?.messages && data.messages.length > 0)
-            ? data.messages
-            : (data?.reply ? [data.reply] : []);
-          const convId: string = data?.conversation_id || get().conversationId || '';
-          const now = new Date().toISOString();
+        while (!succeeded) {
+          try {
+            const data = await chatService.sendMessage(
+              item.content,
+              get().conversationId || undefined
+            );
 
-          const novaMessages = replyBubbles.map((content: string, idx: number) => ({
-            id: `${Date.now()}_nova_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-            role: 'assistant' as const,
-            content,
-            status: 'responded' as const,
-            timestamp: now,
-          }));
+            const replyBubbles: string[] = (data?.messages && data.messages.length > 0)
+              ? data.messages
+              : (data?.reply ? [data.reply] : []);
+            const convId: string = data?.conversation_id || get().conversationId || '';
+            const now = new Date().toISOString();
 
-          set((s) => ({
-            conversationId: convId,
-            isTyping: false,
-            messages: [
-              // Mark user message as sent (Yellow dot)
-              ...s.messages.map(m =>
-                m.id === item.id ? { ...m, status: 'sent' as const } : m
-              ),
-              // Append Nova's reply bubbles (no LED dot on assistant messages)
-              ...novaMessages,
-            ],
-          }));
+            const novaMessages = replyBubbles.map((content: string, idx: number) => ({
+              id: `${Date.now()}_nova_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+              role: 'assistant' as const,
+              content,
+              status: 'responded' as const,
+              timestamp: now,
+            }));
 
-          console.log('[QUEUE] success:', item.id);
-        } catch (error: any) {
-          // Mark message as FAILED — user taps to retry (like WhatsApp).
-          // Do NOT silently re-enqueue: that is what caused duplicate sends.
-          const isNetworkError = !error.response;
-          const errorMessage = error.response?.data?.error
-            || error.message
-            || 'Failed to send';
+            set((s) => ({
+              conversationId: convId,
+              isTyping: false,
+              messages: [
+                ...s.messages.map(m =>
+                  m.id === item.id ? { ...m, status: 'sent' as const } : m
+                ),
+                ...novaMessages,
+              ],
+            }));
 
-          console.log('[QUEUE] failed:', item.id, errorMessage);
-
-          set((s) => ({
-            isTyping: false,
-            messages: s.messages.map(m =>
-              m.id === item.id
-                ? { ...m, status: 'error' as const, errorMessage }
-                : m
-            ),
-          }));
-        } finally {
-          _inFlightIds.delete(item.id);
+            succeeded = true;
+            console.log('[QUEUE] success:', item.id);
+          } catch (err: any) {
+            const isServerError = err?.response?.status >= 400 && err?.response?.status < 500;
+            if (isServerError) {
+              // 4xx = auth/not-found — no point retrying, mark silent send fail
+              // but keep Red dot so user knows
+              console.log('[QUEUE] 4xx error, not retrying:', err?.response?.status);
+              set({ isTyping: false });
+              succeeded = true; // exit inner while, message stays Red (sending)
+            } else {
+              // Network error or 5xx — retry silently with backoff
+              console.log('[QUEUE] network error, retrying in', retryDelay, 'ms');
+              set({ isTyping: false });
+              await new Promise(r => setTimeout(r, retryDelay));
+              retryDelay = Math.min(retryDelay * 1.5, 30000);
+            }
+          }
         }
+
+        _inFlightIds.delete(item.id);
       }
     } finally {
       _isProcessing = false;
       set({ isTyping: false });
+      await savePendingQueue([]); // clear persisted queue on completion
       console.log('[QUEUE] finished');
     }
   };
@@ -214,6 +219,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     
     hydrateMessages: async () => {
       try {
+        // Restore any unsent messages from before the app was closed
+        const savedQueue = await loadPendingQueue();
+
         const PAGE_SIZE = 50;
         const history = await chatService.getHistory(undefined, PAGE_SIZE);
         console.log('Diagnostics - Messages received from API:', history?.length);
@@ -259,15 +267,24 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           }
           
-          console.log('Diagnostics - Oldest message from API:', formattedHistory[0]?.timestamp);
-          console.log('Diagnostics - Newest message from API:', formattedHistory[formattedHistory.length - 1]?.timestamp);
-          
-          // The oldest raw message ID is the cursor for loading more
+          // Reconstruct any persisted pending messages as 'sending' bubbles
+          // Filter out any queue items that were already saved to history
+          const savedIds = new Set(history.map((m: any) => m.id));
+          const pendingToRestore = savedQueue.filter(q => !savedIds.has(q.id));
+          const restoredMessages: Message[] = pendingToRestore.map(q => ({
+            id: q.id,
+            role: 'user' as const,
+            content: q.content,
+            status: 'sending' as const,
+            timestamp: new Date().toISOString(),
+          }));
+
           const oldestRawId = history[0]?.id || null;
           
           set({ 
-            messages: formattedHistory, 
+            messages: [...formattedHistory, ...restoredMessages], 
             conversationId: history[0].conversation_id,
+            pendingQueue: pendingToRestore,
             isHydrated: true,
             hasMoreMessages: history.length >= PAGE_SIZE,
             oldestMessageId: oldestRawId,
@@ -280,8 +297,28 @@ export const useChatStore = create<ChatState>((set, get) => {
               activeConversationId: history[0]?.conversation_id || 'UNKNOWN'
             }
           });
+
+          // Resume sending any restored pending messages
+          if (pendingToRestore.length > 0) {
+            console.log('[HYDRATE] Resuming', pendingToRestore.length, 'pending messages');
+            get().processQueue();
+          }
         } else {
-          set({ isHydrated: true, hasMoreMessages: false });
+          // No history but might have pending messages
+          const restoredMessages: Message[] = savedQueue.map(q => ({
+            id: q.id,
+            role: 'user' as const,
+            content: q.content,
+            status: 'sending' as const,
+            timestamp: new Date().toISOString(),
+          }));
+          set({
+            isHydrated: true,
+            hasMoreMessages: false,
+            messages: restoredMessages,
+            pendingQueue: savedQueue,
+          });
+          if (savedQueue.length > 0) get().processQueue();
         }
       } catch (e) {
         console.error('Failed to hydrate history from backend:', e);
@@ -351,14 +388,15 @@ export const useChatStore = create<ChatState>((set, get) => {
         timestamp: new Date().toISOString()
       };
 
+      const newQueue = [...get().pendingQueue, { id: userMsg.id, content }];
       set((state) => ({ 
         messages: [...state.messages, userMsg],
-        pendingQueue: [...state.pendingQueue, { id: userMsg.id, content }]
+        pendingQueue: newQueue,
       }));
 
-      // processQueue is idempotent — safe to call unconditionally.
-      // If _isProcessing is true, it returns immediately and the running
-      // while-loop will pick up the new item on its next iteration.
+      // Persist queue so it survives if the app is swiped away
+      await savePendingQueue(newQueue);
+
       get().processQueue();
     },
 
