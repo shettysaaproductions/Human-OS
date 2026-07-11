@@ -14,6 +14,7 @@ import { qt } from '../lib/queryTracker';
 import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
+import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -363,7 +364,7 @@ chatRouter.post(
 
       const profileCacheKey = `profile:${userId}`;
       const wmCacheKey = `working_memory:${userId}`;
-      const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string }>(profileCacheKey);
+      const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string }>(profileCacheKey);
       const cachedWm = cache.get<{ key: string; value: string }[]>(wmCacheKey);
 
       const skipMemory = process.env.DISABLE_MEMORY === 'true';
@@ -382,7 +383,7 @@ chatRouter.post(
           ? Promise.resolve({ data: cachedProfile, error: null })
           : qt.track('get_profile', 'profiles', () =>
               supabaseAdmin.from('profiles')
-                .select('preferred_name, companion_personality, country')
+                .select('preferred_name, companion_personality, country, push_token')
                 .eq('id', userId).maybeSingle()
             ),
 
@@ -448,7 +449,7 @@ chatRouter.post(
 
       // ── Unpack results ─────────────────────────────────────────────────────────
       // 1. Profile
-      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string } | null;
+      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string; push_token?: string } | null;
       if (profile && !cachedProfile) {
         cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
       }
@@ -877,6 +878,13 @@ chatRouter.post(
         cache.invalidate(wmCacheKey);
       } else {
         logger.info('[DEBUG] DISABLE_MEMORY=true — skipping background extraction jobs');
+      }
+
+      // 10. Fire-and-forget push notification if user has a registered token
+      // Fetch push token from profile (already cached via profileCacheKey)
+      const pushToken = (profile as any)?.push_token as string | undefined;
+      if (pushToken) {
+        sendNovaReplyNotification(pushToken, reply).catch(() => {});
       }
 
       if (!isStreaming) {
