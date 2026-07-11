@@ -160,5 +160,24 @@ export function createApp(): express.Application {
   }, 30_000);
   if (healthInterval.unref) healthInterval.unref();
 
+  // ── Render free-tier keep-alive ping ────────────────────────────────────────
+  // Render spins down free services after 15 min of inactivity, causing a
+  // 10-30s cold start on the next request. Pinging /health every 9 min keeps
+  // the server warm so users never wait for a cold boot.
+  const renderUrl = process.env.RENDER_EXTERNAL_URL;
+  if (renderUrl && process.env.NODE_ENV === 'production') {
+    const keepAliveInterval = setInterval(async () => {
+      try {
+        const url = `${renderUrl}/health`;
+        const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
+        logger.info('[KeepAlive] Pinged', { status: res.status, url });
+      } catch (err: any) {
+        logger.warn('[KeepAlive] Ping failed (non-critical)', { error: err?.message });
+      }
+    }, 9 * 60 * 1000); // every 9 minutes
+    if (keepAliveInterval.unref) keepAliveInterval.unref();
+    logger.info('[KeepAlive] Server warm-up ping started', { url: renderUrl, intervalMin: 9 });
+  }
+
   return app;
 }
