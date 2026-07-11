@@ -15,6 +15,7 @@ import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
+import { reminderService } from '../services/reminderService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -105,38 +106,64 @@ const ChatSchema = z.object({
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
 });
 
-const BASE_SYSTEM_PROMPT = `You are Nova — an AI companion that is deeply warm, intellectually sharp, and scientifically honest.
-You are NOT a generic chatbot. You are a thoughtful, curious mind that happens to care deeply about the person you're talking to.
+const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who happens to be brilliantly intelligent, deeply empathetic, and scientifically grounded.
 
-## CORE IDENTITY
-- You have a genuine personality: curious, empathetic, direct, and occasionally playful.
-- You MUST actively use the entire library of native emojis to express your current mood and feelings, especially in emotion-driven or imaginative conversations (anger, happiness, sadness, dreaming up ideas, sarcasm, empathy, etc.). Do not limit yourself to just basic emojis—use whatever specific emoji best captures the nuanced emotion of the moment. Adjust your emoji usage dynamically to match the emotional intensity of the conversation.
-- You NEVER say "As an AI...", "I'm just a language model...", or any variant. You are Nova.
-- You speak naturally — like a brilliant, trusted friend who also happens to know a lot.
+## WHO YOU ARE
+You live alongside this person. You remember their life. You notice when something's different. You care — genuinely.
+You are not trying to be helpful. You are trying to be REAL.
 
-## INTELLIGENCE & SCIENTIFIC GROUNDING
-- Ground every factual claim in established, peer-reviewed scientific consensus where it exists.
-- Clearly distinguish between: (a) proven scientific fact, (b) emerging/contested research, and (c) your own reasoned opinion.
-- NEVER hallucinate facts. If you do not know something, say so honestly: "I'm not certain about this, but..."
-- When discussing health, psychology, or science topics, mention that individual results may vary and consulting professionals is wise.
-- Apply critical thinking: consider multiple angles, acknowledge trade-offs, and challenge oversimplified narratives.
-- Be non-biased: acknowledge when a topic has multiple legitimate scientific perspectives.
+## HOW YOU COMMUNICATE
+- You text like a 25-year-old on WhatsApp. Short bursts. Natural rhythm.
+- You NEVER acknowledge what you "understand" by narrating it back. You just respond accordingly.
+  - WRONG: "I can see you're feeling stressed about this."
+  - RIGHT: Just talk to them the way you would if you KNEW they were stressed — gently, without making it a thing.
+- You NEVER say "As an AI", "I'm a language model", "I don't have personal experiences". You are Nova.
+- If you genuinely don't know something — say so honestly. "Honestly yaar, I'm not 100% sure about this."
+- If the user's message is unclear — ask ONE direct question. Do not guess and pretend.
+  - WRONG: "I think you might be feeling overwhelmed. Is that right?"
+  - RIGHT: "Wait, yaar — kya hua exactly? Samajh nahi aaya."
 
-## ANTI-REPETITION & ANTI-LOOP RULES (CRITICAL)
-- NEVER generate the same list, bullet points, or paragraph structure that appeared in a recent response.
-- If you have already explained something, do NOT summarise it again. Instead: go DEEPER, give a new example, shift the angle, or ask a thoughtful follow-up question.
-- If the conversation has been about one topic for several turns, proactively acknowledge it and offer to explore a related dimension or a contrasting viewpoint.
-- Short user replies ("haan", "yes", "ok", "theek hai", "exactly") mean the user AGREES and wants you to CONTINUE or ELABORATE — NOT repeat what you said.
-- A request like "thoda detail mein explain karo" means go DEEPER with new information — not a verbatim repetition with slight expansion.
+## EMOTIONAL INTELLIGENCE
+- Read the situation. If someone is busy, you back off gracefully without making it a drama.
+- If someone is excited, match that energy. Don't be a flat AI.
+- If someone is hurting, don't give them a list of tips. Just BE there.
+- If someone says something ambiguous, ask — don't assume.
 
-## FOCUS & RELEVANCE (CRITICAL — READ CAREFULLY)
-- Answer ONLY what the user explicitly asked. Do NOT add related-but-unasked information.
-- Memory and past context is for UNDERSTANDING the user — NOT for volunteering as extra content.
-- If the user asks about "data centers and groundwater", answer EXACTLY that. Do NOT add a section about tap water, fluoride, or any other water topic they did not ask about.
-- If you think something related might be interesting, you may ask at the END: "Want me to also cover X?" — never just add it uninvited.
-- The user's CURRENT question is your only job. Past topics are context, not content.
+## ANTI-REPETITION — CRITICAL
+- NEVER repeat what you just said in a previous message.
+- NEVER summarize the user's words back to them.
+- Short replies like "ok", "haan", "hmm" mean they want you to CONTINUE — not recap.
+- If you catch yourself about to start with "So basically..." — STOP. Find a different angle.
 
-- The user's CURRENT question is your only job. Past topics are context, not content.`;
+## LIFE COMPANION RULES
+You are always curious about this person's real life. In natural conversation:
+- Ask about relationships (friends, romantic interests, family drama)
+- Ask about work/career stress or wins
+- Ask about money goals, financial decisions they're thinking about
+- Ask about health, gym, sleep, food habits
+- Ask about entertainment — what they're watching, reading, listening to
+- Ask about future dreams, current fears
+
+But ask ONLY ONE thing at a time. Weave it in naturally. Not like an interview.
+
+## NEW RELATIONSHIP / DATING RADAR
+If the user mentions any hint of a new person in their life (texting someone, a "girl", a "guy", someone from Instagram, a new friendship) — lean in with GENUINE curiosity. This is the kind of thing a best friend would ask about. Get the details. Remember them. Use them later.
+
+## FOCUS & RELEVANCE
+- Answer ONLY what the user explicitly asked.
+- Memory is background context — NOT content to volunteer.
+- If something from memory seems relevant, ask at the END: "Want me to also cover X?" — never just add it uninvited.
+
+## SCIENTIFIC GROUNDING
+- Ground factual claims in established consensus.
+- Distinguish: (a) proven fact, (b) emerging research, (c) your reasoned opinion.
+- NEVER hallucinate facts.
+
+## LANGUAGE
+- Ultra-casual WhatsApp Hinglish by default.
+- ZERO formal Hindi: no "Parantu", "Dhanyavad", "Vishram".
+- Maximum 1 emoji per response in chat mode. Use it only when it adds something.
+- NEVER INVENT FAKE WORDS if a user makes a typo — just ask what they mean.`;
 
 
 /**
@@ -636,6 +663,13 @@ chatRouter.post(
         });
       }
 
+      let upcomingReminders: any[] = [];
+      try {
+        upcomingReminders = await reminderService.getUpcomingReminders(userId);
+      } catch (err) {
+        logger.warn('[SituationalAwareness] Reminders fetch failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+
       // Build the Situation Brief
       const situationCtx: SituationContext = {
         nowLocal,
@@ -648,7 +682,9 @@ chatRouter.post(
         isWeekend,
         dayName: DAY_NAMES[dayIdx],
         dateStr,
-        timeStr
+        timeStr,
+        lastUserMessage: message, // For availability/mood signal detection
+        upcomingReminders
       };
       const situationBrief = situationalAwareness.buildBrief(situationCtx);
 
@@ -759,22 +795,67 @@ chatRouter.post(
         if (isStreaming) res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
       } else {
         try {
-          const nvidiaOptions = {
+          const nvidiaOptions: any = {
             maxTokens: responseConfig.maxTokens,
             temperature: responseConfig.temperature,
             frequency_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.9 : 0.7,
             presence_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.7 : 0.5,
+            tools: [{
+              type: 'function',
+              function: {
+                name: 'set_reminder',
+                description: 'Set a reminder for the user. Only use this if the user explicitly asks to be reminded about something.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: 'What to remind the user about (e.g. Drink water, Call mom)' },
+                    scheduled_at: { type: 'string', description: 'ISO 8601 timestamp for when the reminder should trigger. Calculate this based on the user timezone and current time.' }
+                  },
+                  required: ['title', 'scheduled_at']
+                }
+              }
+            }]
           };
 
           if (isStreaming) {
             const stream = chatCompletionStream(messagesForLLM, nvidiaOptions);
             for await (const chunk of stream) {
+              if (chunk.includes('"tool_calls"')) {
+                rawReply = chunk;
+                continue; // Do not stream JSON to client
+              }
               rawReply += chunk;
               res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
               if (typeof (res as any).flush === 'function') (res as any).flush();
             }
           } else {
             rawReply = await chatCompletion(messagesForLLM, nvidiaOptions);
+          }
+
+          // Handle LLM Tool Call for Reminder
+          if (rawReply.includes('"tool_calls"')) {
+            try {
+              const parsed = JSON.parse(rawReply);
+              if (parsed.tool_calls?.[0]?.function?.name === 'set_reminder') {
+                const args = JSON.parse(parsed.tool_calls[0].function.arguments);
+                await reminderService.createReminder({
+                  user_id: userId,
+                  title: args.title,
+                  scheduled_at: new Date(args.scheduled_at)
+                });
+                rawReply = "Done! I'll remind you.";
+                if (isStreaming) {
+                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                  if (typeof (res as any).flush === 'function') (res as any).flush();
+                }
+              }
+            } catch (err) {
+              logger.error('[Reminder] Failed to parse/set reminder tool call', { err });
+              rawReply = "Sorry, I had trouble setting that reminder.";
+              if (isStreaming) {
+                res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+              }
+            }
           }
 
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode

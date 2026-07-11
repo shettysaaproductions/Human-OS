@@ -1,12 +1,11 @@
 /**
  * notificationService.ts
  *
- * Handles all push notification logic:
- * - Requesting permission on first launch
- * - Getting the Expo Push Token for this device
- * - Registering the token with our backend
- * - Setting up notification channels (Android: messages vs moments)
- * - Showing notifications while app is foregrounded
+ * Handles all push notification logic.
+ * IMPORTANT: Call initialize() on app start (channels only — no token).
+ * Call registerAfterAuth() AFTER the user successfully logs in and the
+ * auth token is set in axios headers. This avoids the race condition where
+ * the push token API call fails because auth headers aren't set yet.
  */
 
 import * as Notifications from 'expo-notifications';
@@ -26,22 +25,37 @@ Notifications.setNotificationHandler({
 
 class NotificationService {
   private _pushToken: string | null = null;
+  private _registered = false;
+
+  get pushToken(): string | null {
+    return this._pushToken;
+  }
 
   /**
-   * Call once on app startup (in App.tsx).
-   * Requests permission, gets token, registers with backend.
+   * Call once on app startup. Creates Android channels only — no token fetch.
+   * Safe to call before auth is complete.
    */
   async initialize(): Promise<void> {
     try {
       await this._createAndroidChannels();
-      await this._requestPermissionAndRegister();
     } catch (err) {
-      console.warn('[Notifications] Initialization failed (non-critical):', err);
+      console.warn('[Notifications] Channel setup failed (non-critical):', err);
     }
   }
 
-  get pushToken(): string | null {
-    return this._pushToken;
+  /**
+   * Call this AFTER the user is authenticated and the axios auth header is set.
+   * Requests permission, gets the Expo push token, registers with backend.
+   * Has exponential-backoff retry (max 3 attempts) so transient network errors
+   * on login don't silently drop the token.
+   */
+  async registerAfterAuth(): Promise<void> {
+    if (this._registered) return; // Already done this session
+    try {
+      await this._requestPermissionAndRegister();
+    } catch (err) {
+      console.warn('[Notifications] registerAfterAuth failed (non-critical):', err);
+    }
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────
@@ -49,7 +63,6 @@ class NotificationService {
   private async _createAndroidChannels(): Promise<void> {
     if (Platform.OS !== 'android') return;
 
-    // High-priority channel for Nova replies (makes sound + heads-up banner)
     await Notifications.setNotificationChannelAsync('nova_messages', {
       name: 'Nova Messages',
       importance: Notifications.AndroidImportance.HIGH,
@@ -60,11 +73,20 @@ class NotificationService {
       showBadge: true,
     });
 
-    // Default priority for proactive moments / check-ins
     await Notifications.setNotificationChannelAsync('nova_moments', {
       name: 'Nova Moments & Check-ins',
-      importance: Notifications.AndroidImportance.DEFAULT,
+      importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 150],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+    });
+
+    await Notifications.setNotificationChannelAsync('nova_reminders', {
+      name: 'Nova Reminders',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 300, 150, 300],
       lightColor: '#8B5CF6',
       sound: 'default',
       enableVibrate: true,
@@ -93,12 +115,25 @@ class NotificationService {
     this._pushToken = tokenResult.data;
     console.log('[Notifications] Push token obtained:', this._pushToken);
 
-    // Register with our backend so Nova can send notifications to this device
-    try {
-      await chatService.registerPushToken(this._pushToken);
-      console.log('[Notifications] Token registered with backend');
-    } catch (err) {
-      console.warn('[Notifications] Failed to register token:', err);
+    // Register with backend — retry up to 3 times with exponential backoff
+    let attempt = 0;
+    let delay = 2000;
+    while (attempt < 3) {
+      try {
+        await chatService.registerPushToken(this._pushToken);
+        console.log('[Notifications] Token registered with backend');
+        this._registered = true;
+        return;
+      } catch (err) {
+        attempt++;
+        if (attempt >= 3) {
+          console.warn('[Notifications] Failed to register token after 3 attempts:', err);
+          return;
+        }
+        console.warn(`[Notifications] Token registration attempt ${attempt} failed, retrying in ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+        delay *= 2;
+      }
     }
   }
 }

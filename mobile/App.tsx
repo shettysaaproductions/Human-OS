@@ -24,7 +24,8 @@ function AppContent() {
     console.log('IS_EMBEDDED', Updates.isEmbeddedLaunch);
     // All background — never block the UI
     runBackgroundChecks();
-    // Initialize push notifications silently in background
+    // Initialize notification channels only (safe before auth)
+    // Token registration happens post-login via notificationService.registerAfterAuth()
     notificationService.initialize();
   }, []);
 

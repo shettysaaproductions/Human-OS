@@ -59,9 +59,10 @@ export interface ChatOptions {
   temperature?: number;
   /** Penalises repeating the same tokens (phrases) mid-response. Range 0–2. */
   frequency_penalty?: number;
-  /** Penalises bringing up topics already covered in the response. Range 0–2. */
   presence_penalty?: number;
   response_format?: { type: 'json_object' | 'text' };
+  tools?: any[];
+  tool_choice?: 'auto' | 'none' | { type: 'function', function: { name: string } };
 }
 
 /**
@@ -161,12 +162,11 @@ export async function chatCompletion(
   if (options?.frequency_penalty !== undefined) {
     payload.frequency_penalty = options.frequency_penalty;
   }
-  if (options?.presence_penalty !== undefined) {
-    payload.presence_penalty = options.presence_penalty;
-  }
-
-  if (options?.response_format) {
-    payload.response_format = options.response_format;
+  if (options?.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty;
+  if (options?.response_format) payload.response_format = options.response_format;
+  if (options?.tools) {
+    payload.tools = options.tools;
+    if (options.tool_choice) payload.tool_choice = options.tool_choice;
   }
 
   try {
@@ -174,11 +174,16 @@ export async function chatCompletion(
     const response = await withNvidiaTimeout((signal) =>
       nvidiaClient.chat.completions.create(payload, { signal })
     );
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
+    const message = response.choices[0]?.message;
+    if (message?.tool_calls?.length) {
+      // Return the JSON representation of tool_calls instead of raw string
+      return JSON.stringify({ tool_calls: message.tool_calls });
+    }
+
+    if (!message?.content) {
       throw new Error('NVIDIA API returned an empty response');
     }
-    return content;
+    return message.content;
   } catch (err: any) {
     const isDev = process.env.NODE_ENV === 'development';
 
@@ -220,12 +225,31 @@ export async function* chatCompletionStream(
 
   if (options?.frequency_penalty !== undefined) payload.frequency_penalty = options.frequency_penalty;
   if (options?.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty;
+  if (options?.tools) {
+    payload.tools = options.tools;
+    if (options.tool_choice) payload.tool_choice = options.tool_choice;
+  }
 
   try {
     const stream = await nvidiaClient.chat.completions.create(payload) as any;
+    let toolCallBuffer = '';
+    let toolCallName = '';
+    let isToolCall = false;
+
     for await (const chunk of stream) {
+      const tc = chunk.choices[0]?.delta?.tool_calls?.[0];
+      if (tc) {
+        isToolCall = true;
+        if (tc.function?.name) toolCallName = tc.function.name;
+        if (tc.function?.arguments) toolCallBuffer += tc.function.arguments;
+        continue;
+      }
       const content = chunk.choices[0]?.delta?.content || '';
       if (content) yield content;
+    }
+
+    if (isToolCall) {
+      yield JSON.stringify({ tool_calls: [{ function: { name: toolCallName, arguments: toolCallBuffer } }] });
     }
   } catch (err: any) {
     logger.error('NVIDIA API streaming call failed', {

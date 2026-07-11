@@ -6,16 +6,21 @@ DROP TABLE IF EXISTS public.reminders CASCADE;
 
 CREATE TABLE IF NOT EXISTS public.reminders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  text TEXT NOT NULL,
-  trigger_at TIMESTAMPTZ NOT NULL,
-  recurrence_type TEXT, -- NULL, 'hours', 'days'
-  recurrence_interval INTEGER, -- NULL
-  status TEXT NOT NULL DEFAULT 'active', -- 'active', 'completed', 'canceled'
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT,
+  scheduled_at TIMESTAMPTZ NOT NULL,
+  repeat_pattern TEXT DEFAULT NULL,
+  repeat_times TEXT[] DEFAULT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_reminders_user_status ON public.reminders(user_id, status);
-CREATE INDEX IF NOT EXISTS idx_reminders_trigger_at ON public.reminders(trigger_at);
+CREATE INDEX IF NOT EXISTS reminders_user_id_idx ON public.reminders(user_id);
+CREATE INDEX IF NOT EXISTS reminders_scheduled_idx ON public.reminders(scheduled_at);
+
+ALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own reminders" ON public.reminders
+  FOR ALL USING (auth.uid() = user_id);

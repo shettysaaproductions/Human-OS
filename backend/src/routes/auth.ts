@@ -3,6 +3,7 @@ import { supabaseAnon, supabaseAdmin } from '../lib/supabase';
 import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { config } from '../config';
+import { cache, CACHE_NS } from '../lib/cache';
 
 export const authRouter: import('express').Router = Router();
 
@@ -212,6 +213,8 @@ authRouter.post('/push-token', authenticateUser, async (req: Request, res: Respo
     }
 
     logger.info('Push token registered', { userId });
+    // Invalidate profile cache so next chat request reads the fresh push_token
+    cache.invalidate(`profile:${userId}`);
     res.status(200).json({ success: true });
   } catch (err) {
     logger.error('Failed to register push token', { error: err instanceof Error ? err.message : String(err) });

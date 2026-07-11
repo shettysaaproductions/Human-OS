@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { chatService } from '../services/chatService';
 import * as SecureStore from 'expo-secure-store';
+import { proactiveReplyService } from '../services/proactiveReplyService';
 
 console.log('USECHATSTORE_LOADED');
 
@@ -43,6 +44,7 @@ interface ChatState {
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
   processQueue: () => Promise<void>;
+  checkProactiveMessages: () => Promise<void>;
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
@@ -67,14 +69,44 @@ async function loadPendingQueue(): Promise<{ id: string; content: string }[]> {
   }
 }
 
+// ── Delivered ID set (prevents re-send after force close) ────────────────────
+// Stores IDs of messages that were successfully sent. On cold start, any
+// pendingQueue item in this set is silently dropped — it was already delivered.
+const DELIVERED_KEY = 'humanOs_deliveredIds';
+const MAX_DELIVERED_IDS = 100; // Keep last 100 to avoid storage bloat
+
+async function loadDeliveredIds(): Promise<Set<string>> {
+  try {
+    const raw = await SecureStore.getItemAsync(DELIVERED_KEY);
+    if (!raw) return new Set();
+    const arr: { id: string; ts: number }[] = JSON.parse(raw);
+    // Auto-expire IDs older than 48 hours
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+    const fresh = arr.filter(e => e.ts > cutoff);
+    return new Set(fresh.map(e => e.id));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+async function markDelivered(id: string): Promise<void> {
+  try {
+    const raw = await SecureStore.getItemAsync(DELIVERED_KEY);
+    const arr: { id: string; ts: number }[] = raw ? JSON.parse(raw) : [];
+    // Append, deduplicate, keep last MAX entries
+    const newArr = [...arr.filter(e => e.id !== id), { id, ts: Date.now() }]
+      .slice(-MAX_DELIVERED_IDS);
+    await SecureStore.setItemAsync(DELIVERED_KEY, JSON.stringify(newArr));
+  } catch (e) {
+    console.warn('[QUEUE] Failed to mark delivered:', e);
+  }
+}
+
 // ── Message cache (instant startup — like WhatsApp) ───────────────────────────
-// Saves the last 50 messages locally so the app shows content immediately
-// on open without waiting for the backend API call.
 const MSG_CACHE_KEY = 'humanOs_messageCache';
 const CONV_CACHE_KEY = 'humanOs_conversationId';
 async function saveMessageCache(messages: Message[], conversationId: string | null) {
   try {
-    // Only cache the last 50 messages to keep SecureStore lean
     const toCache = messages.filter(m => m.status !== 'sending' && m.status !== 'error').slice(-50);
     await SecureStore.setItemAsync(MSG_CACHE_KEY, JSON.stringify(toCache));
     if (conversationId) await SecureStore.setItemAsync(CONV_CACHE_KEY, conversationId);
@@ -149,8 +181,22 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (queue.length === 0) break;
 
         const [item, ...rest] = queue;
+        // ── ATOMIC DEQUEUE: update state + persist BEFORE API call ────────────
+        // This means even if the app is force-closed after a successful send,
+        // the queue no longer contains this item on the next cold start.
         set({ pendingQueue: rest });
-        await savePendingQueue(rest); // persist after dequeue
+        await savePendingQueue(rest);
+
+        // Skip if already delivered (dedup against force-close re-open scenario)
+        const deliveredIds = await loadDeliveredIds();
+        if (deliveredIds.has(item.id)) {
+          console.log('[QUEUE] skipped — already delivered:', item.id);
+          // Clean up the sending bubble if it's still showing
+          set((s) => ({
+            messages: s.messages.filter(m => m.id !== item.id),
+          }));
+          continue;
+        }
 
         // Skip if already being sent (deduplication against parallel processQueue calls)
         if (_inFlightIds.has(item.id)) {
@@ -167,7 +213,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         _inFlightIds.add(item.id);
         set({ isTyping: true });
 
-        let retryDelay = 3000; // start at 3s, cap at 30s
+        let retryDelay = 3000;
         let succeeded = false;
 
         while (!succeeded) {
@@ -202,18 +248,20 @@ export const useChatStore = create<ChatState>((set, get) => {
               ],
             }));
 
+            // ── Mark as delivered IMMEDIATELY after success ─────────────────
+            // This is the key fix: even if the app crashes here, this ID is
+            // already in the delivered set so it won't re-send on next launch.
+            await markDelivered(item.id);
+
             succeeded = true;
             console.log('[QUEUE] success:', item.id);
           } catch (err: any) {
             const isServerError = err?.response?.status >= 400 && err?.response?.status < 500;
             if (isServerError) {
-              // 4xx = auth/not-found — no point retrying, mark silent send fail
-              // but keep Red dot so user knows
               console.log('[QUEUE] 4xx error, not retrying:', err?.response?.status);
               set({ isTyping: false });
-              succeeded = true; // exit inner while, message stays Red (sending)
+              succeeded = true;
             } else {
-              // Network error or 5xx — retry silently with backoff
               console.log('[QUEUE] network error, retrying in', retryDelay, 'ms');
               set({ isTyping: false });
               await new Promise(r => setTimeout(r, retryDelay));
@@ -227,7 +275,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     } finally {
       _isProcessing = false;
       set({ isTyping: false });
-      await savePendingQueue([]); // clear persisted queue on completion
       console.log('[QUEUE] finished');
     }
   };
@@ -247,14 +294,21 @@ export const useChatStore = create<ChatState>((set, get) => {
     
     hydrateMessages: async () => {
       // ── Step 1: Load cache instantly (zero wait, no spinner) ──────────────────
-      const [cachedData, savedQueue] = await Promise.all([
+      const [cachedData, savedQueue, deliveredIds] = await Promise.all([
         loadMessageCache(),
         loadPendingQueue(),
+        loadDeliveredIds(),
       ]);
 
+      // Filter out already-delivered messages from the restored queue
+      const filteredQueue = savedQueue.filter(q => !deliveredIds.has(q.id));
+      if (filteredQueue.length < savedQueue.length) {
+        console.log('[HYDRATE] Dropped', savedQueue.length - filteredQueue.length, 'already-delivered items from queue');
+        await savePendingQueue(filteredQueue);
+      }
+
       if (cachedData.messages.length > 0) {
-        // Show cached messages immediately — app feels instant like WhatsApp
-        const restoredPending: Message[] = savedQueue.map(q => ({
+        const restoredPending: Message[] = filteredQueue.map(q => ({
           id: q.id,
           role: 'user' as const,
           content: q.content,
@@ -264,10 +318,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         set({
           messages: [...cachedData.messages, ...restoredPending],
           conversationId: cachedData.conversationId,
-          pendingQueue: savedQueue,
-          isHydrated: true, // ← unlock UI immediately
+          pendingQueue: filteredQueue,
+          isHydrated: true,
         });
-        if (savedQueue.length > 0) get().processQueue();
+        if (filteredQueue.length > 0) get().processQueue();
       }
 
       // ── Step 2: Refresh from backend in background ─────────────────────────
@@ -317,9 +371,9 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           }
           
-          // Restore pending messages that aren't in history yet
+          // Restore pending messages that aren't in history yet and not delivered
           const savedIds = new Set(history.map((m: any) => m.id));
-          const pendingToRestore = savedQueue.filter(q => !savedIds.has(q.id));
+          const pendingToRestore = filteredQueue.filter(q => !savedIds.has(q.id));
           const restoredMessages: Message[] = pendingToRestore.map(q => ({
             id: q.id,
             role: 'user' as const,
@@ -348,7 +402,6 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           });
 
-          // Save fresh messages to cache for next startup
           saveMessageCache(freshMessages, history[0].conversation_id);
 
           if (pendingToRestore.length > 0) {
@@ -356,8 +409,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             get().processQueue();
           }
         } else {
-          // No history from backend
-          const restoredMessages: Message[] = savedQueue.map(q => ({
+          const restoredMessages: Message[] = filteredQueue.map(q => ({
             id: q.id,
             role: 'user' as const,
             content: q.content,
@@ -368,13 +420,12 @@ export const useChatStore = create<ChatState>((set, get) => {
             isHydrated: true,
             hasMoreMessages: false,
             messages: restoredMessages,
-            pendingQueue: savedQueue,
+            pendingQueue: filteredQueue,
           });
-          if (savedQueue.length > 0) get().processQueue();
+          if (filteredQueue.length > 0) get().processQueue();
         }
       } catch (e) {
         console.error('Failed to hydrate history from backend:', e);
-        // Still mark hydrated — cached messages are already shown
         set({ isHydrated: true });
       }
     },
@@ -419,7 +470,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
 
         const newOldestRawId = older[0]?.id || null;
-        // Prepend older messages BEFORE the existing ones — preserves scroll position
         set({
           messages: [...formattedOlder, ...messages],
           hasMoreMessages: older.length >= PAGE_SIZE,
@@ -447,18 +497,12 @@ export const useChatStore = create<ChatState>((set, get) => {
         pendingQueue: newQueue,
       }));
 
-      // Persist queue so it survives if the app is swiped away
       await savePendingQueue(newQueue);
-
       get().processQueue();
     },
 
     retryMessage: async (messageId: string) => {
       const state = get();
-      // Only retry if the message is actually in error state.
-      // If the user taps Retry twice rapidly the first tap moves status to
-      // 'sending' — the second tap finds no 'error' message and returns,
-      // preventing a duplicate API call.
       const msg = state.messages.find(m => m.id === messageId && m.status === 'error');
       if (!msg) return;
 
@@ -467,14 +511,81 @@ export const useChatStore = create<ChatState>((set, get) => {
         pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content }]
       }));
 
-      // Same idempotent call — safe whether or not a processor is already running.
       get().processQueue();
     },
     
     clearMessages: () => {
-      // Setting pendingQueue: [] means the while-loop will find nothing on its
-      // next iteration and exit cleanly, resetting _isProcessing itself via finally.
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
+    },
+
+    // ── Proactive message check: called when app comes to foreground ───────────
+    // Fetches any messages Nova sent while the app was backgrounded/minimized
+    checkProactiveMessages: async () => {
+      try {
+        const convId = get().conversationId;
+        if (!convId) return;
+
+        const currentMessages = get().messages;
+        const latestTimestamp = currentMessages.length > 0
+          ? currentMessages[currentMessages.length - 1].timestamp
+          : null;
+
+        const history = await chatService.getHistory(convId, 10);
+        if (!history || history.length === 0) return;
+
+        const existingIds = new Set(currentMessages.map(m => m.id));
+        const newMessages: Message[] = [];
+
+        for (const msg of history) {
+          const role = msg.role === 'nova' ? 'assistant' : msg.role;
+          const msgId = msg.id;
+
+          // Only add truly new messages (not in our current store)
+          const partId0 = `${msgId}_part_1`;
+          if (existingIds.has(msgId) || existingIds.has(partId0)) continue;
+
+          // Only add messages newer than our latest
+          if (latestTimestamp && msg.created_at <= latestTimestamp) continue;
+
+          if (role === 'assistant') {
+            const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
+              ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
+              : [msg.content];
+            chunks.forEach((chunkContent: string, idx: number) => {
+              newMessages.push({
+                id: `${msgId}_part_${idx + 1}`,
+                role: 'assistant',
+                content: chunkContent,
+                status: 'responded',
+                timestamp: msg.created_at,
+              });
+            });
+          } else {
+            newMessages.push({
+              id: msgId,
+              role,
+              content: msg.content,
+              status: 'sent',
+              timestamp: msg.created_at,
+            });
+          }
+        }
+
+        if (newMessages.length > 0) {
+          console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
+          set((s) => ({
+            messages: [...s.messages, ...newMessages],
+          }));
+          saveMessageCache([...get().messages], get().conversationId);
+        }
+
+        // Trigger proactive check (will only fire if > 4 hours since last user message)
+        if (latestTimestamp) {
+          proactiveReplyService.triggerProactiveCheck(latestTimestamp);
+        }
+      } catch (e) {
+        console.warn('[PROACTIVE] Failed to check for new messages:', e);
+      }
     },
     
     processQueue
