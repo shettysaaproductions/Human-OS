@@ -67,6 +67,34 @@ async function loadPendingQueue(): Promise<{ id: string; content: string }[]> {
   }
 }
 
+// ── Message cache (instant startup — like WhatsApp) ───────────────────────────
+// Saves the last 50 messages locally so the app shows content immediately
+// on open without waiting for the backend API call.
+const MSG_CACHE_KEY = 'humanOs_messageCache';
+const CONV_CACHE_KEY = 'humanOs_conversationId';
+async function saveMessageCache(messages: Message[], conversationId: string | null) {
+  try {
+    // Only cache the last 50 messages to keep SecureStore lean
+    const toCache = messages.filter(m => m.status !== 'sending' && m.status !== 'error').slice(-50);
+    await SecureStore.setItemAsync(MSG_CACHE_KEY, JSON.stringify(toCache));
+    if (conversationId) await SecureStore.setItemAsync(CONV_CACHE_KEY, conversationId);
+  } catch (e) {
+    console.warn('[CACHE] Failed to save message cache:', e);
+  }
+}
+async function loadMessageCache(): Promise<{ messages: Message[]; conversationId: string | null }> {
+  try {
+    const raw = await SecureStore.getItemAsync(MSG_CACHE_KEY);
+    const convId = await SecureStore.getItemAsync(CONV_CACHE_KEY);
+    return {
+      messages: raw ? JSON.parse(raw) : [],
+      conversationId: convId || null,
+    };
+  } catch (e) {
+    return { messages: [], conversationId: null };
+  }
+}
+
 // ── Client-side chunking for hydration ────────────────────────────────────────
 function chunkText(text: string): string[] {
   if (text.length <= 1500) return [text];
@@ -218,10 +246,32 @@ export const useChatStore = create<ChatState>((set, get) => {
     setDeveloperMode: (val: boolean) => set({ developerMode: val }),
     
     hydrateMessages: async () => {
-      try {
-        // Restore any unsent messages from before the app was closed
-        const savedQueue = await loadPendingQueue();
+      // ── Step 1: Load cache instantly (zero wait, no spinner) ──────────────────
+      const [cachedData, savedQueue] = await Promise.all([
+        loadMessageCache(),
+        loadPendingQueue(),
+      ]);
 
+      if (cachedData.messages.length > 0) {
+        // Show cached messages immediately — app feels instant like WhatsApp
+        const restoredPending: Message[] = savedQueue.map(q => ({
+          id: q.id,
+          role: 'user' as const,
+          content: q.content,
+          status: 'sending' as const,
+          timestamp: new Date().toISOString(),
+        }));
+        set({
+          messages: [...cachedData.messages, ...restoredPending],
+          conversationId: cachedData.conversationId,
+          pendingQueue: savedQueue,
+          isHydrated: true, // ← unlock UI immediately
+        });
+        if (savedQueue.length > 0) get().processQueue();
+      }
+
+      // ── Step 2: Refresh from backend in background ─────────────────────────
+      try {
         const PAGE_SIZE = 50;
         const history = await chatService.getHistory(undefined, PAGE_SIZE);
         console.log('Diagnostics - Messages received from API:', history?.length);
@@ -267,8 +317,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           }
           
-          // Reconstruct any persisted pending messages as 'sending' bubbles
-          // Filter out any queue items that were already saved to history
+          // Restore pending messages that aren't in history yet
           const savedIds = new Set(history.map((m: any) => m.id));
           const pendingToRestore = savedQueue.filter(q => !savedIds.has(q.id));
           const restoredMessages: Message[] = pendingToRestore.map(q => ({
@@ -280,9 +329,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           }));
 
           const oldestRawId = history[0]?.id || null;
+          const freshMessages = [...formattedHistory, ...restoredMessages];
           
           set({ 
-            messages: [...formattedHistory, ...restoredMessages], 
+            messages: freshMessages,
             conversationId: history[0].conversation_id,
             pendingQueue: pendingToRestore,
             isHydrated: true,
@@ -298,13 +348,15 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
           });
 
-          // Resume sending any restored pending messages
+          // Save fresh messages to cache for next startup
+          saveMessageCache(freshMessages, history[0].conversation_id);
+
           if (pendingToRestore.length > 0) {
             console.log('[HYDRATE] Resuming', pendingToRestore.length, 'pending messages');
             get().processQueue();
           }
         } else {
-          // No history but might have pending messages
+          // No history from backend
           const restoredMessages: Message[] = savedQueue.map(q => ({
             id: q.id,
             role: 'user' as const,
@@ -322,6 +374,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
       } catch (e) {
         console.error('Failed to hydrate history from backend:', e);
+        // Still mark hydrated — cached messages are already shown
         set({ isHydrated: true });
       }
     },
