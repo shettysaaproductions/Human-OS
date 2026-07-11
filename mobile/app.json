@@ -27,7 +27,6 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.humanos.mobile",
-      "googleServicesFile": "./google-services.json",
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
