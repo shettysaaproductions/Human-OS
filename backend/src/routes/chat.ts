@@ -177,12 +177,13 @@ You are always curious about this person's real life. In natural conversation:
 But ask ONLY ONE thing at a time. Weave it in naturally. Not like an interview.
 
 ## ⏰ REMINDERS — HOW TO SET THEM
-If a user asks you to remind them about something at a specific time:
-- Use the set_reminder tool with: title (what to remind about) and relative_minutes (minutes from now) OR time_of_day (HH:MM).
-- Examples: "in 2 mins" -> relative_minutes: 2. "at 5pm" -> time_of_day: "17:00".
+If a user asks you to remind them about something:
+- Use the set_reminder tool with: title (what to remind about), relative_value & relative_unit (e.g. 2, "minutes" / 1, "days" / 2, "months").
+- If it is a specific time of day: use time_of_day (HH:MM).
+- If it is recurring (e.g. "3 times every 3 minutes"), use recurrence_interval_value, recurrence_interval_unit, and recurrence_limit.
 - NEVER output the text "Done! I'll remind you". The system will do that for you automatically when you call the tool.
 - NEVER repeat a reminder confirmation if the user asks a new question. Just answer their new question!
-- You can set multiple reminders in the same conversation — each is tracked separately.
+- If the user asks what reminders they have, use the list_reminders tool.
 
 ## NEW RELATIONSHIP / DATING RADAR
 If the user mentions any hint of a new person in their life — lean in with GENUINE curiosity. Get the details. Remember them. Use them later.
@@ -849,10 +850,26 @@ chatRouter.post(
                   type: 'object',
                   properties: {
                     title: { type: 'string', description: 'What to remind the user about (e.g. Drink water, Call mom)' },
-                    relative_minutes: { type: 'integer', description: 'If the reminder is relative (e.g. "in 5 minutes"), output the total minutes from now. E.g. for 2 hours, output 120.' },
-                    time_of_day: { type: 'string', description: 'If the reminder is at a specific time (e.g. "at 5pm"), output the 24-hour time HH:MM (e.g. "17:00").' }
+                    relative_value: { type: 'integer', description: 'Value for relative time (e.g. 2 for "in 2 months")' },
+                    relative_unit: { type: 'string', description: 'Unit for relative time: "minutes", "hours", "days", "weeks", "months"' },
+                    time_of_day: { type: 'string', description: 'If at a specific time (e.g. "at 5pm"), output 24-hour time HH:MM (e.g. "17:00").' },
+                    recurrence_interval_value: { type: 'integer', description: 'If recurring, the interval value (e.g. 3 for "every 3 minutes")' },
+                    recurrence_interval_unit: { type: 'string', description: 'Unit for recurrence: "minutes", "hours", "days", "weeks", "months"' },
+                    recurrence_limit: { type: 'integer', description: 'Max number of times to repeat (e.g. 3 for "3 times")' }
                   },
                   required: ['title']
+                }
+              }
+            },
+            {
+              type: 'function',
+              function: {
+                name: 'list_reminders',
+                description: 'Fetch the user\'s active reminders. Use this if the user asks what reminders they have scheduled.',
+                parameters: {
+                  type: 'object',
+                  properties: {},
+                  required: []
                 }
               }
             }]
@@ -873,46 +890,79 @@ chatRouter.post(
             rawReply = await chatCompletion(messagesForLLM, nvidiaOptions);
           }
 
-          // Handle LLM Tool Call for Reminder
-          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder')) {
+          // Handle LLM Tool Calls
+          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder') || rawReply.includes('list_reminders')) {
             try {
-              // Try to extract JSON from raw reply (may be wrapped in markdown)
               const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
               const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawReply);
               const toolCall = parsed?.tool_calls?.[0] ?? parsed;
               const fnName = toolCall?.function?.name ?? toolCall?.name;
-              if (fnName === 'set_reminder') {
+              
+              if (fnName === 'list_reminders') {
+                const { data: upcoming } = await supabaseAdmin
+                  .from('reminders')
+                  .select('*')
+                  .eq('user_id', userId)
+                  .eq('status', 'active')
+                  .gte('trigger_at', new Date().toISOString())
+                  .order('trigger_at', { ascending: true })
+                  .limit(10);
+                
+                if (!upcoming || upcoming.length === 0) {
+                  rawReply = "You don't have any active reminders scheduled right now.";
+                } else {
+                  rawReply = "Here are your upcoming reminders:\n" + upcoming.map(r => {
+                    const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+                    const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
+                    return `- ${r.text || r.title} at ${timeStr}${recurrence}`;
+                  }).join("\n");
+                }
+                if (isStreaming) {
+                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                  if (typeof (res as any).flush === 'function') (res as any).flush();
+                }
+              } else if (fnName === 'set_reminder') {
                 const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
                 const reminderText = args.title || 'Reminder';
                 let triggerDate = new Date();
                 
-                if (args.relative_minutes) {
-                  triggerDate = new Date(Date.now() + args.relative_minutes * 60000);
+                if (args.relative_value && args.relative_unit) {
+                  if (args.relative_unit === 'minutes') triggerDate.setMinutes(triggerDate.getMinutes() + args.relative_value);
+                  else if (args.relative_unit === 'hours') triggerDate.setHours(triggerDate.getHours() + args.relative_value);
+                  else if (args.relative_unit === 'days') triggerDate.setDate(triggerDate.getDate() + args.relative_value);
+                  else if (args.relative_unit === 'weeks') triggerDate.setDate(triggerDate.getDate() + (args.relative_value * 7));
+                  else if (args.relative_unit === 'months') triggerDate.setMonth(triggerDate.getMonth() + args.relative_value);
                 } else if (args.time_of_day) {
                   const [hh, mm] = args.time_of_day.split(':').map(Number);
                   const tzOffset = 5.5; // IST
                   const nowLocal = new Date(Date.now() + tzOffset * 3600000);
                   nowLocal.setUTCHours(hh, mm, 0, 0);
-                  // If the time has already passed today, set for tomorrow
                   if (nowLocal.getTime() < Date.now() + tzOffset * 3600000) {
                     nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
                   }
                   triggerDate = new Date(nowLocal.getTime() - tzOffset * 3600000);
                 } else {
-                  throw new Error('No time provided');
+                  // Default
+                  triggerDate.setMinutes(triggerDate.getMinutes() + 5);
                 }
                 
                 if (isNaN(triggerDate.getTime())) throw new Error('Invalid calculated date');
 
-                // Schedule using the correct schema (text + trigger_at)
-                await reminderSchedulerService.scheduleReminder(userId, reminderText, triggerDate);
+                await reminderSchedulerService.scheduleReminder(
+                  userId, 
+                  reminderText, 
+                  triggerDate,
+                  args.recurrence_interval_unit,
+                  args.recurrence_interval_value,
+                  args.recurrence_limit
+                );
 
-                // Human-friendly confirmation
                 const localTime = triggerDate.toLocaleTimeString('en-IN', {
                   hour: '2-digit', minute: '2-digit', hour12: true,
                   timeZone: 'Asia/Kolkata'
                 });
-                rawReply = `Done! I'll remind you about "${reminderText}" at ${localTime}. 🔔`;
+                const recurringText = args.recurrence_interval_value ? ` (recurring every ${args.recurrence_interval_value} ${args.recurrence_interval_unit})` : '';
+                rawReply = `Done! I'll remind you about "${reminderText}" starting at ${localTime}${recurringText}. 🔔`;
                 if (isStreaming) {
                   res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
                   if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -920,8 +970,8 @@ chatRouter.post(
                 logger.info('[Reminder] Scheduled successfully', { userId, reminderText, triggerDate });
               }
             } catch (err) {
-              logger.error('[Reminder] Failed to parse/set reminder tool call', { err: err instanceof Error ? err.message : String(err), rawReply: rawReply.substring(0, 200) });
-              rawReply = "Hmm, I had trouble setting that. Can you tell me the exact time you want the reminder?";
+              logger.error('[Tool Call] Failed', { err: err instanceof Error ? err.message : String(err), rawReply: rawReply.substring(0, 200) });
+              rawReply = "Hmm, I had trouble processing that request.";
               if (isStreaming) {
                 res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
               }

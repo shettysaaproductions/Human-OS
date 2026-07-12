@@ -7,7 +7,7 @@ export class ReminderSchedulerService {
   /**
    * Schedule a reminder by creating a database record
    */
-  async scheduleReminder(userId: string, text: string, triggerAt: Date, recurrenceType?: string, recurrenceInterval?: number): Promise<any> {
+  async scheduleReminder(userId: string, text: string, triggerAt: Date, recurrenceType?: string, recurrenceInterval?: number, recurrenceLimit?: number): Promise<any> {
     const { data: reminder, error } = await supabaseAdmin
       .from('reminders')
       .insert({
@@ -16,6 +16,7 @@ export class ReminderSchedulerService {
         trigger_at: triggerAt.toISOString(),
         recurrence_type: recurrenceType || null,
         recurrence_interval: recurrenceInterval || null,
+        recurrence_limit: recurrenceLimit || null,
         status: 'active'
       })
       .select('*')
@@ -114,23 +115,37 @@ export class ReminderSchedulerService {
     });
 
     // 3. Handle recurrence or mark completed
+    let completed = false;
     if (reminder.recurrence_type && reminder.recurrence_interval) {
-      const nextTrigger = this.calculateNextTrigger(
-        triggerTime,
-        reminder.recurrence_type,
-        reminder.recurrence_interval
-      );
-      await supabaseAdmin
-        .from('reminders')
-        .update({ trigger_at: nextTrigger.toISOString(), updated_at: new Date().toISOString() })
-        .eq('id', reminderId);
-      logger.info('Recurring reminder rescheduled', { reminderId, nextTrigger });
+      const currentCount = (reminder.recurrence_count || 0) + 1;
+      if (reminder.recurrence_limit && currentCount >= reminder.recurrence_limit) {
+        completed = true;
+      } else {
+        const nextTrigger = this.calculateNextTrigger(
+          triggerTime,
+          reminder.recurrence_type,
+          reminder.recurrence_interval
+        );
+        await supabaseAdmin
+          .from('reminders')
+          .update({ 
+            trigger_at: nextTrigger.toISOString(), 
+            updated_at: new Date().toISOString(),
+            recurrence_count: currentCount
+          })
+          .eq('id', reminderId);
+        logger.info('Recurring reminder rescheduled', { reminderId, nextTrigger, count: currentCount });
+      }
     } else {
+      completed = true;
+    }
+
+    if (completed) {
       await supabaseAdmin
         .from('reminders')
         .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('id', reminderId);
-      logger.info('One-off reminder fired and completed', { reminderId });
+      logger.info('Reminder fired and completed', { reminderId });
     }
 
     // 4. Send push notification to the user
@@ -161,10 +176,16 @@ export class ReminderSchedulerService {
 
   private calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {
     const next = new Date(currentTrigger);
-    if (recurrenceType === 'hours') {
+    if (recurrenceType === 'minutes') {
+      next.setMinutes(next.getMinutes() + recurrenceInterval);
+    } else if (recurrenceType === 'hours') {
       next.setHours(next.getHours() + recurrenceInterval);
     } else if (recurrenceType === 'days') {
       next.setDate(next.getDate() + recurrenceInterval);
+    } else if (recurrenceType === 'weeks') {
+      next.setDate(next.getDate() + (recurrenceInterval * 7));
+    } else if (recurrenceType === 'months') {
+      next.setMonth(next.getMonth() + recurrenceInterval);
     } else {
       // Default fallback
       next.setDate(next.getDate() + 1);
