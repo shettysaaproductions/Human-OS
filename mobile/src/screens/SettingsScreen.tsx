@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
 import { useTheme, ThemeMode } from '../theme/ThemeContext';
 import { useChatStore } from '../store/useChatStore';
+import { useAuthStore } from '../store/useAuthStore';
 
 const APP_VERSION = '0.2.0-beta';
 
@@ -37,6 +38,7 @@ export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { colors, themeMode, setThemeMode } = useTheme();
   const { developerMode, setDeveloperMode } = useChatStore();
+  const { logout } = useAuthStore();
 
   // Notification settings (local state — could persist to backend)
   const [momentNotifs, setMomentNotifs] = useState(true);
@@ -92,19 +94,26 @@ export function SettingsScreen() {
     }
   }, []);
 
-  const handleDeleteAccount = useCallback(() => {
+  const handleMarkDead = useCallback(() => {
     Alert.alert(
-      'Delete Account',
-      'This will permanently delete all your memories, goals, and reflections. This cannot be undone.',
+      'MARK DEAD (NUCLEAR OPTION)',
+      'Are you absolutely sure? This will shoot Nova dead, delete your account, and erase every memory, chat, and emotion forever. There is no coming back.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete Everything', style: 'destructive',
-          onPress: () => Alert.alert('Coming Soon', 'Account deletion will be available in the next update.')
+          text: 'Shoot (Delete Everything)', style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete('/auth/mark-dead');
+              await logout(); // Wipe local tokens and redirect to Auth
+            } catch (err) {
+              Alert.alert('Error', 'Failed to eradicate data.');
+            }
+          }
         }
       ]
     );
-  }, []);
+  }, [logout]);
 
   const handleSelectTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
@@ -233,9 +242,12 @@ export function SettingsScreen() {
             <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
           </TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={handleDeleteAccount}>
-            <Text style={[st.rowLabel, { color: '#EF4444' }]}>Delete All Data</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
+          
+          <TouchableOpacity style={[st.row, st.markDeadBtn]} onPress={handleMarkDead}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={st.markDeadIcon}>🔫</Text>
+              <Text style={st.markDeadText}>Mark Dead (Shoot)</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -331,4 +343,11 @@ const st = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
   modalTitle: { fontSize: 17, fontWeight: '700' },
   countryRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
+  markDeadBtn: { 
+    backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+    borderBottomLeftRadius: 14, 
+    borderBottomRightRadius: 14 
+  },
+  markDeadIcon: { fontSize: 20, marginRight: 10 },
+  markDeadText: { color: '#EF4444', fontSize: 15, fontWeight: 'bold', letterSpacing: 0.5 },
 });
