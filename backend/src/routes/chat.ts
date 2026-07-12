@@ -16,6 +16,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
+import { novaFollowupService } from '../services/NovaFollowupService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -104,6 +105,7 @@ const ChatSchema = z.object({
   message: z.string().min(1).max(4000),
   conversation_id: z.string().uuid().optional(),
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
+  is_proactive: z.boolean().optional().default(false),
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who happens to be brilliantly intelligent, deeply empathetic, and scientifically grounded.
@@ -333,10 +335,14 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, language } = parseResult.data;
+      const { message, conversation_id, language, is_proactive } = parseResult.data;
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
       const isDegraded = dbHealthService.isDegraded();
+      // For proactive triggers, rewrite the message to a natural system instruction
+      const effectiveMessage = is_proactive
+        ? '[SYSTEM: The user has not messaged in a while. Open a warm, short, casual conversation. Reference something from your recent memory if possible. Do NOT say you were checking in — just talk naturally like a friend who thought of them.]'
+        : message;
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────
       if (isDegraded) {
@@ -387,7 +393,7 @@ chatRouter.post(
       // ── PARALLEL FETCH: profile, save user msg, chat history, cross-session,
       // working memory, long-term memories, short-term memories — all at once.
       // Previously sequential (~600-900ms); now runs in ~200ms (one network RTT).
-      const keywords = extractKeywords(message);
+      const keywords = extractKeywords(effectiveMessage);
 
       const profileCacheKey = `profile:${userId}`;
       const wmCacheKey = `working_memory:${userId}`;
@@ -414,12 +420,14 @@ chatRouter.post(
                 .eq('id', userId).maybeSingle()
             ),
 
-        // 2. Save user message (we need the ID later, but can start the write now)
-        qt.track('save_user_message', 'chat_history', () =>
-          supabaseAdmin.from('chat_history')
-            .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message })
-            .select('id').single()
-        ),
+        // 2. Save user message — skip for proactive trigger (no phantom user message in history)
+        is_proactive
+          ? Promise.resolve({ data: { id: 'proactive_' + Date.now() }, error: null })
+          : qt.track('save_user_message', 'chat_history', () =>
+              supabaseAdmin.from('chat_history')
+                .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message })
+                .select('id').single()
+            ),
 
         // 3. Recent chat history (last 20, for context continuity)
         qt.track('get_chat_history', 'chat_history', () =>
@@ -576,7 +584,7 @@ chatRouter.post(
 
 
       // 5. Build prompt
-      const responseConfig = classifyIntent(message, recentMessages.map(m => m.content));
+      const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
 
       // 5.1 Situational Awareness: Fetch context from disconnected engines (parallel, lightweight)
       const userCountry = (profile as any)?.country || 'IN';
@@ -683,7 +691,7 @@ chatRouter.post(
         dayName: DAY_NAMES[dayIdx],
         dateStr,
         timeStr,
-        lastUserMessage: message, // For availability/mood signal detection
+        lastUserMessage: effectiveMessage, // For availability/mood signal detection
         upcomingReminders
       };
       const situationBrief = situationalAwareness.buildBrief(situationCtx);
@@ -713,7 +721,7 @@ chatRouter.post(
         'raat ko', 'dopahar', 'shaam ko', 'maine kaha tha', 'tune kaha tha',
         'bataya tha', 'bola tha', 'likha tha'
       ];
-      const lowerMsg = message.toLowerCase();
+      const lowerMsg = effectiveMessage.toLowerCase();
       const isTemporalQuery = TEMPORAL_KEYWORDS.some(kw => lowerMsg.includes(kw));
 
       if (isTemporalQuery) {
@@ -764,7 +772,8 @@ chatRouter.post(
 
       const messagesForLLM: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
         { role: 'system', content: finalSystemPrompt },
-        ...recentMessages
+        ...recentMessages,
+        { role: 'user', content: effectiveMessage },
       ];
 
       // CRITICAL RECENCY BIAS FIX: Append a final system reminder *after* the chat history.
@@ -790,7 +799,7 @@ chatRouter.post(
 
       // 6. Call NVIDIA
       let rawReply = '';
-      if (isExcessiveRequest(message)) {
+      if (isExcessiveRequest(effectiveMessage)) {
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
         if (isStreaming) res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
       } else {
@@ -885,7 +894,7 @@ chatRouter.post(
         res.end();
       }
 
-      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), message);
+      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), effectiveMessage);
       const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE
@@ -962,10 +971,26 @@ chatRouter.post(
       }
 
       // 10. Fire-and-forget push notification if user has a registered token
-      // Fetch push token from profile (already cached via profileCacheKey)
       const pushToken = (profile as any)?.push_token as string | undefined;
       if (pushToken) {
         sendNovaReplyNotification(pushToken, reply).catch(() => {});
+      }
+
+      // 11. Fire-and-forget: schedule Nova's next human-like follow-up
+      // Uses LLM to decide when and what to send next based on conversation mood + time
+      // Only fires for non-proactive messages (don't chain proactive→proactive)
+      const isProactiveTrigger = message.includes('[NOVA_PROACTIVE_TRIGGER]');
+      if (!isProactiveTrigger) {
+        const recentForFollowup = (historyResult.data || []).slice(0, 10).reverse()
+          .map((m: any) => ({ role: m.role, content: m.content }))
+          .concat([{ role: 'user', content: effectiveMessage }, { role: 'assistant', content: reply }]);
+        novaFollowupService.scheduleFollowup(
+          userId,
+          activeConversationId,
+          recentForFollowup,
+          nowLocal.getUTCHours(),
+          userCountry
+        ).catch(() => {});
       }
 
       if (!isStreaming) {
