@@ -17,6 +17,7 @@ import { reflectionScheduler } from './services/ReflectionSchedulerService';
 import { reminderSchedulerService } from './services/ReminderSchedulerService';
 import { shortTermMemoryCleanupService } from './services/ShortTermMemoryCleanupService';
 import { chatHistoryPruningService } from './services/ChatHistoryPruningService';
+import { novaFollowupService } from './services/NovaFollowupService';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -46,10 +47,11 @@ async function main(): Promise<void> {
     }, 24 * 60 * 60 * 1000); // 24 hours
     if (momentInterval.unref) momentInterval.unref();
 
-    // Reminders Polling Engine (runs every 10 seconds)
+    // Reminders + Nova Follow-up Polling Engine (runs every 10 seconds)
     const remindersInterval = setInterval(async () => {
       try {
         await reminderSchedulerService.checkAndFireReminders();
+        await novaFollowupService.checkAndFireFollowups();
       } catch (err) {
         logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
       }
