@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // Screens
@@ -19,7 +19,11 @@ import { useAuthStore } from '../store/useAuthStore';
 
 const Stack = createNativeStackNavigator();
 
-export function AppNavigator() {
+interface AppNavigatorProps {
+  navigationRef?: React.RefObject<NavigationContainerRef<any>>;
+}
+
+export function AppNavigator({ navigationRef }: AppNavigatorProps) {
   const { isLoading, accessToken, onboardingStatus, hydrate } = useAuthStore();
 
   React.useEffect(() => {
@@ -35,7 +39,7 @@ export function AppNavigator() {
 
   return (
     <ErrorBoundary>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           {!isAuthenticated ? (
             <>
@@ -59,3 +63,4 @@ export function AppNavigator() {
     </ErrorBoundary>
   );
 }
+
