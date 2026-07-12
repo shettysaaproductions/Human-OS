@@ -26,17 +26,26 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Setup EAS CLI
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build APK on EAS
-        run: eas build --platform android --profile production --non-interactive
+      - name: Build APK locally on CI
+        env:
+          EAS_LOCAL_BUILD_SKIP_CLEANUP: 1
+        run: eas build --platform android --profile production --local --non-interactive
 
-      - name: Get APK download URL
-        run: |
-          echo "✅ Build complete!"
-          echo "Download your APK from:"
-          echo "https://expo.dev/accounts/shettysaa/projects/mobile/builds"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HumanOS-APK
+          path: mobile/*.apk
+          retention-days: 7
