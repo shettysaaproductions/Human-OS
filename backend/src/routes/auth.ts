@@ -3,7 +3,7 @@ import { supabaseAnon, supabaseAdmin } from '../lib/supabase';
 import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { config } from '../config';
-import { cache, CACHE_NS } from '../lib/cache';
+import { cache } from '../lib/cache';
 
 export const authRouter: import('express').Router = Router();
 
