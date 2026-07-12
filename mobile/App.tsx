@@ -7,9 +7,15 @@ import { StatusBar } from 'expo-status-bar';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { notificationService } from './src/services/notificationService';
+import { useChatStore } from './src/store/useChatStore';
+import * as Notifications from 'expo-notifications';
+import { NavigationContainerRef } from '@react-navigation/native';
 import updateHistory from './src/config/updateHistory.json';
 
 const latestUpdate = updateHistory[0];
+
+// Navigation ref so we can navigate from outside React tree (notification tap handler)
+const navigationRef = React.createRef<NavigationContainerRef<any>>();
 
 function AppContent() {
   const { isDark, colors } = useTheme();
@@ -27,6 +33,38 @@ function AppContent() {
     // Initialize notification channels only (safe before auth)
     // Token registration happens post-login via notificationService.registerAfterAuth()
     notificationService.initialize();
+
+    // ── Notification tap handler: user tapped a Nova notification ──────────────
+    // Navigates to Chat and refreshes messages so Nova's follow-up is visible
+    const tapSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as any;
+      const type = data?.type;
+      // Navigate to Chat for any Nova notification type
+      if (type === 'nova_reply' || type === 'nova_followup' || type === 'nova_reminder') {
+        // Small delay to allow navigation to mount after cold start
+        setTimeout(() => {
+          if (navigationRef.current?.isReady()) {
+            navigationRef.current.navigate('Chat' as never);
+          }
+          // Refresh messages to show Nova's new message
+          useChatStore.getState().checkProactiveMessages();
+        }, 300);
+      }
+    });
+
+    // ── Foreground notification handler: show badge + refresh messages ──────────
+    // When app is open and a Nova notification arrives, silently refresh messages
+    const fgSub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as any;
+      if (data?.type === 'nova_followup' || data?.type === 'nova_reply') {
+        useChatStore.getState().checkProactiveMessages();
+      }
+    });
+
+    return () => {
+      tapSub.remove();
+      fgSub.remove();
+    };
   }, []);
 
   const runBackgroundChecks = async () => {
@@ -82,7 +120,7 @@ function AppContent() {
   return (
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <AppNavigator />
+      <AppNavigator navigationRef={navigationRef} />
       
 
       
