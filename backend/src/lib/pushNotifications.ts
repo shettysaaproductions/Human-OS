@@ -49,8 +49,8 @@ export async function sendPushNotification(messages: ExpoPushMessage[]): Promise
       return;
     }
 
-    const result = await response.json();
-    const errors = result?.data?.filter((r: any) => r.status === 'error') ?? [];
+    const result = await response.json() as { data?: { status: string; message?: string }[] };
+    const errors = result?.data?.filter((r) => r.status === 'error') ?? [];
     if (errors.length > 0) {
       logger.warn('[Push] Some tokens rejected', { errors });
     } else {

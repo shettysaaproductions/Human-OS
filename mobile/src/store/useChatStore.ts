@@ -242,7 +242,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               isTyping: false,
               messages: [
                 ...s.messages.map(m =>
-                  m.id === item.id ? { ...m, status: 'sent' as const } : m
+                  m.id === item.id ? { ...m, status: 'sent' as const, id: data.user_message_id || m.id } : m
                 ),
                 ...novaMessages,
               ],
@@ -373,7 +373,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           
           // Restore pending messages that aren't in history yet and not delivered
           const savedIds = new Set(history.map((m: any) => m.id));
-          const pendingToRestore = filteredQueue.filter(q => !savedIds.has(q.id));
+          const savedContents = new Set(history.filter((m: any) => m.role === 'user').map((m: any) => m.content.trim()));
+          const pendingToRestore = filteredQueue.filter(q => !savedIds.has(q.id) && !savedContents.has(q.content.trim()));
           const restoredMessages: Message[] = pendingToRestore.map(q => ({
             id: q.id,
             role: 'user' as const,
@@ -543,6 +544,13 @@ export const useChatStore = create<ChatState>((set, get) => {
           // Only add truly new messages (not in our current store)
           const partId0 = `${msgId}_part_1`;
           if (existingIds.has(msgId) || existingIds.has(partId0)) continue;
+
+          // Deduplicate by content to prevent ghost duplicates (from local cache vs backend UUID mismatch)
+          const isAssistant = role === 'assistant';
+          const alreadyExistsByContent = currentMessages.some(
+            cm => cm.role === role && cm.content.trim() === msg.content.trim()
+          );
+          if (alreadyExistsByContent) continue;
 
           // Only add messages newer than our latest
           if (latestTimestamp && msg.created_at <= latestTimestamp) continue;

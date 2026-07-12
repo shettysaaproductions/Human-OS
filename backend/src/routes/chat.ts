@@ -974,6 +974,7 @@ chatRouter.post(
           messages: parsedMessagesArray,
           chunks,
           conversation_id: activeConversationId,
+          user_message_id: userMessageId,
           meta: {
             memories_retrieved: memories.length,
             keywords_searched: keywords,
