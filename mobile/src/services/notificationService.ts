@@ -45,12 +45,10 @@ class NotificationService {
 
   /**
    * Call this AFTER the user is authenticated and the axios auth header is set.
-   * Requests permission, gets the Expo push token, registers with backend.
-   * Has exponential-backoff retry (max 3 attempts) so transient network errors
-   * on login don't silently drop the token.
+   * Always re-registers the token — handles force-close + fresh open cases.
+   * Safe to call multiple times; debounced to prevent spam.
    */
   async registerAfterAuth(): Promise<void> {
-    if (this._registered) return; // Already done this session
     try {
       await this._requestPermissionAndRegister();
     } catch (err) {
@@ -104,24 +102,32 @@ class NotificationService {
     }
 
     if (finalStatus !== 'granted') {
-      console.warn('[Notifications] Permission not granted');
+      console.warn('[Notifications] Permission not granted — user denied');
       return;
     }
 
-    const tokenResult = await Notifications.getExpoPushTokenAsync({
-      projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
-    });
+    let tokenResult;
+    try {
+      tokenResult = await Notifications.getExpoPushTokenAsync({
+        projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
+      });
+    } catch (tokenErr) {
+      console.warn('[Notifications] Failed to get push token:', tokenErr);
+      // Common cause: google-services.json missing / FCM not configured
+      // Background notifications will NOT work until Firebase is set up
+      return;
+    }
 
     this._pushToken = tokenResult.data;
     console.log('[Notifications] Push token obtained:', this._pushToken);
 
     // Register with backend — retry up to 3 times with exponential backoff
     let attempt = 0;
-    let delay = 2000;
+    let delay = 1000;
     while (attempt < 3) {
       try {
         await chatService.registerPushToken(this._pushToken);
-        console.log('[Notifications] Token registered with backend');
+        console.log('[Notifications] Token registered with backend ✅');
         this._registered = true;
         return;
       } catch (err) {
