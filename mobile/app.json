@@ -65,7 +65,8 @@
             "deploymentTarget": "16.4"
           }
         }
-      ]
+      ],
+      "./plugins/withDisableLint.js"
     ],
     "extra": {
       "eas": {
