@@ -16,6 +16,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
+import { reminderSchedulerService } from '../services/ReminderSchedulerService';
 import { novaFollowupService } from '../services/NovaFollowupService';
 import crypto from 'crypto';
 
@@ -842,25 +843,40 @@ chatRouter.post(
           }
 
           // Handle LLM Tool Call for Reminder
-          if (rawReply.includes('"tool_calls"')) {
+          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder')) {
             try {
-              const parsed = JSON.parse(rawReply);
-              if (parsed.tool_calls?.[0]?.function?.name === 'set_reminder') {
-                const args = JSON.parse(parsed.tool_calls[0].function.arguments);
-                await reminderService.createReminder({
-                  user_id: userId,
-                  title: args.title,
-                  scheduled_at: new Date(args.scheduled_at)
+              // Try to extract JSON from raw reply (may be wrapped in markdown)
+              const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
+              const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawReply);
+              const toolCall = parsed?.tool_calls?.[0] ?? parsed;
+              const fnName = toolCall?.function?.name ?? toolCall?.name;
+              if (fnName === 'set_reminder') {
+                const argsRaw = toolCall?.function?.arguments ?? toolCall?.arguments ?? '{}';
+                const args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw;
+                const reminderText = args.title || args.text || args.reminder || 'Reminder';
+                const scheduledAt = args.scheduled_at || args.trigger_at || args.time;
+                if (!scheduledAt) throw new Error('No scheduled_at in tool args');
+                const triggerDate = new Date(scheduledAt);
+                if (isNaN(triggerDate.getTime())) throw new Error('Invalid date: ' + scheduledAt);
+
+                // Schedule using the correct schema (text + trigger_at)
+                await reminderSchedulerService.scheduleReminder(userId, reminderText, triggerDate);
+
+                // Human-friendly confirmation
+                const localTime = triggerDate.toLocaleTimeString('en-IN', {
+                  hour: '2-digit', minute: '2-digit', hour12: true,
+                  timeZone: 'Asia/Kolkata'
                 });
-                rawReply = "Done! I'll remind you.";
+                rawReply = `Done! I'll remind you about "${reminderText}" at ${localTime}. 🔔`;
                 if (isStreaming) {
                   res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
                   if (typeof (res as any).flush === 'function') (res as any).flush();
                 }
+                logger.info('[Reminder] Scheduled successfully', { userId, reminderText, triggerDate });
               }
             } catch (err) {
-              logger.error('[Reminder] Failed to parse/set reminder tool call', { err });
-              rawReply = "Sorry, I had trouble setting that reminder.";
+              logger.error('[Reminder] Failed to parse/set reminder tool call', { err: err instanceof Error ? err.message : String(err), rawReply: rawReply.substring(0, 200) });
+              rawReply = "Hmm, I had trouble setting that. Can you tell me the exact time you want the reminder?";
               if (isStreaming) {
                 res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
               }
