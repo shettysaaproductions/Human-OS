@@ -18,6 +18,7 @@ import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
 import { reminderSchedulerService } from '../services/ReminderSchedulerService';
 import { novaFollowupService } from '../services/NovaFollowupService';
+import { lifeEventExtractor } from '../services/LifeEventExtractor';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -176,13 +177,16 @@ You are always curious about this person's real life. In natural conversation:
 
 But ask ONLY ONE thing at a time. Weave it in naturally. Not like an interview.
 
-## ⏰ REMINDERS — HOW TO SET THEM
+## ⏰ REMINDERS — HOW TO SET & DELETE THEM
 If a user asks you to remind them about something:
 - Use the set_reminder tool with: title (what to remind about), relative_value & relative_unit (e.g. 2, "minutes" / 1, "days" / 2, "months").
 - If it is a specific time of day: use time_of_day (HH:MM).
 - If it is recurring (e.g. "3 times every 3 minutes"), use recurrence_interval_value, recurrence_interval_unit, and recurrence_limit.
 - NEVER output the text "Done! I'll remind you". The system will do that for you automatically when you call the tool.
 - NEVER repeat a reminder confirmation if the user asks a new question. Just answer their new question!
+
+If a user asks you to DELETE or CANCEL a reminder:
+- Use the delete_reminders tool. Provide the exact string ID(s) of the reminders to delete, or set delete_all to true if they want to clear all reminders.
 
 ## 💬 MULTI-BUBBLE REPLIES (MANDATORY)
 - NEVER send one giant wall of text.
@@ -819,8 +823,8 @@ chatRouter.post(
         remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has these reminders active:\n' + upcoming.map(r => {
           const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
           const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
-          return `- ${r.text || r.title} at ${timeStr}${recurrence}`;
-        }).join('\n') + '\n\nIf the user asks what their reminders are, read this list naturally to them in a human way.';
+          return `- [ID: "${r.id}"] ${r.text || r.title} at ${timeStr}${recurrence}`;
+        }).join('\n') + '\n\nIf the user asks what their reminders are, read this list naturally to them in a human way. To delete any of these, use the delete_reminders tool with their exact ID.';
       } else {
         remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has NO active reminders. If they ask, just tell them naturally.';
       }
@@ -885,6 +889,27 @@ chatRouter.post(
                   required: ['title']
                 }
               }
+            },
+            {
+              type: 'function',
+              function: {
+                name: 'delete_reminders',
+                description: 'Delete or cancel specific active reminders or ALL reminders.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    reminder_ids: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: 'The exact ID strings of the reminders to delete.'
+                    },
+                    delete_all: {
+                      type: 'boolean',
+                      description: 'Set to true ONLY if the user wants to delete ALL of their reminders.'
+                    }
+                  }
+                }
+              }
             }]
           };
 
@@ -904,14 +929,31 @@ chatRouter.post(
           }
 
           // Handle LLM Tool Calls
-          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder')) {
+          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder') || rawReply.includes('delete_reminders')) {
             try {
               const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
               const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawReply);
               const toolCall = parsed?.tool_calls?.[0] ?? parsed;
               const fnName = toolCall?.function?.name ?? toolCall?.name;
               
-              if (fnName === 'set_reminder') {
+              if (fnName === 'delete_reminders') {
+                const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
+                
+                if (args.delete_all) {
+                  await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
+                  rawReply = "Done! I've cancelled all your active reminders. 🗑️";
+                } else if (args.reminder_ids && args.reminder_ids.length > 0) {
+                  await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).in('id', args.reminder_ids).eq('user_id', userId);
+                  rawReply = "Done! I've cancelled those reminders for you. 🗑️";
+                } else {
+                  rawReply = "I wasn't sure which reminders to cancel.";
+                }
+
+                if (isStreaming) {
+                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                  if (typeof (res as any).flush === 'function') (res as any).flush();
+                }
+              } else if (fnName === 'set_reminder') {
                 const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
                 const reminderText = args.title || 'Reminder';
                 let triggerDate = new Date();
@@ -1076,6 +1118,15 @@ chatRouter.post(
       if (pushToken) {
         sendNovaReplyNotification(pushToken, reply).catch(() => {});
       }
+
+      // 10.5. Extract Life Events & Routines (NACE)
+      const combinedMessages = recentMessages.slice(-5).concat([
+        { role: 'user', content: effectiveMessage },
+        { role: 'assistant', content: reply }
+      ]);
+      lifeEventExtractor.extractAndStore(userId, combinedMessages, nowLocal, tzOffset).catch(err => {
+        logger.warn('Failed to extract life events', { error: err instanceof Error ? err.message : String(err) });
+      });
 
       // 11. Fire-and-forget: schedule Nova's next human-like follow-up
       // Uses LLM to decide when and what to send next based on conversation mood + time

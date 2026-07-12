@@ -34,6 +34,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@babel/core": "^7.20.0",
     "@react-navigation/bottom-tabs": "^7.18.3",
     "@types/d3-force": "^3.0.10",
     "@types/d3-scale": "^4.0.9",

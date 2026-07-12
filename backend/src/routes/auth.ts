@@ -222,3 +222,65 @@ authRouter.post('/push-token', authenticateUser, async (req: Request, res: Respo
   }
 });
 
+/**
+ * DELETE /auth/mark-dead
+ * Nuclear option: Permanently deletes the user's account and all associated data.
+ * Can be called by the user themselves from Settings, or by a founder admin.
+ */
+authRouter.delete('/mark-dead', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    logger.info('[Mark Dead] Initiating nuclear data wipe for user', { userId });
+
+    // 1. Explicitly delete user data from all operational tables
+    // (We do this explicitly in case ON DELETE CASCADE is missing on some tables)
+    const tables = [
+      'nova_outreach_log',
+      'nova_agenda',
+      'user_routines',
+      'reminders',
+      'chat_history',
+      'short_term_memories',
+      'memories',
+      'kg_edges',
+      'kg_nodes',
+      'user_moments',
+      'reflections',
+      'emotional_states',
+      'nova_followups',
+      'profiles'
+    ];
+
+    for (const table of tables) {
+      try {
+        await supabaseAdmin.from(table).delete().eq('user_id', userId);
+      } catch (e) {
+        logger.warn(`[Mark Dead] Failed to delete from ${table}`, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // 2. Delete the actual Auth user (this permanently revokes access and deletes the identity)
+    const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    
+    if (authError) {
+      logger.error('[Mark Dead] Failed to delete auth user', { error: authError.message, userId });
+      res.status(500).json({ error: 'Failed to completely delete account identity' });
+      return;
+    }
+
+    // 3. Clear cache
+    cache.invalidate(`profile:${userId}`);
+    cache.invalidate(`memories:${userId}`);
+
+    logger.info('[Mark Dead] User successfully eradicated', { userId });
+    res.status(200).json({ success: true, message: 'Account marked dead and all data wiped.' });
+  } catch (err) {
+    logger.error('[Mark Dead] Catastrophic failure during deletion', { error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});

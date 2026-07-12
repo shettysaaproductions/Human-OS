@@ -18,6 +18,7 @@ import { reminderSchedulerService } from './services/ReminderSchedulerService';
 import { shortTermMemoryCleanupService } from './services/ShortTermMemoryCleanupService';
 import { chatHistoryPruningService } from './services/ChatHistoryPruningService';
 import { novaFollowupService } from './services/NovaFollowupService';
+import { novaConsciousnessEngine } from './services/NovaConsciousnessEngine';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -57,6 +58,18 @@ async function main(): Promise<void> {
       }
     }, 10 * 1000); // 10 seconds
     if (remindersInterval.unref) remindersInterval.unref();
+
+    // NACE: Nova Autonomous Consciousness Engine (runs every 15 minutes)
+    const naceInterval = setInterval(async () => {
+      try {
+        logger.info('Scheduler: Triggering NACE pulse...');
+        await novaConsciousnessEngine.pulse();
+        await novaConsciousnessEngine.expireOldAgendaItems();
+      } catch (err) {
+        logger.error('Error in NACE pulse', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 15 * 60 * 1000); // 15 minutes
+    if (naceInterval.unref) naceInterval.unref();
 
     // Daily Reflection + Memory Pruning Scheduler (runs once per day)
     const dailyReflectionInterval = setInterval(async () => {
