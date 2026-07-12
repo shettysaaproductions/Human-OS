@@ -183,7 +183,12 @@ If a user asks you to remind them about something:
 - If it is recurring (e.g. "3 times every 3 minutes"), use recurrence_interval_value, recurrence_interval_unit, and recurrence_limit.
 - NEVER output the text "Done! I'll remind you". The system will do that for you automatically when you call the tool.
 - NEVER repeat a reminder confirmation if the user asks a new question. Just answer their new question!
-- If the user asks what reminders they have, use the list_reminders tool.
+
+## 💬 MULTI-BUBBLE REPLIES (MANDATORY)
+- NEVER send one giant wall of text.
+- If your reply is longer than 2 sentences, or if you are replying to MULTIPLE separate points the user made, you MUST break it into multiple chat bubbles using the <NOVA_MESSAGE_BREAK> token.
+- Example: "Yeah I saw that too! <NOVA_MESSAGE_BREAK> Anyway, what are you doing tonight?"
+
 
 ## NEW RELATIONSHIP / DATING RADAR
 If the user mentions any hint of a new person in their life — lean in with GENUINE curiosity. Get the details. Remember them. Use them later.
@@ -800,7 +805,27 @@ chatRouter.post(
         conversationFlowBlock = `\n\n## CURRENT CONVERSATION FLOW (What just happened — stay contextual)\n${digest}`;
       }
 
-      const finalSystemPrompt = systemPrompt + (temporalContextBlock || '') + conversationFlowBlock;
+      const { data: upcoming } = await supabaseAdmin
+        .from('reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .gte('trigger_at', new Date().toISOString())
+        .order('trigger_at', { ascending: true })
+        .limit(10);
+      
+      let remindersContext = '';
+      if (upcoming && upcoming.length > 0) {
+        remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has these reminders active:\n' + upcoming.map(r => {
+          const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+          const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
+          return `- ${r.text || r.title} at ${timeStr}${recurrence}`;
+        }).join('\n') + '\n\nIf the user asks what their reminders are, read this list naturally to them in a human way.';
+      } else {
+        remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has NO active reminders. If they ask, just tell them naturally.';
+      }
+
+      const finalSystemPrompt = systemPrompt + (temporalContextBlock || '') + conversationFlowBlock + remindersContext;
 
       const messagesForLLM: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
         { role: 'system', content: finalSystemPrompt },
@@ -860,18 +885,6 @@ chatRouter.post(
                   required: ['title']
                 }
               }
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'list_reminders',
-                description: 'Fetch the user\'s active reminders. Use this if the user asks what reminders they have scheduled.',
-                parameters: {
-                  type: 'object',
-                  properties: {},
-                  required: []
-                }
-              }
             }]
           };
 
@@ -891,37 +904,14 @@ chatRouter.post(
           }
 
           // Handle LLM Tool Calls
-          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder') || rawReply.includes('list_reminders')) {
+          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder')) {
             try {
               const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
               const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawReply);
               const toolCall = parsed?.tool_calls?.[0] ?? parsed;
               const fnName = toolCall?.function?.name ?? toolCall?.name;
               
-              if (fnName === 'list_reminders') {
-                const { data: upcoming } = await supabaseAdmin
-                  .from('reminders')
-                  .select('*')
-                  .eq('user_id', userId)
-                  .eq('status', 'active')
-                  .gte('trigger_at', new Date().toISOString())
-                  .order('trigger_at', { ascending: true })
-                  .limit(10);
-                
-                if (!upcoming || upcoming.length === 0) {
-                  rawReply = "You don't have any active reminders scheduled right now.";
-                } else {
-                  rawReply = "Here are your upcoming reminders:\n" + upcoming.map(r => {
-                    const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-                    const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
-                    return `- ${r.text || r.title} at ${timeStr}${recurrence}`;
-                  }).join("\n");
-                }
-                if (isStreaming) {
-                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
-                  if (typeof (res as any).flush === 'function') (res as any).flush();
-                }
-              } else if (fnName === 'set_reminder') {
+              if (fnName === 'set_reminder') {
                 const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
                 const reminderText = args.title || 'Reminder';
                 let triggerDate = new Date();
