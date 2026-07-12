@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "REPLACE_WITH_YOUR_PROJECT_NUMBER",
-    "project_id": "REPLACE_WITH_YOUR_PROJECT_ID",
-    "storage_bucket": "REPLACE_WITH_YOUR_PROJECT_ID.appspot.com"
+    "project_number": "371339644360",
+    "project_id": "human-os-2c9da",
+    "storage_bucket": "human-os-2c9da.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "REPLACE_WITH_YOUR_APP_ID",
+        "mobilesdk_app_id": "1:371339644360:android:f095b4d960047a941404fd",
         "android_client_info": {
-          "package_name": "com.humanos.mobile"
+          "package_name": "human_.os1"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "REPLACE_WITH_YOUR_API_KEY"
+          "current_key": "AIzaSyBxVda8r6UhEUUyCXn588cZ1YYkzy-16OE"
         }
       ],
       "services": {
