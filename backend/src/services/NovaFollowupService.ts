@@ -20,7 +20,6 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { chatCompletion } from '../lib/nvidia';
 import { sendPushNotification } from '../lib/pushNotifications';
-import crypto from 'crypto';
 
 interface FollowupDecision {
   shouldFollowUp: boolean;

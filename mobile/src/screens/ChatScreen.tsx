@@ -221,7 +221,7 @@ function CustomTable({ headers, rows, colors }: { headers: string[]; rows: strin
         keyboardShouldPersistTaps="handled"
         style={{ flexGrow: 0 }}
         contentContainerStyle={{ flexDirection: 'column' }}
-        clipToPadding={false}
+
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: false })}
         onContentSizeChange={(w) => setWidths(prev => ({ ...prev, content: w }))}
         onLayout={(e) => {

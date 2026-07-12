@@ -20,7 +20,7 @@ import { useAuthStore } from '../store/useAuthStore';
 const Stack = createNativeStackNavigator();
 
 interface AppNavigatorProps {
-  navigationRef?: React.RefObject<NavigationContainerRef<any>>;
+  navigationRef?: React.RefObject<NavigationContainerRef<any> | null>;
 }
 
 export function AppNavigator({ navigationRef }: AppNavigatorProps) {
