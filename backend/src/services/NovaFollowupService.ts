@@ -38,17 +38,13 @@ Context rules:
 - If user is at work/office → wait until evening (6+ hours)  
 - If conversation just ended naturally with no clear closure → follow up in 10-30 mins
 - If user seems happy and chatty → shorter gap (5-20 mins)
-- If it's late night (10pm-7am user time) → don't follow up until morning
+- If it's late night (10pm-7am user time) → do not follow up (return shouldFollowUp: false)
 - If user asked something and you answered → check back in 15-30 mins
 - Vary your timing — don't be predictable
 
-Respond ONLY with valid JSON, no markdown, no explanation:
-{
-  "shouldFollowUp": true,
-  "delayMinutes": 15,
-  "message": "Btw how did that go?",
-  "reason": "User mentioned something they were about to do, natural check-in"
-}`;
+You MUST respond with ONLY a raw JSON object. No markdown, no explanation, no backticks:
+{"shouldFollowUp":true,"delayMinutes":15,"message":"Btw how did that go?","reason":"User mentioned something they were about to do"}`;
+
 
 export class NovaFollowupService {
 
@@ -93,12 +89,13 @@ export class NovaFollowupService {
       ], {
         maxTokens: 200,
         temperature: 0.8,
-        response_format: { type: 'json_object' }
       });
 
       let decision: FollowupDecision;
       try {
-        decision = JSON.parse(decisionRaw) as FollowupDecision;
+        // Extract JSON even if LLM wraps it in markdown code fences
+        const jsonMatch = decisionRaw.match(/\{[\s\S]*?\}/);
+        decision = JSON.parse(jsonMatch ? jsonMatch[0] : decisionRaw) as FollowupDecision;
       } catch {
         logger.warn('[NovaFollowup] Failed to parse LLM decision JSON', { raw: decisionRaw });
         return;

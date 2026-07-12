@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { sendPushNotification } from '../lib/pushNotifications';
 import crypto from 'crypto';
 
 export class ReminderSchedulerService {
@@ -121,22 +122,40 @@ export class ReminderSchedulerService {
       );
       await supabaseAdmin
         .from('reminders')
-        .update({
-          trigger_at: nextTrigger.toISOString(),
-          updated_at: new Date().toISOString()
-        })
+        .update({ trigger_at: nextTrigger.toISOString(), updated_at: new Date().toISOString() })
         .eq('id', reminderId);
-
       logger.info('Recurring reminder rescheduled', { reminderId, nextTrigger });
     } else {
       await supabaseAdmin
         .from('reminders')
-        .update({
-          status: 'completed',
-          updated_at: new Date().toISOString()
-        })
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('id', reminderId);
       logger.info('One-off reminder fired and completed', { reminderId });
+    }
+
+    // 4. Send push notification to the user
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('push_token')
+        .eq('id', reminder.user_id)
+        .maybeSingle();
+      if (profile?.push_token) {
+        await sendPushNotification([{
+          to: profile.push_token,
+          title: '🔔 Nova Reminder',
+          body: reminder.text.length > 100 ? reminder.text.substring(0, 97) + '...' : reminder.text,
+          sound: 'default',
+          channelId: 'nova_reminders',
+          priority: 'high',
+          data: { type: 'nova_reminder', conversationId: conversationId },
+        }]);
+        logger.info('Reminder push notification sent', { reminderId });
+      }
+    } catch (pushErr) {
+      logger.warn('Failed to send reminder push notification', {
+        error: pushErr instanceof Error ? pushErr.message : String(pushErr)
+      });
     }
   }
 
