@@ -169,6 +169,8 @@ function chunkText(text: string): string[] {
   return chunks.length ? chunks : [text];
 }
 
+let _queueTimeout: NodeJS.Timeout | null = null;
+
 export const useChatStore = create<ChatState>((set, get) => {
   const processQueue = async () => {
     if (_isProcessing) return;
@@ -180,46 +182,44 @@ export const useChatStore = create<ChatState>((set, get) => {
         const queue = get().pendingQueue;
         if (queue.length === 0) break;
 
-        const [item, ...rest] = queue;
-        // ── ATOMIC DEQUEUE: update state + persist BEFORE API call ────────────
-        // This means even if the app is force-closed after a successful send,
-        // the queue no longer contains this item on the next cold start.
-        set({ pendingQueue: rest });
-        await savePendingQueue(rest);
+        // --- BATCHING LOGIC ---
+        // Pop all items currently in the queue
+        const batch = [...queue];
+        set({ pendingQueue: [] });
+        await savePendingQueue([]);
+
+        const primaryId = batch[0].id;
 
         // Skip if already delivered (dedup against force-close re-open scenario)
         const deliveredIds = await loadDeliveredIds();
-        if (deliveredIds.has(item.id)) {
-          console.log('[QUEUE] skipped — already delivered:', item.id);
-          // Clean up the sending bubble if it's still showing
+        if (deliveredIds.has(primaryId)) {
+          console.log('[QUEUE] skipped — already delivered:', primaryId);
+          // Clean up the sending bubbles if they're still showing
           set((s) => ({
-            messages: s.messages.filter(m => m.id !== item.id),
+            messages: s.messages.filter(m => !batch.some(b => b.id === m.id)),
           }));
           continue;
         }
 
         // Skip if already being sent (deduplication against parallel processQueue calls)
-        if (_inFlightIds.has(item.id)) {
-          console.log('[QUEUE] skipped — already in-flight:', item.id);
+        if (_inFlightIds.has(primaryId)) {
+          console.log('[QUEUE] skipped — already in-flight:', primaryId);
           continue;
         }
 
-        // Skip if message no longer in 'sending' state (e.g. user cleared chat)
-        const stillExists = get().messages.some(
-          m => m.id === item.id && m.status === 'sending'
-        );
-        if (!stillExists) continue;
-
-        _inFlightIds.add(item.id);
+        _inFlightIds.add(primaryId);
         set({ isTyping: true });
 
         let retryDelay = 3000;
         let succeeded = false;
 
+        // Combine all message contents into one string for the backend
+        const combinedContent = batch.map(b => b.content).join('\n');
+
         while (!succeeded) {
           try {
             const data = await chatService.sendMessage(
-              item.content,
+              combinedContent,
               get().conversationId || undefined
             );
 
@@ -242,19 +242,19 @@ export const useChatStore = create<ChatState>((set, get) => {
               isTyping: false,
               messages: [
                 ...s.messages.map(m =>
-                  m.id === item.id ? { ...m, status: 'sent' as const, id: data.user_message_id || m.id } : m
+                  batch.some(b => b.id === m.id) 
+                    ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data.user_message_id || m.id) : m.id } 
+                    : m
                 ),
                 ...novaMessages,
               ],
             }));
 
             // ── Mark as delivered IMMEDIATELY after success ─────────────────
-            // This is the key fix: even if the app crashes here, this ID is
-            // already in the delivered set so it won't re-send on next launch.
-            await markDelivered(item.id);
+            await markDelivered(primaryId);
 
             succeeded = true;
-            console.log('[QUEUE] success:', item.id);
+            console.log('[QUEUE] success for batch starting with:', primaryId);
           } catch (err: any) {
             const isServerError = err?.response?.status >= 400 && err?.response?.status < 500;
             if (isServerError) {
@@ -270,7 +270,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
         }
 
-        _inFlightIds.delete(item.id);
+        _inFlightIds.delete(primaryId);
       }
     } finally {
       _isProcessing = false;
@@ -499,7 +499,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       }));
 
       await savePendingQueue(newQueue);
-      get().processQueue();
+      
+      if (_queueTimeout) clearTimeout(_queueTimeout);
+      _queueTimeout = setTimeout(() => {
+        get().processQueue();
+      }, 1500); // 1.5s debounce to batch rapid messages
     },
 
     retryMessage: async (messageId: string) => {
