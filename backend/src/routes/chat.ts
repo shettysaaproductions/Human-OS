@@ -178,11 +178,11 @@ But ask ONLY ONE thing at a time. Weave it in naturally. Not like an interview.
 
 ## ⏰ REMINDERS — HOW TO SET THEM
 If a user asks you to remind them about something at a specific time:
-- Use the set_reminder tool with: title (what to remind about) and scheduled_at (ISO 8601 timestamp)
-- Calculate the correct time based on their timezone (India = IST = UTC+5:30 by default)
-- Confirm naturally: "Done, I'll ping you at [time]! 🔔"
-- You can set multiple reminders in the same conversation — each is tracked separately
-- If the user says "remind me in 2 hours" → calculate current time + 2 hours in their timezone
+- Use the set_reminder tool with: title (what to remind about) and relative_minutes (minutes from now) OR time_of_day (HH:MM).
+- Examples: "in 2 mins" -> relative_minutes: 2. "at 5pm" -> time_of_day: "17:00".
+- NEVER output the text "Done! I'll remind you". The system will do that for you automatically when you call the tool.
+- NEVER repeat a reminder confirmation if the user asks a new question. Just answer their new question!
+- You can set multiple reminders in the same conversation — each is tracked separately.
 
 ## NEW RELATIONSHIP / DATING RADAR
 If the user mentions any hint of a new person in their life — lean in with GENUINE curiosity. Get the details. Remember them. Use them later.
@@ -849,9 +849,10 @@ chatRouter.post(
                   type: 'object',
                   properties: {
                     title: { type: 'string', description: 'What to remind the user about (e.g. Drink water, Call mom)' },
-                    scheduled_at: { type: 'string', description: 'ISO 8601 timestamp for when the reminder should trigger. Calculate this based on the user timezone and current time.' }
+                    relative_minutes: { type: 'integer', description: 'If the reminder is relative (e.g. "in 5 minutes"), output the total minutes from now. E.g. for 2 hours, output 120.' },
+                    time_of_day: { type: 'string', description: 'If the reminder is at a specific time (e.g. "at 5pm"), output the 24-hour time HH:MM (e.g. "17:00").' }
                   },
-                  required: ['title', 'scheduled_at']
+                  required: ['title']
                 }
               }
             }]
@@ -881,13 +882,27 @@ chatRouter.post(
               const toolCall = parsed?.tool_calls?.[0] ?? parsed;
               const fnName = toolCall?.function?.name ?? toolCall?.name;
               if (fnName === 'set_reminder') {
-                const argsRaw = toolCall?.function?.arguments ?? toolCall?.arguments ?? '{}';
-                const args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw;
-                const reminderText = args.title || args.text || args.reminder || 'Reminder';
-                const scheduledAt = args.scheduled_at || args.trigger_at || args.time;
-                if (!scheduledAt) throw new Error('No scheduled_at in tool args');
-                const triggerDate = new Date(scheduledAt);
-                if (isNaN(triggerDate.getTime())) throw new Error('Invalid date: ' + scheduledAt);
+                const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
+                const reminderText = args.title || 'Reminder';
+                let triggerDate = new Date();
+                
+                if (args.relative_minutes) {
+                  triggerDate = new Date(Date.now() + args.relative_minutes * 60000);
+                } else if (args.time_of_day) {
+                  const [hh, mm] = args.time_of_day.split(':').map(Number);
+                  const tzOffset = 5.5; // IST
+                  const nowLocal = new Date(Date.now() + tzOffset * 3600000);
+                  nowLocal.setUTCHours(hh, mm, 0, 0);
+                  // If the time has already passed today, set for tomorrow
+                  if (nowLocal.getTime() < Date.now() + tzOffset * 3600000) {
+                    nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
+                  }
+                  triggerDate = new Date(nowLocal.getTime() - tzOffset * 3600000);
+                } else {
+                  throw new Error('No time provided');
+                }
+                
+                if (isNaN(triggerDate.getTime())) throw new Error('Invalid calculated date');
 
                 // Schedule using the correct schema (text + trigger_at)
                 await reminderSchedulerService.scheduleReminder(userId, reminderText, triggerDate);
