@@ -968,7 +968,7 @@ chatRouter.post(
                   const [hh, mm] = args.time_of_day.split(':').map(Number);
                   const tzOffset = 5.5; // IST
                   const nowLocal = new Date(Date.now() + tzOffset * 3600000);
-                  nowLocal.setUTCHours(hh, mm, 0, 0);
+                  nowLocal.setUTCHours(hh, mm || 0, 0, 0);
                   if (nowLocal.getTime() < Date.now() + tzOffset * 3600000) {
                     nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
                   }
@@ -1000,12 +1000,20 @@ chatRouter.post(
                   if (typeof (res as any).flush === 'function') (res as any).flush();
                 }
                 logger.info('[Reminder] Scheduled successfully', { userId, reminderText, triggerDate });
+              } else if (fnName === 'none' || !fnName) {
+                rawReply = "Mujhe pakka nahi pata isme kya karna hai, thoda aur detail dega?";
+                if (isStreaming) {
+                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                  if (typeof (res as any).flush === 'function') (res as any).flush();
+                }
               }
             } catch (err) {
-              logger.error('[Tool Call] Failed', { err: err instanceof Error ? err.message : String(err), rawReply: rawReply.substring(0, 200) });
-              rawReply = "Hmm, I had trouble processing that request.";
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              logger.error('[Tool Call] Failed', { err: errorMsg, rawReply: rawReply.substring(0, 200) });
+              rawReply = "Sorry bhai, yeh request process karne mein issue ho gaya: " + errorMsg;
               if (isStreaming) {
                 res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                if (typeof (res as any).flush === 'function') (res as any).flush();
               }
             }
           }
