@@ -180,7 +180,7 @@ But ask ONLY ONE thing at a time. Weave it in naturally. Not like an interview.
 ## ⏰ REMINDERS — HOW TO SET & DELETE THEM
 If a user asks you to remind them about something:
 - Use the set_reminder tool with: title (what to remind about), relative_value & relative_unit (e.g. 2, "minutes" / 1, "days" / 2, "months").
-- If it is a specific time of day: use time_of_day (HH:MM).
+- If it is a specific time of day: use time_of_day (HH:MM in 24-hour format, e.g. 17:00 for 5 PM).
 - If it is recurring (e.g. "3 times every 3 minutes"), use recurrence_interval_value, recurrence_interval_unit, and recurrence_limit.
 - NEVER output the text "Done! I'll remind you". The system will do that for you automatically when you call the tool.
 - NEVER repeat a reminder confirmation if the user asks a new question. Just answer their new question!
@@ -959,11 +959,13 @@ chatRouter.post(
                 let triggerDate = new Date();
                 
                 if (args.relative_value && args.relative_unit) {
-                  if (args.relative_unit === 'minutes') triggerDate.setMinutes(triggerDate.getMinutes() + args.relative_value);
-                  else if (args.relative_unit === 'hours') triggerDate.setHours(triggerDate.getHours() + args.relative_value);
-                  else if (args.relative_unit === 'days') triggerDate.setDate(triggerDate.getDate() + args.relative_value);
-                  else if (args.relative_unit === 'weeks') triggerDate.setDate(triggerDate.getDate() + (args.relative_value * 7));
-                  else if (args.relative_unit === 'months') triggerDate.setMonth(triggerDate.getMonth() + args.relative_value);
+                  let unit = args.relative_unit.toLowerCase();
+                  if (unit.endsWith('s')) unit = unit.slice(0, -1);
+                  if (unit === 'min' || unit === 'minute') triggerDate.setMinutes(triggerDate.getMinutes() + args.relative_value);
+                  else if (unit === 'hour' || unit === 'hr') triggerDate.setHours(triggerDate.getHours() + args.relative_value);
+                  else if (unit === 'day') triggerDate.setDate(triggerDate.getDate() + args.relative_value);
+                  else if (unit === 'week') triggerDate.setDate(triggerDate.getDate() + (args.relative_value * 7));
+                  else if (unit === 'month') triggerDate.setMonth(triggerDate.getMonth() + args.relative_value);
                 } else if (args.time_of_day) {
                   const [hh, mm] = args.time_of_day.split(':').map(Number);
                   const tzOffset = 5.5; // IST
