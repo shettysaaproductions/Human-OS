@@ -128,11 +128,12 @@ export class ReminderEngine {
 
     // ── 4. Batch expansion ──────────────────────────────────────────────────
     if (spec.batch_count && spec.batch_count > 1 && spec.batch_interval_minutes) {
+      const batchTitle = spec.title || 'Reminder';
       const results: ParsedReminder[] = [];
       for (let i = 0; i < spec.batch_count; i++) {
         const batchTriggerLocal = new Date(baseTriggerLocal.getTime() + i * spec.batch_interval_minutes * 60000);
         results.push({
-          text: spec.title,
+          text: batchTitle,
           trigger_at: this.localToUtc(batchTriggerLocal),
           is_auto: spec.is_auto || false,
           notes: spec.notes,
@@ -146,7 +147,7 @@ export class ReminderEngine {
 
     // ── 5. Single reminder ──────────────────────────────────────────────────
     const parsed: ParsedReminder = {
-      text: spec.title,
+      text: spec.title || 'Reminder',
       trigger_at: this.localToUtc(baseTriggerLocal),
       is_auto: spec.is_auto || false,
       notes: spec.notes,
@@ -185,9 +186,11 @@ export class ReminderEngine {
    * Insert one or more parsed reminders into the database.
    */
   async scheduleAll(userId: string, parsedReminders: ParsedReminder[]): Promise<any[]> {
-    const rows = parsedReminders.map(r => ({
+    const rows = parsedReminders
+      .filter(r => r.text)   // safety net: never insert null text
+      .map(r => ({
       user_id: userId,
-      text: r.text,
+      text: r.text || 'Reminder',
       trigger_at: r.trigger_at.toISOString(),
       recurrence_type: r.recurrence_type || null,
       recurrence_interval: r.recurrence_interval || null,
