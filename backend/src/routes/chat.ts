@@ -1023,8 +1023,9 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
 
                   // Fallback title: extract the "about X" part from user message
                   const messageTitleFallback = effectiveMessage
-                    .replace(/remind(ers?)?|can you|please|about|me|to|in|at|next|every|daily|weekly|monthly/gi, '')
-                    .replace(/\d+\s*(min(ute)?s?|hour?s?|day?s?|week?s?|month?s?)/gi, '')
+                    .replace(/\b(remind(ers?)?|can you|please|about|me|to|in|at|next|every|daily|weekly|monthly)\b/gi, '')
+                    .replace(/\b\d+\s*(min(ute)?s?|hour?s?|day?s?|week?s?|month?s?)\b/gi, '')
+                    .replace(/\s+/g, ' ')
                     .trim()
                     .slice(0, 60) || 'Reminder';
 
