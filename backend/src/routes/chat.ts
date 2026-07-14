@@ -16,7 +16,6 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
-import { reminderSchedulerService } from '../services/ReminderSchedulerService';
 import { novaFollowupService } from '../services/NovaFollowupService';
 import { lifeEventExtractor } from '../services/LifeEventExtractor';
 import crypto from 'crypto';
@@ -823,13 +822,39 @@ chatRouter.post(
         remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has these reminders active:\n' + upcoming.map(r => {
           const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
           const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
-          return `- [ID: "${r.id}"] ${r.text || r.title} at ${timeStr}${recurrence}`;
-        }).join('\n') + '\n\nIf the user asks what their reminders are, read this list naturally to them in a human way. To delete any of these, use the delete_reminders tool with their exact ID.';
+          const dayFilter = r.active_days?.length ? ` [only on: ${r.active_days.join(', ')}]` : '';
+          const monthFilter = r.active_months?.length ? ` [only in: ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''}]` : '';
+          const autoTag = r.is_auto ? ' [auto-detected]' : '';
+          return `- [ID: "${r.id}"] ${r.text || r.title} at ${timeStr}${recurrence}${dayFilter}${monthFilter}${autoTag}`;
+        }).join('\n') + '\n\nIf the user asks what their reminders are, read this list naturally. To delete any, use delete_reminders with the exact ID.';
       } else {
-        remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has NO active reminders. If they ask, just tell them naturally.';
+        remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has NO active reminders.';
       }
 
-      const finalSystemPrompt = systemPrompt + (temporalContextBlock || '') + conversationFlowBlock + remindersContext;
+      const reminderInstructions = `\n\n## REMINDER INTELLIGENCE RULES
+You are Nova — an intelligent life assistant who manages reminders like a smart friend.
+
+**When to set reminders:**
+1. User explicitly asks → use set_reminder tool immediately
+2. User mentions an important upcoming event (interview, exam, flight, appointment, deadline) → auto-set a reminder 30-60 mins before with is_auto=true, then tell them naturally
+3. Do NOT set reminders for casual mentions ("I'll have tea later")
+
+**How to handle complex requests (ALL in one tool call):**
+- "Every day at 7am tea, 5pm water 3 times" → send TWO reminders in the reminders array
+- "Only Sat/Sun in July" → use active_days: ["saturday","sunday"], active_months: ["july"]
+- "3 times from 2pm every 15 mins" → use batch_count: 3, batch_interval_minutes: 15, time_of_day: "14:00"
+- "Remind me every day at 10am" → recurrence_interval_value: 1, recurrence_interval_unit: "days", time_of_day: "10:00"
+- "December 2027" → active_months: ["december"], active_year: 2027
+
+**When to clarify (use needs_clarification):**
+- "Remind me at 2pm" — ask: "Is that today at 2pm or a specific date?"
+- "Remind me tomorrow" with no time — ask: "What time tomorrow?"
+- Any ambiguous date/time where guessing would be wrong
+
+**Tone:** Sound like a smart friend, not a robot. "Done! I've set a reminder..." or "Got it! 3 reminders set..."`;
+
+      const finalSystemPrompt = systemPrompt + (temporalContextBlock || '') + conversationFlowBlock + remindersContext + reminderInstructions;
+
 
       const messagesForLLM: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
         { role: 'system', content: finalSystemPrompt },
@@ -874,19 +899,41 @@ chatRouter.post(
               type: 'function',
               function: {
                 name: 'set_reminder',
-                description: 'Set a reminder for the user. Only use this if the user explicitly asks to be reminded about something.',
+                description: `Set one or more reminders. Use when user explicitly asks to be reminded, or when you detect an important event (interview, exam, flight). If time is ambiguous (e.g. 'at 2pm' with no date), use needs_clarification instead of guessing. For batch reminders use batch_count + batch_interval_minutes.`,
                 parameters: {
                   type: 'object',
                   properties: {
-                    title: { type: 'string', description: 'What to remind the user about (e.g. Drink water, Call mom)' },
-                    relative_value: { type: 'integer', description: 'Value for relative time (e.g. 2 for "in 2 months")' },
-                    relative_unit: { type: 'string', description: 'Unit for relative time: "minutes", "hours", "days", "weeks", "months"' },
-                    time_of_day: { type: 'string', description: 'If at a specific time (e.g. "at 5pm"), output 24-hour time HH:MM (e.g. "17:00").' },
-                    recurrence_interval_value: { type: 'integer', description: 'If recurring, the interval value (e.g. 3 for "every 3 minutes")' },
-                    recurrence_interval_unit: { type: 'string', description: 'Unit for recurrence: "minutes", "hours", "days", "weeks", "months"' },
-                    recurrence_limit: { type: 'integer', description: 'Max number of times to repeat (e.g. 3 for "3 times")' }
-                  },
-                  required: ['title']
+                    reminders: {
+                      type: 'array',
+                      description: 'One or more reminders to schedule.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          title: { type: 'string', description: 'What to remind about (e.g. Drink water, Call mom, Interview prep)' },
+                          time_of_day: { type: 'string', description: '24-hour HH:MM (e.g. 07:00 for 7am, 17:00 for 5pm)' },
+                          date: { type: 'string', description: 'Specific date YYYY-MM-DD if user gave a date' },
+                          relative_value: { type: 'integer', description: 'Number for relative time (e.g. 2 for in 2 minutes)' },
+                          relative_unit: { type: 'string', description: 'Unit: minutes, hours, days, weeks, months' },
+                          active_days: { type: 'array', items: { type: 'string' }, description: 'Day filter e.g. [saturday,sunday] for weekends. null = every day.' },
+                          active_months: { type: 'array', items: { type: 'string' }, description: 'Month filter e.g. [july] or [december]. null = every month.' },
+                          active_year: { type: 'integer', description: 'Year filter e.g. 2027. null = every year.' },
+                          recurrence_interval_value: { type: 'integer', description: 'Repeat interval value (e.g. 1 for every day, 7 for every 7 days)' },
+                          recurrence_interval_unit: { type: 'string', description: 'Repeat unit: minutes, hours, days, weeks, months' },
+                          recurrence_limit: { type: 'integer', description: 'Max number of repeats (e.g. 3 for 3 times total)' },
+                          end_at: { type: 'string', description: 'Stop repeating at this date/time (YYYY-MM-DD HH:MM or ISO)' },
+                          batch_count: { type: 'integer', description: 'For X times every Y mins from Z: set to X' },
+                          batch_interval_minutes: { type: 'integer', description: 'Minutes between each batch reminder' },
+                          is_auto: { type: 'boolean', description: 'true if you detected this event and set it without user explicitly asking' },
+                          notes: { type: 'string', description: 'Internal context note' }
+                        },
+                        required: ['title']
+                      }
+                    },
+                    needs_clarification: {
+                      type: 'string',
+                      description: 'If ambiguous (no date, unclear time), set this to the one question you need to ask. Do NOT also set reminders array.'
+                    }
+                  }
                 }
               }
             },
@@ -955,55 +1002,76 @@ chatRouter.post(
                 }
               } else if (fnName === 'set_reminder') {
                 const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
-                const reminderText = args.title || 'Reminder';
-                let triggerDate = new Date();
-                
-                if (args.relative_value && args.relative_unit) {
-                  let unit = args.relative_unit.toLowerCase();
-                  if (unit.endsWith('s')) unit = unit.slice(0, -1);
-                  if (unit === 'min' || unit === 'minute') triggerDate.setMinutes(triggerDate.getMinutes() + args.relative_value);
-                  else if (unit === 'hour' || unit === 'hr') triggerDate.setHours(triggerDate.getHours() + args.relative_value);
-                  else if (unit === 'day') triggerDate.setDate(triggerDate.getDate() + args.relative_value);
-                  else if (unit === 'week') triggerDate.setDate(triggerDate.getDate() + (args.relative_value * 7));
-                  else if (unit === 'month') triggerDate.setMonth(triggerDate.getMonth() + args.relative_value);
-                } else if (args.time_of_day) {
-                  const [hh, mm] = args.time_of_day.split(':').map(Number);
-                  const tzOffset = 5.5; // IST
-                  const nowLocal = new Date(Date.now() + tzOffset * 3600000);
-                  nowLocal.setUTCHours(hh, mm || 0, 0, 0);
-                  if (nowLocal.getTime() < Date.now() + tzOffset * 3600000) {
-                    nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
+
+                // ── Clarification branch: LLM needs more info ────────────
+                if (args.needs_clarification) {
+                  rawReply = args.needs_clarification;
+                  if (isStreaming) {
+                    res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                    if (typeof (res as any).flush === 'function') (res as any).flush();
                   }
-                  triggerDate = new Date(nowLocal.getTime() - tzOffset * 3600000);
                 } else {
-                  // Default
-                  triggerDate.setMinutes(triggerDate.getMinutes() + 5);
-                }
-                
-                if (isNaN(triggerDate.getTime())) throw new Error('Invalid calculated date');
+                  // ── Batch / multi-reminder branch ────────────────────
+                  const reminderSpecs = args.reminders || (args.title ? [args] : []);
+                  if (!reminderSpecs || reminderSpecs.length === 0) throw new Error('No reminders specified');
 
-                await reminderSchedulerService.scheduleReminder(
-                  userId, 
-                  reminderText, 
-                  triggerDate,
-                  args.recurrence_interval_unit,
-                  args.recurrence_interval_value,
-                  args.recurrence_limit
-                );
+                  // Build timezone-aware engine for this user
+                  const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
+                  const { ReminderEngine: EngineClass } = await import('../services/ReminderEngine');
+                  const engine = new EngineClass(userTzOffset);
 
-                const localTime = triggerDate.toLocaleTimeString('en-IN', {
-                  hour: '2-digit', minute: '2-digit', hour12: true,
-                  timeZone: 'Asia/Kolkata'
-                });
-                const recurringText = args.recurrence_interval_value ? ` (recurring every ${args.recurrence_interval_value} ${args.recurrence_interval_unit})` : '';
-                rawReply = `Done! I'll remind you about "${reminderText}" starting at ${localTime}${recurringText}. 🔔`;
-                if (isStreaming) {
-                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
-                  if (typeof (res as any).flush === 'function') (res as any).flush();
+                  const allScheduled: any[] = [];
+                  for (const spec of reminderSpecs) {
+                    const parsed = engine.parse(spec);
+                    const inserted = await engine.scheduleAll(userId, parsed);
+                    allScheduled.push(...inserted);
+                  }
+
+                  logger.info('[Reminder] Scheduled', { userId, count: allScheduled.length });
+
+                  // Build confirmation message
+                  if (allScheduled.length === 1) {
+                    const r = allScheduled[0];
+                    const localTime = new Date(r.trigger_at).toLocaleTimeString('en-IN', {
+                      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+                    });
+                    const localDate = new Date(r.trigger_at).toLocaleDateString('en-IN', {
+                      day: 'numeric', month: 'short', weekday: 'short', timeZone: 'Asia/Kolkata'
+                    });
+                    let msg = `Done! I'll remind you about "${r.text}" at ${localTime} on ${localDate}`;
+                    if (r.recurrence_type && r.recurrence_interval) {
+                      msg += ` — repeating every ${r.recurrence_interval} ${r.recurrence_type}`;
+                    }
+                    if (r.active_days && r.active_days.length > 0) {
+                      msg += ` (only on ${r.active_days.join(', ')})`;
+                    }
+                    if (r.active_months && r.active_months.length > 0) {
+                      msg += ` (only in ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''})`;
+                    }
+                    if (r.is_auto) {
+                      msg = `Oh btw — I noticed you mentioned this! ${msg.replace('Done! ', '')} Want me to adjust it?`;
+                    } else {
+                      msg += '. 🔔';
+                    }
+                    rawReply = msg;
+                  } else {
+                    // Multiple reminders — list them
+                    const timeList = allScheduled.map(r =>
+                      new Date(r.trigger_at).toLocaleTimeString('en-IN', {
+                        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+                      })
+                    ).join(', ');
+                    const title = allScheduled[0].text;
+                    rawReply = `Done! Set ${allScheduled.length} reminders for "${title}": ${timeList}. 🔔`;
+                  }
+
+                  if (isStreaming) {
+                    res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                    if (typeof (res as any).flush === 'function') (res as any).flush();
+                  }
                 }
-                logger.info('[Reminder] Scheduled successfully', { userId, reminderText, triggerDate });
               } else if (fnName === 'none' || !fnName) {
-                rawReply = "Mujhe pakka nahi pata isme kya karna hai, thoda aur detail dega?";
+                rawReply = "Hmm, kuch samajh nahi aaya. Thoda aur detail dega?";
                 if (isStreaming) {
                   res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
                   if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -1015,13 +1083,14 @@ chatRouter.post(
               else if (typeof err === 'object' && err !== null) errorMsg = (err as any).message || JSON.stringify(err);
               else errorMsg = String(err);
               logger.error('[Tool Call] Failed', { err: errorMsg, rawReply: rawReply.substring(0, 200) });
-              rawReply = "Sorry bhai, yeh request process karne mein issue ho gaya: " + errorMsg;
+              rawReply = "Sorry, something went wrong setting that reminder: " + errorMsg;
               if (isStreaming) {
                 res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
                 if (typeof (res as any).flush === 'function') (res as any).flush();
               }
             }
           }
+
 
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
           if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
@@ -1156,6 +1225,93 @@ chatRouter.post(
           nowLocal.getUTCHours(),
           userCountry
         ).catch(() => {});
+      }
+
+      // 12. Fire-and-forget: Smart auto-event detection
+      // Scans user's message for important upcoming events and auto-sets reminders
+      // ONLY if the message wasn't already a reminder request (avoid double-setting)
+      const wasReminderRequest = rawReply.includes('remind') || rawReply.includes('Reminder') || rawReply.includes('🔔');
+      if (!wasReminderRequest && !isProactiveTrigger && effectiveMessage.length > 20) {
+        (async () => {
+          try {
+            const { chatCompletion: llmCall } = await import('../lib/nvidia');
+            const eventCheckPrompt = `You are a reminder detection system. Given a user message, determine if they mentioned a specific important upcoming event (interview, exam, flight, appointment, deadline, presentation, doctor visit, meeting) with a time or date.
+
+User message: "${effectiveMessage.substring(0, 300)}"
+
+If yes, respond with JSON ONLY (no markdown):
+{"detected": true, "event": "what the event is", "when_iso": "YYYY-MM-DDTHH:MM (approximate, in IST)", "reminder_title": "short reminder text"}
+
+If no important timed event detected, respond with:
+{"detected": false}
+
+Current IST date/time: ${dateStr} ${timeStr}`;
+
+            const detectionRaw = await llmCall(
+              [{ role: 'user', content: eventCheckPrompt }],
+              { maxTokens: 120, temperature: 0.1 }
+            );
+
+            const jsonMatch = detectionRaw.match(/\{[\s\S]*?\}/);
+            if (!jsonMatch) return;
+            const detection = JSON.parse(jsonMatch[0]);
+
+            if (!detection.detected || !detection.when_iso) return;
+
+            // Parse the event time
+            const eventTime = new Date(detection.when_iso.replace(' ', 'T') + (detection.when_iso.includes('+') ? '' : '+05:30'));
+            if (isNaN(eventTime.getTime())) return;
+
+            // Set reminder 30 mins before the event
+            const reminderTime = new Date(eventTime.getTime() - 30 * 60 * 1000);
+            if (reminderTime.getTime() <= Date.now()) return; // already passed
+
+            const { ReminderEngine: AutoEngine } = await import('../services/ReminderEngine');
+            const autoEngine = new AutoEngine(tzOffset);
+            const inserted = await autoEngine.scheduleAll(userId, [{
+              text: detection.reminder_title || detection.event,
+              trigger_at: reminderTime,
+              is_auto: true,
+              notes: `Auto-detected from: "${effectiveMessage.substring(0, 100)}"`,
+            }]);
+
+            if (inserted && inserted.length > 0) {
+              const localEventTime = eventTime.toLocaleTimeString('en-IN', {
+                hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+              });
+              const autoMsg = `Oh btw — you mentioned "${detection.event}"! I've set a reminder 30 mins before at ${localEventTime} 🔔 Let me know if you want a different time!`;
+
+              // Insert auto-message into chat history as Nova's next message
+              await supabaseAdmin.from('chat_history').insert({
+                user_id: userId,
+                conversation_id: activeConversationId,
+                role: 'assistant',
+                content: autoMsg,
+              });
+
+              // Send push notification
+              if (pushToken) {
+                const { sendPushNotification } = await import('../lib/pushNotifications');
+                await sendPushNotification([{
+                  to: pushToken,
+                  title: 'Nova',
+                  body: autoMsg.substring(0, 100) + '...',
+                  sound: 'default',
+                  channelId: 'nova_messages',
+                  priority: 'high',
+                  data: { type: 'nova_auto_reminder', conversationId: activeConversationId },
+                }]);
+              }
+
+              logger.info('[AutoReminder] Auto-set from conversation', { userId, event: detection.event, reminderTime });
+            }
+          } catch (autoErr) {
+            // Fully fire-and-forget — never crash the chat flow
+            logger.warn('[AutoReminder] Detection failed (non-critical)', {
+              error: autoErr instanceof Error ? autoErr.message : String(autoErr)
+            });
+          }
+        })();
       }
 
       if (!isStreaming) {

@@ -118,14 +118,29 @@ export class ReminderSchedulerService {
     let completed = false;
     if (reminder.recurrence_type && reminder.recurrence_interval) {
       const currentCount = (reminder.recurrence_count || 0) + 1;
-      if (reminder.recurrence_limit && currentCount >= reminder.recurrence_limit) {
+
+      // Check hard limit
+      const hitLimit = reminder.recurrence_limit && currentCount >= reminder.recurrence_limit;
+
+      // Calculate next trigger respecting day/month filters
+      const rawNextTrigger = this.calculateNextTrigger(
+        triggerTime,
+        reminder.recurrence_type,
+        reminder.recurrence_interval
+      );
+      const nextTrigger = this.applyDayMonthFilters(
+        rawNextTrigger,
+        reminder.active_days || null,
+        reminder.active_months || null,
+        reminder.active_year || null
+      );
+
+      // Check end_at
+      const hitEndAt = reminder.end_at && nextTrigger >= new Date(reminder.end_at);
+
+      if (hitLimit || hitEndAt) {
         completed = true;
       } else {
-        const nextTrigger = this.calculateNextTrigger(
-          triggerTime,
-          reminder.recurrence_type,
-          reminder.recurrence_interval
-        );
         await supabaseAdmin
           .from('reminders')
           .update({ 
@@ -187,10 +202,54 @@ export class ReminderSchedulerService {
     } else if (recurrenceType === 'months') {
       next.setMonth(next.getMonth() + recurrenceInterval);
     } else {
-      // Default fallback
       next.setDate(next.getDate() + 1);
     }
     return next;
+  }
+
+  /**
+   * Given a candidate next trigger date, advance it forward until
+   * it falls on a valid day (active_days) and valid month (active_months/year).
+   */
+  private applyDayMonthFilters(
+    date: Date,
+    activeDays: string[] | null,
+    activeMonths: string[] | null,
+    activeYear: number | null
+  ): Date {
+    const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const MONTH_NAMES = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+    let d = new Date(date);
+    let safetyDay = 0;
+    // Advance to a valid day
+    if (activeDays && activeDays.length > 0) {
+      while (safetyDay < 14) {
+        const dayName = DAY_NAMES[d.getUTCDay()];
+        if (activeDays.includes(dayName)) break;
+        d.setUTCDate(d.getUTCDate() + 1);
+        safetyDay++;
+      }
+    }
+
+    // Advance to a valid month
+    if (activeMonths && activeMonths.length > 0) {
+      let safetyMonth = 0;
+      while (safetyMonth < 24) {
+        const monthName = MONTH_NAMES[d.getUTCMonth()];
+        const yearOk = !activeYear || d.getUTCFullYear() === activeYear;
+        if (activeMonths.includes(monthName) && yearOk) break;
+        // Jump to 1st of next month, preserve time
+        const hours = d.getUTCHours();
+        const mins = d.getUTCMinutes();
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        d.setUTCDate(1);
+        d.setUTCHours(hours, mins, 0, 0);
+        safetyMonth++;
+      }
+    }
+
+    return d;
   }
 }
 
