@@ -259,12 +259,13 @@ export class ReminderEngine {
 
   private normalizeUnit(unit: string): string {
     const u = unit.toLowerCase().trim();
-    if (u === 'min' || u === 'mins' || u === 'minute' || u === 'minutes') return 'minutes';
-    if (u === 'hr' || u === 'hrs' || u === 'hour' || u === 'hours') return 'hours';
-    if (u === 'day' || u === 'days') return 'days';
-    if (u === 'week' || u === 'weeks') return 'weeks';
-    if (u === 'month' || u === 'months') return 'months';
-    return u;
+    if (u.startsWith('mo')) return 'months';
+    if (u.startsWith('m')) return 'minutes';
+    if (u.startsWith('h')) return 'hours';
+    if (u.startsWith('d')) return 'days';
+    if (u.startsWith('w')) return 'weeks';
+    if (u.startsWith('y')) return 'years';
+    return 'minutes'; // ultimate fallback if completely garbage
   }
 
   private addDuration(date: Date, value: number, unit: string): Date {
