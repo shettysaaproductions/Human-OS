@@ -84,10 +84,10 @@ export class ReminderEngine {
     let baseTriggerLocal: Date;
 
     // ── 1. Resolve base trigger time ────────────────────────────────────────
-    if (spec.relative_value && spec.relative_unit) {
+    if (spec.relative_value !== undefined && spec.relative_value !== null) {
       // "in 2 minutes", "after 3 hours", etc.
       baseTriggerLocal = new Date(localNow);
-      const unit = this.normalizeUnit(spec.relative_unit);
+      const unit = spec.relative_unit ? this.normalizeUnit(spec.relative_unit) : 'minutes';
       baseTriggerLocal = this.addDuration(baseTriggerLocal, spec.relative_value, unit);
 
     } else if (spec.date && spec.time_of_day) {
