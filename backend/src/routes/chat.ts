@@ -1013,7 +1013,12 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
                 } else {
                   // ── Batch / multi-reminder branch ────────────────────
                   // Handle both: old flat format {title, ...} and new array format {reminders: [...]}
-                  let reminderSpecs = args.reminders || (args.title ? [args] : []);
+                  let reminderSpecs: any[] = [];
+                  if (args.reminders) {
+                    reminderSpecs = Array.isArray(args.reminders) ? args.reminders : [args.reminders];
+                  } else if (args.title) {
+                    reminderSpecs = [args];
+                  }
                   if (!reminderSpecs || reminderSpecs.length === 0) throw new Error('No reminders specified');
 
                   // Fallback title: extract the "about X" part from user message
