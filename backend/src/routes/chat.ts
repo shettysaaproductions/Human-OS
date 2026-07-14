@@ -867,7 +867,7 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
       if (responseConfig.mode === 'HUMAN_CHAT') {
         messagesForLLM.push({
           role: 'system',
-          content: 'FINAL REMINDER: Keep your response SHORT (1-2 sentences). DO NOT echo/repeat the user\'s phrases. DO NOT start your message with "Bhai". BE A SMART FRIEND. NO formal Hindi. If the user makes a typo, do NOT invent fake Hindi words. If the user says goodbye/gn, just wish them well naturally (DO NOT say "welcome back").'
+          content: 'FINAL REMINDER: Keep responses SHORT (1-2 sentences). Read the chat history in chronological order (top is oldest, bottom is newest); the most recent message is the highest priority. If the user makes a typo (e.g., "wo lo" instead of "wo log"), infer from context. If a message is completely confusing, DO NOT guess or hallucinate—politely ask for clarification. NO formal Hindi. DO NOT echo phrases. DO NOT start with "Bhai".'
         });
       }
 
