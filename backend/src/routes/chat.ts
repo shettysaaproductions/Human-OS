@@ -895,7 +895,13 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
             temperature: responseConfig.temperature,
             frequency_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.9 : 0.7,
             presence_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.7 : 0.5,
-            tools: [{
+          };
+
+          // Only pass reminder tools if the user actually asks for a reminder/alarm/cancellation
+          const mightBeReminderCmd = effectiveMessage.match(/\b(remind|alarm|cancel|delete|forget|schedule|yaad)\b/i) || effectiveMessage.includes('🔔');
+          
+          if (mightBeReminderCmd) {
+            nvidiaOptions.tools = [{
               type: 'function',
               function: {
                 name: 'set_reminder',
@@ -957,8 +963,8 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
                   }
                 }
               }
-            }]
-          };
+            }];
+          }
 
           if (isStreaming) {
             const stream = chatCompletionStream(messagesForLLM, nvidiaOptions);
