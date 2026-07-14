@@ -1012,8 +1012,22 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
                   }
                 } else {
                   // ── Batch / multi-reminder branch ────────────────────
-                  const reminderSpecs = args.reminders || (args.title ? [args] : []);
+                  // Handle both: old flat format {title, ...} and new array format {reminders: [...]}
+                  let reminderSpecs = args.reminders || (args.title ? [args] : []);
                   if (!reminderSpecs || reminderSpecs.length === 0) throw new Error('No reminders specified');
+
+                  // Fallback title: extract the "about X" part from user message
+                  const messageTitleFallback = effectiveMessage
+                    .replace(/remind(ers?)?|can you|please|about|me|to|in|at|next|every|daily|weekly|monthly/gi, '')
+                    .replace(/\d+\s*(min(ute)?s?|hour?s?|day?s?|week?s?|month?s?)/gi, '')
+                    .trim()
+                    .slice(0, 60) || 'Reminder';
+
+                  // Patch any spec missing a title
+                  reminderSpecs = reminderSpecs.map((spec: any) => ({
+                    ...spec,
+                    title: spec.title || messageTitleFallback,
+                  }));
 
                   // Build timezone-aware engine for this user
                   const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
@@ -1022,8 +1036,8 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
 
                   const allScheduled: any[] = [];
                   for (const spec of reminderSpecs) {
-                    const parsed = engine.parse(spec);
-                    const inserted = await engine.scheduleAll(userId, parsed);
+                    const parsedList = engine.parse(spec);
+                    const inserted = await engine.scheduleAll(userId, parsedList);
                     allScheduled.push(...inserted);
                   }
 
