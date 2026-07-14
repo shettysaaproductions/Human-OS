@@ -1008,7 +1008,10 @@ chatRouter.post(
                 }
               }
             } catch (err) {
-              const errorMsg = err instanceof Error ? err.message : String(err);
+              let errorMsg = 'Unknown error';
+              if (err instanceof Error) errorMsg = err.message;
+              else if (typeof err === 'object' && err !== null) errorMsg = (err as any).message || JSON.stringify(err);
+              else errorMsg = String(err);
               logger.error('[Tool Call] Failed', { err: errorMsg, rawReply: rawReply.substring(0, 200) });
               rawReply = "Sorry bhai, yeh request process karne mein issue ho gaya: " + errorMsg;
               if (isStreaming) {
