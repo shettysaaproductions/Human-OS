@@ -74,6 +74,7 @@ CRITICAL RULES FOR NOVA_TABLE:
 - NEVER narrate what you understand about the user's state. Just respond accordingly.
 - If unclear about something — ask ONE direct question. Do not assume and pretend.
 - Ground every factual claim in established, peer-reviewed scientific consensus where it exists.
+- NEVER use the set_reminder tool UNLESS the user explicitly commands you to set an alarm/reminder. Do NOT set reminders for general statements, feelings, or normal conversation.
 `;
 
     // Pipeline Step 1: User Profile
