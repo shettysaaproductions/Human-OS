@@ -899,7 +899,7 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
               type: 'function',
               function: {
                 name: 'set_reminder',
-                description: `Set one or more reminders. Use when user explicitly asks to be reminded, or when you detect an important event (interview, exam, flight). If time is ambiguous (e.g. 'at 2pm' with no date), use needs_clarification instead of guessing. For batch reminders use batch_count + batch_interval_minutes.`,
+                description: `Set one or more reminders. Use ONLY when the user explicitly asks to be reminded or set an alarm. Do NOT use this for normal conversation or general statements. If time is ambiguous (e.g. 'at 2pm' with no date), use needs_clarification instead of guessing. For batch reminders use batch_count + batch_interval_minutes.`,
                 parameters: {
                   type: 'object',
                   properties: {
