@@ -819,16 +819,16 @@ chatRouter.post(
       
       let remindersContext = '';
       if (upcoming && upcoming.length > 0) {
-        remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has these reminders active:\n' + upcoming.map(r => {
+        remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has these reminders active:\n' + upcoming.map(r => {
           const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
           const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
           const dayFilter = r.active_days?.length ? ` [only on: ${r.active_days.join(', ')}]` : '';
           const monthFilter = r.active_months?.length ? ` [only in: ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''}]` : '';
           const autoTag = r.is_auto ? ' [auto-detected]' : '';
           return `- [ID: "${r.id}"] ${r.text || r.title} at ${timeStr}${recurrence}${dayFilter}${monthFilter}${autoTag}`;
-        }).join('\n') + '\n\nIf the user asks what their reminders are, read this list naturally. To delete any, use delete_reminders with the exact ID.';
+        }).join('\n') + '\n\nCRITICAL: This list is the absolute source of truth. If past chat history says a reminder was cancelled but it appears here, it is STILL ACTIVE. Do not contradict this list.';
       } else {
-        remindersContext = '\n\n## ACTIVE REMINDERS\nThe user currently has NO active reminders.';
+        remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has NO active reminders. CRITICAL: This is the absolute source of truth. If past chat history says a reminder was set, but this list is empty, it means there are NO active reminders. Do not contradict this fact.';
       }
 
       const reminderInstructions = `\n\n## REMINDER INTELLIGENCE RULES
