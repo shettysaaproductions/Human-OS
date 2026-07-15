@@ -501,9 +501,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       await savePendingQueue(newQueue);
       
       if (_queueTimeout) clearTimeout(_queueTimeout);
-      _queueTimeout = setTimeout(() => {
-        get().processQueue();
-      }, 1500); // 1.5s debounce to batch rapid messages
+      // Fire immediately so Android doesn't suspend the app before the request leaves
+      get().processQueue();
     },
 
     retryMessage: async (messageId: string) => {
