@@ -94,6 +94,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await SecureStore.deleteItemAsync('accessToken');
     await SecureStore.deleteItemAsync('refreshToken');
+    notificationService.cleanup();
     set({ accessToken: null, user: null, onboardingStatus: false });
   },
 
