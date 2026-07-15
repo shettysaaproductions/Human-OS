@@ -218,43 +218,42 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         while (!succeeded) {
           try {
-            const data = await chatService.sendMessage(
+            const data = await chatService.sendMessageAsync(
               combinedContent,
               get().conversationId || undefined
             );
 
-            const replyBubbles: string[] = (data?.messages && data.messages.length > 0)
-              ? data.messages
-              : (data?.reply ? [data.reply] : []);
             const convId: string = data?.conversation_id || get().conversationId || '';
-            const now = new Date().toISOString();
-
-            const novaMessages = replyBubbles.map((content: string, idx: number) => ({
-              id: `${Date.now()}_nova_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-              role: 'assistant' as const,
-              content,
-              status: 'responded' as const,
-              timestamp: now,
-            }));
 
             set((s) => ({
               conversationId: convId,
-              isTyping: false,
-              messages: [
-                ...s.messages.map(m =>
-                  batch.some(b => b.id === m.id) 
-                    ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data.user_message_id || m.id) : m.id } 
-                    : m
-                ),
-                ...novaMessages,
-              ],
+              isTyping: true, // Keep true until background reply arrives
+              messages: s.messages.map(m =>
+                batch.some(b => b.id === m.id) 
+                  ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data.user_message_id || m.id) : m.id } 
+                  : m
+              ),
             }));
 
             // ── Mark as delivered IMMEDIATELY after success ─────────────────
             await markDelivered(primaryId);
+            
+            // ── Start polling for the reply (useful if app stays in foreground) ──
+            let polls = 0;
+            const pollInterval = setInterval(async () => {
+              polls++;
+              const state = get();
+              // Stop polling if typing was cleared (reply received) or after 60s
+              if (!state.isTyping || polls > 20) {
+                clearInterval(pollInterval);
+                if (polls > 20) set({ isTyping: false });
+                return;
+              }
+              await state.checkProactiveMessages();
+            }, 3000);
 
             succeeded = true;
-            console.log('[QUEUE] success for batch starting with:', primaryId);
+            console.log('[QUEUE] async send success for batch starting with:', primaryId);
           } catch (err: any) {
             const isServerError = err?.response?.status >= 400 && err?.response?.status < 500;
             if (isServerError) {
@@ -274,9 +273,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     } finally {
       _isProcessing = false;
-      set({ isTyping: false });
+      // We DO NOT set isTyping: false here, because we are waiting for the async reply
       console.log('[QUEUE] finished');
     }
+
   };
 
   return {
@@ -587,6 +587,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
           set((s) => ({
             messages: [...s.messages, ...newMessages],
+            isTyping: false, // Reply received, clear typing indicator
           }));
           saveMessageCache([...get().messages], get().conversationId);
         }

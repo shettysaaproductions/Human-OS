@@ -21,6 +21,13 @@ export const chatService = {
     return response.data;
   },
 
+  sendMessageAsync: async (message: string, conversationId?: string) => {
+    const payload: any = { message, async_mode: true };
+    if (conversationId) payload.conversation_id = conversationId;
+    const response = await api.post('/chat', payload);
+    return response.data;
+  },
+
   streamMessage: (
     message: string,
     conversationId: string | undefined,

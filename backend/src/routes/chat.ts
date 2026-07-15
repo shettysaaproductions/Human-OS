@@ -107,6 +107,7 @@ const ChatSchema = z.object({
   conversation_id: z.string().uuid().optional(),
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
   is_proactive: z.boolean().optional().default(false),
+  async_mode: z.boolean().optional().default(false),
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who happens to be brilliantly intelligent, deeply empathetic, and scientifically grounded.
@@ -375,9 +376,18 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, language, is_proactive } = parseResult.data;
+      const { message, conversation_id, language, is_proactive, async_mode } = parseResult.data;
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
+
+      // ── ASYNC MODE: respond immediately, process in background ──────────────
+      // When the mobile app sends async_mode=true, we return 202 Accepted right
+      // away so Android doesn't suspend the JS thread waiting for Nova's reply.
+      // Nova's processing happens server-side, reply is saved to DB, push fires.
+      if (async_mode) {
+        res.status(202).json({ status: 'processing', conversation_id: activeConversationId });
+        // Continue processing below — res is already closed, no further res calls
+      }
       const isDegraded = dbHealthService.isDegraded();
       // For proactive triggers, rewrite the message to a natural system instruction
       const effectiveMessage = is_proactive
@@ -1342,7 +1352,8 @@ Current IST date/time: ${dateStr} ${timeStr}`;
         })();
       }
 
-      if (!isStreaming) {
+      // In async_mode the 202 was already sent above — skip the synchronous response
+      if (!isStreaming && !async_mode) {
         res.status(200).json({
           reply,
           messages: parsedMessagesArray,
