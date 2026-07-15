@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus, View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import * as SecureStore from 'expo-secure-store';
@@ -40,7 +40,8 @@ function AppContent() {
       const data = response.notification.request.content.data as any;
       const type = data?.type;
       // Navigate to Chat for any Nova notification type
-      if (type === 'nova_reply' || type === 'nova_followup' || type === 'nova_reminder') {
+      const novaTypes = ['nova_reply', 'nova_followup', 'nova_reminder', 'nova_auto_reminder', 'nova_moment'];
+      if (novaTypes.includes(type)) {
         // Small delay to allow navigation to mount after cold start
         setTimeout(() => {
           if (navigationRef.current?.isReady()) {
@@ -56,14 +57,30 @@ function AppContent() {
     // When app is open and a Nova notification arrives, silently refresh messages
     const fgSub = Notifications.addNotificationReceivedListener((notification) => {
       const data = notification.request.content.data as any;
-      if (data?.type === 'nova_followup' || data?.type === 'nova_reply') {
+      const novaTypes = ['nova_reply', 'nova_followup', 'nova_reminder', 'nova_auto_reminder', 'nova_moment'];
+      if (novaTypes.includes(data?.type)) {
         useChatStore.getState().checkProactiveMessages();
       }
+    });
+
+    // ── AppState listener: refresh messages when app comes back from background ──
+    // This handles the case where the user opens the app from the recents tray
+    // WITHOUT tapping a notification — e.g. Nova sent a follow-up while minimized.
+    let lastAppState: AppStateStatus = AppState.currentState;
+    const appStateSub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (lastAppState !== 'active' && nextState === 'active') {
+        // App just came to foreground — check for new messages from Nova
+        setTimeout(() => {
+          useChatStore.getState().checkProactiveMessages();
+        }, 500); // small delay to ensure auth/hydration is ready
+      }
+      lastAppState = nextState;
     });
 
     return () => {
       tapSub.remove();
       fgSub.remove();
+      appStateSub.remove();
     };
   }, []);
 

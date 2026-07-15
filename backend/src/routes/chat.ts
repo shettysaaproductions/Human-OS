@@ -1225,6 +1225,8 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
       const pushToken = (profile as any)?.push_token as string | undefined;
       if (pushToken) {
         sendNovaReplyNotification(pushToken, reply).catch(() => {});
+      } else {
+        logger.warn('[Push] No push_token for user — background notification skipped', { userId });
       }
 
       // 10.5. Extract Life Events & Routines (NACE)
