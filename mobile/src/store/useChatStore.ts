@@ -182,40 +182,39 @@ export const useChatStore = create<ChatState>((set, get) => {
         const queue = get().pendingQueue;
         if (queue.length === 0) break;
 
-        // --- BATCHING LOGIC ---
-        // Pop all items currently in the queue
         const batch = [...queue];
         set({ pendingQueue: [] });
-        await savePendingQueue([]);
+        // Fire and forget storage writes so we don't block the network request
+        savePendingQueue([]).catch(e => console.warn(e));
 
         const primaryId = batch[0].id;
 
-        // Skip if already delivered (dedup against force-close re-open scenario)
-        const deliveredIds = await loadDeliveredIds();
-        if (deliveredIds.has(primaryId)) {
-          console.log('[QUEUE] skipped — already delivered:', primaryId);
-          // Clean up the sending bubbles if they're still showing
-          set((s) => ({
-            messages: s.messages.filter(m => !batch.some(b => b.id === m.id)),
-          }));
-          continue;
-        }
-
-        // Skip if already being sent (deduplication against parallel processQueue calls)
+        // Skip if already being sent
         if (_inFlightIds.has(primaryId)) {
-          console.log('[QUEUE] skipped — already in-flight:', primaryId);
           continue;
         }
 
         _inFlightIds.add(primaryId);
         set({ isTyping: true });
 
+        // Check delivered status in parallel to allow fast failure, 
+        // but DO NOT block the network request from firing immediately
+        loadDeliveredIds().then(deliveredIds => {
+          if (deliveredIds.has(primaryId)) {
+             _inFlightIds.delete(primaryId);
+             set((s) => ({
+               messages: s.messages.filter(m => !batch.some(b => b.id === m.id)),
+             }));
+          }
+        });
+
         let retryDelay = 3000;
         let succeeded = false;
 
-        // Combine all message contents into one string for the backend
         const combinedContent = batch.map(b => b.content).join('\n');
 
+        // FIRE IMMEDIATELY: Hand off to native OkHttp instantly
+        // This ensures the request leaves the phone even if minimized 10ms later
         while (!succeeded) {
           try {
             const data = await chatService.sendMessageAsync(
@@ -498,7 +497,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         pendingQueue: newQueue,
       }));
 
-      await savePendingQueue(newQueue);
+      // Fire and forget, don't block the network request!
+      savePendingQueue(newQueue).catch(e => console.warn(e));
       
       if (_queueTimeout) clearTimeout(_queueTimeout);
       // Fire immediately so Android doesn't suspend the app before the request leaves
