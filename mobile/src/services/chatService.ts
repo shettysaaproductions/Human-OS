@@ -24,8 +24,18 @@ export const chatService = {
   sendMessageAsync: async (message: string, conversationId?: string) => {
     const payload: any = { message, async_mode: true };
     if (conversationId) payload.conversation_id = conversationId;
-    const response = await api.post('/chat', payload);
-    return response.data;
+
+    // 30-second hard timeout — on Android, battery optimization can suspend the JS
+    // thread mid-await, causing api.post to hang indefinitely with no error.
+    // We race the request against a timer so the retry loop always gets control back.
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('sendMessageAsync timed out after 30s')), 30000)
+    );
+    const response = await Promise.race([
+      api.post('/chat', payload),
+      timeoutPromise,
+    ]);
+    return (response as any).data;
   },
 
   streamMessage: (
