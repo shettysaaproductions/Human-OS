@@ -527,17 +527,16 @@ export function ChatScreen() {
     // the notificationService fires this callback. This is the primary mechanism
     // for loading replies when the app is minimized — JS polling stops when
     // Android suspends the thread, but the native push listener survives.
+    // NO speculative setTimeout retries here — they cause duplicate messages
+    // by calling checkProactiveMessages after the lock has already been released.
     notificationService.setOnNovaReplyCallback(() => {
       checkProactiveMessages();
-      setTimeout(checkProactiveMessages, 2000); // retry if network takes a moment
     });
 
-    // ── AppState listener: fallback refresh + queue rescue when app returns to foreground ────
+    // ── AppState listener: fallback refresh + queue rescue when app returns to foreground ──
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         checkProactiveMessages();
-        setTimeout(checkProactiveMessages, 2000);
-        setTimeout(checkProactiveMessages, 5000);
         // Kick queue in case it got stuck while app was backgrounded
         useChatStore.getState().processQueue();
       }

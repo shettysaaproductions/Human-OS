@@ -268,16 +268,19 @@ export const useChatStore = create<ChatState>((set, get) => {
             await markDelivered(primaryId);
             
             // ── Start polling for the reply (useful if app stays in foreground) ──
+            // IMPORTANT: Use useChatStore.getState() directly inside the interval,
+            // NOT a captured `state` variable — the captured reference goes stale
+            // and reads the old isTyping value, preventing the interval from stopping.
             let polls = 0;
             const pollInterval = setInterval(async () => {
               polls++;
-              const state = get();
-              // Stop polling if typing was cleared (reply received) or after 120 polls (6 mins)
-              if (!state.isTyping || polls > 120) {
+              const live = useChatStore.getState();
+              // Stop polling if typing was cleared (reply received) or after 60 polls (3 mins)
+              if (!live.isTyping || polls > 60) {
                 clearInterval(pollInterval);
                 return;
               }
-              await state.checkProactiveMessages();
+              await live.checkProactiveMessages();
             }, 3000);
 
             succeeded = true;
@@ -532,7 +535,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       // Start the watchdog so stuck messages self-heal without restarting the app
       startQueueWatchdog(processQueue);
-      
+
       if (_queueTimeout) clearTimeout(_queueTimeout);
       // Fire immediately so Android doesn't suspend the app before the request leaves
       get().processQueue();
