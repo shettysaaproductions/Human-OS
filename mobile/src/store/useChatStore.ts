@@ -49,7 +49,33 @@ interface ChatState {
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
 let _isProcessing = false;
+let _lockTimestamp: number = 0; // Unix ms — used to force-release stale locks (90s timeout)
 const _inFlightIds = new Set<string>();
+
+// ── Proactive check lock — prevents simultaneous duplicate checks ──────────────
+let _proactiveCheckInProgress = false;
+
+// ── Queue watchdog — rescues stuck queues when internet comes back ─────────────
+// Checks every 15s: if queue is non-empty and not processing, kicks processQueue().
+// Also detects stale locks (>90s) and force-resets them.
+let _watchdogTimer: ReturnType<typeof setInterval> | null = null;
+function startQueueWatchdog(processQueueFn: () => Promise<void>) {
+  if (_watchdogTimer) return; // already running
+  _watchdogTimer = setInterval(() => {
+    // Force-release stale lock (if processQueue has been stuck for >90s)
+    if (_isProcessing && _lockTimestamp > 0 && Date.now() - _lockTimestamp > 90_000) {
+      console.warn('[WATCHDOG] Force-releasing stale processQueue lock after 90s');
+      _isProcessing = false;
+      _lockTimestamp = 0;
+    }
+    // Kick processQueue if queue has items and nothing is running
+    const store = (globalThis as any).__chatStoreGet?.();
+    if (store && store.pendingQueue.length > 0 && !_isProcessing) {
+      console.log('[WATCHDOG] Kicking stuck queue —', store.pendingQueue.length, 'item(s) pending');
+      processQueueFn();
+    }
+  }, 15_000);
+}
 
 // ── Pending queue persistence (survives app swipe-away) ─────────────────────
 const QUEUE_KEY = 'humanOs_pendingQueue';
@@ -169,12 +195,16 @@ function chunkText(text: string): string[] {
   return chunks.length ? chunks : [text];
 }
 
-let _queueTimeout: NodeJS.Timeout | null = null;
+let _queueTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export const useChatStore = create<ChatState>((set, get) => {
+  // Store get reference globally so watchdog can access queue length without circular deps
+  (globalThis as any).__chatStoreGet = get;
+
   const processQueue = async () => {
     if (_isProcessing) return;
     _isProcessing = true;
+    _lockTimestamp = Date.now();
     console.log('[QUEUE] start');
 
     try {
@@ -271,6 +301,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     } finally {
       _isProcessing = false;
+      _lockTimestamp = 0;
       // We DO NOT set isTyping: false here, because we are waiting for the async reply
       console.log('[QUEUE] finished');
     }
@@ -498,6 +529,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       // Fire and forget, don't block the network request!
       savePendingQueue(newQueue).catch(e => console.warn(e));
+
+      // Start the watchdog so stuck messages self-heal without restarting the app
+      startQueueWatchdog(processQueue);
       
       if (_queueTimeout) clearTimeout(_queueTimeout);
       // Fire immediately so Android doesn't suspend the app before the request leaves
@@ -522,8 +556,15 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     // ── Proactive message check: called when app comes to foreground ───────────
-    // Fetches any messages Nova sent while the app was backgrounded/minimized
+    // Fetches any messages Nova sent while the app was backgrounded/minimized.
+    // Guarded by a lock so rapid back-to-back calls (AppState + notification)
+    // don't both run and produce duplicates.
     checkProactiveMessages: async () => {
+      if (_proactiveCheckInProgress) {
+        console.log('[PROACTIVE] Skipping — check already in progress');
+        return;
+      }
+      _proactiveCheckInProgress = true;
       try {
         const convId = get().conversationId;
         if (!convId) return;
@@ -536,23 +577,44 @@ export const useChatStore = create<ChatState>((set, get) => {
         const history = await chatService.getHistory(convId, 10);
         if (!history || history.length === 0) return;
 
-        const existingIds = new Set(currentMessages.map(m => m.id));
+        // Build a comprehensive set of IDs already in store:
+        // includes both raw IDs (user msgs) and all _part_N variants (assistant chunks)
+        const existingIds = new Set<string>();
+        const existingContentByRole = new Map<string, Set<string>>(); // role -> Set<content.trim()>
+        for (const m of currentMessages) {
+          existingIds.add(m.id);
+          // If this is a _part_N id, also register the base id so the same msg
+          // fetched from backend (raw UUID) is recognised as a duplicate
+          const partMatch = m.id.match(/^(.+)_part_\d+$/);
+          if (partMatch) existingIds.add(partMatch[1]);
+          if (!existingContentByRole.has(m.role)) existingContentByRole.set(m.role, new Set());
+          existingContentByRole.get(m.role)!.add(m.content.trim());
+        }
+
         const newMessages: Message[] = [];
 
         for (const msg of history) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
           const msgId = msg.id;
 
-          // Only add truly new messages (not in our current store)
-          const partId0 = `${msgId}_part_1`;
-          if (existingIds.has(msgId) || existingIds.has(partId0)) continue;
+          // Skip if already in store (by raw ID or any _part_N variant)
+          if (existingIds.has(msgId)) continue;
+          const partId1 = `${msgId}_part_1`;
+          if (existingIds.has(partId1)) continue;
 
-          // Deduplicate by content to prevent ghost duplicates (from local cache vs backend UUID mismatch)
-          const isAssistant = role === 'assistant';
-          const alreadyExistsByContent = currentMessages.some(
-            cm => cm.role === role && cm.content.trim() === msg.content.trim()
-          );
-          if (alreadyExistsByContent) continue;
+          // Skip if same content already exists for that role
+          // (handles local temp-ID vs backend UUID mismatch that causes visible duplicates)
+          if (role === 'assistant') {
+            const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
+              ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
+              : [msg.content];
+            const contentSet = existingContentByRole.get('assistant') ?? new Set();
+            // If ANY chunk already exists by content, skip the whole message
+            if (chunks.some((c: string) => contentSet.has(c.trim()))) continue;
+          } else {
+            const contentSet = existingContentByRole.get(role) ?? new Set();
+            if (contentSet.has(msg.content.trim())) continue;
+          }
 
           // Only add messages newer than our latest (allow 60s clock skew)
           if (latestTimestamp && new Date(msg.created_at).getTime() < new Date(latestTimestamp).getTime() - 60000) continue;
@@ -596,6 +658,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
       } catch (e) {
         console.warn('[PROACTIVE] Failed to check for new messages:', e);
+      } finally {
+        _proactiveCheckInProgress = false;
       }
     },
     
