@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "371339644360",
-    "project_id": "human-os-2c9da",
-    "storage_bucket": "human-os-2c9da.firebasestorage.app"
+    "project_number": "1092881832770",
+    "project_id": "humanos-3895f",
+    "storage_bucket": "humanos-3895f.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:371339644360:android:f095b4d960047a941404fd",
+        "mobilesdk_app_id": "1:1092881832770:android:a629568d2b25f63be406db",
         "android_client_info": {
           "package_name": "com.humanos.mobile"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBxVda8r6UhEUUyCXn588cZ1YYkzy-16OE"
+          "current_key": "AIzaSyC4b2r1SrVnEHuTX2CKqKl-17h8WoS3uEE"
         }
       ],
       "services": {
