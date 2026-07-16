@@ -18,9 +18,9 @@ export const api = axios.create({
 
 // ── Request interceptor: attach the current access token ─────────────────────
 api.interceptors.request.use(
-  async (config) => {
+  (config) => {
     try {
-      const token = await SecureStore.getItemAsync('accessToken');
+      const token = require('../store/useAuthStore').useAuthStore.getState().accessToken;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -30,7 +30,7 @@ api.interceptors.request.use(
       if (config.data) console.log(`[API PAYLOAD]`, JSON.stringify(config.data));
       
     } catch (error) {
-      console.error('[api] Error reading accessToken from SecureStore', error);
+      console.error('[api] Error reading accessToken from store', error);
     }
     return config;
   },

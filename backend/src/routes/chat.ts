@@ -461,8 +461,8 @@ chatRouter.post(
         memoriesResult,
         stmResult,
       ] = await Promise.all([
-        // 1. Profile (use cache if available, else fetch)
-        cachedProfile
+        // 1. Profile (use cache only if it has a push_token — avoids stale cache killing push delivery)
+        (cachedProfile && cachedProfile.push_token)
           ? Promise.resolve({ data: cachedProfile, error: null })
           : qt.track('get_profile', 'profiles', () =>
               supabaseAdmin.from('profiles')
@@ -1231,10 +1231,19 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
         logger.info('[DEBUG] DISABLE_MEMORY=true — skipping background extraction jobs');
       }
 
-      // 10. Fire-and-forget push notification if user has a registered token
-      const pushToken = (profile as any)?.push_token as string | undefined;
+      // 10. Fire push notification — always fetch push_token fresh so a stale cache
+      // never causes silent delivery failures. This is a tiny single-column fetch.
+      const pushTokenResult = await supabaseAdmin
+        .from('profiles')
+        .select('push_token')
+        .eq('id', userId)
+        .maybeSingle();
+      const pushToken = pushTokenResult.data?.push_token as string | undefined;
       if (pushToken) {
-        sendNovaReplyNotification(pushToken, reply).catch(() => {});
+        logger.info('[Push] Sending nova_reply notification', { userId, tokenPreview: pushToken.substring(0, 30) });
+        sendNovaReplyNotification(pushToken, reply).catch((err) => {
+          logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message });
+        });
       } else {
         logger.warn('[Push] No push_token for user — background notification skipped', { userId });
       }
