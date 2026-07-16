@@ -49,26 +49,41 @@ interface ChatState {
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
 let _isProcessing = false;
-let _lockTimestamp: number = 0; // Unix ms — used to force-release stale locks (90s timeout)
+let _lockTimestamp: number = 0;
 const _inFlightIds = new Set<string>();
 
 // ── Proactive check lock — prevents simultaneous duplicate checks ──────────────
 let _proactiveCheckInProgress = false;
 
-// ── Queue watchdog — rescues stuck queues when internet comes back ─────────────
-// Checks every 15s: if queue is non-empty and not processing, kicks processQueue().
-// Also detects stale locks (>90s) and force-resets them.
+// ── Recovery poll timer — resumes polling after app restart ────────────────
+let _recoveryPollTimer: ReturnType<typeof setInterval> | null = null;
+function startRecoveryPolling(checkFn: () => Promise<void>) {
+  if (_recoveryPollTimer) return; // already running
+  let count = 0;
+  _recoveryPollTimer = setInterval(async () => {
+    count++;
+    const live = useChatStore.getState();
+    // Stop if reply arrived or after 5 minutes (60 polls × 5s)
+    if (!live.isTyping || count > 60) {
+      clearInterval(_recoveryPollTimer!);
+      _recoveryPollTimer = null;
+      return;
+    }
+    await checkFn();
+  }, 5000);
+  console.log('[RECOVERY] Reply-wait polling started (5s interval, max 5min)');
+}
+
+// ── Queue watchdog — rescues stuck send queues ────────────────────────
 let _watchdogTimer: ReturnType<typeof setInterval> | null = null;
 function startQueueWatchdog(processQueueFn: () => Promise<void>) {
-  if (_watchdogTimer) return; // already running
+  if (_watchdogTimer) return;
   _watchdogTimer = setInterval(() => {
-    // Force-release stale lock (if processQueue has been stuck for >90s)
     if (_isProcessing && _lockTimestamp > 0 && Date.now() - _lockTimestamp > 90_000) {
       console.warn('[WATCHDOG] Force-releasing stale processQueue lock after 90s');
       _isProcessing = false;
       _lockTimestamp = 0;
     }
-    // Kick processQueue if queue has items and nothing is running
     const store = (globalThis as any).__chatStoreGet?.();
     if (store && store.pendingQueue.length > 0 && !_isProcessing) {
       console.log('[WATCHDOG] Kicking stuck queue —', store.pendingQueue.length, 'item(s) pending');
@@ -96,9 +111,31 @@ async function loadPendingQueue(): Promise<{ id: string; content: string }[]> {
 }
 
 // ── Delivered ID set (prevents re-send after force close) ────────────────────
-// Stores IDs of messages that were successfully sent. On cold start, any
-// pendingQueue item in this set is silently dropped — it was already delivered.
 const DELIVERED_KEY = 'humanOs_deliveredIds';
+
+// ── Awaiting-reply persistence — survives app restarts ────────────────────
+const AWAITING_REPLY_KEY = 'humanOs_awaitingReply';
+async function saveAwaitingReply(conversationId: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(AWAITING_REPLY_KEY, JSON.stringify({ convId: conversationId, ts: Date.now() }));
+  } catch {}
+}
+async function clearAwaitingReply(): Promise<void> {
+  try { await SecureStore.deleteItemAsync(AWAITING_REPLY_KEY); } catch {}
+}
+async function loadAwaitingReply(): Promise<{ convId: string; ts: number } | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(AWAITING_REPLY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Date.now() - parsed.ts > 10 * 60 * 1000) {
+      await clearAwaitingReply();
+      return null;
+    }
+    return parsed;
+  } catch { return null; }
+}
+
 const MAX_DELIVERED_IDS = 100; // Keep last 100 to avoid storage bloat
 
 async function loadDeliveredIds(): Promise<Set<string>> {
@@ -267,6 +304,9 @@ export const useChatStore = create<ChatState>((set, get) => {
             // ── Mark as delivered IMMEDIATELY after success ─────────────────
             await markDelivered(primaryId);
             
+            // ── Save awaiting-reply state so a restart can resume polling ──────
+            saveAwaitingReply(convId).catch(() => {});
+
             // ── Start polling for the reply (useful if app stays in foreground) ──
             // IMPORTANT: Use useChatStore.getState() directly inside the interval,
             // NOT a captured `state` variable — the captured reference goes stale
@@ -441,6 +481,25 @@ export const useChatStore = create<ChatState>((set, get) => {
             console.log('[HYDRATE] Resuming', pendingToRestore.length, 'pending messages');
             get().processQueue();
           }
+
+          // ── Resume reply-wait polling if we were waiting for Nova's reply ──────────────
+          // isTyping is NOT persisted. On restart it resets to false even if we
+          // were mid-conversation. We detect this by checking:
+          // 1. A persisted 'awaitingReply' flag was saved when the msg was sent
+          // 2. The last message in fresh history is still a user message (no reply yet)
+          loadAwaitingReply().then(awaiting => {
+            if (!awaiting) return;
+            const lastMsg = freshMessages[freshMessages.length - 1];
+            const lastIsUser = lastMsg?.role === 'user';
+            if (lastIsUser) {
+              console.log('[HYDRATE] Resuming reply-wait polling — no reply received yet');
+              set({ isTyping: true });
+              startRecoveryPolling(get().checkProactiveMessages);
+            } else {
+              // Reply already in history — clean up the awaiting flag
+              clearAwaitingReply();
+            }
+          });
         } else {
           const restoredMessages: Message[] = filteredQueue.map(q => ({
             id: q.id,
@@ -619,8 +678,12 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (contentSet.has(msg.content.trim())) continue;
           }
 
-          // Only add messages newer than our latest (allow 60s clock skew)
-          if (latestTimestamp && new Date(msg.created_at).getTime() < new Date(latestTimestamp).getTime() - 60000) continue;
+          // Only add messages newer than our latest (allow 60s clock skew).
+          // EXCEPTION: When isTyping=true we're actively waiting for Nova's reply —
+          // skip the timestamp filter so server clock skew can never hide the reply.
+          // The ID+content dedup above already prevents duplicates.
+          const isAwaitingReply = get().isTyping;
+          if (!isAwaitingReply && latestTimestamp && new Date(msg.created_at).getTime() < new Date(latestTimestamp).getTime() - 60000) continue;
 
           if (role === 'assistant') {
             const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
@@ -650,12 +713,26 @@ export const useChatStore = create<ChatState>((set, get) => {
           console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
           set((s) => ({
             messages: [...s.messages, ...newMessages],
-            isTyping: false, // Reply received, clear typing indicator
+            isTyping: false,
           }));
           saveMessageCache([...get().messages], get().conversationId);
+          // Reply arrived — clear the persistent awaiting flag
+          clearAwaitingReply();
         }
 
-        // Trigger proactive check (will only fire if > 4 hours since last user message)
+        // ── isTyping self-heal: if we're still 'typing' but the store already has
+        // an assistant reply as the last message, the reply was added without
+        // clearing isTyping (e.g. via hydrateMessages after restart). Fix it.
+        if (newMessages.length === 0 && get().isTyping) {
+          const storeMsgs = get().messages;
+          const lastStoreMsg = storeMsgs[storeMsgs.length - 1];
+          if (lastStoreMsg?.role === 'assistant') {
+            console.log('[PROACTIVE] Self-healing: isTyping stuck true but reply already in store');
+            set({ isTyping: false });
+            clearAwaitingReply();
+          }
+        }
+
         if (latestTimestamp) {
           proactiveReplyService.triggerProactiveCheck(latestTimestamp);
         }
