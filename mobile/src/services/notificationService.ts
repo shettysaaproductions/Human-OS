@@ -18,13 +18,21 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { chatService } from './chatService';
 
-// ── Show notifications even when the app is open (foreground) ─────────────────
+// ── Chat screen active flag — suppress banners when user is reading chat ────────
+// ChatScreen calls setChatScreenActive(true) on mount and (false) on unmount.
+let _isChatScreenActive = false;
+export function setChatScreenActive(active: boolean) {
+  _isChatScreenActive = active;
+}
+
+// ── Show notifications when app is open BUT suppress when on ChatScreen ────────
+// When user is actively reading the chat, showing a banner is redundant noise.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
+    shouldShowAlert: !_isChatScreenActive,
+    shouldPlaySound: !_isChatScreenActive,
     shouldSetBadge: true,
-    shouldShowBanner: true,
+    shouldShowBanner: !_isChatScreenActive,
     shouldShowList: true,
   }),
 });

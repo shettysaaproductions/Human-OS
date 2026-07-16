@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
-import { notificationService } from '../services/notificationService';
+import { notificationService, setChatScreenActive } from '../services/notificationService';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
@@ -513,6 +513,10 @@ export function ChatScreen() {
   useEffect(() => {
     logEvent('COMPONENT_MOUNT');
     hydrateMessages();
+
+    // Suppress push notification banners while user is on chat screen (WhatsApp-style)
+    setChatScreenActive(true);
+
     if (!didTrackOpen.current) {
       didTrackOpen.current = true;
       trackEvent('app_open');
@@ -528,17 +532,21 @@ export function ChatScreen() {
       setTimeout(checkProactiveMessages, 2000); // retry if network takes a moment
     });
 
-    // ── AppState listener: fallback refresh when app returns to foreground ────
+    // ── AppState listener: fallback refresh + queue rescue when app returns to foreground ────
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         checkProactiveMessages();
         setTimeout(checkProactiveMessages, 2000);
         setTimeout(checkProactiveMessages, 5000);
+        // Kick queue in case it got stuck while app was backgrounded
+        useChatStore.getState().processQueue();
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => {
       subscription.remove();
+      // Restore notification banners when user leaves chat screen
+      setChatScreenActive(false);
       // Clear the callback on unmount to avoid stale closures
       notificationService.setOnNovaReplyCallback(() => {});
     };
