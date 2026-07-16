@@ -33,6 +33,24 @@ class NotificationService {
   private _pushToken: string | null = null;
   private _registered = false;
   private _tokenListener: Notifications.EventSubscription | null = null;
+  private _notifReceivedListener: Notifications.EventSubscription | null = null;
+  private _notifResponseListener: Notifications.EventSubscription | null = null;
+  private _onNovaReply: (() => void) | null = null;
+
+  /**
+   * Register a callback that fires whenever a Nova-reply push notification
+   * arrives (foreground OR background-then-tapped). Use this to trigger
+   * checkProactiveMessages() from the chat store.
+   */
+  setOnNovaReplyCallback(cb: () => void): void {
+    this._onNovaReply = cb;
+  }
+
+  private _fireReplyCallback(): void {
+    if (this._onNovaReply) {
+      try { this._onNovaReply(); } catch {}
+    }
+  }
 
   get pushToken(): string | null {
     return this._pushToken;
@@ -62,6 +80,7 @@ class NotificationService {
     try {
       await this._requestPermissionAndRegister();
       this._startTokenRefreshListener();
+      this._startNotificationListeners();
     } catch (err) {
       console.warn('[Notifications] registerAfterAuth failed (non-critical):', err);
     }
@@ -76,6 +95,14 @@ class NotificationService {
       this._tokenListener.remove();
       this._tokenListener = null;
     }
+    if (this._notifReceivedListener) {
+      this._notifReceivedListener.remove();
+      this._notifReceivedListener = null;
+    }
+    if (this._notifResponseListener) {
+      this._notifResponseListener.remove();
+      this._notifResponseListener = null;
+    }
     this._registered = false;
   }
 
@@ -86,6 +113,41 @@ class NotificationService {
    * When a new token is issued, immediately re-register with the backend so
    * the DB never holds a stale token.
    */
+  /**
+   * Listen for incoming Nova-reply push notifications and immediately fetch
+   * the latest messages. This is the key link between push delivery and the
+   * UI updating — previously nothing happened when the push arrived.
+   */
+  private _startNotificationListeners(): void {
+    // Remove old listeners before adding new ones
+    if (this._notifReceivedListener) {
+      this._notifReceivedListener.remove();
+    }
+    if (this._notifResponseListener) {
+      this._notifResponseListener.remove();
+    }
+
+    // Fires when a push notification arrives while the app is foregrounded
+    this._notifReceivedListener = Notifications.addNotificationReceivedListener((notification) => {
+      const type = notification.request.content.data?.type as string | undefined;
+      if (type === 'nova_reply' || type === 'nova_auto_reminder') {
+        console.log('[Notifications] Nova reply push received (foreground) — fetching messages');
+        this._fireReplyCallback();
+      }
+    });
+
+    // Fires when the user taps the notification (app was in background or killed)
+    this._notifResponseListener = Notifications.addNotificationResponseReceivedListener((response) => {
+      const type = response.notification.request.content.data?.type as string | undefined;
+      if (type === 'nova_reply' || type === 'nova_auto_reminder') {
+        console.log('[Notifications] Nova reply push tapped (background) — fetching messages');
+        this._fireReplyCallback();
+      }
+    });
+
+    console.log('[Notifications] Nova reply listeners active ✅');
+  }
+
   private _startTokenRefreshListener(): void {
     // Remove existing listener before adding a new one (avoid duplicates on re-auth)
     if (this._tokenListener) {

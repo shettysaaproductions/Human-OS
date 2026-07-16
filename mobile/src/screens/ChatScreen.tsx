@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
+import { notificationService } from '../services/notificationService';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
@@ -517,15 +518,30 @@ export function ChatScreen() {
       trackEvent('app_open');
     }
 
-    // ── AppState listener: refresh messages when app comes to foreground ────────
-    // This picks up any Nova proactive messages sent while the app was minimized.
+    // ── Push notification → immediate message fetch ──────────────────────────
+    // When Nova's push arrives on the device (foreground OR tapped from tray),
+    // the notificationService fires this callback. This is the primary mechanism
+    // for loading replies when the app is minimized — JS polling stops when
+    // Android suspends the thread, but the native push listener survives.
+    notificationService.setOnNovaReplyCallback(() => {
+      checkProactiveMessages();
+      setTimeout(checkProactiveMessages, 2000); // retry if network takes a moment
+    });
+
+    // ── AppState listener: fallback refresh when app returns to foreground ────
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         checkProactiveMessages();
+        setTimeout(checkProactiveMessages, 2000);
+        setTimeout(checkProactiveMessages, 5000);
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
+    return () => {
+      subscription.remove();
+      // Clear the callback on unmount to avoid stale closures
+      notificationService.setOnNovaReplyCallback(() => {});
+    };
   }, []);
 
   const handleSend = useCallback(() => {

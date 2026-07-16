@@ -242,10 +242,9 @@ export const useChatStore = create<ChatState>((set, get) => {
             const pollInterval = setInterval(async () => {
               polls++;
               const state = get();
-              // Stop polling if typing was cleared (reply received) or after 60s
-              if (!state.isTyping || polls > 20) {
+              // Stop polling if typing was cleared (reply received) or after 120 polls (6 mins)
+              if (!state.isTyping || polls > 120) {
                 clearInterval(pollInterval);
-                if (polls > 20) set({ isTyping: false });
                 return;
               }
               await state.checkProactiveMessages();
@@ -555,8 +554,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           );
           if (alreadyExistsByContent) continue;
 
-          // Only add messages newer than our latest
-          if (latestTimestamp && msg.created_at <= latestTimestamp) continue;
+          // Only add messages newer than our latest (allow 60s clock skew)
+          if (latestTimestamp && new Date(msg.created_at).getTime() < new Date(latestTimestamp).getTime() - 60000) continue;
 
           if (role === 'assistant') {
             const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
