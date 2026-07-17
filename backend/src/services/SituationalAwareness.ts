@@ -62,6 +62,12 @@ export class SituationalAwareness {
     if (ctx.gapMinutes !== null) {
       lines.push(`- Last contact: ${this.describeGap(ctx.gapMinutes)}`);
       lines.push(`- Greeting strategy: ${this.getGreetingStrategy(ctx.gapMinutes, ctx.nowLocal)}`);
+      // Hard-lock stale context when gap is significant
+      if (ctx.gapMinutes > 1440) { // > 24 hours
+        lines.push(`- ⛔ CONTEXT HARD STOP: It has been over 24 hours since last message. The previous conversation thread is CLOSED. Do NOT reference or continue it. Open fresh with something relevant to RIGHT NOW — current time, day, what they are likely doing.`);
+      } else if (ctx.gapMinutes > 360) { // > 6 hours
+        lines.push(`- ⚠️ STALE CONTEXT WARNING: ${Math.round(ctx.gapMinutes / 60)}h gap. Previous topic is likely stale. Start from the current moment — don't pick up mid-thread.`);
+      }
     } else {
       lines.push(`- Last contact: First message ever. Greet warmly, introduce yourself naturally.`);
     }
