@@ -1139,11 +1139,17 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
           }
         } catch (nvidiaError) {
           const errStr = nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError);
+          logger.error('[NVIDIA] LLM call failed', { error: errStr, async_mode });
           if (isStreaming) {
             res.write(`data: ${JSON.stringify({ type: 'error', error: errStr })}\n\n`);
             if (typeof (res as any).flush === 'function') (res as any).flush();
             res.end();
             return;
+          } else if (async_mode) {
+            // async_mode: 202 already sent — MUST save a fallback reply so the
+            // user message is never orphaned with no response.
+            rawReply = 'Yaar, kuch technical issue aa gaya abhi. Thodi der mein phir try karo!';
+            logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId });
           } else {
             throw new ExternalServiceError('NVIDIA', errStr);
           }
@@ -1377,6 +1383,34 @@ Current IST date/time: ${dateStr} ${timeStr}`;
         });
       }
     } catch (err) {
+      // In async_mode: 202 was already sent. If we reach here, the user message
+      // is in the DB but Nova never replied. Save a fallback reply so the user
+      // always gets SOMETHING and the chat never stays stuck.
+      if (async_mode) {
+        logger.error('[ASYNC] Unexpected crash during processing — saving fallback reply', {
+          error: err instanceof Error ? err.message : String(err),
+          userId: (req as any).user?.id,
+        });
+        try {
+          const userId = (req as any).user?.id;
+          const activeConversationId = (req.body?.conversation_id) || '';
+          if (userId) {
+            await supabaseAdmin.from('chat_history').insert({
+              user_id: userId,
+              conversation_id: activeConversationId,
+              role: 'assistant',
+              content: 'Yaar, thoda technical glitch ho gaya. Ek second mein phir try kar!',
+            });
+            // Try to push a notification so user knows to check
+            const ptResult = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
+            if (ptResult.data?.push_token) {
+              sendNovaReplyNotification(ptResult.data.push_token, 'Yaar, thoda glitch hua. Dekh lo!').catch(() => {});
+            }
+          }
+        } catch (fallbackErr) {
+          logger.error('[ASYNC] Could not save fallback reply', { error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr) });
+        }
+      }
       next(err);
     }
   }

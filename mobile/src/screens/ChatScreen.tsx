@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { notificationService, setChatScreenActive } from '../services/notificationService';
+import * as Notifications from 'expo-notifications';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
@@ -522,13 +523,14 @@ export function ChatScreen() {
       trackEvent('app_open');
     }
 
+    // ── Clear notification tray when chat is opened (WhatsApp-style) ────────
+    const clearNotifications = () => {
+      Notifications.dismissAllNotificationsAsync().catch(() => {});
+      Notifications.setBadgeCountAsync(0).catch(() => {});
+    };
+    clearNotifications();
+
     // ── Push notification → immediate message fetch ──────────────────────────
-    // When Nova's push arrives on the device (foreground OR tapped from tray),
-    // the notificationService fires this callback. This is the primary mechanism
-    // for loading replies when the app is minimized — JS polling stops when
-    // Android suspends the thread, but the native push listener survives.
-    // NO speculative setTimeout retries here — they cause duplicate messages
-    // by calling checkProactiveMessages after the lock has already been released.
     notificationService.setOnNovaReplyCallback(() => {
       checkProactiveMessages();
     });
@@ -536,6 +538,7 @@ export function ChatScreen() {
     // ── AppState listener: fallback refresh + queue rescue when app returns to foreground ──
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
+        clearNotifications(); // Clear tray every time user comes back to chat
         checkProactiveMessages();
         // Kick queue in case it got stuck while app was backgrounded
         useChatStore.getState().processQueue();

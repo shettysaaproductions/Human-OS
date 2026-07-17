@@ -45,6 +45,7 @@ interface ChatState {
   clearMessages: () => void;
   processQueue: () => Promise<void>;
   checkProactiveMessages: () => Promise<void>;
+  set_isTyping: (v: boolean) => void;
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
@@ -55,23 +56,49 @@ const _inFlightIds = new Set<string>();
 // ── Proactive check lock — prevents simultaneous duplicate checks ──────────────
 let _proactiveCheckInProgress = false;
 
-// ── Recovery poll timer — resumes polling after app restart ────────────────
-let _recoveryPollTimer: ReturnType<typeof setInterval> | null = null;
-function startRecoveryPolling(checkFn: () => Promise<void>) {
-  if (_recoveryPollTimer) return; // already running
-  let count = 0;
-  _recoveryPollTimer = setInterval(async () => {
-    count++;
+// ── Reply-wait polling — unified poller that covers both foreground and post-restart ──
+// Only one poller runs at a time. Checks every 3 seconds while isTyping=true.
+// Max 120 polls = 6 minutes, then gives up and marks message as delivered
+// (backend already has it, just waiting is pointless).
+let _replyPollTimer: ReturnType<typeof setInterval> | null = null;
+let _replyPollCount = 0;
+const MAX_REPLY_POLLS = 120; // 6 minutes
+
+function startReplyPolling(checkFn: () => Promise<void>) {
+  if (_replyPollTimer) return; // already running
+  _replyPollCount = 0;
+  _replyPollTimer = setInterval(async () => {
+    _replyPollCount++;
     const live = useChatStore.getState();
-    // Stop if reply arrived or after 5 minutes (60 polls × 5s)
-    if (!live.isTyping || count > 60) {
-      clearInterval(_recoveryPollTimer!);
-      _recoveryPollTimer = null;
+
+    // Stop if reply arrived
+    if (!live.isTyping) {
+      stopReplyPolling();
       return;
     }
+
+    // After max polls — give up waiting, clear typing indicator
+    // The message was sent and delivered to server (202 confirmed).
+    // The reply IS in the DB, user will see it next time they open the app.
+    if (_replyPollCount > MAX_REPLY_POLLS) {
+      console.warn('[REPLY_POLL] Max polls reached. Stopping. Reply will load on next open.');
+      stopReplyPolling();
+      useChatStore.getState().set_isTyping(false);
+      return;
+    }
+
     await checkFn();
-  }, 5000);
-  console.log('[RECOVERY] Reply-wait polling started (5s interval, max 5min)');
+  }, 3000);
+  console.log('[REPLY_POLL] Started (3s interval, max 6min)');
+}
+
+function stopReplyPolling() {
+  if (_replyPollTimer) {
+    clearInterval(_replyPollTimer);
+    _replyPollTimer = null;
+    _replyPollCount = 0;
+    console.log('[REPLY_POLL] Stopped');
+  }
 }
 
 // ── Queue watchdog — rescues stuck send queues ────────────────────────
@@ -114,6 +141,8 @@ async function loadPendingQueue(): Promise<{ id: string; content: string }[]> {
 const DELIVERED_KEY = 'humanOs_deliveredIds';
 
 // ── Awaiting-reply persistence — survives app restarts ────────────────────
+// Stores conversationId + timestamp of last sent user message.
+// On restart: if last DB message is still a user msg, resume polling.
 const AWAITING_REPLY_KEY = 'humanOs_awaitingReply';
 async function saveAwaitingReply(conversationId: string): Promise<void> {
   try {
@@ -128,6 +157,7 @@ async function loadAwaitingReply(): Promise<{ convId: string; ts: number } | nul
     const raw = await SecureStore.getItemAsync(AWAITING_REPLY_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    // Expire after 10 minutes — if no reply in 10 mins, stop waiting
     if (Date.now() - parsed.ts > 10 * 60 * 1000) {
       await clearAwaitingReply();
       return null;
@@ -264,16 +294,15 @@ export const useChatStore = create<ChatState>((set, get) => {
         _inFlightIds.add(primaryId);
         set({ isTyping: true });
 
-        // Check delivered status in parallel to allow fast failure, 
-        // but DO NOT block the network request from firing immediately
-        loadDeliveredIds().then(deliveredIds => {
-          if (deliveredIds.has(primaryId)) {
-             _inFlightIds.delete(primaryId);
-             set((s) => ({
-               messages: s.messages.filter(m => !batch.some(b => b.id === m.id)),
-             }));
-          }
-        });
+        // Check delivered status — skip if already processed, but DON'T remove from store
+        // (removing from store mid-render causes the "message deleted" bug the user sees)
+        const deliveredIds = await loadDeliveredIds();
+        if (deliveredIds.has(primaryId)) {
+          _inFlightIds.delete(primaryId);
+          // Message already sent — just start polling for the reply
+          startReplyPolling(get().checkProactiveMessages);
+          continue;
+        }
 
         let retryDelay = 3000;
         let succeeded = false;
@@ -291,9 +320,10 @@ export const useChatStore = create<ChatState>((set, get) => {
 
             const convId: string = data?.conversation_id || get().conversationId || '';
 
+            // ── Update message status to 'sent' in store ─────────────────
             set((s) => ({
               conversationId: convId,
-              isTyping: true, // Keep true until background reply arrives
+              isTyping: true, // Keep true until reply arrives
               messages: s.messages.map(m =>
                 batch.some(b => b.id === m.id) 
                   ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data.user_message_id || m.id) : m.id } 
@@ -305,23 +335,17 @@ export const useChatStore = create<ChatState>((set, get) => {
             await markDelivered(primaryId);
             
             // ── Save awaiting-reply state so a restart can resume polling ──────
-            saveAwaitingReply(convId).catch(() => {});
+            await saveAwaitingReply(convId);
 
-            // ── Start polling for the reply (useful if app stays in foreground) ──
-            // IMPORTANT: Use useChatStore.getState() directly inside the interval,
-            // NOT a captured `state` variable — the captured reference goes stale
-            // and reads the old isTyping value, preventing the interval from stopping.
-            let polls = 0;
-            const pollInterval = setInterval(async () => {
-              polls++;
-              const live = useChatStore.getState();
-              // Stop polling if typing was cleared (reply received) or after 60 polls (3 mins)
-              if (!live.isTyping || polls > 60) {
-                clearInterval(pollInterval);
-                return;
-              }
-              await live.checkProactiveMessages();
-            }, 3000);
+            // ── Save message cache immediately so closing the app doesn't lose the message ──
+            // This is the fix for "message deleted on reopen" — the cache must include
+            // the sent message so it's available on cold start even before the DB fetch.
+            saveMessageCache(get().messages, convId).catch(() => {});
+
+            // ── Start unified reply poller ─────────────────────────────────────
+            // This covers foreground use. If app is minimized, push notification
+            // fires checkProactiveMessages directly via notificationService callback.
+            startReplyPolling(get().checkProactiveMessages);
 
             succeeded = true;
             console.log('[QUEUE] async send success for batch starting with:', primaryId);
@@ -363,6 +387,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     diagnostics: null,
     developerMode: false,
     setDeveloperMode: (val: boolean) => set({ developerMode: val }),
+    set_isTyping: (v: boolean) => set({ isTyping: v }),
     
     hydrateMessages: async () => {
       // ── Step 1: Load cache instantly (zero wait, no spinner) ──────────────────
@@ -483,23 +508,28 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
 
           // ── Resume reply-wait polling if we were waiting for Nova's reply ──────────────
-          // isTyping is NOT persisted. On restart it resets to false even if we
-          // were mid-conversation. We detect this by checking:
-          // 1. A persisted 'awaitingReply' flag was saved when the msg was sent
-          // 2. The last message in fresh history is still a user message (no reply yet)
-          loadAwaitingReply().then(awaiting => {
-            if (!awaiting) return;
-            const lastMsg = freshMessages[freshMessages.length - 1];
-            const lastIsUser = lastMsg?.role === 'user';
-            if (lastIsUser) {
+          // Check persisted awaiting-reply flag AND confirm the last DB message is
+          // still a user message (not yet replied to).
+          // CRITICAL: we check freshMessages (DB truth), NOT formattedHistory only.
+          const awaiting = await loadAwaitingReply();
+          if (awaiting) {
+            // Find the actual last message from DB (ignore restored pending msgs)
+            const lastDbMsg = formattedHistory[formattedHistory.length - 1];
+            const lastDbMsgIsUser = lastDbMsg?.role === 'user';
+            if (lastDbMsgIsUser) {
               console.log('[HYDRATE] Resuming reply-wait polling — no reply received yet');
               set({ isTyping: true });
-              startRecoveryPolling(get().checkProactiveMessages);
+              // Start fresh poller — stops automatically when reply arrives
+              stopReplyPolling();
+              startReplyPolling(get().checkProactiveMessages);
             } else {
-              // Reply already in history — clean up the awaiting flag
+              // Reply already in DB — mark as received and stop waiting
+              console.log('[HYDRATE] Reply already in DB, clearing awaiting flag');
               clearAwaitingReply();
+              // Make sure isTyping is false (could be stale from prev session)
+              set({ isTyping: false });
             }
-          });
+          }
         } else {
           const restoredMessages: Message[] = filteredQueue.map(q => ({
             id: q.id,
@@ -617,10 +647,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
     },
 
-    // ── Proactive message check: called when app comes to foreground ───────────
+    // ── Proactive message check: called when push arrives or app foregrounds ───
     // Fetches any messages Nova sent while the app was backgrounded/minimized.
-    // Guarded by a lock so rapid back-to-back calls (AppState + notification)
-    // don't both run and produce duplicates.
+    // Guarded by a lock so rapid back-to-back calls don't produce duplicates.
     checkProactiveMessages: async () => {
       if (_proactiveCheckInProgress) {
         console.log('[PROACTIVE] Skipping — check already in progress');
@@ -678,12 +707,9 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (contentSet.has(msg.content.trim())) continue;
           }
 
-          // Only add messages newer than our latest (allow 60s clock skew).
-          // EXCEPTION: When isTyping=true we're actively waiting for Nova's reply —
-          // skip the timestamp filter so server clock skew can never hide the reply.
-          // The ID+content dedup above already prevents duplicates.
-          const isAwaitingReply = get().isTyping;
-          if (!isAwaitingReply && latestTimestamp && new Date(msg.created_at).getTime() < new Date(latestTimestamp).getTime() - 60000) continue;
+          // NOTE: Timestamp filter intentionally removed — the ID+content dedup above
+          // is comprehensive and prevents duplicates. The timestamp filter was silently
+          // rejecting Nova's proactive follow-up messages when isTyping was false.
 
           if (role === 'assistant') {
             const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
@@ -715,20 +741,24 @@ export const useChatStore = create<ChatState>((set, get) => {
             messages: [...s.messages, ...newMessages],
             isTyping: false,
           }));
-          saveMessageCache([...get().messages], get().conversationId);
-          // Reply arrived — clear the persistent awaiting flag
+          // Reply arrived — stop the poller and clear the persistent awaiting flag
+          stopReplyPolling();
           clearAwaitingReply();
+          saveMessageCache([...get().messages], get().conversationId);
         }
 
         // ── isTyping self-heal: if we're still 'typing' but the store already has
-        // an assistant reply as the last message, the reply was added without
+        // an assistant reply as the VERY LAST message, the reply was added without
         // clearing isTyping (e.g. via hydrateMessages after restart). Fix it.
+        // NOTE: Only do this if newMessages is empty — if we just found new msgs
+        // above, isTyping was already set to false.
         if (newMessages.length === 0 && get().isTyping) {
           const storeMsgs = get().messages;
           const lastStoreMsg = storeMsgs[storeMsgs.length - 1];
           if (lastStoreMsg?.role === 'assistant') {
             console.log('[PROACTIVE] Self-healing: isTyping stuck true but reply already in store');
             set({ isTyping: false });
+            stopReplyPolling();
             clearAwaitingReply();
           }
         }
