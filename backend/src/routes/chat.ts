@@ -1386,7 +1386,8 @@ Current IST date/time: ${dateStr} ${timeStr}`;
       // In async_mode: 202 was already sent. If we reach here, the user message
       // is in the DB but Nova never replied. Save a fallback reply so the user
       // always gets SOMETHING and the chat never stays stuck.
-      if (async_mode) {
+      const isAsync = req.body?.async_mode === true;
+      if (isAsync) {
         logger.error('[ASYNC] Unexpected crash during processing — saving fallback reply', {
           error: err instanceof Error ? err.message : String(err),
           userId: (req as any).user?.id,
