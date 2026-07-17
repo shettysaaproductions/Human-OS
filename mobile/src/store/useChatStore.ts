@@ -157,8 +157,8 @@ async function loadAwaitingReply(): Promise<{ convId: string; ts: number } | nul
     const raw = await SecureStore.getItemAsync(AWAITING_REPLY_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    // Expire after 10 minutes — if no reply in 10 mins, stop waiting
-    if (Date.now() - parsed.ts > 10 * 60 * 1000) {
+    // Expire after 30 minutes — backend may be slow under load; 10 was too short
+    if (Date.now() - parsed.ts > 30 * 60 * 1000) {
       await clearAwaitingReply();
       return null;
     }

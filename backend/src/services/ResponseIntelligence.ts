@@ -46,22 +46,24 @@ export function classifyIntent(message: string, recentHistory: string[] = []): R
   // ── HUMAN_CHAT mode (everything else) ──
   
   // Ultra-short casual (under 60 chars, no question intent)
+  // These are the most common Indian chat replies: "ok", "haan", "ha", "correct", "theek hai"
+  // Nova MUST move the conversation forward with 2 bubbles — needs room for that.
   if (len < 60 && !lower.includes('?') && !/\b(kya|kab|kaise|kitna|kyun|how|what|when|why|who)\b/.test(lower)) {
-    return { mode: 'HUMAN_CHAT', maxTokens: 150, temperature: 0.9, shouldOfferTable: false };
+    return { mode: 'HUMAN_CHAT', maxTokens: 300, temperature: 0.9, shouldOfferTable: false };
   }
   
   // Direct factual questions
   const factualPatterns = /\b(how old|kitna|kab|what.?s (my|his|her)|name kya|time kya|age kya|when did|kitne din|kitne saal)\b/i;
   if (factualPatterns.test(lower)) {
-    return { mode: 'HUMAN_CHAT', maxTokens: 256, temperature: 0.5, shouldOfferTable: false };
+    return { mode: 'HUMAN_CHAT', maxTokens: 350, temperature: 0.5, shouldOfferTable: false };
   }
   
   // Emotional / vent
   const emotionalPatterns = /\b(feel|sad|happy|angry|bura laga|khush|tension|stress|jhagda|fight|cry|ro raha|dukhi|pareshan)\b/i;
   if (emotionalPatterns.test(lower)) {
-    return { mode: 'HUMAN_CHAT', maxTokens: 300, temperature: 0.85, shouldOfferTable: false };
+    return { mode: 'HUMAN_CHAT', maxTokens: 400, temperature: 0.85, shouldOfferTable: false };
   }
   
-  // Default: Human chat, medium budget
-  return { mode: 'HUMAN_CHAT', maxTokens: 400, temperature: 0.85, shouldOfferTable: false };
+  // Default: Human chat, medium budget — enough for 2 proper bubbles
+  return { mode: 'HUMAN_CHAT', maxTokens: 450, temperature: 0.85, shouldOfferTable: false };
 }
