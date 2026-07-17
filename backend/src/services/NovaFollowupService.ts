@@ -57,7 +57,8 @@ export class NovaFollowupService {
     conversationId: string,
     recentMessages: { role: string; content: string }[],
     userLocalHour: number,   // 0-23, user's local time
-    userCountry: string
+    userCountry: string,
+    workingMemory?: { key: string; value: string }[]
   ): Promise<void> {
     try {
       // Cancel any existing pending follow-up for this user
@@ -79,8 +80,21 @@ export class NovaFollowupService {
         .map(m => `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content.substring(0, 200)}`)
         .join('\n');
 
-      const contextNote = `Current user local time: ${userLocalHour}:00 (${userCountry}). ` +
-        `It is ${userLocalHour < 12 ? 'morning' : userLocalHour < 17 ? 'afternoon' : 'evening'}.`;
+      // Extract schedule clues from working memory
+      let scheduleNote = '';
+      if (workingMemory && workingMemory.length > 0) {
+        const scheduleKeys = ['work', 'office', 'logout', 'login', 'gym', 'sleep', 'routine', 'schedule', 'timing', 'job'];
+        const scheduleMemories = workingMemory.filter(m =>
+          scheduleKeys.some(k => m.key.toLowerCase().includes(k) || m.value.toLowerCase().includes(k))
+        );
+        if (scheduleMemories.length > 0) {
+          scheduleNote = '\n\nUSER SCHEDULE (from memory — CRITICAL for timing decisions):\n' +
+            scheduleMemories.map(m => `- ${m.key}: ${m.value}`).join('\n');
+        }
+      }
+
+      const timeOfDay = userLocalHour < 12 ? 'morning' : userLocalHour < 17 ? 'afternoon' : userLocalHour < 20 ? 'evening' : 'night';
+      const contextNote = `Current user local time: ${userLocalHour}:00 (${userCountry}). It is ${timeOfDay}.${scheduleNote}`;
 
       // Ask LLM to decide follow-up timing and content
       const decisionRaw = await chatCompletion([
@@ -106,8 +120,29 @@ export class NovaFollowupService {
         return;
       }
 
-      // Cap to reasonable bounds
-      const delayMinutes = Math.min(Math.max(decision.delayMinutes, 3), 12 * 60);
+      // Cap to reasonable bounds — minimum 5 mins, maximum 12 hours
+      const delayMinutes = Math.min(Math.max(decision.delayMinutes, 5), 12 * 60);
+
+      // SCHEDULE GUARD: If the follow-up message asks about location/home/arrival
+      // and the user's known logout is after the projected fire time → skip or delay
+      const projectedHour = (userLocalHour + Math.floor(delayMinutes / 60)) % 24;
+      const msgLower = decision.message.toLowerCase();
+      const isHomeQuestion = ['home', 'ghar', 'pahunch', 'reached', 'land', 'aa gaye', 'wapas'].some(w => msgLower.includes(w));
+      if (isHomeQuestion && scheduleNote) {
+        // If schedule note mentions logout time > projected fire time, push the delay
+        const logoutMatch = scheduleNote.match(/logout[:\s]*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+        if (logoutMatch) {
+          let logoutHour = parseInt(logoutMatch[1]);
+          if (logoutMatch[3]?.toLowerCase() === 'pm' && logoutHour < 12) logoutHour += 12;
+          if (projectedHour < logoutHour) {
+            logger.info('[NovaFollowup] Suppressing home-arrival message — user not yet out of work', {
+              userId, projectedHour, logoutHour
+            });
+            return; // Don't schedule this — it would be dumb
+          }
+        }
+      }
+
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
       await supabaseAdmin.from('nova_followups').insert({
