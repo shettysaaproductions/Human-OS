@@ -27,13 +27,14 @@ export function setChatScreenActive(active: boolean) {
 
 // ── Show notifications when app is open BUT suppress when on ChatScreen ────────
 // When user is actively reading the chat, showing a banner is redundant noise.
+// shouldShowList: false when on chat ensures NO heads-up banner on Android.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: !_isChatScreenActive,
     shouldPlaySound: !_isChatScreenActive,
-    shouldSetBadge: true,
+    shouldSetBadge: !_isChatScreenActive,
     shouldShowBanner: !_isChatScreenActive,
-    shouldShowList: true,
+    shouldShowList: !_isChatScreenActive,
   }),
 });
 
@@ -138,7 +139,13 @@ class NotificationService {
     // Fires when a push notification arrives while the app is foregrounded
     this._notifReceivedListener = Notifications.addNotificationReceivedListener((notification) => {
       const type = notification.request.content.data?.type as string | undefined;
-      if (type === 'nova_reply' || type === 'nova_auto_reminder') {
+      // If user is on chat screen: silently dismiss the notification and just fetch messages
+      // This is the WhatsApp behavior — no banner/sound while actively reading
+      if (_isChatScreenActive) {
+        Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => {});
+        Notifications.setBadgeCountAsync(0).catch(() => {});
+      }
+      if (type === 'nova_reply' || type === 'nova_auto_reminder' || type === 'nova_consciousness' || type === 'nova_followup') {
         console.log('[Notifications] Nova reply push received (foreground) — fetching messages');
         this._fireReplyCallback();
       }
@@ -147,7 +154,7 @@ class NotificationService {
     // Fires when the user taps the notification (app was in background or killed)
     this._notifResponseListener = Notifications.addNotificationResponseReceivedListener((response) => {
       const type = response.notification.request.content.data?.type as string | undefined;
-      if (type === 'nova_reply' || type === 'nova_auto_reminder') {
+      if (type === 'nova_reply' || type === 'nova_auto_reminder' || type === 'nova_consciousness' || type === 'nova_followup') {
         console.log('[Notifications] Nova reply push tapped (background) — fetching messages');
         this._fireReplyCallback();
       }

@@ -571,18 +571,35 @@ chatRouter.post(
         }
       })();
 
-      // 3. Chat history
-      const recentMessages = ((historyResult.data || []) as any[]).reverse().map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content
-      }));
+      // 3. Chat history — filter out system fallback/error messages so
+      // Nova never sees them in context and never responds TO them.
+      const FALLBACK_PREFIXES = [
+        'Yaar, kuch technical issue',
+        'Yaar, thoda technical glitch',
+        'kuch technical issue aa gaya',
+        '[SYSTEM]',
+        'Thodi der mein phir try karo',
+      ];
+      const isFallback = (content: string) =>
+        FALLBACK_PREFIXES.some(p => content.includes(p));
 
-      // 3.5 Cross-session context
+      const recentMessages = ((historyResult.data || []) as any[])
+        .filter(msg => !isFallback(msg.content))  // ← strip fallback messages from LLM context
+        .reverse()
+        .map(msg => ({
+          role: msg.role as 'user' | 'assistant' | 'system',
+          content: msg.content
+        }));
+
+      // 3.5 Cross-session context — also filter fallback messages
       let recentCrossSessionContext = '';
       if (crossSessionResult.data && (crossSessionResult.data as any[]).length > 0) {
-        const lines = (crossSessionResult.data as any[]).reverse().map(m =>
-          `${m.role === 'assistant' ? 'Nova' : 'User'}: ${m.content.substring(0, 200)}${m.content.length > 200 ? '...' : ''}`
-        );
+        const lines = (crossSessionResult.data as any[])
+          .filter(m => !isFallback(m.content))  // ← no fallbacks in cross-session either
+          .reverse()
+          .map(m =>
+            `${m.role === 'assistant' ? 'Nova' : 'User'}: ${m.content.substring(0, 200)}${m.content.length > 200 ? '...' : ''}`
+          );
         recentCrossSessionContext = lines.join('\n');
       }
 
