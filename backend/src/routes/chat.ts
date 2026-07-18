@@ -579,6 +579,13 @@ chatRouter.post(
         'kuch technical issue aa gaya',
         '[SYSTEM]',
         'Thodi der mein phir try karo',
+        // LLM-hallucinated refusals — should also be filtered so Nova doesn't reference them
+        'reminder set nahi kar sakta',
+        'reminder system thoda busy',
+        'Nova ka reminder system',
+        'Sorry yaar, reminder',
+        'system busy hai',
+        'set nahi kar sakta',
       ];
       const isFallback = (content: string) =>
         FALLBACK_PREFIXES.some(p => content.includes(p));
@@ -864,9 +871,20 @@ chatRouter.post(
       const reminderInstructions = `\n\n## REMINDER INTELLIGENCE RULES
 You are Nova — an intelligent life assistant who manages reminders like a smart friend.
 
+⚠️ CRITICAL — NO REFUSALS ALLOWED:
+- When a user asks to be reminded about ANYTHING, you MUST call the set_reminder tool immediately.
+- NEVER say "reminder set nahi kar sakta", "system busy", "can't set reminder", or any excuse.
+- NEVER generate a text reply refusing a reminder. Just call the tool.
+- Even if the time seems ambiguous — use needs_clarification to ask. Do NOT refuse.
+
+**Hindi/Hinglish recognition (ALWAYS treat these as reminder requests):**
+- "yaad dilao", "yaad karo", "yaad kar lena", "yaad dila dena" → SET REMINDER
+- "X baje yaad dilao", "X baje remind karo" → SET REMINDER at that time today
+- "[baj/baje]" means the hour in IST (e.g. "5 baje" = 5:00pm or 5:00am based on context)
+
 **When to set reminders:**
-1. User explicitly asks → use set_reminder tool immediately
-2. User mentions an important upcoming event (interview, exam, flight, appointment, deadline) → auto-set a reminder 30-60 mins before with is_auto=true, then tell them naturally
+1. User explicitly asks → use set_reminder tool immediately. NO exceptions.
+2. User mentions an important upcoming event (interview, exam, flight, appointment, deadline) → auto-set with is_auto=true
 3. Do NOT set reminders for casual mentions ("I'll have tea later")
 
 **How to handle complex requests (ALL in one tool call):**
@@ -928,9 +946,13 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
           };
 
           // Only pass reminder tools if the user actually asks for a reminder/alarm/cancellation
-          const mightBeReminderCmd = effectiveMessage.match(/\b(remind|alarm|cancel|delete|forget|schedule|yaad)\b/i) || effectiveMessage.includes('🔔');
+          // Expanded to cover all Hindi/Hinglish variants — yaad dilao, yaad karo, yaad kar lena, etc.
+          const mightBeReminderCmd = /(remind|alarm|cancel|delete|forget|schedule|yaad|reminder|set reminder|notification|alert|ringtone|baj|bata dena|bata do|yaad rakhna|yaad kar|yaad dila|notify|wake me|uthao)/i.test(effectiveMessage) || effectiveMessage.includes('🔔');
           
           if (mightBeReminderCmd) {
+            // CRITICAL: Prepend a mandatory instruction so the LLM MUST call the tool
+            // and never generates a text refusal like "reminder set nahi kar sakta"
+            nvidiaOptions.tool_choice = 'auto';
             nvidiaOptions.tools = [{
               type: 'function',
               function: {
