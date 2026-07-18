@@ -427,10 +427,27 @@ export const useChatStore = create<ChatState>((set, get) => {
         const history = await chatService.getHistory(undefined, PAGE_SIZE);
         console.log('Diagnostics - Messages received from API:', history?.length);
         if (history && history.length > 0) {
-          const formattedHistory: Message[] = [];
+        // Filter out backend fallback and LLM-hallucinated refusal messages from UI
+        // These should never appear as chat bubbles to the user
+        const MOBILE_FALLBACK_FILTER = [
+          'Yaar, kuch technical issue',
+          'Thodi der mein phir try karo',
+          'kuch technical issue aa gaya',
+          'reminder set nahi kar sakta',
+          'reminder system thoda busy',
+          'Nova ka reminder system',
+          'system busy hai',
+        ];
+        const isBadMessage = (content: string) =>
+          MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
+
+        const formattedHistory: Message[] = [];
           for (const msg of history) {
+            // Skip bad messages entirely — don't show in UI
+            if (msg.role === 'assistant' && isBadMessage(msg.content)) continue;
             const role = msg.role === 'nova' ? 'assistant' : msg.role;
             const timestamp = msg.created_at || new Date().toISOString();
+
             
             if (role === 'assistant') {
               const initialChunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
