@@ -109,7 +109,7 @@ When the user types `"auto upgrade"` or `"upgrade"`:
 5. `npm run build` in `backend/` to verify no TypeScript errors
 6. Restart local backend: kill old task, start fresh
 7. `git add . && git commit -m 'Auto Upgrade: ...' && git push origin main`
-8. If mobile files changed: `npx eas update --branch preview --message "..."`
+8. If mobile files changed: `npx eas update --branch production --message "..."`
 9. Present full flaw analysis + fix summary to user
 
 ---
