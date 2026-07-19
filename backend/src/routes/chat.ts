@@ -377,14 +377,7 @@ chatRouter.post(
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
 
-      // ── ASYNC MODE: respond immediately, process in background ──────────────
-      // When the mobile app sends async_mode=true, we return 202 Accepted right
-      // away so Android doesn't suspend the JS thread waiting for Nova's reply.
-      // Nova's processing happens server-side, reply is saved to DB, push fires.
-      if (async_mode) {
-        res.status(202).json({ status: 'processing', conversation_id: activeConversationId });
-        // Continue processing below — res is already closed, no further res calls
-      }
+
       const isDegraded = dbHealthService.isDegraded();
       // For proactive triggers, rewrite the message to a natural system instruction
       let effectiveMessage = is_proactive
@@ -1071,8 +1064,6 @@ chatRouter.post(
       } else {
         logger.warn('[Push] No push_token for user — background notification skipped', { userId });
       }
-
-
 
       // In async_mode the 202 was already sent above — skip the synchronous response
       if (!isStreaming && !async_mode) {
