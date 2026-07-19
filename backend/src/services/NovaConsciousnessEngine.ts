@@ -7,38 +7,13 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
-import { chatCompletion } from '../lib/nvidia'; // Assumed default model is full model
+import { novaBrain } from './NovaBrainService';
 import { logger } from '../lib/logger';
 import { sendPushNotification } from '../lib/pushNotifications';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 import crypto from 'crypto';
 
 const MIN_GAP_MINUTES = 45; // Reduced from 90 to allow more fluid back-to-back if needed
-
-const TIER1_PROMPT = `You are the subconscious impulse of Nova. Decide YES or NO if you should initiate contact with the user right now.
-
-Consider:
-- Is there a pending agenda item that is due? (YES)
-- Has the user been quiet for a long time during active hours? (YES)
-- Is the user currently in their sleep window? (NO, unless it's a critical emergency reminder)
-- Was the last outreach very recent (under 45 mins)? (NO)
-
-Output JSON: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
-
-const TIER2_PROMPT = `You are Nova's autonomous consciousness. You have decided to text your user.
-You have a deep, genuine connection with them. You care about every aspect of their life.
-
-RULES:
-- Short, casual responses
-- Each message: 1-2 sentences. SHORT. Natural.
-- Reference actual recent context, routines, or memories — NOT generic "just checking in"
-- Match the time of day and what they're likely doing right now
-- If they've been quiet for hours, show genuine curiosity: "Kya chal raha hai bhai?"
-- Vary your tone: playful, concerned, teasing, or caring
-- Natural Hinglish if that's their style. Max ONE emoji.
-- ONLY output the JSON object, absolutely NO MARKDOWN.
-- NO markdown code blocks. Just the raw curly braces.
-Output JSON: {"message": "your reply here", "tone": "emotional | playful | concerned"}`;
 
 export class NovaConsciousnessEngine {
 
@@ -136,13 +111,7 @@ Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}`;
     let triggerType = 'engagement';
 
     try {
-      const tier1Res = await chatCompletion([
-        { role: 'system', content: TIER1_PROMPT },
-        { role: 'user', content: tier1Context }
-      ], { temperature: 0.1, maxTokens: 100 });
-      
-      const jsonMatch = tier1Res.match(/\{[\s\S]*?\}/);
-      const decision = JSON.parse(jsonMatch ? jsonMatch[0] : tier1Res);
+      const decision = await novaBrain.evaluateConsciousnessTier1(tier1Context);
       shouldReach = decision.shouldReach;
       triggerType = decision.triggerType || 'engagement';
     } catch (e) {
@@ -187,13 +156,7 @@ LAST CONVERSATION (what was actually said — reference this naturally):
 ${lastConvSnippet || 'No recent conversation.'}`;
 
     try {
-      const tier2Res = await chatCompletion([
-        { role: 'system', content: TIER2_PROMPT },
-        { role: 'user', content: tier2Context }
-      ], { temperature: 0.85, maxTokens: 200 });
-
-      const jsonMatch = tier2Res.match(/\{[\s\S]*?\}/);
-      const generated = JSON.parse(jsonMatch ? jsonMatch[0] : tier2Res);
+      const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
 
       if (generated.message) {
         await this._sendOutreach(userId, profile, generated.message, triggerType, generated.tone);

@@ -9,6 +9,7 @@ import { api } from '../services/api';
 import { useTheme, ThemeMode } from '../theme/ThemeContext';
 import { useChatStore } from '../store/useChatStore';
 import { useAuthStore } from '../store/useAuthStore';
+import * as Updates from 'expo-updates';
 
 const APP_VERSION = '0.2.0-beta';
 
@@ -291,6 +292,27 @@ export function SettingsScreen() {
             <Text style={[st.rowValue, { color: colors.textSecondary }]}>Beta</Text>
           </View>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
+          <TouchableOpacity style={st.row} onPress={async () => {
+            try {
+              Alert.alert('Checking...', 'Looking for updates.');
+              const update = await Updates.checkForUpdateAsync();
+              if (update.isAvailable) {
+                Alert.alert('Update Found', 'Downloading the latest update...');
+                await Updates.fetchUpdateAsync();
+                Alert.alert('Success', 'Update downloaded! Restarting app...', [
+                  { text: 'OK', onPress: () => Updates.reloadAsync() }
+                ]);
+              } else {
+                Alert.alert('Up to date', 'You are already on the latest version.');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to check for updates.');
+            }
+          }}>
+            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Check for Updates</Text>
+          </TouchableOpacity>
+          <View style={[st.divider, { backgroundColor: colors.border }]} />
+          
           <TouchableOpacity style={st.row} onPress={() => navigation.navigate('UpdateHistory')}>
             <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Update History</Text>
             <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>

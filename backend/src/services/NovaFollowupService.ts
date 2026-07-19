@@ -18,152 +18,45 @@
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { chatCompletion } from '../lib/nvidia';
 import { sendPushNotification } from '../lib/pushNotifications';
-
-interface FollowupDecision {
-  shouldFollowUp: boolean;
-  delayMinutes: number;       // minutes from now to send
-  message: string;            // what Nova will say
-  reason: string;             // internal reasoning (for logs)
-}
-
-const FOLLOWUP_DECISION_PROMPT = `You are Nova's internal scheduling engine. Given a recent conversation snippet and current context, decide:
-1. Should Nova follow up? (sometimes no — if conversation was conclusive or user said bye)
-2. How many minutes from now? (be realistic — can be 5 mins, 30 mins, 2 hours, 6 hours)
-3. What should Nova say? (short, warm, natural — NOT "Hey I was just checking in" — be specific to the conversation)
-
-Context rules:
-- If user said "bye", "ttyl", "later", "gtg", "busy", "in a meeting" → wait 2-4 hours
-- If user explicitly stated it's their weekoff, holiday, or they are relaxing → DO NOT follow up with work-related or random generic questions. If you must follow up, make it relevant to their relaxation, and wait longer (2-4 hours).
-- If user is at work/office → wait until evening (6+ hours)  
-- If conversation just ended naturally with no clear closure → follow up in 10-30 mins
-- If user seems happy and chatty → shorter gap (5-20 mins)
-- If it's late night (10pm-7am user time) → do not follow up (return shouldFollowUp: false)
-- If user asked something and you answered → check back in 15-30 mins
-- Vary your timing — don't be predictable
-
-You MUST respond with ONLY a raw JSON object. No markdown, no explanation, no backticks:
-{"shouldFollowUp":true,"delayMinutes":15,"message":"Btw how did that go?","reason":"User mentioned something they were about to do"}`;
 
 
 export class NovaFollowupService {
 
   /**
-   * Schedule the next follow-up after a conversation turn.
-   * Call this fire-and-forget after every chat response.
+   * Queue the next follow-up message from Nova Brain.
    */
-  async scheduleFollowup(
+  async queueFollowup(
     userId: string,
     conversationId: string,
-    recentMessages: { role: string; content: string }[],
-    userLocalHour: number,   // 0-23, user's local time
-    userCountry: string,
-    workingMemory?: { key: string; value: string }[]
+    message: string,
+    delayHours: number
   ): Promise<void> {
     try {
       // Cancel any existing pending follow-up for this user
-      // (new message = reset the clock)
       await supabaseAdmin
         .from('nova_followups')
         .update({ status: 'cancelled' })
         .eq('user_id', userId)
         .eq('status', 'pending');
 
-      // Don't schedule during sleep hours (10pm – 7am user time)
-      if (userLocalHour >= 22 || userLocalHour < 7) {
-        logger.info('[NovaFollowup] Skipping — user is in sleep hours', { userId, userLocalHour });
-        return;
-      }
-
-      // Build conversation snippet (last 6 messages for context)
-      const snippet = recentMessages.slice(-6)
-        .map(m => `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content.substring(0, 200)}`)
-        .join('\n');
-
-      // Extract schedule clues from working memory
-      let scheduleNote = '';
-      if (workingMemory && workingMemory.length > 0) {
-        const scheduleKeys = ['work', 'office', 'logout', 'login', 'gym', 'sleep', 'routine', 'schedule', 'timing', 'job'];
-        const scheduleMemories = workingMemory.filter(m =>
-          scheduleKeys.some(k => m.key.toLowerCase().includes(k) || m.value.toLowerCase().includes(k))
-        );
-        if (scheduleMemories.length > 0) {
-          scheduleNote = '\n\nUSER SCHEDULE (from memory — CRITICAL for timing decisions):\n' +
-            scheduleMemories.map(m => `- ${m.key}: ${m.value}`).join('\n');
-        }
-      }
-
-      const timeOfDay = userLocalHour < 12 ? 'morning' : userLocalHour < 17 ? 'afternoon' : userLocalHour < 20 ? 'evening' : 'night';
-      const contextNote = `Current user local time: ${userLocalHour}:00 (${userCountry}). It is ${timeOfDay}.${scheduleNote}`;
-
-      // Ask LLM to decide follow-up timing and content
-      const decisionRaw = await chatCompletion([
-        { role: 'system', content: FOLLOWUP_DECISION_PROMPT },
-        { role: 'user', content: `${contextNote}\n\nRecent conversation:\n${snippet}` }
-      ], {
-        maxTokens: 200,
-        temperature: 0.8,
-      });
-
-      let decision: FollowupDecision;
-      try {
-        // Extract JSON even if LLM wraps it in markdown code fences
-        const jsonMatch = decisionRaw.match(/\{[\s\S]*?\}/);
-        decision = JSON.parse(jsonMatch ? jsonMatch[0] : decisionRaw) as FollowupDecision;
-      } catch {
-        logger.warn('[NovaFollowup] Failed to parse LLM decision JSON', { raw: decisionRaw });
-        return;
-      }
-
-      if (!decision.shouldFollowUp || !decision.message || decision.delayMinutes <= 0) {
-        logger.info('[NovaFollowup] LLM decided no follow-up needed', { userId, reason: decision.reason });
-        return;
-      }
-
-      // Cap to reasonable bounds — minimum 5 mins, maximum 12 hours
-      const delayMinutes = Math.min(Math.max(decision.delayMinutes, 5), 12 * 60);
-
-      // SCHEDULE GUARD: If the follow-up message asks about location/home/arrival
-      // and the user's known logout is after the projected fire time → skip or delay
-      const projectedHour = (userLocalHour + Math.floor(delayMinutes / 60)) % 24;
-      const msgLower = decision.message.toLowerCase();
-      const isHomeQuestion = ['home', 'ghar', 'pahunch', 'reached', 'land', 'aa gaye', 'wapas'].some(w => msgLower.includes(w));
-      if (isHomeQuestion && scheduleNote) {
-        // If schedule note mentions logout time > projected fire time, push the delay
-        const logoutMatch = scheduleNote.match(/logout[:\s]*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-        if (logoutMatch) {
-          let logoutHour = parseInt(logoutMatch[1]);
-          if (logoutMatch[3]?.toLowerCase() === 'pm' && logoutHour < 12) logoutHour += 12;
-          if (projectedHour < logoutHour) {
-            logger.info('[NovaFollowup] Suppressing home-arrival message — user not yet out of work', {
-              userId, projectedHour, logoutHour
-            });
-            return; // Don't schedule this — it would be dumb
-          }
-        }
-      }
-
+      const delayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 5), 24 * 60);
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
       await supabaseAdmin.from('nova_followups').insert({
         user_id: userId,
         conversation_id: conversationId,
-        message: decision.message,
+        message,
         fire_at: fireAt.toISOString(),
-        status: 'pending',
-        context_summary: decision.reason?.substring(0, 200) || null,
+        status: 'pending'
       });
 
-      logger.info('[NovaFollowup] Scheduled', {
+      logger.info('[NovaFollowup] Scheduled via Brain', {
         userId,
         delayMinutes,
-        fireAt: fireAt.toISOString(),
-        message: decision.message.substring(0, 60),
+        message: message.substring(0, 60),
       });
-
     } catch (err) {
-      // Fully fire-and-forget — never crash the chat flow
       logger.warn('[NovaFollowup] Error scheduling follow-up (non-critical)', {
         error: err instanceof Error ? err.message : String(err)
       });

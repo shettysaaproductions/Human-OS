@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { chatCompletion } from '../lib/nvidia';
+import { novaBrain } from './NovaBrainService';
 import { logger } from '../lib/logger';
 
 /**
@@ -74,28 +74,15 @@ export class ReflectionSchedulerService {
         .map(g => g.name)
         .join(', ');
 
-      const messages: Array<{ role: 'system' | 'user'; content: string }> = [
-        {
-          role: 'system',
-          content: `You are Nova, a thoughtful AI companion. Generate a warm, insightful daily reflection summary for the user based on their memories, emotions, and goals. Be concise (2-3 sentences). Focus on patterns and growth. Do not invent facts. Respond in JSON: { "summary": "...", "key_takeaways": ["..."] }`
-        },
-        {
-          role: 'user',
-          content: `Recent memories:\n${memorySummary}\n\nRecent emotions:\n${emotionSummary}\n\nActive goals: ${goalSummary || 'none'}`
-        }
-      ];
-
-      const raw = await chatCompletion(messages, { response_format: { type: 'json_object' }, maxTokens: 512 });
-
       let summary = 'Daily reflection completed.';
       let keyTakeaways: string[] = [];
 
       try {
-        const parsed = JSON.parse(raw);
+        const parsed = await novaBrain.evaluateDailyReflection(memorySummary, emotionSummary, goalSummary);
         summary = parsed.summary || summary;
         keyTakeaways = parsed.key_takeaways || [];
-      } catch {
-        summary = raw.trim().slice(0, 500);
+      } catch (err) {
+        logger.warn('Failed to parse daily reflection JSON', { err });
       }
 
       // 6. Store reflection
@@ -155,28 +142,15 @@ export class ReflectionSchedulerService {
         .map(r => `- ${r.summary}`)
         .join('\n');
 
-      const messages: Array<{ role: 'system' | 'user'; content: string }> = [
-        {
-          role: 'system',
-          content: `You are Nova. Based on a user's daily reflections from the past week, generate a thoughtful weekly summary with macro trends, achievements, and forward-looking insights. Respond in JSON: { "summary": "...", "key_takeaways": ["trend1", "achievement1", "insight1"] }`
-        },
-        {
-          role: 'user',
-          content: `Daily reflections from the past week:\n${dailySummaries}`
-        }
-      ];
-
-      const raw = await chatCompletion(messages, { response_format: { type: 'json_object' }, maxTokens: 768 });
-
       let summary = 'Weekly reflection completed.';
       let keyTakeaways: string[] = [];
 
       try {
-        const parsed = JSON.parse(raw);
+        const parsed = await novaBrain.evaluateWeeklyReflection(dailySummaries);
         summary = parsed.summary || summary;
         keyTakeaways = parsed.key_takeaways || [];
-      } catch {
-        summary = raw.trim().slice(0, 800);
+      } catch (err) {
+        logger.warn('Failed to parse weekly reflection JSON', { err });
       }
 
       await supabaseAdmin.from('reflections').insert({
