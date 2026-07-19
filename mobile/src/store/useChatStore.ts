@@ -729,6 +729,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
 
         const newMessages: Message[] = [];
+        const delayedChunks: Message[] = [];
 
         for (const msg of history) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
@@ -756,13 +757,18 @@ export const useChatStore = create<ChatState>((set, get) => {
               ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
               : [msg.content];
             chunks.forEach((chunkContent: string, idx: number) => {
-              newMessages.push({
+              const newMsg: Message = {
                 id: `${msgId}_part_${idx + 1}`,
                 role: 'assistant',
                 content: chunkContent,
                 status: 'responded',
                 timestamp: msg.created_at,
-              });
+              };
+              if (idx === 0) {
+                newMessages.push(newMsg);
+              } else {
+                delayedChunks.push(newMsg);
+              }
             });
           } else {
             newMessages.push({
@@ -782,13 +788,34 @@ export const useChatStore = create<ChatState>((set, get) => {
             combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
             return {
               messages: combined,
-              isTyping: false,
+              isTyping: delayedChunks.length > 0,
             };
           });
           // Reply arrived — stop the poller and clear the persistent awaiting flag
           stopReplyPolling();
           clearAwaitingReply();
           saveMessageCache([...get().messages], get().conversationId);
+
+          if (delayedChunks.length > 0) {
+            let currentDelay = 0;
+            delayedChunks.forEach((msg, index) => {
+              const gap = Math.floor(Math.random() * 5000) + 5000; // 5s to 10s gap
+              currentDelay += gap;
+              setTimeout(() => {
+                set((s) => {
+                  if (s.messages.some(m => m.id === msg.id)) return s;
+                  const msgWithFreshTime = { ...msg, timestamp: new Date().toISOString() };
+                  const combined = [...s.messages, msgWithFreshTime];
+                  combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  return {
+                    messages: combined,
+                    isTyping: index < delayedChunks.length - 1,
+                  };
+                });
+                saveMessageCache([...get().messages], get().conversationId);
+              }, currentDelay);
+            });
+          }
         }
 
         // ── isTyping self-heal: if we're still 'typing' but the store already has

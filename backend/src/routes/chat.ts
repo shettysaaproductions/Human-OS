@@ -441,9 +441,33 @@ chatRouter.post(
         return;
       }
 
-      // ── PARALLEL FETCH: profile, save user msg, chat history, cross-session,
+      // 1. Save user message IMMEDIATELY so it's in the DB
+      // We skip for proactive triggers (no phantom user message in history)
+      const userMsgResult = is_proactive
+        ? { data: { id: 'proactive_' + Date.now() }, error: null }
+        : await qt.track('save_user_message', 'chat_history', () =>
+            supabaseAdmin.from('chat_history')
+              .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, reply_to_id, reply_to_content })
+              .select('id').single()
+          );
+
+      if (userMsgResult.error) logger.error('Failed to save user message', { error: userMsgResult.error.message });
+      const userMessageId = userMsgResult.data?.id || 'msg_' + Date.now();
+
+      // 2. If fast async mode is requested, return 202 IMMEDIATELY NOW THAT THE MESSAGE IS IN DB
+      // so the client can mark it as delivered. The rest happens in the background.
+      const async_mode = req.body.async_mode;
+      if (async_mode) {
+        res.status(202).json({
+          message: 'Processing in background',
+          conversation_id: activeConversationId,
+          user_message_id: userMessageId,
+        });
+        // We do NOT return here, we let the process continue to talk to LLM
+      }
+
+      // ── PARALLEL FETCH: profile, chat history, cross-session,
       // working memory, long-term memories, short-term memories — all at once.
-      // Previously sequential (~600-900ms); now runs in ~200ms (one network RTT).
       const keywords = extractKeywords(effectiveMessage);
 
       const profileCacheKey = `profile:${userId}`;
@@ -455,7 +479,6 @@ chatRouter.post(
 
       const [
         profileResult,
-        userMsgResult,
         historyResult,
         crossSessionResult,
         wmResult,
@@ -469,15 +492,6 @@ chatRouter.post(
               supabaseAdmin.from('profiles')
                 .select('preferred_name, companion_personality, country, push_token')
                 .eq('id', userId).maybeSingle()
-            ),
-
-        // 2. Save user message — skip for proactive trigger (no phantom user message in history)
-        is_proactive
-          ? Promise.resolve({ data: { id: 'proactive_' + Date.now() }, error: null })
-          : qt.track('save_user_message', 'chat_history', () =>
-              supabaseAdmin.from('chat_history')
-                .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, reply_to_id, reply_to_content })
-                .select('id').single()
             ),
 
         // 3. Recent chat history (last 20, for context continuity)
@@ -539,10 +553,6 @@ chatRouter.post(
       if (profile && !cachedProfile) {
         cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
       }
-
-      // 2. User message ID
-      if (userMsgResult.error) logger.error('Failed to save user message', { error: userMsgResult.error.message });
-      const userMessageId = userMsgResult.data?.id || 'msg_' + Date.now();
 
       // 2.5 Track Session (fire & forget — non-critical)
       const today = new Date().toISOString().split('T')[0];
