@@ -29,11 +29,12 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 **All 7 engines are LIVE in production on Render.**
 
 ### ✅ Recently Completed
-- Auto Upgrade Protocol Execution: Strict anti-robot patches applied to `promptBuilder.ts`
+- Auto Upgrade Protocol Execution: Strict anti-robot patches applied to `promptBuilder.ts` (Anti-formality "Aap", anti-echoing)
+- Message Reactions & Close-Ended Options UI on mobile (`ChatScreen.tsx`)
+- Graceful handling of NVIDIA API Moderation/Content Policy errors (no more "technical glitch" on drugs/profanity)
 - Swipe-to-reply with context injection into LLM
 - Message staggering (5-10s human-like delays between bubbles)
 - Never-stuck message guarantee (DB write before 202 response)
-- Anti-robot behavioral rules in `promptBuilder.ts`: no echoing, no "Aap", no interrogation
 - OTA update popup system (targets `preview` branch for APK builds)
 
 ### 🔜 Next Sprint (Planned)

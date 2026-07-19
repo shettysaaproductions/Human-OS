@@ -19,13 +19,6 @@ This document tracks upcoming features queued for development, ordered by priori
 - Replaces scattered context-gathering logic in `chat.ts`
 - All subconscious actions (memory save, emotion log, moment extract) fire in background after reply
 
-### 2. Message Reactions & Close-Ended Options (User Requested)
-**Goal:** Gather explicit feedback and intent from the user for better understanding.
-- Add WhatsApp-style thumbs up/down/like reactions to messages. Requires new Supabase table/columns to track `message_reactions`.
-- Add support for close-ended questions with selectable options (like Claude) for intent and emotion gathering.
-
----
-
 ## 🟡 P2: High Value (Next Phase)
 
 ### 6. NACE Agenda Builder — Nova Plans Her Outreach
