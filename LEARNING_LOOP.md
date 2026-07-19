@@ -75,6 +75,10 @@ Every 7 days, the founder reviews:
    - Added ANTI-ROBOT RULE (FORMALITY-MIRRORING) to stop mirroring "Aap"
    - Added ANTI-ROBOT RULE (STATEMENTS > QUESTIONS) to reduce interrogation spam
    - Added ANTI-ROBOT RULE (REPETITION) to prevent reusing the same phrase
+   - Added ANTI-ROBOT RULE (FORMALITY - STRICT ENFORCEMENT) to absolutely ban mirroring "aap"
+   - Added ANTI-ROBOT RULE (ECHOING - REPHRASING) to prevent repeating user's exact verbs/nouns
+   - Added ANTI-ROBOT RULE (STATEMENT ENDINGS) to force at least 50% statements vs questions
+   - Added ANTI-ROBOT RULE (EMOTIONAL PRIORITIZATION) to validate stress/emotion before logic
 4. **User Experience Wins:** Features that made the app feel alive
 5. **Stuck/Error Events:** Any message delivery failures, ghost duplicates, or errors
 6. **Next Auto Upgrade Focus:** What flaws to target manually

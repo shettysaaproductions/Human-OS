@@ -5,42 +5,24 @@ This document tracks upcoming features queued for development, ordered by priori
 
 ---
 
-## 🔴 P0: Fix Immediately
-
-### 1. `reminders.status` Column Bug
-**Goal:** Stop the backend from spamming an error every 10 seconds.
-- **SQL:** `ALTER TABLE reminders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';`
-- **Then:** Reload PostgREST schema cache in Supabase dashboard.
-
----
-
 ## 🟠 P1: Next Sprint (Autonomous Intelligence)
 
-### 2. Dual NVIDIA Key Routing
-**Goal:** Double background AI capacity — Key 1 for chat, Key 2 for all background engines.
-- Modify `backend/src/lib/nvidia.ts` — add `nvidiaClientSecondary` + `chatCompletionBackground()`
-- Add `NVIDIA_API_KEY_2` to Render environment variables
-- Route: ReflectionScheduler, NACE, MomentEngine, SelfImprovement → Key 2
-
-### 3. `NovaSelfImprovementService` — Autonomous Self-Repair
-**Goal:** Nova learns from her own mistakes weekly and patches her own brain permanently.
-- New file: `backend/src/services/NovaSelfImprovementService.ts`
-- New Supabase table: `nova_behavioral_patches`
-- `PromptBuilder` loads all active patches from DB at startup
-- Runs on Sunday nights (weekly scheduler in `index.ts`)
-- Detects: Echoing, Formality, Interrogation, Time hallucination, Repetition
-
-### 4. Enhanced `SituationalAwareness` — Deep Chat Interface Understanding
-**Goal:** Nova understands conversation phase, reply intent, and emotional momentum.
-- Add **Conversation Phase Detector** (`OPENING`, `FLOWING`, `WINDING_DOWN`, `RE-ENTRY`)
-- Add **Reply Intent Detector** (when user swipes-to-reply, inject that context)
-- Add **Emotional Momentum Tracker** (last 3 messages for valence trend)
+### 1. `NovaCognitionOrchestrator` — All 7 Engines on Every Message
+**Goal:** No engine ever misses a message again. All context gathered in parallel before LLM call.
+- New file: `backend/src/services/NovaCognitionOrchestrator.ts`
+- Replaces scattered context-gathering logic in `chat.ts`
+- All subconscious actions (memory save, emotion log, moment extract) fire in background after reply
 
 ### 5. `NovaCognitionOrchestrator` — All 7 Engines on Every Message
 **Goal:** No engine ever misses a message again. All context gathered in parallel before LLM call.
 - New file: `backend/src/services/NovaCognitionOrchestrator.ts`
 - Replaces scattered context-gathering logic in `chat.ts`
 - All subconscious actions (memory save, emotion log, moment extract) fire in background after reply
+
+### 2. Message Reactions & Close-Ended Options (User Requested)
+**Goal:** Gather explicit feedback and intent from the user for better understanding.
+- Add WhatsApp-style thumbs up/down/like reactions to messages. Requires new Supabase table/columns to track `message_reactions`.
+- Add support for close-ended questions with selectable options (like Claude) for intent and emotion gathering.
 
 ---
 
@@ -65,6 +47,11 @@ This document tracks upcoming features queued for development, ordered by priori
 
 | Feature | Completed |
 |---|---|
+| Auto Upgrade Protocol execution & patches | July 2026 |
+| `reminders.status` Bug Fix (Migration) | July 2026 |
+| Dual NVIDIA Key Routing | July 2026 |
+| `NovaSelfImprovementService` — Autonomous Self-Repair | July 2026 |
+| Enhanced `SituationalAwareness` | July 2026 |
 | Swipe-to-reply with LLM context injection | July 2026 |
 | Message staggering (5-10s human-like delays) | July 2026 |
 | Never-stuck message guarantee | July 2026 |
