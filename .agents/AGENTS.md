@@ -201,6 +201,8 @@ Wait for the EAS command to complete and confirm:
 - ✅ Branch = preview
 - ✅ Runtime version = 1.1.0
 
+**CRITICAL RULE:** Do NOT consider the Auto Upgrade complete until the EAS update finishes successfully. You must explicitly inform the user that the OTA update was published and they will see a popup in their app.
+
 ---
 
 ### STEP 10: Present Full Summary

@@ -48,8 +48,10 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
 - The 202 Accepted pattern guarantees message is saved to DB before reply is sent.
 
 ### NVIDIA API
-- `NVIDIA_API_KEY` — primary key for user-facing chat (70B model)
-- `NVIDIA_API_KEY_2` — secondary key for all background engine LLM calls
+- **Dual Keys:** Chat model (70B) uses `NVIDIA_API_KEY`, background engines (8B) use `NVIDIA_API_KEY_2`. (Hard limits: 30s timeout, fallback to Key 2 if Key 1 429s).
+- **Graceful Error Handling:** Intercepting NVIDIA Moderation/Policy errors (400) to reply gracefully instead of throwing technical glitches.
+
+### Current Engine Status (Epoch 2 Live)
 - `EXTRACTION_MODEL` = `meta/llama-3.1-8b-instruct` (fast, cheap, used for JSON extraction)
 - Main chat model configured via `NVIDIA_CHAT_MODEL` env var
 - 30-second hard timeout on all NVIDIA calls (`NvidiaTimeoutError`)
