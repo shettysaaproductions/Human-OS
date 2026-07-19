@@ -21,9 +21,11 @@ export const chatService = {
     return response.data;
   },
 
-  sendMessageAsync: async (message: string, conversationId?: string) => {
+  sendMessageAsync: async (message: string, conversationId?: string, replyToId?: string, replyToContent?: string) => {
     const payload: any = { message, async_mode: true };
     if (conversationId) payload.conversation_id = conversationId;
+    if (replyToId) payload.reply_to_id = replyToId;
+    if (replyToContent) payload.reply_to_content = replyToContent;
 
     // 30-second hard timeout — on Android, battery optimization can suspend the JS
     // thread mid-await, causing api.post to hang indefinitely with no error.

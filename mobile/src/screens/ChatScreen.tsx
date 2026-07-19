@@ -14,7 +14,7 @@ import * as Notifications from 'expo-notifications';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
-import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
+import { ScrollView as GHScrollView, Swipeable } from 'react-native-gesture-handler';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -418,10 +418,32 @@ function NovaLoader() {
   );
 }
 
+function SwipeableBubble({ item, children, onReply }: { item: Message, children: React.ReactNode, onReply: (msg: Message) => void }) {
+  const swipeRef = useRef<any>(null);
+  return (
+    <Swipeable
+      ref={swipeRef}
+      renderLeftActions={() => (
+        <View style={{ justifyContent: 'center', paddingLeft: 16, width: 60 }}>
+          <Text style={{ fontSize: 24, transform: [{ scaleX: -1 }] }}>↩️</Text>
+        </View>
+      )}
+      onSwipeableOpen={() => {
+        onReply(item);
+        setTimeout(() => swipeRef.current?.close(), 50);
+      }}
+      overshootLeft={false}
+      friction={2}
+    >
+      {children}
+    </Swipeable>
+  );
+}
+
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
@@ -612,7 +634,8 @@ export function ChatScreen() {
             </Text>
           </View>
         )}
-        <View style={s.bubbleContainer}>
+        <SwipeableBubble item={item} onReply={setReplyingTo}>
+          <View style={s.bubbleContainer}>
           {selectedMessageIds.includes(item.id) && (
             <View 
               pointerEvents="none" 
@@ -629,6 +652,20 @@ export function ChatScreen() {
               ? { backgroundColor: colors.userBubble, borderBottomRightRadius: 4, maxWidth: '80%' }
               : { backgroundColor: colors.assistantBubble, borderBottomLeftRadius: 4, maxWidth: '95%', minWidth: '60%', overflow: 'visible' }
           ]}>
+            {item.reply_to_content && (
+              <View style={{
+                backgroundColor: 'rgba(0,0,0,0.15)',
+                padding: 8,
+                borderRadius: 4,
+                marginBottom: 8,
+                borderLeftWidth: 3,
+                borderLeftColor: '#8B5CF6'
+              }}>
+                <Text style={{ color: isUser ? colors.buttonText : colors.assistantText, fontSize: 13, opacity: 0.9, fontWeight: '500' }} numberOfLines={3}>
+                  {item.reply_to_content}
+                </Text>
+              </View>
+            )}
             {!isUser ? (
               <SmartMarkdown
                 content={item.content}
@@ -744,10 +781,11 @@ export function ChatScreen() {
                 }} />
               )}
             </View>
+            </View>
 
           </View>
           </View>
-          </View>
+        </SwipeableBubble>
       </View>
     );
   }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage]);
@@ -982,6 +1020,34 @@ export function ChatScreen() {
             <View style={s.typingDot} />
             <View style={[s.typingDot, { opacity: 0.6 }]} />
             <View style={[s.typingDot, { opacity: 0.3 }]} />
+          </View>
+        )}
+        )}
+
+        {/* Reply Preview */}
+        {replyingTo && (
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            borderLeftWidth: 4,
+            borderLeftColor: '#8B5CF6'
+          }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#8B5CF6', fontSize: 12, fontWeight: 'bold', marginBottom: 2 }}>
+                Replying to {replyingTo.role === 'user' ? 'Yourself' : 'Nova'}
+              </Text>
+              <Text style={{ color: colors.textPrimary, fontSize: 13, opacity: 0.8 }} numberOfLines={1}>
+                {replyingTo.content}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyingTo(null)} style={{ padding: 8 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 16 }}>✕</Text>
+            </TouchableOpacity>
           </View>
         )}
 

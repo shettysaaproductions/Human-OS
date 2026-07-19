@@ -106,6 +106,8 @@ const ChatSchema = z.object({
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
   is_proactive: z.boolean().optional().default(false),
   async_mode: z.boolean().optional().default(false),
+  reply_to_id: z.string().uuid().optional(),
+  reply_to_content: z.string().optional(),
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -371,7 +373,7 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, is_proactive, async_mode } = parseResult.data;
+      const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content } = parseResult.data;
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
 
@@ -385,9 +387,13 @@ chatRouter.post(
       }
       const isDegraded = dbHealthService.isDegraded();
       // For proactive triggers, rewrite the message to a natural system instruction
-      const effectiveMessage = is_proactive
+      let effectiveMessage = is_proactive
         ? '[SYSTEM: The user has not messaged in a while. Open a warm, short, casual conversation. Reference something from your recent memory if possible. Do NOT say you were checking in — just talk naturally like a friend who thought of them.]'
         : message;
+
+      if (reply_to_content && !is_proactive) {
+        effectiveMessage = `[Replying to: "${reply_to_content}"]\n\n${effectiveMessage}`;
+      }
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────
       if (isDegraded) {
@@ -470,7 +476,7 @@ chatRouter.post(
           ? Promise.resolve({ data: { id: 'proactive_' + Date.now() }, error: null })
           : qt.track('save_user_message', 'chat_history', () =>
               supabaseAdmin.from('chat_history')
-                .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message })
+                .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, reply_to_id, reply_to_content })
                 .select('id').single()
             ),
 
