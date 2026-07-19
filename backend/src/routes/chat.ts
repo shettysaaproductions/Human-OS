@@ -850,6 +850,7 @@ chatRouter.post(
         userCountry: profile?.country || 'IN'
       };
 
+      let extractedActions: any[] = [];
       let rawReply = '';
       if (isExcessiveRequest(effectiveMessage)) {
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
@@ -878,6 +879,7 @@ chatRouter.post(
               const { value, done } = await iterator.next();
               if (done) {
                 if (value && value.subconscious_actions && value.subconscious_actions.length > 0) {
+                  extractedActions = value.subconscious_actions;
                   const { backgroundActions } = await import('../services/BackgroundActionService');
                   // Execute in background
                   backgroundActions.processActions(userId, activeConversationId, value.subconscious_actions, userCountry).catch(e => {
@@ -897,6 +899,7 @@ chatRouter.post(
             const result = await novaBrain.processInteraction(userId, effectiveMessage, brainContext);
             rawReply = result.reply;
             if (result.subconscious_actions && result.subconscious_actions.length > 0) {
+              extractedActions = result.subconscious_actions;
               const { backgroundActions } = await import('../services/BackgroundActionService');
               // Execute in background
               backgroundActions.processActions(userId, activeConversationId, result.subconscious_actions, userCountry).catch(e => {
@@ -940,10 +943,19 @@ chatRouter.post(
       const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), effectiveMessage);
       const reply = parsedMessages.join('\n\n');
 
-      // 7. Save AI response ONCE
+      // 7. Save AI response ONCE (with telemetry meta)
       await qt.track('save_ai_response', 'chat_history', () =>
         supabaseAdmin.from('chat_history')
-          .insert({ user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: rawReply })
+          .insert({ 
+            user_id: userId, 
+            conversation_id: activeConversationId, 
+            role: 'assistant', 
+            content: rawReply,
+            meta: {
+              situationBrief: situationBrief || null,
+              subconsciousActions: extractedActions
+            }
+          })
       );
 
       // Generate chunks for UI (only needed for REST response)

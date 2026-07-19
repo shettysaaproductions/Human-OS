@@ -81,3 +81,28 @@ telemetryRouter.get('/admin/errors', async (_req: Request, res: Response, next: 
     next(err);
   }
 });
+
+// GET /telemetry/chat/:userId — fetch chat history with hidden 'meta' context for debugging hallucinations
+telemetryRouter.get('/chat/:userId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('chat_history')
+      .select('id, role, content, created_at, meta')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    logger.error('Failed to fetch chat telemetry', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
