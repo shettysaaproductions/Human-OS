@@ -11,9 +11,10 @@ export interface Message {
   content: string;
   status: 'sending' | 'sent' | 'responded' | 'error';
   errorMessage?: string;
-  timestamp: string;
   chunkIndex?: number;
   chunkTotal?: number;
+  reply_to_id?: string;
+  reply_to_content?: string;
 }
 
 export interface ChatDiagnostics {
@@ -33,7 +34,9 @@ interface ChatState {
   hasMoreMessages: boolean;
   isLoadingMore: boolean;
   oldestMessageId: string | null;
-  pendingQueue: { id: string, content: string }[];
+  replyingTo: Message | null;
+  setReplyingTo: (msg: Message | null) => void;
+  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string }[];
   diagnostics: ChatDiagnostics | null;
   developerMode: boolean;
   setDeveloperMode: (val: boolean) => void;
@@ -121,14 +124,14 @@ function startQueueWatchdog(processQueueFn: () => Promise<void>) {
 
 // ── Pending queue persistence (survives app swipe-away) ─────────────────────
 const QUEUE_KEY = 'humanOs_pendingQueue';
-async function savePendingQueue(queue: { id: string; content: string }[]) {
+async function savePendingQueue(queue: { id: string; content: string; replyToId?: string; replyToContent?: string; }[]) {
   try {
     await SecureStore.setItemAsync(QUEUE_KEY, JSON.stringify(queue));
   } catch (e) {
     console.warn('[QUEUE] Failed to persist queue:', e);
   }
 }
-async function loadPendingQueue(): Promise<{ id: string; content: string }[]> {
+async function loadPendingQueue(): Promise<{ id: string; content: string; replyToId?: string; replyToContent?: string; }[]> {
   try {
     const raw = await SecureStore.getItemAsync(QUEUE_KEY);
     return raw ? JSON.parse(raw) : [];
@@ -328,7 +331,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           try {
             const data = await chatService.sendMessageAsync(
               combinedContent,
-              get().conversationId || undefined
+              get().conversationId || undefined,
+              batch[0].replyToId,
+              batch[0].replyToContent
             );
 
             const convId: string = data?.conversation_id || get().conversationId || '';
@@ -403,6 +408,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     hasMoreMessages: false,
     isLoadingMore: false,
     oldestMessageId: null,
+    replyingTo: null,
+    setReplyingTo: (msg: Message | null) => set({ replyingTo: msg }),
     pendingQueue: [],
     diagnostics: null,
     developerMode: false,
@@ -636,18 +643,27 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     sendMessage: async (content: string) => {
+      const replyingTo = get().replyingTo;
       const userMsg: Message = {
         id: Date.now().toString() + Math.random().toString().slice(2, 6),
         role: 'user',
         content,
         status: 'sending',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        reply_to_id: replyingTo?.id,
+        reply_to_content: replyingTo?.content
       };
 
-      const newQueue = [...get().pendingQueue, { id: userMsg.id, content }];
+      const newQueue = [...get().pendingQueue, { 
+        id: userMsg.id, 
+        content,
+        replyToId: replyingTo?.id,
+        replyToContent: replyingTo?.content 
+      }];
       set((state) => ({ 
         messages: [...state.messages, userMsg],
         pendingQueue: newQueue,
+        replyingTo: null
       }));
 
       // Fire and forget, don't block the network request!
