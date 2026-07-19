@@ -1,28 +1,73 @@
 # Nova Model Router Rules
 
-This document defines the escalation rules and selection criteria for AI models operating behind the scenes of **Nova Consciousness**. 
-Nova must always appear to the user as a single living mind.
+**Mission:** Define how Nova intelligently routes LLM calls across multiple API keys and models, preserving the illusion of a single living mind while maximizing free-tier capacity.
 
-## 1. The Orchestrator
-The top-level **Consciousness** module determines what cognitive tasks need to be performed. It then quietly routes those sub-tasks to the appropriate model based on complexity, keeping the illusion of a single entity.
+---
 
-## 2. Default Model (The Subconscious & Reflexes)
-- **Model:** Gemini 3.5 Flash Low
-- **Usage:** Used for 90% of tasks. Fast I/O, conversational reflexes, simple memory retrieval, basic API routing, and the Action module.
+## 1. Current Deployed Stack
 
-## 3. Escalation Rules (The Conscious Mind)
-The Consciousness module escalates to higher models *only* if the confidence score for a task drops below 80%.
+Nova uses NVIDIA's NIM API (OpenAI-compatible endpoint) in production.
 
-1. **Architecture & System Design:** Escalate to **Gemini 3.1 Pro High**. Used for restructuring the Reasoning or Growth modules.
-2. **Complex Debugging:** If an internal issue remains unresolved for >30 minutes, persist the context and escalate to **Claude Sonnet 4.6 Thinking**.
-3. **Major Production Incidents:** Escalate to **Claude Opus 4.6 Thinking**. Used only when critical cognitive infrastructure (e.g., Supabase memory retrieval) is offline.
+| Key | Model | Role |
+|---|---|---|
+| `NVIDIA_API_KEY` (Key 1) | `meta/llama-3.1-70b-instruct` | All user-facing chat replies |
+| `NVIDIA_API_KEY` (Key 1) | `meta/llama-3.1-8b-instruct` (EXTRACTION_MODEL) | Fast background extraction |
+| `NVIDIA_API_KEY_2` (Key 2) | `meta/llama-3.1-8b-instruct` | Background consciousness engines |
 
-## 4. Implementation Requirements
-- **Always start cheap:** Every task starts with Gemini 3.5 Flash Low.
-- **Context Persistence:** Maintain strict task context (logs, summaries, artifacts) across the `MEMORY.md` file so higher-tier models can continue without repeating steps.
-- **Logging Requirements:** Every execution block must asynchronously log to `agent_metrics`:
-  - Model used
-  - Tokens consumed
-  - Cost estimate
-  - Execution time
-  - Success/Failure status
+---
+
+## 2. Two-Tier Key Routing Strategy
+
+The second NVIDIA key exclusively powers **background consciousness work** so it never competes with live user chat:
+
+| Tier | Key Used | Functions |
+|---|---|---|
+| **Tier 1 (User-Facing)** | Key 1 | `chat.ts` reply generation, `NovaBrainService` |
+| **Tier 2 (Background)** | Key 2 | `ReflectionSchedulerService`, `NovaConsciousnessEngine` (NACE), `NovaSelfImprovementService`, `MomentEngineService` LLM calls |
+
+**Failover Rule:** If Key 1 receives HTTP 429 (rate limit), transparently route to Key 2. Log the failover event.
+
+---
+
+## 3. ModelRouterService (Supabase-Backed)
+
+The `ModelRouterService` (`src/services/ModelRouterService.ts`) reads from the `llm_providers` table in Supabase. This allows adding, disabling, or reprioritizing LLM keys without a code deploy.
+
+- Keys are stored **encrypted** in `llm_providers.api_key_encrypted`
+- Priority is numeric — higher number = preferred
+- Failover deactivates the failing provider row and selects the next highest priority
+
+---
+
+## 4. Escalation Rules (Future Growth Path)
+
+As Nova grows beyond the free tier, the following escalation ladder applies:
+
+| Task Type | Model | Trigger |
+|---|---|---|
+| **User Chat (reflexes)** | `llama-3.1-8b-instruct` | Short casual messages (< 20 words) |
+| **User Chat (standard)** | `llama-3.1-70b-instruct` | Default |
+| **Deep Reasoning / Analysis** | Escalate to higher model | When task complexity exceeds threshold |
+| **NovaSelfImprovementService** | `llama-3.1-8b-instruct` via Key 2 | Weekly background run |
+
+---
+
+## 5. Logging Requirements
+
+Every LLM call must log to `agent_metrics` table asynchronously:
+- Model used
+- Key slot used (primary / secondary)
+- Tokens consumed (estimated)
+- Execution time (ms)
+- Success / Failure status
+- Failover triggered (boolean)
+
+---
+
+## 6. Implementation Notes
+
+- `src/lib/nvidia.ts` contains both `nvidiaClient` (Key 1) and `nvidiaClientSecondary` (Key 2)
+- `chatCompletion()` uses Key 1 (user-facing)
+- `chatCompletionBackground()` uses Key 2 (background engines)
+- Environment variables: `NVIDIA_API_KEY` and `NVIDIA_API_KEY_2`
+- Both must be set in Render environment variables for production
