@@ -119,14 +119,27 @@ export function SettingsScreen() {
     setThemeMode(mode);
   };
 
+  const handleLogout = () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log Out', style: 'destructive', onPress: async () => {
+            await logout();
+        }}
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={[st.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={st.header}>
+      <View style={[st.header, { borderBottomColor: colors.divider }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={st.backBtn}>
           <Text style={st.backText}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={[st.title, { color: colors.textPrimary }]}>Settings</Text>
-        <View style={{ width: 60 }} />
+        <View style={st.backBtn} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -299,6 +312,22 @@ export function SettingsScreen() {
             </>
           )}
         </View>
+
+        <View style={{ height: 32 }} />
+        <TouchableOpacity 
+          style={{
+            marginHorizontal: 12,
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            padding: 16,
+            borderRadius: 14,
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: 'rgba(239, 68, 68, 0.2)'
+          }} 
+          onPress={handleLogout}
+        >
+          <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 16 }}>Log Out</Text>
+        </TouchableOpacity>
 
         <View style={{ height: 48 }} />
       </ScrollView>
