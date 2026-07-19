@@ -1,83 +1,97 @@
-# Magical Moments Blueprint
+# MAGICAL_MOMENTS.md
 
-**Mission:** Define the experiential highlights that make Nova feel irreplaceable, prioritizing deep emotional value over feature quantity.
+**Mission:** Define the experiential highlights that make Nova feel irreplaceable. These are the moments where Nova transcends "chatbot" and becomes a truly living companion. Every moment type listed here must be implemented and maintained with deep care.
+
+**Last Updated: July 2026**
 
 ---
 
 ## 1. Birthday and Anniversary Reminders
-*   **Why it matters:** Validates that Nova respects the user's close relationships and significant personal history. It shows attention to the social anchors in the user's life.
-*   **Required data:** Names of loved ones, dates, relationship types (e.g. partner, parent, sibling).
-*   **Required memory type:** Long-Term Semantic Memory (attributes stored in `kg_nodes` or `memories` table).
-*   **Privacy considerations:** Ensure that no external integrations or contact syncs are performed without explicit consent. Dates and associations are stored strictly locally and encrypted in the user's database.
-*   **Frequency of interaction:** Once a year per recorded event.
-*   **Success metric:** User acknowledges the prompt with positive validation or a prolonged, meaningful conversational exchange.
+- **Why it matters:** Validates that Nova respects the user's close relationships and significant personal history.
+- **Required data:** Names of loved ones, dates, relationship types (partner, parent, sibling).
+- **Required memory type:** Long-Term Semantic Memory (attributes stored in `kg_nodes` or `memories` table).
+- **Privacy:** Dates and associations stored strictly locally, encrypted. No external syncs.
+- **Frequency:** Once a year per recorded event.
+- **Success metric:** User acknowledges with a prolonged, meaningful conversational exchange.
 
 ---
 
 ## 2. Child's Milestones Tracking
-*   **Why it matters:** Reflects the user's deep commitments and legacy. Celebrating a child's development phase (first steps, school transition, small wins) creates highly-resonant companionship.
-*   **Required data:** Name, age, developmental milestones shared, progress tracking logs.
-*   **Required memory type:** Episodic Memories & Knowledge Graph nodes (`kg_edges` expressing `PARENT_OF`).
-*   **Privacy considerations:** Data relating to children must be handled with maximum security. Never expose child names/milestones to external routing paths unless strictly necessary for core prompt processing.
-*   **Frequency of interaction:** Contextual; typically once every few weeks when milestones are reached.
-*   **Success metric:** Onward user-provoked sharing of milestone details in subsequent chats.
+- **Why it matters:** Reflects the user's deepest commitments. Celebrating a child's development creates the most emotionally resonant companionship.
+- **Required data:** Name, age, developmental milestones shared, progress logs.
+- **Required memory type:** Episodic Memories & KG nodes (`kg_edges` expressing `PARENT_OF`).
+- **Privacy:** Child data handled with maximum security. Never exposed to external routing.
+- **Frequency:** Every few weeks when milestones are relevant.
 
 ---
 
 ## 3. Following Up on Long-Term Goals
-*   **Why it matters:** Positions Nova as a long-term accountability partner. Surfacing a goal weeks or months later shows a level of persistence that general-purpose assistants cannot match.
-*   **Required data:** Original goal summary, target completion time, current status, user's shared anxiety or excitement details.
-*   **Required memory type:** Long-term Semantic Memory (Knowledge Graph relationship links `HAS_GOAL`).
-*   **Privacy considerations:** Goals must remain confidential and are never aggregated or indexed outside the user's workspace.
-*   **Frequency of interaction:** Low frequency (e.g. once every 2–4 weeks depending on the goal duration).
-*   **Success metric:** User rates the check-in as highly useful in their feedback loops.
+- **Why it matters:** Positions Nova as a lifelong accountability partner.
+- **Required data:** Original goal summary, target completion time, user's shared emotions.
+- **Required memory type:** Long-term Semantic Memory (KG relationship `HAS_GOAL`).
+- **Frequency:** Once every 2-4 weeks depending on goal duration.
+- **Success metric:** User provides an update and rates check-in as highly useful.
 
 ---
 
 ## 4. Remembering Places, Habits, and Routines
-*   **Why it matters:** Recognizes the user's daily life structure. Referencing a favorite coffee shop or an evening wind-down routine makes dialogue feel organic and context-aware.
-*   **Required data:** Routine details, place names, typical execution hours, preference keys.
-*   **Required memory type:** Short-term Working Memory (`working_memory`) transitioning to long-term attributes.
-*   **Privacy considerations:** Geolocation tracking must never run continuously. Locations and habits are populated purely via explicit user chat inputs.
-*   **Frequency of interaction:** Continuous, woven naturally into daily greetings.
-*   **Success metric:** Natural flow integration (the user doesn't have to correct the location or habit details).
+- **Why it matters:** Makes dialogue feel organic. "How was the gym today?" after a known gym routine hits differently.
+- **Required data:** Routine details, place names, typical hours, preference keys.
+- **Required memory type:** Working Memory → long-term attributes.
+- **Frequency:** Continuous, woven naturally into greetings.
 
 ---
 
 ## 5. Recalling Previous Conversations Naturally
-*   **Why it matters:** Connects the current chat back to historical context, making dialogue feel continuous and meaningful rather than a series of isolated sessions.
-*   **Required data:** Summarized segments of prior chats, keywords, emotional valence markers.
-*   **Required memory type:** Episodic Memories and Memory Events (`episodic_memories`).
-*   **Privacy considerations:** Only reference context relevant to the user's current thread; avoid random, intrusive past topic recalls.
-*   **Frequency of interaction:** Mid frequency (several times per week as conversational threads align).
-*   **Success metric:** Zero user friction or confusion regarding the past context reference.
+- **Why it matters:** Connects current chat to historical context. Dialogue feels continuous, not isolated sessions.
+- **Required data:** Summarized prior chat segments, keywords, emotional valence markers.
+- **Required memory type:** `episodic_memories` table.
+- **Frequency:** Multiple times per week as threads align.
+- **Success metric:** Zero user friction or confusion from the context reference.
 
 ---
 
 ## 6. Celebrating Personal Achievements
-*   **Why it matters:** Nova acts as a cheerleader, amplifying positive emotions and validating hard work.
-*   **Required data:** Shared wins (e.g. job offer, finished workout, completed draft), emotional intensity.
-*   **Required memory type:** Episodic Memories tagged with high positive valence.
-*   **Privacy considerations:** Celebratory items are stored safely under profile stats.
-*   **Frequency of interaction:** Promptly upon achievement reports.
-*   **Success metric:** High sentiment scores in response messages.
+- **Why it matters:** Nova acts as a genuine cheerleader, amplifying the user's joy at the right moment.
+- **Required data:** Shared wins (job offer, finished project, completed goal), emotional intensity.
+- **Required memory type:** Episodic Memories tagged with high positive valence.
+- **Frequency:** Immediately upon achievement being shared.
+- **Success metric:** High positive sentiment in user's follow-up messages.
 
 ---
 
 ## 7. Offering Support During Difficult Periods
-*   **Why it matters:** Establishes Nova as a reliable, comforting companion. Empathy during stress, grief, or fatigue builds deep trust.
-*   **Required data:** Stress triggers, past coping tools, emotional states.
-*   **Required memory type:** Emotional States (`emotional_states`) and long-term coping mechanisms.
-*   **Privacy considerations:** Highly sensitive. Avoid toxic positivity or offering medical/clinical advice. Frame responses purely around companionship and validation.
-*   **Frequency of interaction:** Contextual (during negative sentiment peaks).
-*   **Success metric:** Shift in user sentiment from negative/anxious to calm/resilient.
+- **Why it matters:** Establishes Nova as a reliable companion during the user's hardest moments.
+- **Required data:** Stress triggers, past coping tools, emotional states.
+- **Required memory type:** `emotional_states` table + long-term coping mechanisms.
+- **Privacy:** Strictly companionship and validation. No clinical or medical advice.
+- **Frequency:** Contextual during negative sentiment peaks.
+- **Success metric:** User's emotional state improves from the conversation.
 
 ---
 
-## 8. Surfacing Forgotten Happy Memories
-*   **Why it matters:** Evokes warmth by presenting a past happy moment ("A year ago today you completed your first marathon").
-*   **Required data:** Highly positive episodic memory events from weeks or months in the past.
-*   **Required memory type:** Episodic Memory archives.
-*   **Privacy considerations:** Ensure memories selected for recall do not associate with trigger events or resolved negative situations.
-*   **Frequency of interaction:** Rare (e.g. once every 2–4 weeks).
-*   **Success metric:** High engagement and expressions of gratitude/delight in the user reply.
+## 8. Memory Time Capsule — "A Year Ago Today..." ⭐ NEW
+- **Why it matters:** The single most emotionally powerful feature. When Nova says "Hey, a year ago today you told me you got your dream job — how has that journey been?" — that moment creates irreplaceable loyalty.
+- **Required data:** Joyful episodic memories tagged with `surface_on` date (1 year from creation).
+- **Required memory type:** `episodic_memories` with `surface_on TIMESTAMPTZ` column.
+- **How it works:**
+  1. When a positive memory is extracted (importance ≥ 7/10), `surface_on` = `NOW() + 1 year`.
+  2. `MomentEngineService.checkTimeCapsules()` runs daily.
+  3. If `surface_on <= today`, Nova generates a warm "Remember when..." message.
+  4. Sent as a push notification AND inserted as a Nova message in `chat_history`.
+- **Privacy:** ONLY positive memories are surfaced. Resolved traumas or negative events are NEVER selected.
+- **Frequency:** Rare and precious — maybe 3-4 times per year per user.
+- **Success metric:** User expresses surprise, delight, gratitude, or shares the memory further.
+
+---
+
+## 9. Proactive "Nova Is Thinking of You" Moments (NACE)
+- **Why it matters:** Nova doesn't wait for the user to open the app. She reaches out when the user's life context calls for it.
+- **How it works:** NACE (`NovaConsciousnessEngine`) runs every 15 minutes. Before sending a message, it checks for:
+  - Open goal threads (goal that hasn't been followed up in 2+ weeks)
+  - Emotional lows in the last 48 hours (from `emotional_states`)
+  - Upcoming reminders in the next 4 hours
+  - Pending Time Capsule moments
+  - If NONE of the above → NACE sends a contextual, time-of-day-aware message
+- **Minimum gap:** 45 minutes between any two NACE outreach messages.
+- **Success metric:** User responds within 30 minutes of the push notification.
