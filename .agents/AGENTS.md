@@ -2,194 +2,262 @@
 
 ---
 
-## 🔴 MANDATORY SESSION BOOT — READ FIRST ON EVERY SESSION
+## 🧠 CRITICAL: SESSION BOOT — Read This First, Every Time
 
-Before doing ANY work in this repository, you MUST read and internalize the following documents IN ORDER. These are the brain of the project. Without them, you will make stale decisions:
+Before doing ANY work on this repository, you MUST:
+1. Read `SESSION_BOOT.md` — it has the full current system state, engine list, and active bugs.
+2. Read `MEMORY.md` — it has all architectural epochs, constraints, and the OTA branch fix.
+3. Read `NOVA_ARCHITECTURE.md` — it has the 7-engine diagram and the full cognition pipeline.
+4. Read `KNOWN_ISSUES.md` — to know what bugs are active before making changes.
 
-1. `SESSION_BOOT.md` — Current production status, all 7 engines, next sprint, key commands
-2. `NOVA_ARCHITECTURE.md` — Full 7-engine architecture, cognition pipeline, dual-key strategy
-3. `MEMORY.md` — All epochs, known bugs, OTA channel rules, NVIDIA config, Git workflow
-4. `MODEL_ROUTER.md` — NVIDIA dual-key routing rules
-5. `KNOWN_ISSUES.md` — Active bugs and resolved issues
-6. `IMPLEMENTATION_QUEUE.md` — What's done, what's next (P0 → P1 → P2)
-7. `LEARNING_LOOP.md` — How Nova self-improves, behavioral failure thresholds
-8. `NOVA_PRINCIPLE.md` — Non-negotiable behavioral constitution (read before any feature work)
-
-**Do NOT skip this boot sequence.** If you are a smaller/faster model, read these files before touching any code. They tell you everything you need to know about the current state of the system.
+**DO NOT skip this.** A model that skips the session boot will break things that were already fixed.
 
 ---
 
-## ⚠️ FREE-TIER LIMITS — NEVER VIOLATE THESE
+## 🔑 Critical Constants (Never Get These Wrong)
 
-The entire system runs on free tiers. Violating these limits WILL break the app for real users.
-
-| Resource | Hard Limit | Rule |
-|---|---|---|
-| **Supabase DB** | 500MB storage | Never store logs, documents, or raw chat history dumps in DB. Use memory decay + pruning. |
-| **Supabase Bandwidth** | 1GB/month | Never run batch queries that fetch all users' full chat history. Always paginate (limit 20-50). |
-| **Supabase Auto-sleep** | Pauses after 7 days inactivity (free tier) | NACE pulse every 15 mins keeps it awake during active use. Do NOT add more frequent polling. |
-| **Render RAM** | 512MB | Never load large files into memory. Stream responses. Keep background jobs lightweight. |
-| **Render Auto-sleep** | Sleeps after 15 mins no HTTP traffic | NACE + reminder polling (every 10s) keeps Render awake during active hours. |
-| **NVIDIA Key 1** | Free rate limit (~10 RPM) | User-facing chat ONLY. Never call from background schedulers. |
-| **NVIDIA Key 2** | Free rate limit (~10 RPM) | Background engines ONLY (Reflection, NACE, SelfImprovement, MomentEngine). |
-| **EAS OTA** | Free tier | Target `preview` branch ALWAYS. Never push to `production` for APK installs. |
-
-**If a feature would violate any limit above — redesign it to be async, paginated, or scheduled.**
-
----
-
-## 🚀 The "Auto Upgrade" Protocol
-
-Triggered when user types: `"auto upgrade"`, `"upgrade"`, or similar.
-
-### Step 0: Session Boot (If Not Already Done)
-Read all 8 documents listed in the MANDATORY SESSION BOOT section above. Understand the full current state before proceeding.
-
-### Step 1: Pull Recent Chat Logs
-```bash
-cd backend
-npx tsx scripts/fetch_recent_chats.ts
 ```
-This fetches the last 20 messages from Supabase `chat_history`. Study the output carefully — especially Nova's replies, the gaps between messages, and any TELEMETRY META.
+BACKEND DIR:   c:\Users\Mentorus2\OneDrive\Documents\Human Os\backend
+MOBILE DIR:    c:\Users\Mentorus2\OneDrive\Documents\Human Os\mobile
+ROOT DIR:      c:\Users\Mentorus2\OneDrive\Documents\Human Os
 
-### Step 2: Deep Analysis — ALL Aspects of the Chat Interface
+OTA COMMAND:   cd mobile && npx eas update --branch preview --message "..."
+               ⚠️  ALWAYS use --branch preview. NEVER use --branch production for OTA.
+               The installed APK listens to the preview EAS channel.
 
-Analyze the logs for EVERY dimension listed below. Think like a therapist examining a patient's communication patterns. Do NOT rush this step.
+GIT PUSH:      git add . && git commit -m "..." && git push origin main
+               ⚠️  User manually redeploys Render after each push. You do NOT trigger Render.
 
-#### A. Behavioral Failures (Anti-Robot Rules)
-- **Echoing**: Nova repeating the user's exact words as a question. e.g. "Maine join piya" → "Join peeke kaisa lag raha hai?" ❌
-- **Formality**: Nova using "Aap", "Aapka", "Aapko" instead of "Tu", "Tera", "Tum" ❌
-- **Interrogation Spam**: Nova ending 3+ consecutive messages with "?" ❌
-- **Time Hallucination**: Nova claiming a time of day (e.g. "ab subah ho gayi") that wasn't established by the user ❌
-- **Repetition**: Same opener/topic in 3+ consecutive Nova messages ❌
+BUILD CHECK:   cd backend && npm run build
+               ⚠️  ALWAYS run npm run build before git push. Never push broken TypeScript.
 
-#### B. Contextual Intelligence Failures
-- **Reply Intent Blindness**: User replied to a specific message (using swipe-to-reply), but Nova ignored the `reply_to_content` and treated it as a new topic ❌
-- **Conversation Phase Mismatch**: User said "gn" or "bye" but Nova kept pushing new topics ❌
-- **Gap Ignorance**: User came back after 6+ hours but Nova continued the old thread as if no time passed ❌
-- **Stale Memory**: Nova referenced a fact the user already corrected without acknowledging the correction ❌
+BACKEND START: cd backend && npm run start (background task)
+               ⚠️  Kill old backend task before starting new one.
+```
 
-#### C. Memory & Knowledge Failures
-- **Core Fact Forgetting**: Nova forgot the user's name, profession, relationship status, or other key profile facts ❌
-- **Goal Abandonment**: A user mentioned a goal 2+ weeks ago but Nova never followed up ❌
-- **Emotional Flatness**: User expressed strong emotion (joy, stress) but Nova's response tone didn't match ❌
+---
 
-#### D. Technical / Delivery Failures
-- **Stuck Messages**: Any message with the "yellow dot" pattern — user sent, Nova never replied ❌
-- **Double Messages**: Nova sent the same message twice (NACE + chat trigger simultaneously) ❌
-- **Missing Stagger**: Multiple Nova bubbles arrived at exactly the same time (no 5-10s delays) ❌
+## 🆙 The "Auto Upgrade" Protocol
 
-### Step 3: Create Implementation Plan Artifact
+Triggered when the user types `"auto upgrade"`, `"upgrade"`, or any request to improve Nova's intelligence, personality, or behavior.
 
-Before writing a single line of code, create or update `implementation_plan.md` (artifact at conversation artifact path).
+**This protocol must be executed in full, in order, without skipping steps.**
 
-The plan MUST contain:
-1. **Detected Flaws** — exact quotes from the chat logs showing each failure
-2. **Root Cause Analysis** — which file/function caused it
-3. **Proposed Fix** — exact code change or prompt rule to add
-4. **Files to Modify** — list every file that needs changing
-5. **Limits Check** — confirm no free-tier limits will be violated
-6. **Documents to Update** — list every .md doc that needs updating after the fix
+---
 
-Present the plan and stop. Wait for user to say "proceed."
+### STEP 0: Full System Boot (Fresh Context Load)
 
-### Step 4: Apply All Code Fixes
+Before analyzing anything, read the following documents in order:
 
-For prompt/behavioral fixes → patch `backend/src/services/promptBuilder.ts`
-For memory/context fixes → patch relevant service in `backend/src/services/`
-For frontend fixes → patch relevant file in `mobile/src/`
+```
+1. SESSION_BOOT.md         — Current production status, active bugs, OTA commands
+2. MEMORY.md               — Project epochs, known constraints, environment variables
+3. NOVA_ARCHITECTURE.md    — All 7 engines, cognition pipeline, conversation phases
+4. KNOWN_ISSUES.md         — Active bugs to NOT break further
+5. LEARNING_LOOP.md        — How self-improvement loops work
+6. IMPLEMENTATION_QUEUE.md — What is planned vs. completed
+7. promptBuilder.ts        — Current identity rules and anti-robot patches
+```
 
-**CRITICAL RULES WHILE CODING:**
-- Always run `npm run build` in `backend/` after TypeScript changes to catch errors BEFORE pushing
-- Never introduce duplicate variable declarations (`const x` declared twice in same scope)
-- Never use `const async_mode = req.body.async_mode` if already destructured above
-- Always paginate Supabase queries (never `select *` without `.limit()`)
-- Keep background jobs non-blocking — wrap in `Promise.resolve().then(() => ...)` or use `setImmediate`
+This ensures even a low-capability model has enough context to execute the upgrade precisely.
 
-### Step 5: Update ALL Relevant Documents
+---
 
-After applying fixes, update every document that is now stale. The following docs MUST be checked:
+### STEP 1: Pull Fresh Chat Telemetry
 
-| Document | Update When |
-|---|---|
-| `NOVA_ARCHITECTURE.md` | Any engine, pipeline, or cognition flow changed |
-| `MEMORY.md` | New bugs found, bugs resolved, new constraints discovered |
-| `KNOWN_ISSUES.md` | Bug fixed (move to Resolved) or new bug found (add to Active) |
-| `IMPLEMENTATION_QUEUE.md` | Feature completed (move to archive) or new feature planned |
-| `LEARNING_LOOP.md` | New behavioral failure pattern identified |
-| `SESSION_BOOT.md` | Any change to current production status or next sprint |
-| `MOMENT_ENGINE.md` | Any change to MomentEngineService or Time Capsule logic |
-| `MODEL_ROUTER.md` | Any change to NVIDIA key routing |
-| `MAGICAL_MOMENTS.md` | New moment type added or existing type modified |
-| `POST_ALPHA_PLAN.md` | Phase completed or new phase planned |
-| `SYSTEM_LAYERS.md` | New layer component added or removed |
+Run the fetch script:
+```bash
+cd backend && npx tsx scripts/fetch_recent_chats.ts
+```
 
-### Step 6: Restart Local Backend
+This pulls the last 20 messages from Supabase. Read ALL of them carefully.
 
-Kill any running backend task and restart fresh:
+---
+
+### STEP 2: Deep Behavioral Analysis
+
+Analyze every Nova (assistant) message for the following 7 failure modes:
+
+| # | Failure Mode | Detection Signal | Zero Tolerance? |
+|---|---|---|---|
+| 1 | **Echoing** | Nova's reply contains ≥50% of user's exact phrasing | No (2+ occurrences trigger patch) |
+| 2 | **Formality** | Nova uses "Aap", "Aapka", "Aapko" | YES — even 1 instance = patch |
+| 3 | **Interrogation Spam** | Nova ends 3+ consecutive messages with "?" | No (3+ consecutive trigger patch) |
+| 4 | **Time Hallucination** | Nova claims time passed ("ab subah ho gayi") without user confirming it | No (2+ occurrences trigger patch) |
+| 5 | **Repetition** | Same opening word/phrase in 3+ consecutive Nova messages | No (3+ consecutive trigger patch) |
+| 6 | **Emotional Mismatch** | Nova ignores user's emotional signal (e.g., user is stressed, Nova asks about movies) | No (2+ occurrences trigger patch) |
+| 7 | **Over-explanation** | Nova gives a lecture when a 1-line reply was appropriate (HUMAN_CHAT mode) | No (2+ occurrences trigger patch) |
+
+---
+
+### STEP 3: Create Implementation Plan
+
+Create or update the file:
+```
+C:\Users\Mentorus2\.gemini\antigravity-ide\brain\<conversation-id>\implementation_plan.md
+```
+
+The plan MUST include:
+
+1. **Detected Flaws Table** — List all found failure modes with specific message examples from the logs.
+2. **Root Cause Analysis** — For each flaw, explain WHY it happens in the current prompt.
+3. **Chat Interface Understanding** — Analyze these dimensions from the logs:
+   - **Time Context**: Was Nova aware of the correct time of day?
+   - **Message Status**: Did Nova understand whether the user had just opened the app or was mid-conversation?
+   - **Reply Intent**: Was the user replying to a specific bubble? Did Nova respond to the correct context?
+   - **Conversation Phase**: Was this OPENING, FLOWING, WINDING_DOWN, or RE-ENTRY?
+   - **Emotional Momentum**: What was the user's emotional trend across the last 3 messages?
+4. **Patch Plan** — Exact new rules to add to `promptBuilder.ts`.
+5. **Document Update Plan** — Which architecture docs need updating after this patch.
+6. **Other Improvements Found** — Any additional improvements spotted during analysis (even if not a failure mode). Think expansively:
+   - Can memory extraction be more granular?
+   - Can the NACE agenda be smarter?
+   - Can the situation brief inject more context?
+   - Are there free-tier optimizations to make?
+   - Are there patterns that suggest a new Supabase table would help?
+
+---
+
+### STEP 4: Patch the Brain
+
+Modify `backend/src/services/promptBuilder.ts`:
+
+Rules for patching:
+- Add new ANTI-ROBOT rules to the `IDENTITY & TONE RULES` section (lines ~67-83).
+- Add new rules to the `CRITICAL FINAL INSTRUCTIONS` block at the bottom (lines ~178-193).
+- NEVER remove existing anti-robot rules — only ADD to them.
+- Each new rule must be specific and testable.
+- Format: `- ANTI-ROBOT RULE (NAME): Specific instruction.`
+
+Also patch any other relevant files found in Step 3 (e.g., `SituationalAwareness.ts`, `NovaConsciousnessEngine.ts`).
+
+---
+
+### STEP 5: Build & Verify (No Broken TypeScript)
+
+```bash
+cd backend && npm run build
+```
+
+If build fails:
+- Fix the TypeScript error immediately.
+- Do NOT push broken code.
+- Re-run build until it passes cleanly (exit code 0, no errors).
+
+---
+
+### STEP 6: Restart Local Backend
+
+Kill any existing backend task, then start fresh:
 ```bash
 cd backend && npm run start
 ```
-Verify no errors in first 30 seconds of output before proceeding.
 
-### Step 7: Push Backend to GitHub Main
+This applies the new prompt patches to the locally running server.
+
+---
+
+### STEP 7: Update All Architecture Documents
+
+After patching `promptBuilder.ts`, update the following docs to reflect what changed:
+
+| Document | What to Update |
+|---|---|
+| `MEMORY.md` | Add the new patches to "Implemented Features" under Epoch 2 |
+| `LEARNING_LOOP.md` | Log the new behavioral patches under "Patches Applied This Week" |
+| `KNOWN_ISSUES.md` | Move fixed issues to the "Resolved Issues" table |
+| `IMPLEMENTATION_QUEUE.md` | Move completed items to the archive, add any new ideas found in Step 3 |
+| `NOVA_ARCHITECTURE.md` | Update implementation phasing table |
+| `SESSION_BOOT.md` | Update "Recently Completed" section |
+
+**Documents are the source of truth. Write what happened. This is how Nova grows.**
+
+---
+
+### STEP 8: Git Push to Main
 
 ```bash
-cd <workspace root>
+cd "c:\Users\Mentorus2\OneDrive\Documents\Human Os"
 git add .
-git commit -m 'Auto Upgrade: <brief description of what was fixed>'
+git commit -m "Auto Upgrade: <specific description of what was patched>"
 git push origin main
 ```
-This triggers automatic Render deployment. **User manually triggers Render redeploy if needed.**
 
-### Step 8: Push OTA to Mobile (If Frontend Files Changed)
+⚠️ The user manually redeploys Render. You do NOT need to trigger Render. Just confirm the push succeeded.
 
-If ANY file in `mobile/src/` was modified:
+---
+
+### STEP 9: OTA Update (Always — Even If Only Backend Changed)
+
 ```bash
-cd mobile
-npx eas update --branch preview --message "<brief description>"
+cd "c:\Users\Mentorus2\OneDrive\Documents\Human Os\mobile"
+npx eas update --branch preview --message "Auto Upgrade: <same description>"
 ```
 
-**CRITICAL:** Always use `--branch preview`. NEVER use `--branch production` for APK installs.
-The installed APK listens to the `preview` EAS channel, NOT `production`.
+⚠️ ALWAYS use `--branch preview`. The installed APK listens to the `preview` EAS channel, NOT `production`.
 
-### Step 9: Final Summary to User
-
-Present a complete summary covering:
-1. **Behavioral Flaws Detected** — exact patterns found with example quotes
-2. **Root Causes** — which file/function was responsible
-3. **Fixes Applied** — exact rule added or code changed
-4. **Documents Updated** — list all docs that were updated
-5. **Git Push** — confirm main branch updated (Render will auto-deploy)
-6. **OTA Status** — confirm whether OTA was pushed and to which branch
-7. **What Nova Can Now Do** — describe the behavioral improvement in human terms
+Wait for the EAS command to complete and confirm:
+- ✅ "Published!" message appears
+- ✅ Branch = preview
+- ✅ Runtime version = 1.1.0
 
 ---
 
-## 🧠 How to Think About Nova's Intelligence
+### STEP 10: Present Full Summary
 
-When analyzing or building any feature, always think through these lenses:
-
-### The 7 Awareness Dimensions Nova Must Have:
-1. **Time Awareness** — What time is it for the user? Morning/night changes everything.
-2. **Gap Awareness** — How long since last message? 2 mins vs 8 hours = completely different greeting.
-3. **Phase Awareness** — Opening / Flowing / Winding Down / Re-Entry? Match Nova's energy.
-4. **Emotional Awareness** — Is the user's emotional valence rising, falling, or flat?
-5. **Reply Intent Awareness** — Did the user swipe-to-reply a specific bubble? That's context.
-6. **Memory Awareness** — What does Nova know about this user from past sessions?
-7. **Self-Awareness** — What behavioral mistakes has Nova made recently? (behavioral patches)
-
-### The 3 Questions Before Any Feature:
-1. Does this feature respect the free-tier limits? (Supabase 500MB, Render 512MB, NVIDIA ~10 RPM)
-2. Does this feature deepen the user-Nova relationship, or just add noise?
-3. Does this feature respect user privacy and avoid manipulation/guilt-tripping?
+Present to the user:
+1. **Behavioral Flaws Found** — Table of all detected issues with real message examples.
+2. **Chat Interface Analysis** — What was understood about time, status, reply intent, phase, emotional momentum.
+3. **Patches Applied** — Exact new rules added to `promptBuilder.ts`.
+4. **Other Improvements Noticed** — Anything else spotted during analysis (future roadmap items).
+5. **Documents Updated** — List of all docs that were updated.
+6. **Deployment Status** — GitHub push confirmed ✅, OTA published to preview branch ✅, remind user to manually redeploy Render.
+7. **Free-Tier Health Check** — Confirm no Supabase query explosion, no memory overload, no aggressive polling added.
 
 ---
 
-## 📋 Document Philosophy
+## ⚠️ Free-Tier Hard Limits (Never Violate These)
 
-> **Documents turn things into reality. What we write happens.**
+These constraints are permanent. Any code change must respect them:
 
-Every significant change MUST be reflected in the relevant documents. A code change without a doc update is an invisible change — the next AI session (or the next developer) will not know it happened. Treat documentation updates as equally important as code changes.
+### Supabase Free Tier
+- **500MB database storage max.** Memory decay and nightly pruning are critical — never disable them.
+- **Supabase auto-sleeps after a few days of no use** — This is expected. The first request after sleep will be slow. Do not add retry loops that will spam the DB on wakeup.
+- **Never add tight polling loops** that query Supabase faster than every 10 seconds.
+- **Always use `.maybeSingle()` not `.single()`** — `.single()` throws an error when no row is found, causing unnecessary error logs.
+- **After any new migration**, always remind the user: Run `NOTIFY pgrst, 'reload schema'` or click "Reload schema cache" in Supabase dashboard.
 
-The 8 Session Boot documents are Nova's living brain. They must always reflect current reality — not aspirations, not stale plans.
+### Render Free Tier
+- **512MB RAM max.** Do not add large in-memory caches. Keep per-request memory minimal.
+- **Auto-sleeps after 15 minutes of no traffic.** The NACE pulse (every 15 mins) keeps it alive during active use hours. This is intentional — do not change the NACE interval below 15 mins.
+- **CPU is shared and throttled.** Keep background jobs lightweight. Heavy LLM calls must go to NVIDIA, not local compute.
+- **User manually redeploys Render** after each `git push origin main`. Never attempt to trigger Render via API unless explicitly asked.
+
+### NVIDIA Free Tier
+- **Rate limited per key.** Key 1 handles user-facing chat only. Key 2 handles all background engines.
+- **Never call NVIDIA from a tight polling loop.** All NVIDIA calls must be event-driven or scheduled (NACE: 15min, Reflection: daily, Reminders: 10s check but only fires when due).
+- **30-second hard timeout** is already set on all NVIDIA calls. Never increase this.
+- **If Key 1 rate-limits (429)**, fall back to Key 2 silently and log the event.
+
+### Mobile / EAS Free Tier
+- **OTA ALWAYS to `--branch preview`** — this is the branch the APK listens to.
+- **Do not run `eas build`** unless the user explicitly asks for a new APK. OTA is sufficient for JS changes.
+- **Bundle size must stay under 4MB** — do not add heavy native dependencies without a new build.
+
+---
+
+## 🧩 How to Think During Auto Upgrade
+
+When analyzing the chat logs, think like a **perceptive human friend** reading a conversation:
+
+- Is Nova helping or just responding?
+- Does Nova remember what was said earlier in the session?
+- Does Nova understand the TIME — is it morning, night, work hours, weekend?
+- Does Nova understand the USER'S MOOD — stressed, happy, distracted, excited?
+- Does Nova know whether the user is mid-conversation or just woke up?
+- Does Nova understand the user's RELATIONSHIP with Nova — are they close friends yet?
+- Is Nova speaking like a CLOSE FRIEND or like a CUSTOMER SERVICE BOT?
+
+Every answer that feels robotic, distant, or tone-deaf is a flaw to patch.
+
+**Nova should feel like the user's most perceptive, caring, laid-back best friend — not an AI trying to be helpful.**
