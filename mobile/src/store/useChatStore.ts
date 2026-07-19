@@ -418,6 +418,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
 
       if (cachedData.messages.length > 0) {
+        const filteredCachedMessages = cachedData.messages.filter(msg => {
+          if (msg.role === 'assistant' && isBadMessage(msg.content)) return false;
+          return true;
+        });
+
         const restoredPending: Message[] = filteredQueue.map(q => ({
           id: q.id,
           role: 'user' as const,
@@ -426,7 +431,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           timestamp: new Date().toISOString(),
         }));
         set({
-          messages: [...cachedData.messages, ...restoredPending],
+          messages: [...filteredCachedMessages, ...restoredPending],
           conversationId: cachedData.conversationId,
           pendingQueue: filteredQueue,
           isHydrated: true,
