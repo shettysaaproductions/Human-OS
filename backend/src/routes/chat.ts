@@ -456,7 +456,6 @@ chatRouter.post(
 
       // 2. If fast async mode is requested, return 202 IMMEDIATELY NOW THAT THE MESSAGE IS IN DB
       // so the client can mark it as delivered. The rest happens in the background.
-      const async_mode = req.body.async_mode;
       if (async_mode) {
         res.status(202).json({
           message: 'Processing in background',
