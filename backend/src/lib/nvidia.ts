@@ -16,6 +16,12 @@ export const nvidiaClient = new OpenAI({
   baseURL: config.nvidia.baseUrl,
 });
 
+export const nvidiaClientSecondary = new OpenAI({
+  apiKey: config.nvidia.apiKey2 || config.nvidia.apiKey || 'dummy_key', // fallback to primary if not set
+  baseURL: config.nvidia.baseUrl,
+});
+
+
 /** Thrown when the NVIDIA API does not respond within NVIDIA_TIMEOUT_MS. */
 export class NvidiaTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -199,6 +205,60 @@ export async function chatCompletion(
     // Production: surface the real error so the caller can return HTTP 503.
     // Do NOT silently return a fake response to real users.
     logger.error('NVIDIA API call failed', {
+      error: err.message,
+      name: err.name,
+      status: err.status,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Sends a chat completion request to NVIDIA's API using the secondary background key.
+ * Use this for NACE, ReflectionScheduler, MomentEngine, and SelfImprovement.
+ */
+export async function chatCompletionBackground(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: ChatOptions,
+): Promise<string> {
+  const payload: any = {
+    model: options?.model ?? config.nvidia.chatModel,
+    messages,
+    max_tokens: options?.maxTokens ?? 1024,
+    temperature: options?.temperature ?? 0.85,
+    stream: false,
+  };
+
+  if (options?.frequency_penalty !== undefined) payload.frequency_penalty = options.frequency_penalty;
+  if (options?.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty;
+  if (options?.response_format) payload.response_format = options.response_format;
+  if (options?.tools) {
+    payload.tools = options.tools;
+    if (options.tool_choice) payload.tool_choice = options.tool_choice;
+  }
+
+  try {
+    const response = await withNvidiaTimeout((signal) =>
+      nvidiaClientSecondary.chat.completions.create(payload, { signal })
+    );
+    const message = response.choices[0]?.message;
+    if (message?.tool_calls?.length) {
+      return JSON.stringify({ tool_calls: message.tool_calls });
+    }
+    if (!message?.content) {
+      throw new Error('NVIDIA background API returned an empty response');
+    }
+    return message.content;
+  } catch (err: any) {
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+      logger.warn('NVIDIA API call failed (background) — returning mock response', {
+        error: err.message,
+        name: err.name,
+      });
+      return getMockResponse(messages, options);
+    }
+    logger.error('NVIDIA API call failed (background)', {
       error: err.message,
       name: err.name,
       status: err.status,

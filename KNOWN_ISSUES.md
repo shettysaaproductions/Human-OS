@@ -7,15 +7,7 @@ This document tracks identified bugs, limitations, and workarounds.
 
 ## P1 (CRITICAL — Fix Immediately)
 
-### 1. `reminders.status` Column Missing
-- **Symptom:** Backend logs spam `"column reminders.status does not exist"` every 10 seconds.
-- **Impact:** Wastes free-tier Render compute cycles, pollutes logs, makes debugging harder.
-- **Fix:** Run a Supabase migration to add `status TEXT DEFAULT 'pending'` to the `reminders` table.
-- **Migration SQL:**
-  ```sql
-  ALTER TABLE reminders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
-  ```
-- **After migration:** Click "Reload schema cache" in Supabase Project Settings → API.
+(No active P1 issues at this time.)
 
 ---
 
@@ -54,3 +46,6 @@ This document tracks identified bugs, limitations, and workarounds.
 | Nova echoing user's words | Added ANTI-ROBOT ECHO rule to `promptBuilder.ts` | July 2026 |
 | Nova interrogating with questions every message | Added INTERROGATION rule to `promptBuilder.ts` | July 2026 |
 | OTA popup never appearing | Fixed OTA branch from `production` to `preview` | July 2026 |
+| `reminders.status` missing causing log spam | Applied migration `20260720000000_add_reminders_status.sql` | July 2026 |
+| Time Hallucination near midnight | Addressed via better context awareness in auto upgrade | July 2026 |
+| Repetition of exact phrases | Added ANTI-ROBOT REPETITION rule to `promptBuilder.ts` | July 2026 |
