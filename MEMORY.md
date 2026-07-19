@@ -58,8 +58,8 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
 
 ### OTA Updates (Mobile)
 - APK is built on the `apk` EAS build profile targeting the `production` channel.
-- APK installed on test devices listens to the `preview` channel.
-- **CORRECT COMMAND for OTA to reach the installed APK:** `npx eas update --branch preview --message "..."`
+- APK installed on test devices listens to the `production` channel.
+- **CORRECT COMMAND for OTA to reach the installed APK:** `npx eas update --branch production --message "..."`
 - OTA update popup appears on app startup when update is downloaded.
 - `app.json` has `checkAutomatically: "ON_ERROR_RECOVERY"` — update is checked silently on launch.
 
@@ -77,5 +77,5 @@ Triggered by user typing "auto upgrade" or "upgrade":
 4. Patch `backend/src/services/promptBuilder.ts` with strict anti-robot rules.
 5. Restart local backend.
 6. Push to GitHub main branch.
-7. If mobile files modified: `npx eas update --branch preview --message "..."`.
+7. If mobile files modified: `npx eas update --branch production --message "..."`.
 8. Present full summary to user.

@@ -21,8 +21,8 @@ BACKEND DIR:   c:\Users\Mentorus2\OneDrive\Documents\Human Os\backend
 MOBILE DIR:    c:\Users\Mentorus2\OneDrive\Documents\Human Os\mobile
 ROOT DIR:      c:\Users\Mentorus2\OneDrive\Documents\Human Os
 
-OTA COMMAND:   cd mobile && npx eas update --branch preview --message "..."
-               ⚠️  ALWAYS use --branch preview. NEVER use --branch production for OTA.
+OTA COMMAND:   cd mobile && npx eas update --branch production --message "..."
+               ⚠️  ALWAYS use --branch production. NEVER use --branch preview for OTA.
                The installed APK listens to the preview EAS channel.
 
 GIT PUSH:      git add . && git commit -m "..." && git push origin main
@@ -191,14 +191,14 @@ git push origin main
 
 ```bash
 cd "c:\Users\Mentorus2\OneDrive\Documents\Human Os\mobile"
-npx eas update --branch preview --message "Auto Upgrade: <same description>"
+npx eas update --branch production --message "Auto Upgrade: <same description>"
 ```
 
-⚠️ ALWAYS use `--branch preview`. The installed APK listens to the `preview` EAS channel, NOT `production`.
+⚠️ ALWAYS use `--branch production`. The installed APK listens to the `production` EAS channel.
 
 Wait for the EAS command to complete and confirm:
 - ✅ "Published!" message appears
-- ✅ Branch = preview
+- ✅ Branch = production
 - ✅ Runtime version = 1.1.0
 
 **CRITICAL RULE:** Do NOT consider the Auto Upgrade complete until the EAS update finishes successfully. You must explicitly inform the user that the OTA update was published and they will see a popup in their app.
@@ -213,7 +213,7 @@ Present to the user:
 3. **Patches Applied** — Exact new rules added to `promptBuilder.ts`.
 4. **Other Improvements Noticed** — Anything else spotted during analysis (future roadmap items).
 5. **Documents Updated** — List of all docs that were updated.
-6. **Deployment Status** — GitHub push confirmed ✅, OTA published to preview branch ✅, remind user to manually redeploy Render.
+6. **Deployment Status** — GitHub push confirmed ✅, OTA published to production branch ✅, remind user to manually redeploy Render.
 7. **Free-Tier Health Check** — Confirm no Supabase query explosion, no memory overload, no aggressive polling added.
 
 ---
