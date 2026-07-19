@@ -15,6 +15,8 @@ export interface Message {
   chunkTotal?: number;
   reply_to_id?: string;
   reply_to_content?: string;
+  options?: string[];
+  user_reaction?: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null;
 }
 
 export interface ChatDiagnostics {
@@ -49,6 +51,7 @@ interface ChatState {
   processQueue: () => Promise<void>;
   checkProactiveMessages: () => Promise<void>;
   set_isTyping: (v: boolean) => void;
+  updateMessageReaction: (messageId: string, reaction: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null) => Promise<void>;
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
@@ -490,6 +493,8 @@ export const useChatStore = create<ChatState>((set, get) => {
                   timestamp,
                   chunkIndex: finalChunks.length > 1 ? idx + 1 : undefined,
                   chunkTotal: finalChunks.length > 1 ? finalChunks.length : undefined,
+                  options: msg.meta?.options,
+                  user_reaction: msg.user_reaction,
                 });
               });
             } else {
@@ -498,7 +503,9 @@ export const useChatStore = create<ChatState>((set, get) => {
                 role,
                 content: msg.content,
                 status: 'sent',
-                timestamp
+                timestamp,
+                options: msg.meta?.options,
+                user_reaction: msg.user_reaction
               });
             }
           }
@@ -622,10 +629,12 @@ export const useChatStore = create<ChatState>((set, get) => {
                 role, content: chunkContent, status: 'sent', timestamp,
                 chunkIndex: finalChunks.length > 1 ? idx + 1 : undefined,
                 chunkTotal: finalChunks.length > 1 ? finalChunks.length : undefined,
+                options: msg.meta?.options,
+                user_reaction: msg.user_reaction,
               });
             });
           } else {
-            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp });
+            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp, options: msg.meta?.options, user_reaction: msg.user_reaction });
           }
         }
 
@@ -763,6 +772,8 @@ export const useChatStore = create<ChatState>((set, get) => {
                 content: chunkContent,
                 status: 'responded',
                 timestamp: msg.created_at,
+                options: msg.meta?.options,
+                user_reaction: msg.user_reaction,
               };
               if (idx === 0) {
                 newMessages.push(newMsg);
@@ -777,6 +788,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               content: msg.content,
               status: 'sent',
               timestamp: msg.created_at,
+              options: msg.meta?.options,
+              user_reaction: msg.user_reaction,
             });
           }
         }
@@ -841,6 +854,16 @@ export const useChatStore = create<ChatState>((set, get) => {
         console.warn('[PROACTIVE] Failed to check for new messages:', e);
       } finally {
         _proactiveCheckInProgress = false;
+      }
+    },
+    updateMessageReaction: async (messageId: string, reaction: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null) => {
+      set((s) => ({
+        messages: s.messages.map(m => m.id === messageId ? { ...m, user_reaction: reaction } : m)
+      }));
+      try {
+        await chatService.setReaction(messageId, reaction);
+      } catch (e) {
+        console.warn('Failed to save reaction:', e);
       }
     },
     

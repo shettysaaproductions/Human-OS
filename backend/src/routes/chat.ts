@@ -931,8 +931,9 @@ chatRouter.post(
               if (typeof (res as any).flush === 'function') (res as any).flush();
             }
           }
-        } catch (nvidiaError) {
+        } catch (nvidiaError: any) {
           const errStr = nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError);
+          const isContentPolicy = errStr.toLowerCase().includes('policy') || errStr.toLowerCase().includes('moderation') || nvidiaError?.status === 400 || nvidiaError?.status === 422 || errStr.includes('400') || errStr.includes('422');
           logger.error('[NVIDIA] LLM call failed', { error: errStr, async_mode });
           if (isStreaming) {
             res.write(`data: ${JSON.stringify({ type: 'error', error: errStr })}\n\n`);
@@ -940,10 +941,12 @@ chatRouter.post(
             res.end();
             return;
           } else if (async_mode) {
-            // async_mode: 202 already sent — MUST save a fallback reply so the
-            // user message is never orphaned with no response.
-            rawReply = 'Yaar, kuch technical issue aa gaya abhi. Thodi der mein phir try karo!';
-            logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId });
+            if (isContentPolicy) {
+              rawReply = 'Acha, is topic par main jyada bol nahi sakti yaar 😂 kuch aur baat karte hain?';
+            } else {
+              rawReply = 'Yaar, kuch technical issue aa gaya abhi. Thodi der mein phir try karo!';
+            }
+            logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId, isContentPolicy });
           } else {
             throw new ExternalServiceError('NVIDIA', errStr);
           }
@@ -953,6 +956,17 @@ chatRouter.post(
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
         res.end();
+      }
+
+      let optionsArray: string[] | undefined;
+      const optionsMatch = rawReply.match(/<OPTIONS>([\s\S]*?)<\/OPTIONS>/);
+      if (optionsMatch) {
+        try {
+          optionsArray = JSON.parse(optionsMatch[1]);
+          rawReply = rawReply.replace(/<OPTIONS>[\s\S]*?<\/OPTIONS>/, '').trim();
+        } catch (e) {
+          logger.warn('Failed to parse OPTIONS JSON', { error: e instanceof Error ? e.message : String(e) });
+        }
       }
 
       const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), effectiveMessage);
@@ -968,7 +982,8 @@ chatRouter.post(
             content: rawReply,
             meta: {
               situationBrief: situationBrief || null,
-              subconsciousActions: extractedActions
+              subconsciousActions: extractedActions,
+              options: optionsArray
             }
           })
       );
@@ -1124,7 +1139,7 @@ chatRouter.get(
 
       let query = supabaseAdmin
         .from('chat_history')
-        .select('id, role, content, created_at, conversation_id, user_id')
+        .select('id, role, content, created_at, conversation_id, user_id, meta, user_reaction')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -1150,6 +1165,36 @@ chatRouter.get(
 
       // Return in ascending order (oldest first) so the client can prepend correctly
       res.status(200).json((data || []).reverse());
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── SET Reaction ──────────────────────────────────────────────────────────────
+chatRouter.post(
+  '/:messageId/reaction',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user!.id;
+      const { messageId } = req.params;
+      const { reaction } = req.body;
+
+      const { data, error } = await qt.track('set_reaction', 'chat_history', () =>
+        supabaseAdmin
+          .from('chat_history')
+          .update({ user_reaction: reaction })
+          .eq('id', messageId)
+          .eq('user_id', userId)
+          .select()
+          .single()
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      res.status(200).json({ success: true, reaction: data?.user_reaction });
     } catch (err) {
       next(err);
     }
