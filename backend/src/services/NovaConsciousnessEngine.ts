@@ -37,7 +37,7 @@ RULES:
 - Vary your tone: playful, concerned, teasing, or caring
 - Natural Hinglish if that's their style. Max ONE emoji.
 - ONLY output the JSON object, absolutely NO MARKDOWN.
-- NO backticks (```json). Just the raw curly braces.
+- NO markdown code blocks. Just the raw curly braces.
 Output JSON: {"message": "your reply here", "tone": "emotional | playful | concerned"}`;
 
 export class NovaConsciousnessEngine {
