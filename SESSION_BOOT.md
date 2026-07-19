@@ -29,6 +29,7 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 **All 7 engines are LIVE in production on Render.**
 
 ### ✅ Recently Completed
+- Auto Upgrade Protocol Execution: Strict anti-robot patches applied to `promptBuilder.ts`
 - Swipe-to-reply with context injection into LLM
 - Message staggering (5-10s human-like delays between bubbles)
 - Never-stuck message guarantee (DB write before 202 response)
