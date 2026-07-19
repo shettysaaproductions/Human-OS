@@ -1,0 +1,1 @@
+ALTER TABLE public.reminders ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
