@@ -70,7 +70,11 @@ Every 7 days, the founder reviews:
 ### Required Sections:
 1. **Most Natural Moments:** Messages that felt genuinely like a best friend
 2. **Most Robotic Moments:** Where Nova felt like a chatbot
-3. **Behavioral Patches Applied This Week:** What `NovaSelfImprovementService` fixed
+3. **Behavioral Patches Applied This Week:** 
+   - Added ANTI-ROBOT RULE (ECHOING-ACTIONS) to stop repeating user actions
+   - Added ANTI-ROBOT RULE (FORMALITY-MIRRORING) to stop mirroring "Aap"
+   - Added ANTI-ROBOT RULE (STATEMENTS > QUESTIONS) to reduce interrogation spam
+   - Added ANTI-ROBOT RULE (REPETITION) to prevent reusing the same phrase
 4. **User Experience Wins:** Features that made the app feel alive
 5. **Stuck/Error Events:** Any message delivery failures, ghost duplicates, or errors
 6. **Next Auto Upgrade Focus:** What flaws to target manually

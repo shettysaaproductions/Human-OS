@@ -19,6 +19,8 @@ import { shortTermMemoryCleanupService } from './services/ShortTermMemoryCleanup
 import { chatHistoryPruningService } from './services/ChatHistoryPruningService';
 import { novaFollowupService } from './services/NovaFollowupService';
 import { novaConsciousnessEngine } from './services/NovaConsciousnessEngine';
+import { selfImprovementService } from './services/NovaSelfImprovementService';
+import { promptBuilder } from './services/promptBuilder';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -26,6 +28,9 @@ async function main(): Promise<void> {
     version: config.server.appVersion,
     environment: config.server.nodeEnv,
   });
+
+  // Load autonomous behavioral patches into memory before accepting traffic
+  await promptBuilder.loadPatches();
 
   // Initialize Background Queue Workers
   // DISABLE_REFLECTIONS=true → skip all background workers for debugging
@@ -78,11 +83,12 @@ async function main(): Promise<void> {
         await reflectionScheduler.runDailyForAllUsers();
         await shortTermMemoryCleanupService.run();
 
-        // Nightly chat history pruning — only run between 2AM-3AM server time
+        // Nightly chat history pruning and self-improvement — only run between 2AM-3AM server time
         const hour = new Date().getHours();
         if (hour === 2) {
-          logger.info('Scheduler: Triggering nightly chat history pruning...');
+          logger.info('Scheduler: Triggering nightly chat history pruning and autonomous self-improvement...');
           await chatHistoryPruningService.runAll();
+          await selfImprovementService.runReview();
         }
       } catch (err) {
         logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });

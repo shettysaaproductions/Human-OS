@@ -21,12 +21,12 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
   - Swipe-to-reply with reply context injected into LLM prompt
   - Message staggering (5-10s between bubbles for human-like pacing)
   - Never-stuck message guarantee (user message saved to DB before 202 response)
-  - Anti-robot prompt rules: no echoing, no "Aap", no interrogation spam
+  - Anti-robot prompt rules: no echoing, no "Aap", no interrogation spam, no repetition, casual statements
   - OTA update system with popup notification on app launch
-- **In Progress (Planned):**
   - Dual NVIDIA key routing (Key 1: chat, Key 2: background)
-  - `NovaSelfImprovementService` — weekly autonomous self-repair loop
+  - `NovaSelfImprovementService` — daily autonomous self-repair loop
   - Enhanced `SituationalAwareness` — reply intent, conversation phase, emotional momentum
+- **In Progress (Planned):**
   - `NovaCognitionOrchestrator` — all 7 engines firing on every message
   - NACE Agenda Builder — Nova plans proactive outreach intelligently
   - Memory Time Capsule — joyful moments surfaced 1 year later
@@ -37,10 +37,10 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
 
 ### Supabase Infrastructure
 - We use Supabase with `pgvector` and `GIN` full-text search indexing.
-- **Active Bug (P1):** `reminders.status` column does not exist. Backend logs spam this error every 10 seconds. Fix: add `status` column to `reminders` table via SQL migration.
+- **Fixed Bug:** `reminders.status` column missing issue is now resolved via migration.
 - **Known Rule:** After any migration, run `NOTIFY pgrst, 'reload schema'` or click "Reload schema cache" in Supabase project settings.
-- **Key Tables:** `profiles`, `chat_history`, `memories`, `working_memory`, `episodic_memories`, `emotional_states`, `kg_nodes`, `kg_edges`, `reflections`, `background_jobs`, `nova_outreach_log`, `llm_providers`.
-- **Planned New Tables:** `nova_behavioral_patches` (self-improvement patches), `surface_on` column on `episodic_memories` (Time Capsules).
+- **Key Tables:** `profiles`, `chat_history`, `memories`, `working_memory`, `episodic_memories`, `emotional_states`, `kg_nodes`, `kg_edges`, `reflections`, `background_jobs`, `nova_outreach_log`, `llm_providers`, `nova_behavioral_patches`.
+- **Planned New Tables:** `surface_on` column on `episodic_memories` (Time Capsules).
 
 ### Asynchronous Processing
 - Chat latency must remain under 2 seconds for user-facing replies.

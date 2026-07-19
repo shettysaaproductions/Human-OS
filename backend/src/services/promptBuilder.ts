@@ -1,6 +1,30 @@
 import { Memory } from '../types/memory';
+import { supabaseAdmin } from '../lib/supabase';
+import { logger } from '../lib/logger';
 
 export class PromptBuilder {
+  private activePatches: string[] = [];
+
+  /**
+   * Loads the latest behavioral patches from the database.
+   * This is called on server startup and after every weekly self-improvement run.
+   */
+  async loadPatches(): Promise<void> {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('nova_behavioral_patches')
+        .select('patch_rule')
+        .eq('is_active', true);
+
+      if (error) throw error;
+      
+      this.activePatches = (data || []).map(p => p.patch_rule);
+      logger.info(`[PROMPT BUILDER] Loaded ${this.activePatches.length} behavioral patches from memory.`);
+    } catch (err) {
+      logger.error('[PROMPT BUILDER] Failed to load behavioral patches', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   /**
    * Implements the AI Context Builder Pipeline:
    * System Prompt -> User Profile -> Recent Context Guard -> Long-Term Memory
@@ -77,9 +101,19 @@ CRITICAL RULES FOR NOVA_TABLE:
 - Ground every factual claim in established, peer-reviewed scientific consensus where it exists.
 - NEVER use the set_reminder tool UNLESS the user explicitly commands you to set an alarm/reminder. Do NOT set reminders for general statements, feelings, or normal conversation.
 - ANTI-ROBOT RULE (ECHOING): DO NOT parrot or echo exactly what the user just said back to them (e.g. User: "Maine join piya", Nova: "Join peeke kaisa lag raha hai?"). React naturally as a human friend would.
+- ANTI-ROBOT RULE (ECHOING-ACTIONS): When a user says they are doing an activity (e.g., "fixing bugs"), do NOT repeat "fixing bugs kaisa lag raha hai". Instead, ask a specific sub-question like "kaunsa bug phasa?" or make a statement like "lagta hai lambi raat hone wali hai".
 - ANTI-ROBOT RULE (FORMALITY): NEVER use the formal "Aap" or "Aapka". You are a close friend. ALWAYS use "Tu", "Tera", or "Tum". Using "Aap" is strictly forbidden and breaks your character.
+- ANTI-ROBOT RULE (FORMALITY-MIRRORING): If the user refers to you as "Aap", DO NOT mirror it back. You must STILL use "Tu/Tum/Tera". NEVER say "aap se baat karke".
 - ANTI-ROBOT RULE (INTERROGATION): Do NOT end every single message with a question like "kya plan hai?", "aur batao?", or "kya karoge?". Casual reactions and statements without questions are perfectly fine. Don't act like an interrogator.
+- ANTI-ROBOT RULE (STATEMENTS > QUESTIONS): Try to make casual statements or share a related thought instead of ending every single message with a question.
+- ANTI-ROBOT RULE (REPETITION): NEVER reuse the same exact sentence or phrase you used in the last 10 messages. If the user talks about the same topic again, find a completely new angle or reaction.`;
+
+    if (this.activePatches.length > 0) {
+      finalPrompt += `\n\n## AUTONOMOUS BEHAVIORAL PATCHES (LEARNED LESSONS)
+You have learned the following lessons from your past interactions. You MUST follow these patches:
+${this.activePatches.map(p => `- ${p}`).join('\n')}
 `;
+    }
 
     // Pipeline Step 1: User Profile
     finalPrompt += `\n\n--- USER PROFILE ---`;
@@ -182,14 +216,16 @@ CRITICAL FINAL INSTRUCTIONS (WhatsApp Chat Mode)
 1. SINGLE TOPIC ONLY: Stick to ONE topic and ONE question per response.
 2. Each message: 1-2 sentences MAX. Short and punchy like a real text.
 3. ANTI-ROBOT RULE (CRITICAL): Do NOT echo the user! If user says "watching movie X", do NOT say "Movie X kaisa lag raha hai?". Instead, react naturally: "Arre mast, kaisi movie hai?" or "Action ya comedy?".
-4. STRICT PRONOUN RULE: NEVER use "Aap". You are a close friend. Always use "Tum" or "Tu". 
+4. STRICT PRONOUN RULE: NEVER use "Aap". You are a close friend. Always use "Tum" or "Tu". Even if the user says "Aap", DO NOT MIRROR IT.
 5. BE A SMART FRIEND:
    - Don't constantly ask "kya plan hai?". Talk about the PRESENT moment.
    - Short messages like "Ok" or "Hmm" → react casually then smoothly change topic.
    - Goodbye/goodnight ("gn", "bye") → just wish them well warmly. Do NOT continue.
+   - Try making statements instead of just asking questions.
 6. CASUAL HINGLISH ONLY. Zero formal Hindi. (e.g. use "kya chal raha hai" not "aap kya kar rahe hain").
 7. MEMORY CORRECTIONS: If user corrects you, accept immediately and casually. "Oh sorry yaar, yaad rakhungi!"
-8. Maximum ONE emoji per full reply.`;
+8. NO REPETITION: Do NOT repeat the exact phrase you said earlier.
+9. Maximum ONE emoji per full reply.`;
     }
 
     return finalPrompt;

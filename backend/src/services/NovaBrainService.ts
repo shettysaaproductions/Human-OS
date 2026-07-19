@@ -1,4 +1,4 @@
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletion, chatCompletionBackground } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 
@@ -247,7 +247,7 @@ Return a JSON object matching this structure:
   "source_memory_id": "string (the exact ID of the goal or node that this is about, or null)"
 }`;
 
-    const response = await chatCompletion([
+    const response = await chatCompletionBackground([
       { role: 'system', content: 'You extract goal check-ins in JSON format.' },
       { role: 'user', content: prompt }
     ], {
@@ -284,7 +284,7 @@ Return a JSON object matching this structure:
   "source_memory_id": "string (the exact ID of the node or memory this is about, or null)"
 }`;
 
-    const response = await chatCompletion([
+    const response = await chatCompletionBackground([
       { role: 'system', content: 'You extract child milestone check-ins in JSON format.' },
       { role: 'user', content: prompt }
     ], {
@@ -312,7 +312,7 @@ Return JSON:
   "body": "Refined Body"
 }`;
 
-    const response = await chatCompletion([
+    const response = await chatCompletionBackground([
       { role: 'system', content: 'You validate and refine check-in notifications in JSON.' },
       { role: 'user', content: prompt }
     ], {
@@ -334,7 +334,7 @@ Consider:
 
 Output JSON: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
 
-    const response = await chatCompletion([
+    const response = await chatCompletionBackground([
       { role: 'system', content: prompt },
       { role: 'user', content: tier1Context }
     ], {
@@ -359,7 +359,7 @@ RULES:
 - NO markdown code blocks. Just the raw curly braces.
 Output JSON: {"message": "your reply here", "tone": "emotional | playful | concerned"}`;
 
-    const response = await chatCompletion([
+    const response = await chatCompletionBackground([
       { role: 'system', content: prompt },
       { role: 'user', content: tier2Context }
     ], {
@@ -380,7 +380,7 @@ Output JSON: {"message": "your reply here", "tone": "emotional | playful | conce
       }
     ];
 
-    const raw = await chatCompletion(messages, { response_format: { type: 'json_object' }, maxTokens: 512 });
+    const raw = await chatCompletionBackground(messages, { response_format: { type: 'json_object' }, maxTokens: 512 });
     return JSON.parse(raw);
   }
 
@@ -396,7 +396,7 @@ Output JSON: {"message": "your reply here", "tone": "emotional | playful | conce
       }
     ];
 
-    const raw = await chatCompletion(messages, { response_format: { type: 'json_object' }, maxTokens: 768 });
+    const raw = await chatCompletionBackground(messages, { response_format: { type: 'json_object' }, maxTokens: 768 });
     return JSON.parse(raw);
   }
 }

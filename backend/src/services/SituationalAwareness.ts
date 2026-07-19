@@ -20,6 +20,9 @@ export interface SituationContext {
   timeStr: string;
   lastUserMessage?: string; // The most recent user message text (for availability detection)
   upcomingReminders?: { title: string; scheduled_at: string }[]; // Jarvis mode
+  replyToContent?: string | null; // Swipe-to-reply content
+  last5Messages?: { role: string; content: string; created_at: string }[]; // For phase detection
+  last3UserEmotions?: { mood: string; intensity: number }[]; // For momentum tracking
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable
@@ -105,6 +108,23 @@ export class SituationalAwareness {
     // ── Daily Reflection ──
     if (ctx.latestReflection) {
       lines.push(`- Yesterday's summary: ${ctx.latestReflection.summary}`);
+    }
+
+    // ── Reply Intent ──
+    if (ctx.replyToContent) {
+      lines.push(`- 💬 REPLY INTENT: User is directly replying to Nova's previous message: "${ctx.replyToContent}". This is NOT a new topic. Stay focused on what Nova said before and react to their reply.`);
+    }
+
+    // ── Conversation Phase ──
+    if (ctx.last5Messages && ctx.last5Messages.length > 0 && ctx.gapMinutes !== null) {
+      const phase = this.detectConversationPhase(ctx.last5Messages, ctx.gapMinutes);
+      lines.push(`- 🔄 CONVERSATION PHASE: ${phase}`);
+    }
+
+    // ── Emotional Momentum ──
+    if (ctx.last3UserEmotions && ctx.last3UserEmotions.length > 0) {
+      const momentum = this.detectEmotionalMomentum(ctx.last3UserEmotions);
+      if (momentum) lines.push(`- 📈 EMOTIONAL MOMENTUM: ${momentum}`);
     }
 
     // ── Jarvis Reminder Mode ──
@@ -203,6 +223,50 @@ export class SituationalAwareness {
     if (['anxious', 'nervous', 'worried', 'tense'].some(m => low.includes(m)))
       return 'User was anxious. Be calming, reassuring, grounding.';
     return 'Neutral mood. Respond naturally.';
+  }
+
+  detectConversationPhase(last5Messages: { role: string; content: string; created_at: string }[], gapMinutes: number): string {
+    if (gapMinutes > 60 && last5Messages[0]?.role === 'user') {
+      return 'OPENING — user just returned after a gap. Acknowledge return naturally, greet if appropriate.';
+    }
+    
+    if (gapMinutes < 5) {
+      const recentUserMsg = last5Messages[0]?.content?.toLowerCase() || '';
+      if (['gn', 'bye', 'goodnight', 'ttyl', 'cya', 'ok bye'].some(w => recentUserMsg.includes(w))) {
+        return 'WINDING_DOWN — user is trying to end the chat. Say goodbye gracefully, do NOT start new topics or ask questions.';
+      }
+      return 'FLOWING — active back-and-forth. Keep it natural, match their pace, do NOT greet again.';
+    }
+
+    // Single message after a medium gap
+    if (gapMinutes > 30 && last5Messages.length >= 1) {
+      return 'RE-ENTRY — user dropped a message after being quiet. Do NOT pick up the old thread like no time passed. Start fresh from this new context.';
+    }
+
+    return 'UNKNOWN — respond naturally to the latest context.';
+  }
+
+  detectEmotionalMomentum(emotions: { mood: string; intensity: number }[]): string | null {
+    if (emotions.length < 2) return null;
+    
+    // Simplistic heuristic for demo
+    const latest = emotions[0];
+    const previous = emotions[1];
+    
+    const isNegative = (mood: string) => ['sad', 'angry', 'frustrated', 'depressed', 'anxious'].some(m => mood.toLowerCase().includes(m));
+    const isPositive = (mood: string) => ['happy', 'excited', 'joy', 'thrilled', 'good'].some(m => mood.toLowerCase().includes(m));
+
+    if (isNegative(latest.mood) && isNegative(previous.mood) && latest.intensity > previous.intensity) {
+      return 'DECLINING — user is getting more stressed/upset. Slow down, ask ONE caring question, be highly supportive.';
+    }
+    if (isPositive(latest.mood) && isPositive(previous.mood) && latest.intensity > previous.intensity) {
+      return 'RISING — user is getting more excited/happy! Match the energy, amplify positivity.';
+    }
+    if (latest.intensity < 4 && previous.intensity < 4) {
+      return 'FLAT — conversation is low energy ("ok", "hmm"). Good time to introduce a new topic from memory or ask a curious question.';
+    }
+
+    return null;
   }
 }
 
