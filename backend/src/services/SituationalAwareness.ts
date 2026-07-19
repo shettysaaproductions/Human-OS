@@ -54,7 +54,10 @@ export class SituationalAwareness {
     const lines: string[] = [];
 
     lines.push(`## SITUATION BRIEF — Nova's Internal Understanding`);
-    lines.push(`- Right now: ${ctx.dayName}, ${ctx.dateStr}, ${ctx.timeStr} ${ctx.tzLabel} (${ctx.isWeekend ? 'Weekend' : 'Weekday'})`);
+    lines.push(`- Right now: ${ctx.dayName}, ${ctx.dateStr}, ${ctx.timeStr} ${ctx.tzLabel} (${ctx.isWeekend ? 'Weekend / Weekoff' : 'Weekday'})`);
+    if (ctx.isWeekend) {
+      lines.push(`- WEEKOFF MODE: It's a weekend. The user is likely relaxing, off from work, or has casual plans. Avoid pushing work/office topics unless the user explicitly brings them up.`);
+    }
     lines.push(`- Time of day: ${this.getTimeOfDay(ctx.nowLocal)}`);
     lines.push(`- Time-based persona: ${this.getTimedPersona(ctx.nowLocal, ctx.isWeekend)}`);
 
@@ -113,7 +116,11 @@ export class SituationalAwareness {
         return remMs > nowMs && remMs - nowMs < twoHoursMs;
       });
       if (soonReminders.length > 0) {
-        lines.push(`- 🔔 JARVIS MODE: These reminders are coming up in the next 2 hours: ${soonReminders.map(r => r.title).join(', ')}. If relevant to conversation, naturally weave in a heads-up. Don't be a robot about it — mention it like a friend who remembered.`);
+        if (ctx.isWeekend) {
+          lines.push(`- 🔔 JARVIS MODE (WEEKEND): These reminders are coming up in the next 2 hours: ${soonReminders.map(r => r.title).join(', ')}. Since it's their weekoff, gently ask if they still want to do this or if they want to skip it for today. Don't push them to do work.`);
+        } else {
+          lines.push(`- 🔔 JARVIS MODE: These reminders are coming up in the next 2 hours: ${soonReminders.map(r => r.title).join(', ')}. If relevant to conversation, naturally weave in a heads-up. Don't be a robot about it — mention it like a friend who remembered.`);
+        }
       }
     }
 

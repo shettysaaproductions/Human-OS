@@ -262,6 +262,19 @@ function chunkText(text: string): string[] {
   return chunks.length ? chunks : [text];
 }
 
+const MOBILE_FALLBACK_FILTER = [
+  'Yaar, kuch technical issue',
+  'Thodi der mein phir try karo',
+  'kuch technical issue aa gaya',
+  'reminder set nahi kar sakta',
+  'reminder system thoda busy',
+  'Nova ka reminder system',
+  'system busy hai',
+];
+
+export const isBadMessage = (content: string) =>
+  MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
+
 let _queueTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export const useChatStore = create<ChatState>((set, get) => {
@@ -427,20 +440,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         const history = await chatService.getHistory(undefined, PAGE_SIZE);
         console.log('Diagnostics - Messages received from API:', history?.length);
         if (history && history.length > 0) {
-        // Filter out backend fallback and LLM-hallucinated refusal messages from UI
-        // These should never appear as chat bubbles to the user
-        const MOBILE_FALLBACK_FILTER = [
-          'Yaar, kuch technical issue',
-          'Thodi der mein phir try karo',
-          'kuch technical issue aa gaya',
-          'reminder set nahi kar sakta',
-          'reminder system thoda busy',
-          'Nova ka reminder system',
-          'system busy hai',
-        ];
-        const isBadMessage = (content: string) =>
-          MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
-
         const formattedHistory: Message[] = [];
           for (const msg of history) {
             // Skip bad messages entirely — don't show in UI
@@ -585,6 +584,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         const formattedOlder: Message[] = [];
         for (const msg of older) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
+          
+          if (role === 'assistant' && isBadMessage(msg.content)) continue;
+
           const timestamp = msg.created_at || new Date().toISOString();
 
           if (role === 'assistant') {
@@ -703,6 +705,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         for (const msg of history) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
+          
+          if (role === 'assistant' && isBadMessage(msg.content)) continue;
+          
           const msgId = msg.id;
 
           // Skip if already in store (by raw ID or any _part_N variant)
@@ -754,10 +759,14 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         if (newMessages.length > 0) {
           console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
-          set((s) => ({
-            messages: [...s.messages, ...newMessages],
-            isTyping: false,
-          }));
+          set((s) => {
+            const combined = [...s.messages, ...newMessages];
+            combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            return {
+              messages: combined,
+              isTyping: false,
+            };
+          });
           // Reply arrived — stop the poller and clear the persistent awaiting flag
           stopReplyPolling();
           clearAwaitingReply();
