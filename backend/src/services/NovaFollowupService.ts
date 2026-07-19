@@ -35,6 +35,7 @@ const FOLLOWUP_DECISION_PROMPT = `You are Nova's internal scheduling engine. Giv
 
 Context rules:
 - If user said "bye", "ttyl", "later", "gtg", "busy", "in a meeting" → wait 2-4 hours
+- If user explicitly stated it's their weekoff, holiday, or they are relaxing → DO NOT follow up with work-related or random generic questions. If you must follow up, make it relevant to their relaxation, and wait longer (2-4 hours).
 - If user is at work/office → wait until evening (6+ hours)  
 - If conversation just ended naturally with no clear closure → follow up in 10-30 mins
 - If user seems happy and chatty → shorter gap (5-20 mins)
