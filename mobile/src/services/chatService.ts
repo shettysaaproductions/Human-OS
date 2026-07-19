@@ -14,6 +14,11 @@ export const chatService = {
     return data;
   },
 
+  setReaction: async (messageId: string, reaction: string | null) => {
+    const response = await api.post(`/chat/${messageId}/reaction`, { reaction });
+    return response.data;
+  },
+
   sendMessage: async (message: string, conversationId?: string) => {
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;

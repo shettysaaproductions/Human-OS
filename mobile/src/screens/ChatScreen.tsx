@@ -443,7 +443,7 @@ function SwipeableBubble({ item, children, onReply }: { item: Message, children:
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo, updateMessageReaction } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
@@ -783,7 +783,28 @@ export function ChatScreen() {
             </View>
             </View>
 
+            {item.user_reaction && (
+              <View style={s.reactionBadge}>
+                <Text style={s.reactionText}>
+                  {item.user_reaction === 'THUMBS_UP' ? '👍' : item.user_reaction === 'THUMBS_DOWN' ? '👎' : '❤️'}
+                </Text>
+              </View>
+            )}
           </View>
+          
+          {item.options && item.options.length > 0 && !isUser && (
+            <View style={s.optionsContainer}>
+              {item.options.map((option, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={s.optionChip}
+                  onPress={() => sendMessage(option)}
+                >
+                  <Text style={s.optionText}>{option}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           </View>
         </SwipeableBubble>
       </View>
@@ -827,6 +848,23 @@ export function ChatScreen() {
               }} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>📋</Text>
               </TouchableOpacity>
+              {selectedMessageIds.length === 1 && (
+                <View style={{ flexDirection: 'row', marginLeft: 8 }}>
+                  {['👍', '👎', '❤️'].map(reaction => (
+                    <TouchableOpacity
+                      key={reaction}
+                      onPress={() => {
+                        const rMap: any = { '👍': 'THUMBS_UP', '👎': 'THUMBS_DOWN', '❤️': 'LIKE' };
+                        updateMessageReaction(selectedMessageIds[0], rMap[reaction]);
+                        setSelectedMessageIds([]);
+                      }}
+                      style={[s.headerBtn, { paddingHorizontal: 6 }]}
+                    >
+                      <Text style={s.headerBtnText}>{reaction}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
               {selectedMessageIds.length === 1 && (
                 <TouchableOpacity onPress={() => {
                   const msg = messages.find(m => m.id === selectedMessageIds[0]);
@@ -1212,5 +1250,43 @@ const s = StyleSheet.create({
   },
   fenceContent: {
     padding: 12,
+  },
+  optionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    gap: 8,
+  },
+  optionChip: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  optionText: {
+    color: '#8B5CF6',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  reactionBadge: {
+    position: 'absolute',
+    bottom: -10,
+    right: 10,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#333',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.5,
+    shadowRadius: 1,
+  },
+  reactionText: {
+    fontSize: 12,
   }
 });
