@@ -366,7 +366,14 @@ export const useChatStore = create<ChatState>((set, get) => {
             const isServerError = err?.response?.status >= 400 && err?.response?.status < 500;
             if (isServerError) {
               console.log('[QUEUE] 4xx error, not retrying:', err?.response?.status);
-              set({ isTyping: false });
+              set((s) => ({
+                isTyping: false,
+                messages: s.messages.map(m =>
+                  batch.some(b => b.id === m.id)
+                    ? { ...m, status: 'error' as const }
+                    : m
+                )
+              }));
               succeeded = true;
             } else {
               console.log('[QUEUE] network error, retrying in', retryDelay, 'ms');
@@ -695,15 +702,14 @@ export const useChatStore = create<ChatState>((set, get) => {
         // Build a comprehensive set of IDs already in store:
         // includes both raw IDs (user msgs) and all _part_N variants (assistant chunks)
         const existingIds = new Set<string>();
-        const existingContentByRole = new Map<string, Set<string>>(); // role -> Set<content.trim()>
+        const existingUserContent = new Set<string>();
         for (const m of currentMessages) {
           existingIds.add(m.id);
           // If this is a _part_N id, also register the base id so the same msg
           // fetched from backend (raw UUID) is recognised as a duplicate
           const partMatch = m.id.match(/^(.+)_part_\d+$/);
           if (partMatch) existingIds.add(partMatch[1]);
-          if (!existingContentByRole.has(m.role)) existingContentByRole.set(m.role, new Set());
-          existingContentByRole.get(m.role)!.add(m.content.trim());
+          if (m.role === 'user') existingUserContent.add(m.content.trim());
         }
 
         const newMessages: Message[] = [];
@@ -720,19 +726,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           const partId1 = `${msgId}_part_1`;
           if (existingIds.has(partId1)) continue;
 
-          // Skip if same content already exists for that role
-          // (handles local temp-ID vs backend UUID mismatch that causes visible duplicates)
-          if (role === 'assistant') {
-            const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
-              ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
-              : [msg.content];
-            const contentSet = existingContentByRole.get('assistant') ?? new Set();
-            // If ANY chunk already exists by content, skip the whole message
-            if (chunks.some((c: string) => contentSet.has(c.trim()))) continue;
-          } else {
-            const contentSet = existingContentByRole.get(role) ?? new Set();
-            if (contentSet.has(msg.content.trim())) continue;
-          }
+          // Skip user messages if the exact same content is already in the local store.
+          // This prevents duplicates where the local store has 'temp_xxx' and the backend returns 'uuid_yyy'.
+          // We DO NOT do this for assistant messages to avoid swallowing repeated LLM fallback messages.
+          if (role === 'user' && existingUserContent.has(msg.content.trim())) continue;
 
           // NOTE: Timestamp filter intentionally removed — the ID+content dedup above
           // is comprehensive and prevents duplicates. The timestamp filter was silently

@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { chatCompletion } from '../lib/nvidia';
+import { novaBrain } from './NovaBrainService';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { sendMomentNotification } from '../lib/pushNotifications';
@@ -91,41 +91,7 @@ export class MomentEngineService {
 
       const pastMomentIds = (pastMoments || []).map(m => m.source_memory_id).filter(Boolean);
 
-      // Ask LLM to evaluate goals and draft a follow-up
-      const prompt = `You are Nova, a warm and thoughtful AI companion.
-You are evaluating the user's goals to decide if a gentle follow-up is appropriate today.
-The user prefers to be called "${preferredName}".
-
-Here is the list of active goals:
-${goalsList.join('\n')}
-
-Recently followed-up Goal/KG IDs (avoid checking in on these if possible):
-${pastMomentIds.join(', ')}
-
-SAFETY RULES:
-- Never generate fictional memories.
-- Do NOT invent any details, progress, or events that are not explicitly stated in the goals.
-- Be extremely warm, supportive, and human.
-- Do NOT say "As an AI..." or act like a chatbot.
-- If no goals are clear enough to follow up on, set shouldNotify to false.
-
-Return a JSON object matching this structure:
-{
-  "shouldNotify": boolean,
-  "title": "Short thoughtful title",
-  "body": "Thoughtful, encouraging follow-up question/statement",
-  "source_memory_id": "string (the exact ID of the goal or node that this is about, or null)"
-}`;
-
-      const response = await chatCompletion([
-        { role: 'system', content: 'You extract goal check-ins in JSON format.' },
-        { role: 'user', content: prompt }
-      ], {
-        response_format: { type: 'json_object' },
-        temperature: 0.2
-      });
-
-      const result = JSON.parse(response);
+      const result = await novaBrain.evaluateGoalFollowup(preferredName, goalsList, pastMomentIds);
 
       if (result.shouldNotify && result.body) {
         // Validate source_memory_id exists in our map or goals
@@ -248,40 +214,7 @@ Return a JSON object matching this structure:
 
       const pastMomentIds = (pastMoments || []).map(m => m.source_memory_id).filter(Boolean);
 
-      const prompt = `You are Nova, a warm and thoughtful AI companion.
-You are evaluating the user's family and child details to decide if a check-in or milestone celebration is appropriate today.
-The user prefers to be called "${preferredName}".
-
-Here is the list of relationship details:
-${relationships.join('\n')}
-
-Recently followed-up Node/Memory IDs (avoid checking in on these if possible):
-${pastMomentIds.join(', ')}
-
-SAFETY RULES:
-- Never generate fictional memories or milestones.
-- Do NOT invent any children, ages, names, milestones, or events that are not explicitly stated in the details.
-- Be extremely warm, supportive, and human.
-- Do NOT say "As an AI..." or act like a chatbot.
-- If no children or clear milestones are found to check in on, set shouldNotify to false.
-
-Return a JSON object matching this structure:
-{
-  "shouldNotify": boolean,
-  "title": "Short thoughtful title",
-  "body": "Thoughtful check-in or milestone celebration message",
-  "source_memory_id": "string (the exact ID of the node or memory this is about, or null)"
-}`;
-
-      const response = await chatCompletion([
-        { role: 'system', content: 'You extract child milestone check-ins in JSON format.' },
-        { role: 'user', content: prompt }
-      ], {
-        response_format: { type: 'json_object' },
-        temperature: 0.2
-      });
-
-      const result = JSON.parse(response);
+      const result = await novaBrain.evaluateChildMilestone(preferredName, relationships, pastMomentIds);
 
       if (result.shouldNotify && result.body) {
         let sourceId: string | null = null;
@@ -309,32 +242,7 @@ Return a JSON object matching this structure:
    * Generates and saves a moment if notification criteria are met.
    */
   async generateMoment(userId: string, type: MomentType, rawData: any): Promise<MomentPayload> {
-    // Grounding safeguard prompt using Nvidia LLM
-    const prompt = `You are the grounding and validation agent for Nova.
-Given a moment category: "${type}"
-And data: ${JSON.stringify(rawData)}
-
-Refine and format the check-in title and body to be extremely thoughtful and conversational.
-CRITICAL SAFETY RULE:
-- Do NOT make up any fictional memories or facts.
-- Do NOT add details, dates, names, or events not present in the data.
-- Maintain a warm, friendly, companion tone.
-
-Return JSON:
-{
-  "title": "Refined Title",
-  "body": "Refined Body"
-}`;
-
-    const response = await chatCompletion([
-      { role: 'system', content: 'You validate and refine check-in notifications in JSON.' },
-      { role: 'user', content: prompt }
-    ], {
-      response_format: { type: 'json_object' },
-      temperature: 0.1
-    });
-
-    const parsed = JSON.parse(response);
+    const parsed = await novaBrain.refineMoment(type, rawData);
 
     return {
       user_id: userId,

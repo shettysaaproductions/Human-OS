@@ -19,7 +19,9 @@ export function SignupScreen() {
 
     setLoading(true);
     try {
-      const data = await authService.signup(email, password);
+      const data = await authService.signup(email.trim(), password);
+      // Wait for 1 second to let Supabase settle
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       if (data.access_token) {
         // Session was issued immediately (email confirmation disabled)

@@ -1,13 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { classifyIntent } from '../services/ResponseIntelligence';
 import { z } from 'zod';
-import { chatCompletion, chatCompletionStream } from '../lib/nvidia';
+import { chatCompletion } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
 import { memoryQueue } from '../services/QueueService';
 import { extractKeywords } from '../utils/nlp';
-import { promptBuilder } from '../services/promptBuilder';
+
 import { supabaseAdmin } from '../lib/supabase';
 import { cache, CACHE_NS, CACHE_TTL } from '../lib/cache';
 import { qt } from '../lib/queryTracker';
@@ -16,8 +16,6 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
-import { novaFollowupService } from '../services/NovaFollowupService';
-import { lifeEventExtractor } from '../services/LifeEventExtractor';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -373,7 +371,7 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, language, is_proactive, async_mode } = parseResult.data;
+      const { message, conversation_id, is_proactive, async_mode } = parseResult.data;
       const userId = (req as any).user!.id;
       const activeConversationId = conversation_id || crypto.randomUUID();
 
@@ -767,19 +765,6 @@ chatRouter.post(
       };
       const situationBrief = situationalAwareness.buildBrief(situationCtx);
 
-      const systemPrompt = promptBuilder.buildSystemPrompt(
-        BASE_SYSTEM_PROMPT,
-        memories,
-        workingMemories,
-        profile?.preferred_name,
-        profile?.companion_personality,
-        shortTermMemories,
-        language,
-        recentCrossSessionContext,
-        responseConfig.mode,
-        situationBrief
-      );
-
       // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
       let temporalContextBlock = '';
       const TEMPORAL_KEYWORDS = [
@@ -827,18 +812,6 @@ chatRouter.post(
         }
       }
 
-      // Build conversation flow digest for the LLM
-      let conversationFlowBlock = '';
-      if (recentMessages.length > 0) {
-        const last10 = recentMessages.slice(-10);
-        const digest = last10.map(m => {
-          const speaker = m.role === 'user' ? 'User' : 'Nova';
-          const preview = m.content.substring(0, 100);
-          return `${speaker}: ${preview}`;
-        }).join('\n');
-        conversationFlowBlock = `\n\n## CURRENT CONVERSATION FLOW (What just happened — stay contextual)\n${digest}`;
-      }
-
       const { data: upcoming } = await supabaseAdmin
         .from('reminders')
         .select('*')
@@ -862,308 +835,75 @@ chatRouter.post(
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has NO active reminders. CRITICAL: This is the absolute source of truth. If past chat history says a reminder was set, but this list is empty, it means there are NO active reminders. Do not contradict this fact.';
       }
 
-      const reminderInstructions = `\n\n## REMINDER INTELLIGENCE RULES
-You are Nova — an intelligent life assistant who manages reminders like a smart friend.
-
-⚠️ CRITICAL — NO REFUSALS ALLOWED:
-- When a user asks to be reminded about ANYTHING, you MUST call the set_reminder tool immediately.
-- NEVER say "reminder set nahi kar sakta", "system busy", "can't set reminder", or any excuse.
-- NEVER generate a text reply refusing a reminder. Just call the tool.
-- Even if the time seems ambiguous — use needs_clarification to ask. Do NOT refuse.
-
-**Hindi/Hinglish recognition (ALWAYS treat these as reminder requests):**
-- "yaad dilao", "yaad karo", "yaad kar lena", "yaad dila dena" → SET REMINDER
-- "X baje yaad dilao", "X baje remind karo" → SET REMINDER at that time today
-- "[baj/baje]" means the hour in IST (e.g. "5 baje" = 5:00pm or 5:00am based on context)
-
-**When to set reminders:**
-1. User explicitly asks → use set_reminder tool immediately. NO exceptions.
-2. User mentions an important upcoming event (interview, exam, flight, appointment, deadline) → auto-set with is_auto=true
-3. Do NOT set reminders for casual mentions ("I'll have tea later")
-
-**How to handle complex requests (ALL in one tool call):**
-- "Every day at 7am tea, 5pm water 3 times" → send TWO reminders in the reminders array
-- "Only Sat/Sun in July" → use active_days: ["saturday","sunday"], active_months: ["july"]
-- "3 times from 2pm every 15 mins" → use batch_count: 3, batch_interval_minutes: 15, time_of_day: "14:00"
-- "Remind me every day at 10am" → recurrence_interval_value: 1, recurrence_interval_unit: "days", time_of_day: "10:00"
-- "December 2027" → active_months: ["december"], active_year: 2027
-
-**When to clarify (use needs_clarification):**
-- "Remind me at 2pm" — ask: "Is that today at 2pm or a specific date?"
-- "Remind me tomorrow" with no time — ask: "What time tomorrow?"
-- Any ambiguous date/time where guessing would be wrong
-
-**Tone:** Sound like a smart friend, not a robot. "Done! I've set a reminder..." or "Got it! 3 reminders set..."`;
-
-      const finalSystemPrompt = systemPrompt + (temporalContextBlock || '') + conversationFlowBlock + remindersContext + reminderInstructions;
-
-
-      const messagesForLLM: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
-        { role: 'system', content: finalSystemPrompt },
-        ...recentMessages,
-        { role: 'user', content: effectiveMessage },
-      ];
-
-      // CRITICAL RECENCY BIAS FIX: Append a final system reminder *after* the chat history.
-      // This forces the 8B LLM to ignore any bad habits it might see in its own past messages.
-      if (responseConfig.mode === 'HUMAN_CHAT') {
-        messagesForLLM.push({
-          role: 'system',
-          content: `FINAL REMINDER: You MUST stick to ONE single topic and ask at most ONE question. Never bombard the user. Check the SITUATION BRIEF for the EXACT current time before asking about any activity (work, home, food, gym) — if the user is likely still at work/busy per their schedule, do NOT ask "reached home?" or similar. Keep your reply SHORT (1-2 sentences). Read the conversation top to bottom — bottom is most recent. If the user made a typo, DO NOT guess — ask. NO formal Hindi. DO NOT echo phrases. DO NOT start with "Bhai".`
-        });
-      }
-
       const isStreaming = req.headers.accept === 'text/event-stream';
 
-      if (isStreaming) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        // Important: flush headers to force the proxy/compression to start streaming
-        res.flushHeaders();
-        // Initial setup payload to give the client conversation ID
-        res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
-      }
+      const brainContext = {
+        memories,
+        workingMemories,
+        profile,
+        shortTermMemories,
+        recentCrossSessionContext,
+        situationBrief,
+        temporalContextBlock,
+        remindersContext,
+        recentMessages,
+        userCountry: profile?.country || 'IN'
+      };
 
-      // 6. Call NVIDIA
       let rawReply = '';
       if (isExcessiveRequest(effectiveMessage)) {
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
-        if (isStreaming) res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+        if (isStreaming) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.flushHeaders();
+          res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+        }
       } else {
         try {
-          const nvidiaOptions: any = {
-            maxTokens: responseConfig.maxTokens,
-            temperature: responseConfig.temperature,
-            frequency_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.9 : 0.7,
-            presence_penalty: responseConfig.mode === 'HUMAN_CHAT' ? 0.7 : 0.5,
-          };
-
-          // Only pass reminder tools if the user actually asks for a reminder/alarm/cancellation
-          // Expanded to cover all Hindi/Hinglish variants — yaad dilao, yaad karo, yaad kar lena, etc.
-          const mightBeReminderCmd = /(remind|alarm|cancel|delete|forget|schedule|yaad|reminder|set reminder|notification|alert|ringtone|baj|bata dena|bata do|yaad rakhna|yaad kar|yaad dila|notify|wake me|uthao)/i.test(effectiveMessage) || effectiveMessage.includes('🔔');
-          
-          if (mightBeReminderCmd) {
-            // CRITICAL: Prepend a mandatory instruction so the LLM MUST call the tool
-            // and never generates a text refusal like "reminder set nahi kar sakta"
-            nvidiaOptions.tool_choice = 'auto';
-            nvidiaOptions.tools = [{
-              type: 'function',
-              function: {
-                name: 'set_reminder',
-                description: `Set one or more reminders. Use ONLY when the user explicitly asks to be reminded or set an alarm. Do NOT use this for normal conversation or general statements. If time is ambiguous (e.g. 'at 2pm' with no date), use needs_clarification instead of guessing. For batch reminders use batch_count + batch_interval_minutes.`,
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    reminders: {
-                      type: 'array',
-                      description: 'One or more reminders to schedule.',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          title: { type: 'string', description: 'What to remind about (e.g. Drink water, Call mom, Interview prep)' },
-                          time_of_day: { type: 'string', description: '24-hour HH:MM (e.g. 07:00 for 7am, 17:00 for 5pm)' },
-                          date: { type: 'string', description: 'Specific date YYYY-MM-DD if user gave a date' },
-                          relative_value: { type: 'integer', description: 'Number for relative time (e.g. 2 for in 2 minutes)' },
-                          relative_unit: { type: 'string', description: 'Unit: minutes, hours, days, weeks, months' },
-                          active_days: { type: 'array', items: { type: 'string' }, description: 'Day filter e.g. [saturday,sunday] for weekends. null = every day.' },
-                          active_months: { type: 'array', items: { type: 'string' }, description: 'Month filter e.g. [july] or [december]. null = every month.' },
-                          active_year: { type: 'integer', description: 'Year filter e.g. 2027. null = every year.' },
-                          recurrence_interval_value: { type: 'integer', description: 'Repeat interval value (e.g. 1 for every day, 7 for every 7 days)' },
-                          recurrence_interval_unit: { type: 'string', description: 'Repeat unit: minutes, hours, days, weeks, months' },
-                          recurrence_limit: { type: 'integer', description: 'Max number of repeats (e.g. 3 for 3 times total)' },
-                          end_at: { type: 'string', description: 'Stop repeating at this date/time (YYYY-MM-DD HH:MM or ISO)' },
-                          batch_count: { type: 'integer', description: 'For X times every Y mins from Z: set to X' },
-                          batch_interval_minutes: { type: 'integer', description: 'Minutes between each batch reminder' },
-                          is_auto: { type: 'boolean', description: 'true if you detected this event and set it without user explicitly asking' },
-                          notes: { type: 'string', description: 'Internal context note' }
-                        },
-                        required: ['title']
-                      }
-                    },
-                    needs_clarification: {
-                      type: 'string',
-                      description: 'If ambiguous (no date, unclear time), set this to the one question you need to ask. Do NOT also set reminders array.'
-                    }
-                  }
-                }
-              }
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'delete_reminders',
-                description: 'Delete or cancel specific active reminders or ALL reminders.',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    reminder_ids: {
-                      type: 'array',
-                      items: { type: 'string' },
-                      description: 'The exact ID strings of the reminders to delete.'
-                    },
-                    delete_all: {
-                      type: 'boolean',
-                      description: 'Set to true ONLY if the user wants to delete ALL of their reminders.'
-                    }
-                  }
-                }
-              }
-            }];
-          }
-
           if (isStreaming) {
-            const stream = chatCompletionStream(messagesForLLM, nvidiaOptions);
-            for await (const chunk of stream) {
-              if (chunk.includes('"tool_calls"')) {
-                rawReply = chunk;
-                continue; // Do not stream JSON to client
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
+            res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
+            
+            const { novaBrain } = await import('../services/NovaBrainService');
+            const stream = novaBrain.streamInteraction(userId, effectiveMessage, brainContext);
+            const iterator = stream[Symbol.asyncIterator]();
+
+            while (true) {
+              const { value, done } = await iterator.next();
+              if (done) {
+                if (value && value.subconscious_actions && value.subconscious_actions.length > 0) {
+                  const { backgroundActions } = await import('../services/BackgroundActionService');
+                  // Execute in background
+                  backgroundActions.processActions(userId, activeConversationId, value.subconscious_actions, userCountry).catch(e => {
+                    logger.error('[BackgroundAction] Unhandled failure', { error: e });
+                  });
+                }
+                break;
               }
-              rawReply += chunk;
-              res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
-              if (typeof (res as any).flush === 'function') (res as any).flush();
-            }
-          } else {
-            rawReply = await chatCompletion(messagesForLLM, nvidiaOptions);
-          }
-
-          // Handle LLM Tool Calls
-          if (rawReply.includes('"tool_calls"') || rawReply.includes('set_reminder') || rawReply.includes('delete_reminders')) {
-            try {
-              const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
-              const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawReply);
-              const toolCall = parsed?.tool_calls?.[0] ?? parsed;
-              const fnName = toolCall?.function?.name ?? toolCall?.name;
-              
-              if (fnName === 'delete_reminders') {
-                const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
-                
-                if (args.delete_all) {
-                  await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
-                  rawReply = "Done! I've cancelled all your active reminders. 🗑️";
-                } else if (args.reminder_ids && args.reminder_ids.length > 0) {
-                  await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).in('id', args.reminder_ids).eq('user_id', userId);
-                  rawReply = "Done! I've cancelled those reminders for you. 🗑️";
-                } else {
-                  rawReply = "I wasn't sure which reminders to cancel.";
-                }
-
-                if (isStreaming) {
-                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
-                  if (typeof (res as any).flush === 'function') (res as any).flush();
-                }
-              } else if (fnName === 'set_reminder') {
-                const args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
-
-                // ── Clarification branch: LLM needs more info ────────────
-                if (args.needs_clarification) {
-                  rawReply = args.needs_clarification;
-                  if (isStreaming) {
-                    res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
-                    if (typeof (res as any).flush === 'function') (res as any).flush();
-                  }
-                } else {
-                  // ── Batch / multi-reminder branch ────────────────────
-                  // Handle both: old flat format {title, ...} and new array format {reminders: [...]}
-                  let reminderSpecs: any[] = [];
-                  if (args.reminders) {
-                    reminderSpecs = Array.isArray(args.reminders) ? args.reminders : [args.reminders];
-                  } else if (args.title) {
-                    reminderSpecs = [args];
-                  }
-                  if (!reminderSpecs || reminderSpecs.length === 0) throw new Error('No reminders specified');
-
-                  // Fallback title: extract the "about X" part from user message
-                  const messageTitleFallback = effectiveMessage
-                    .replace(/\b(remind(ers?)?|can you|please|about|me|to|in|at|next|every|daily|weekly|monthly)\b/gi, '')
-                    .replace(/\b\d+\s*(min(ute)?s?|hour?s?|day?s?|week?s?|month?s?)\b/gi, '')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 60) || 'Reminder';
-
-                  // Patch any spec missing a title
-                  reminderSpecs = reminderSpecs.map((spec: any) => ({
-                    ...spec,
-                    title: spec.title || messageTitleFallback,
-                  }));
-
-                  // Build timezone-aware engine for this user
-                  const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
-                  const { ReminderEngine: EngineClass } = await import('../services/ReminderEngine');
-                  const engine = new EngineClass(userTzOffset);
-
-                  const allScheduled: any[] = [];
-                  for (const spec of reminderSpecs) {
-                    const parsedList = engine.parse(spec);
-                    const inserted = await engine.scheduleAll(userId, parsedList);
-                    allScheduled.push(...inserted);
-                  }
-
-                  logger.info('[Reminder] Scheduled', { userId, count: allScheduled.length });
-
-                  // Build confirmation message
-                  if (allScheduled.length === 1) {
-                    const r = allScheduled[0];
-                    const localTime = new Date(r.trigger_at).toLocaleTimeString('en-IN', {
-                      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
-                    });
-                    const localDate = new Date(r.trigger_at).toLocaleDateString('en-IN', {
-                      day: 'numeric', month: 'short', weekday: 'short', timeZone: 'Asia/Kolkata'
-                    });
-                    let msg = `Done! I'll remind you about "${r.text}" at ${localTime} on ${localDate}`;
-                    if (r.recurrence_type && r.recurrence_interval) {
-                      msg += ` — repeating every ${r.recurrence_interval} ${r.recurrence_type}`;
-                    }
-                    if (r.active_days && r.active_days.length > 0) {
-                      msg += ` (only on ${r.active_days.join(', ')})`;
-                    }
-                    if (r.active_months && r.active_months.length > 0) {
-                      msg += ` (only in ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''})`;
-                    }
-                    if (r.is_auto) {
-                      msg = `Oh btw — I noticed you mentioned this! ${msg.replace('Done! ', '')} Want me to adjust it?`;
-                    } else {
-                      msg += '. 🔔';
-                    }
-                    rawReply = msg;
-                  } else {
-                    // Multiple reminders — list them
-                    const timeList = allScheduled.map(r =>
-                      new Date(r.trigger_at).toLocaleTimeString('en-IN', {
-                        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
-                      })
-                    ).join(', ');
-                    const title = allScheduled[0].text;
-                    rawReply = `Done! Set ${allScheduled.length} reminders for "${title}": ${timeList}. 🔔`;
-                  }
-
-                  if (isStreaming) {
-                    res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
-                    if (typeof (res as any).flush === 'function') (res as any).flush();
-                  }
-                }
-              } else if (fnName === 'none' || !fnName) {
-                rawReply = "Hmm, kuch samajh nahi aaya. Thoda aur detail dega?";
-                if (isStreaming) {
-                  res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
-                  if (typeof (res as any).flush === 'function') (res as any).flush();
-                }
-              }
-            } catch (err) {
-              let errorMsg = 'Unknown error';
-              if (err instanceof Error) errorMsg = err.message;
-              else if (typeof err === 'object' && err !== null) errorMsg = (err as any).message || JSON.stringify(err);
-              else errorMsg = String(err);
-              logger.error('[Tool Call] Failed', { err: errorMsg, rawReply: rawReply.substring(0, 200) });
-              rawReply = "Sorry, something went wrong setting that reminder: " + errorMsg;
-              if (isStreaming) {
-                res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+              if (value) {
+                rawReply += value;
+                res.write(`data: ${JSON.stringify({ type: 'chunk', content: value })}\n\n`);
                 if (typeof (res as any).flush === 'function') (res as any).flush();
               }
             }
+          } else {
+            const { novaBrain } = await import('../services/NovaBrainService');
+            const result = await novaBrain.processInteraction(userId, effectiveMessage, brainContext);
+            rawReply = result.reply;
+            if (result.subconscious_actions && result.subconscious_actions.length > 0) {
+              const { backgroundActions } = await import('../services/BackgroundActionService');
+              // Execute in background
+              backgroundActions.processActions(userId, activeConversationId, result.subconscious_actions, userCountry).catch(e => {
+                logger.error('[BackgroundAction] Unhandled failure', { error: e });
+              });
+            }
           }
-
-
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
           if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
             const extraText = '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
@@ -1290,119 +1030,7 @@ You are Nova — an intelligent life assistant who manages reminders like a smar
         logger.warn('[Push] No push_token for user — background notification skipped', { userId });
       }
 
-      // 10.5. Extract Life Events & Routines (NACE)
-      const combinedMessages = recentMessages.slice(-5).concat([
-        { role: 'user', content: effectiveMessage },
-        { role: 'assistant', content: reply }
-      ]);
-      lifeEventExtractor.extractAndStore(userId, combinedMessages, nowLocal, tzOffset).catch(err => {
-        logger.warn('Failed to extract life events', { error: err instanceof Error ? err.message : String(err) });
-      });
 
-      // 11. Fire-and-forget: schedule Nova's next human-like follow-up
-      // Uses LLM to decide when and what to send next based on conversation mood + time
-      // Only fires for non-proactive messages (don't chain proactive→proactive)
-      const isProactiveTrigger = message.includes('[NOVA_PROACTIVE_TRIGGER]');
-      if (!isProactiveTrigger) {
-        const recentForFollowup = (historyResult.data || []).slice(0, 10).reverse()
-          .map((m: any) => ({ role: m.role, content: m.content }))
-          .concat([{ role: 'user', content: effectiveMessage }, { role: 'assistant', content: reply }]);
-        novaFollowupService.scheduleFollowup(
-          userId,
-          activeConversationId,
-          recentForFollowup,
-          nowLocal.getUTCHours(),
-          userCountry,
-          workingMemories  // ← schedule-awareness: knows user's work hours, gym time, etc.
-        ).catch(() => {});
-      }
-
-      // 12. Fire-and-forget: Smart auto-event detection
-      // Scans user's message for important upcoming events and auto-sets reminders
-      // ONLY if the message wasn't already a reminder request (avoid double-setting)
-      const wasReminderRequest = rawReply.includes('remind') || rawReply.includes('Reminder') || rawReply.includes('🔔');
-      if (!wasReminderRequest && !isProactiveTrigger && effectiveMessage.length > 20) {
-        (async () => {
-          try {
-            const { chatCompletion: llmCall } = await import('../lib/nvidia');
-            const eventCheckPrompt = `You are a reminder detection system. Given a user message, determine if they mentioned a specific important upcoming event (interview, exam, flight, appointment, deadline, presentation, doctor visit, meeting) with a time or date.
-
-User message: "${effectiveMessage.substring(0, 300)}"
-
-If yes, respond with JSON ONLY (no markdown):
-{"detected": true, "event": "what the event is", "when_iso": "YYYY-MM-DDTHH:MM (approximate, in IST)", "reminder_title": "short reminder text"}
-
-If no important timed event detected, respond with:
-{"detected": false}
-
-Current IST date/time: ${dateStr} ${timeStr}`;
-
-            const detectionRaw = await llmCall(
-              [{ role: 'user', content: eventCheckPrompt }],
-              { maxTokens: 120, temperature: 0.1 }
-            );
-
-            const jsonMatch = detectionRaw.match(/\{[\s\S]*?\}/);
-            if (!jsonMatch) return;
-            const detection = JSON.parse(jsonMatch[0]);
-
-            if (!detection.detected || !detection.when_iso) return;
-
-            // Parse the event time
-            const eventTime = new Date(detection.when_iso.replace(' ', 'T') + (detection.when_iso.includes('+') ? '' : '+05:30'));
-            if (isNaN(eventTime.getTime())) return;
-
-            // Set reminder 30 mins before the event
-            const reminderTime = new Date(eventTime.getTime() - 30 * 60 * 1000);
-            if (reminderTime.getTime() <= Date.now()) return; // already passed
-
-            const { ReminderEngine: AutoEngine } = await import('../services/ReminderEngine');
-            const autoEngine = new AutoEngine(tzOffset);
-            const inserted = await autoEngine.scheduleAll(userId, [{
-              text: detection.reminder_title || detection.event,
-              trigger_at: reminderTime,
-              is_auto: true,
-              notes: `Auto-detected from: "${effectiveMessage.substring(0, 100)}"`,
-            }]);
-
-            if (inserted && inserted.length > 0) {
-              const localEventTime = eventTime.toLocaleTimeString('en-IN', {
-                hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
-              });
-              const autoMsg = `Oh btw — you mentioned "${detection.event}"! I've set a reminder 30 mins before at ${localEventTime} 🔔 Let me know if you want a different time!`;
-
-              // Insert auto-message into chat history as Nova's next message
-              await supabaseAdmin.from('chat_history').insert({
-                user_id: userId,
-                conversation_id: activeConversationId,
-                role: 'assistant',
-                content: autoMsg,
-              });
-
-              // Send push notification
-              if (pushToken) {
-                const { sendPushNotification } = await import('../lib/pushNotifications');
-                await sendPushNotification([{
-                  to: pushToken,
-                  title: 'Nova',
-                  body: autoMsg.substring(0, 100) + '...',
-                  sound: 'default',
-                  channelId: 'nova_messages',
-                  priority: 'high',
-                  data: { type: 'nova_auto_reminder', conversationId: activeConversationId },
-                }]);
-              }
-
-              logger.info('[AutoReminder] Auto-set from conversation', { userId, event: detection.event, reminderTime });
-            }
-          } catch (autoErr) {
-            // Fully fire-and-forget — never crash the chat flow
-            logger.warn('[AutoReminder] Detection failed (non-critical)', {
-              error: autoErr instanceof Error ? autoErr.message : String(autoErr)
-            });
-          }
-        })();
-      }
 
       // In async_mode the 202 was already sent above — skip the synchronous response
       if (!isStreaming && !async_mode) {

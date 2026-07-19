@@ -13,6 +13,7 @@ interface AuthState {
   login: (accessToken: string | null, refreshToken: string | null, user: any) => Promise<void>;
   logout: () => Promise<void>;
   setOnboardingStatus: (status: boolean) => void;
+  refreshSession: () => Promise<string | null>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -98,7 +99,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ accessToken: null, user: null, onboardingStatus: false });
   },
 
-  setOnboardingStatus: (status: boolean) => {
-    set({ onboardingStatus: status });
-  },
+  setOnboardingStatus: (status: boolean) => set({ onboardingStatus: status }),
+
+  refreshSession: async () => {
+    try {
+      const refreshToken = await SecureStore.getItemAsync('refreshToken');
+      if (!refreshToken) return null;
+      
+      const data = await authService.refresh(refreshToken);
+      await SecureStore.setItemAsync('accessToken', data.access_token);
+      await SecureStore.setItemAsync('refreshToken', data.refresh_token);
+      set({ accessToken: data.access_token, user: data.user, onboardingStatus: data.user?.onboardingCompleted || false });
+      return data.access_token;
+    } catch (err) {
+      console.warn('[AuthStore] refreshSession failed', err);
+      // If refresh fails, log out
+      await SecureStore.deleteItemAsync('accessToken');
+      await SecureStore.deleteItemAsync('refreshToken');
+      set({ accessToken: null, user: null });
+      return null;
+    }
+  }
 }));

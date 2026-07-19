@@ -20,7 +20,7 @@ export function LoginScreen() {
 
     setLoading(true);
     try {
-      const data = await authService.login(email, password);
+      const data = await authService.login(email.trim(), password);
       // Save both tokens — the store persists them to SecureStore
       await login(data.access_token, data.refresh_token, data.user);
     } catch (err: any) {
