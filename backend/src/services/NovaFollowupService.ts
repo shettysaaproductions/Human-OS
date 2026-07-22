@@ -168,6 +168,80 @@ export class NovaFollowupService {
       logger.warn('[NovaFollowup] No push token for user', { userId: followup.user_id });
     }
   }
+  /**
+   * Scan for conversations where the last message was from the user (unanswered)
+   * and 10+ minutes old, and queue a double-text follow-up.
+   */
+  async checkUnansweredConversations(): Promise<void> {
+    try {
+      // 10 minutes ago
+      const cutoffTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      // Wait, let's just query chat_history directly to find recently stuck conversations.
+      // Since it's a bit heavy to query all, we query messages from the last hour that are from the user.
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      
+      const { data: recentUserMsgs, error: queryErr } = await supabaseAdmin
+        .from('chat_history')
+        .select('id, user_id, conversation_id, content, created_at, role')
+        .gte('created_at', oneHourAgo)
+        .lte('created_at', cutoffTime)
+        .eq('role', 'user')
+        .order('created_at', { ascending: false });
+
+      if (queryErr) {
+        logger.error('[NovaFollowup] Failed to query recent user msgs', { error: queryErr.message });
+        return;
+      }
+
+      if (!recentUserMsgs || recentUserMsgs.length === 0) return;
+
+      // Group by conversation to find the absolute latest message per conversation
+      const conversationMap = new Map();
+      for (const msg of recentUserMsgs) {
+        if (!conversationMap.has(msg.conversation_id)) {
+          conversationMap.set(msg.conversation_id, msg);
+        }
+      }
+
+      // For each conversation, we must verify that this user message is truly the LAST message
+      // (meaning Nova never replied)
+      for (const [convId, userMsg] of conversationMap.entries()) {
+        const { data: newerMsgs } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('conversation_id', convId)
+          .gt('created_at', userMsg.created_at)
+          .limit(1);
+
+        if (newerMsgs && newerMsgs.length > 0) {
+          // Nova (or someone) replied after this message. It's not stuck.
+          continue;
+        }
+
+        // It is stuck! Check if a follow-up is already queued
+        const { data: pendingFollowup } = await supabaseAdmin
+          .from('nova_followups')
+          .select('id')
+          .eq('user_id', userMsg.user_id)
+          .eq('status', 'pending')
+          .limit(1);
+          
+        if (pendingFollowup && pendingFollowup.length > 0) {
+          continue; // Already has a pending follow-up
+        }
+
+        // Schedule a follow-up right now
+        logger.info('[NovaFollowup] Detected stuck conversation, scheduling double-text', { userId: userMsg.user_id, convId });
+        const doubleTextMsg = "Hey, sab theek? Tune reply nahi kiya?";
+        await this.queueFollowup(userMsg.user_id, convId, doubleTextMsg, 0); // delay 0 hours = fire immediately
+      }
+
+    } catch (err) {
+      logger.warn('[NovaFollowup] checkUnansweredConversations error', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
 }
 
 export const novaFollowupService = new NovaFollowupService();

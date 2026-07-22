@@ -42,6 +42,8 @@
     "plugins": [
       "expo-secure-store",
       "expo-updates",
+      "expo-task-manager",
+      "expo-background-fetch",
       [
         "expo-notifications",
         {
