@@ -32,17 +32,38 @@ export const chatService = {
     if (replyToId) payload.reply_to_id = replyToId;
     if (replyToContent) payload.reply_to_content = replyToContent;
 
+    // We use the native fetch API with keepalive: true so that the OS
+    // completes the HTTP request even if the JS thread is suspended immediately after.
+    const token = await SecureStore.getItemAsync('accessToken');
+    const url = `${api.defaults.baseURL}/chat`;
+    
     // 30-second hard timeout — on Android, battery optimization can suspend the JS
-    // thread mid-await, causing api.post to hang indefinitely with no error.
+    // thread mid-await, causing it to hang indefinitely with no error.
     // We race the request against a timer so the retry loop always gets control back.
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('sendMessageAsync timed out after 30s')), 30000)
-    );
-    const response = await Promise.race([
-      api.post('/chat', payload),
-      timeoutPromise,
-    ]);
-    return (response as any).data;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload),
+        keepalive: true, // Crucial for background completion
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 
   streamMessage: (

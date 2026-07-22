@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { notificationService } from './src/services/notificationService';
+import { registerBackgroundFetchAsync } from './src/services/backgroundTaskService';
 import { useChatStore } from './src/store/useChatStore';
 import * as Notifications from 'expo-notifications';
 import { NavigationContainerRef } from '@react-navigation/native';
@@ -33,6 +34,7 @@ function AppContent() {
     // Initialize notification channels only (safe before auth)
     // Token registration happens post-login via notificationService.registerAfterAuth()
     notificationService.initialize();
+    registerBackgroundFetchAsync();
 
     // ── Notification tap handler: user tapped a Nova notification ──────────────
     // Navigates to Chat and refreshes messages so Nova's follow-up is visible.
