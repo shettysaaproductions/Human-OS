@@ -92,9 +92,9 @@ export class NovaConsciousnessEngine {
       .from('nova_agenda')
       .select('*')
       .eq('user_id', userId)
-      .eq('status', 'pending')
-      .lte('follow_up_after', new Date().toISOString())
-      .order('follow_up_after', { ascending: true })
+      .in('status', ['pending', 'active'])
+      .lte('next_retry_at', new Date().toISOString())
+      .order('next_retry_at', { ascending: true })
       .limit(1);
 
     const agendaItem = (pendingAgenda && pendingAgenda.length > 0) ? pendingAgenda[0] : null;
@@ -161,7 +161,26 @@ ${lastConvSnippet || 'No recent conversation.'}`;
       if (generated.message) {
         await this._sendOutreach(userId, profile, generated.message, triggerType, generated.tone);
         if (agendaItem) {
-          await supabaseAdmin.from('nova_agenda').update({ status: 'fired', updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
+          const newRetryCount = (agendaItem.retry_count || 0) + 1;
+          if (newRetryCount >= (agendaItem.max_retries || 3)) {
+            await supabaseAdmin.from('nova_agenda').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
+          } else {
+            // Calculate next retry time based on urgency
+            let delayHours = 24; // Default to next day
+            if (agendaItem.urgency === 'high') delayHours = 4;
+            else if (agendaItem.urgency === 'medium') delayHours = 12;
+            
+            // Backoff logic: double the delay on each retry
+            delayHours = delayHours * Math.pow(2, newRetryCount - 1);
+            
+            const nextRetryAt = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
+            await supabaseAdmin.from('nova_agenda').update({ 
+              status: 'active', 
+              retry_count: newRetryCount,
+              next_retry_at: nextRetryAt,
+              updated_at: new Date().toISOString() 
+            }).eq('id', agendaItem.id);
+          }
         }
       }
     } catch (e) {
@@ -208,11 +227,12 @@ ${lastConvSnippet || 'No recent conversation.'}`;
   }
 
   async expireOldAgendaItems(): Promise<void> {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Delete pending/active items older than 7 days since their follow up after
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     await supabaseAdmin
       .from('nova_agenda')
       .update({ status: 'expired', updated_at: new Date().toISOString() })
-      .eq('status', 'pending')
+      .in('status', ['pending', 'active'])
       .lt('follow_up_after', cutoff);
   }
 }
