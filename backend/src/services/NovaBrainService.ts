@@ -59,9 +59,11 @@ Available Tools for Subconscious Actions:
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
-   - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60 }
+   - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
 6. "LifeEventExtractor" -> "routine": Extract a recurring routine or habit the user mentioned.
    - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
+7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
+   - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
 
 If no tools need to be called, leave the JSON array empty: []
 `;
@@ -154,6 +156,12 @@ Available Tools for Subconscious Actions:
    - data: { "question": "the question to ask", "delay_hours": 2 }
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
+5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
+   - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
+6. "LifeEventExtractor" -> "routine": Extract a recurring routine or habit the user mentioned.
+   - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
+7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
+   - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
 
 If no tools need to be called, leave the JSON array empty: []
 `;

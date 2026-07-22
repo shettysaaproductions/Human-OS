@@ -87,14 +87,14 @@ Supabase (PostgreSQL) is the core nervous system:
 
 ## 5. OTA Update Protocol
 
-The installed APK listens to the **`preview` EAS branch**.
+The installed APK listens to the **`production` EAS branch**.
 
 ```bash
 # CORRECT command to push OTA that the APK will receive:
-npx eas update --branch preview --message "Description"
+npx eas update --branch production --message "Description"
 
-# WRONG — this goes to production channel which APK does NOT listen to:
-npx eas update --branch production ...
+# WRONG — this goes to preview channel which APK does NOT listen to:
+npx eas update --branch preview ...
 ```
 
 ---

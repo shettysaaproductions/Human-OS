@@ -63,6 +63,9 @@ export class BackgroundActionService {
                  follow_up_after: followUpAfter.toISOString(),
                  source_message: 'Extracted by Brain',
                  status: 'pending',
+                 next_retry_at: followUpAfter.toISOString(),
+                 urgency: action.data.urgency || 'medium',
+                 is_recurring: action.data.is_recurring || false,
                });
                logger.info('[BackgroundAction] Stored agenda event', { userId, event: action.data.description });
              }
@@ -76,6 +79,31 @@ export class BackgroundActionService {
              confidence: 80,
            });
            logger.info('[BackgroundAction] Stored user routine', { userId, routine: action.data.description });
+        }
+        else if (action.tool === 'AgendaManager' && action.action === 'update_status') {
+          const { data: items } = await supabaseAdmin
+            .from('nova_agenda')
+            .select('id, event_description')
+            .eq('user_id', userId)
+            .in('status', ['pending', 'active'])
+            .order('created_at', { ascending: false })
+            .limit(10);
+            
+          if (items && items.length > 0) {
+            const keywords = action.data.task_description.toLowerCase().split(' ').filter((w: string) => w.length > 3);
+            let bestMatch = items[0];
+            for (const item of items) {
+              const desc = item.event_description.toLowerCase();
+              if (keywords.some((kw: string) => desc.includes(kw))) {
+                bestMatch = item;
+                break;
+              }
+            }
+            await supabaseAdmin.from('nova_agenda')
+              .update({ status: action.data.status, updated_at: new Date().toISOString() })
+              .eq('id', bestMatch.id);
+            logger.info('[BackgroundAction] Updated agenda item status', { userId, id: bestMatch.id, status: action.data.status });
+          }
         }
       } catch (err) {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });
