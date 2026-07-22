@@ -99,6 +99,8 @@ npx eas update --branch production --message "Description"
 npx eas update --branch preview ...
 ```
 
+**If EAS Free Plan Android build limits (15/month) are exhausted**, you cannot run `eas build`. In this case, instruct the user to build the APK from the GitHub Actions tab.
+
 ---
 
 ## 6. Auto Upgrade Protocol

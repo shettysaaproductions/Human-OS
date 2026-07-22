@@ -242,8 +242,9 @@ These constraints are permanent. Any code change must respect them:
 - **If Key 1 rate-limits (429)**, fall back to Key 2 silently and log the event.
 
 ### Mobile / EAS Free Tier
-- **OTA ALWAYS to `--branch preview`** — this is the branch the APK listens to.
+- **OTA ALWAYS to `--branch production`** — this is the branch the APK listens to.
 - **Do not run `eas build`** unless the user explicitly asks for a new APK. OTA is sufficient for JS changes.
+- **If EAS Free Plan Android build limits are exhausted (15/month)**, instruct the user to build the APK from the GitHub Actions tab.
 - **Bundle size must stay under 4MB** — do not add heavy native dependencies without a new build.
 
 ---
