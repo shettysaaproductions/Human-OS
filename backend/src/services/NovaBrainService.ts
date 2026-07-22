@@ -54,8 +54,8 @@ Available Tools for Subconscious Actions:
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder ONLY IF EXPLICITLY ASKED.
    - data: { "time_phrase": "tomorrow at 10am", "description": "what to remind" }
-3. "NovaFollowupService" -> "queue": Queue a follow-up question to ask in a few hours.
-   - data: { "question": "the question to ask", "delay_hours": 2 }
+3. "NovaFollowupService" -> "queue": Queue a follow-up if you ask a question or want to keep the chat going. If they leave you on read, this fires to double-text them (e.g. "hey?", "busy?").
+   - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.1 for 6 mins, 0.25 for 15 mins)
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
@@ -152,8 +152,8 @@ Available Tools for Subconscious Actions:
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder ONLY IF EXPLICITLY ASKED.
    - data: { "time_phrase": "tomorrow at 10am", "description": "what to remind" }
-3. "NovaFollowupService" -> "queue": Queue a follow-up question to ask in a few hours.
-   - data: { "question": "the question to ask", "delay_hours": 2 }
+3. "NovaFollowupService" -> "queue": Queue a follow-up if you ask a question or want to keep the chat going. If they leave you on read, this fires to double-text them (e.g. "hey?", "busy?").
+   - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.1 for 6 mins, 0.25 for 15 mins)
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.

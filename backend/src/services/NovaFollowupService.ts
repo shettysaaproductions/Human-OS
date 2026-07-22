@@ -64,6 +64,23 @@ export class NovaFollowupService {
   }
 
   /**
+   * Cancel any pending follow-ups for a user (e.g. when they reply).
+   */
+  async cancelFollowups(userId: string): Promise<void> {
+    try {
+      await supabaseAdmin
+        .from('nova_followups')
+        .update({ status: 'cancelled' })
+        .eq('user_id', userId)
+        .eq('status', 'pending');
+    } catch (err) {
+      logger.warn('[NovaFollowup] Error cancelling follow-ups', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
+  /**
    * Poll and fire any due follow-ups.
    * Called by the same 10s interval that fires user reminders.
    */
