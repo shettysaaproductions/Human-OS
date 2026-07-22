@@ -18,6 +18,8 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
 ### Epoch 2: Autonomous Intelligence & Self-Repair (July 2026)
 - **Decision:** Nova must self-improve without human intervention. Every "auto upgrade" adds a permanent behavioral patch to Nova's brain.
 - **Implemented Features:**
+  - True WhatsApp Async Messaging (returns 202 instantly, bypassing Android OS suspending threads)
+  - Smart "Left on Read" Engine (Nova intelligently double-texts after 6-15 mins if her question was ignored)
   - Swipe-to-reply with reply context injected into LLM prompt
   - Message staggering (5-10s between bubbles for human-like pacing)
   - Never-stuck message guarantee (user message saved to DB before 202 response)

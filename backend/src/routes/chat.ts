@@ -447,6 +447,13 @@ chatRouter.post(
       if (userMsgResult.error) logger.error('Failed to save user message', { error: userMsgResult.error.message });
       const userMessageId = userMsgResult.data?.id || 'msg_' + Date.now();
 
+      // Cancel any pending follow-ups since the user replied
+      if (!is_proactive) {
+        import('../services/NovaFollowupService').then(({ novaFollowupService }) => {
+          novaFollowupService.cancelFollowups(userId).catch(e => logger.warn('Failed to cancel follow-ups', { error: e }));
+        });
+      }
+
       // 2. If fast async mode is requested, return 202 IMMEDIATELY NOW THAT THE MESSAGE IS IN DB
       // so the client can mark it as delivered. The rest happens in the background.
       if (async_mode) {
@@ -1110,7 +1117,10 @@ chatRouter.post(
           logger.error('[ASYNC] Could not save fallback reply', { error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr) });
         }
       }
-      next(err);
+      
+      if (!isAsync) {
+        next(err);
+      }
     }
   }
 );

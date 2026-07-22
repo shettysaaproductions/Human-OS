@@ -29,13 +29,15 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 **All 7 engines are LIVE in production on Render.**
 
 ### ✅ Recently Completed
-- Auto Upgrade Protocol Execution: Strict anti-robot patches applied to `promptBuilder.ts` (Anti-formality "Aap", anti-echoing)
+- **Auto Upgrade Protocol Execution**: Strict anti-robot patches applied to `promptBuilder.ts` (Anti-formality "Aap", anti-echoing)
+- **True WhatsApp Async Messaging**: Network request returns 202 instantly, bypassing Android OS suspending threads.
+- **Smart "Left on Read" Engine**: Nova intelligently double-texts after 6-15 mins if her question was ignored.
 - Message Reactions & Close-Ended Options UI on mobile (`ChatScreen.tsx`)
-- Graceful handling of NVIDIA API Moderation/Content Policy errors (no more "technical glitch" on drugs/profanity)
+- Graceful handling of NVIDIA API Moderation/Content Policy errors
 - Swipe-to-reply with context injection into LLM
 - Message staggering (5-10s human-like delays between bubbles)
 - Never-stuck message guarantee (DB write before 202 response)
-- OTA update popup system (targets `preview` branch for APK builds)
+- OTA update popup system (targets `production` branch for APK builds)
 
 ### 🔜 Next Sprint (Planned)
 1. Fix `reminders.status` column bug (P1 blocker — spams logs every 10s)
