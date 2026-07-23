@@ -40,7 +40,12 @@ export class NovaFollowupService {
         .eq('user_id', userId)
         .eq('status', 'pending');
 
-      const delayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 5), 24 * 60);
+      // Allow as low as 1 minute for urgent/serious follow-ups
+      // The LLM picks delayHours based on conversation seriousness:
+      //   deep/emotional conversation → 0.03 hrs (~2 min)
+      //   casual chat → 0.1-0.25 hrs (6-15 min)
+      //   concluded conversation → skip (LLM won't queue one)
+      const delayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 1), 24 * 60);
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
       await supabaseAdmin.from('nova_followups').insert({
@@ -170,21 +175,21 @@ export class NovaFollowupService {
   }
   /**
    * Scan for conversations where the last message was from the user (unanswered)
-   * and 10+ minutes old, and queue a double-text follow-up.
+   * and determine the right follow-up time dynamically based on conversation seriousness.
+   *
+   * - Serious/emotional messages → follow up in ~2 minutes (like a real friend who noticed)
+   * - Casual/short messages → follow up in ~10-15 minutes
+   * - No strict rule. The goal is to NEVER make the user feel ignored.
    */
   async checkUnansweredConversations(): Promise<void> {
     try {
-      // 10 minutes ago
-      const cutoffTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      // Wait, let's just query chat_history directly to find recently stuck conversations.
-      // Since it's a bit heavy to query all, we query messages from the last hour that are from the user.
+      // Check messages from the last hour that are from the user
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      
+
       const { data: recentUserMsgs, error: queryErr } = await supabaseAdmin
         .from('chat_history')
         .select('id, user_id, conversation_id, content, created_at, role')
         .gte('created_at', oneHourAgo)
-        .lte('created_at', cutoffTime)
         .eq('role', 'user')
         .order('created_at', { ascending: false });
 
@@ -195,7 +200,7 @@ export class NovaFollowupService {
 
       if (!recentUserMsgs || recentUserMsgs.length === 0) return;
 
-      // Group by conversation to find the absolute latest message per conversation
+      // Group by conversation — keep only the latest message per conversation
       const conversationMap = new Map();
       for (const msg of recentUserMsgs) {
         if (!conversationMap.has(msg.conversation_id)) {
@@ -203,9 +208,37 @@ export class NovaFollowupService {
         }
       }
 
-      // For each conversation, we must verify that this user message is truly the LAST message
-      // (meaning Nova never replied)
       for (const [convId, userMsg] of conversationMap.entries()) {
+        // Determine how serious/deep this message is
+        const content = (userMsg.content || '').toLowerCase();
+        const ageMinutes = (Date.now() - new Date(userMsg.created_at).getTime()) / 60000;
+
+        // Serious signals → follow up very quickly (2 min)
+        const SERIOUS_SIGNALS = [
+          'stressed', 'stressed out', 'tension', 'fight', 'breakup', 'anxiety', 'anxious',
+          'depressed', 'crying', 'cried', 'dukhi', 'pareshan', 'takleef', 'bura lag raha',
+          'help', 'kya karu', 'samajh nahi', 'confused', 'scared', 'dar lag raha', 'nervous',
+          'accident', 'emergency', 'urgent', 'important', 'bata', 'sunlo', 'sunna',
+          'miss you', 'miss kar raha', 'miss kar rahi', 'alone', 'akela', 'akeli',
+          'rona aa raha', 'bahut bura', 'bahut pareshan', 'kuch hua', 'problem'
+        ];
+        const isSerious = SERIOUS_SIGNALS.some(s => content.includes(s));
+        
+        // Personal/emotional but not critical → follow up in ~5 min
+        const PERSONAL_SIGNALS = [
+          'kaise ho', 'theek ho', 'baat karo', 'suno yaar', 'ek baat', 'batao', 'kya lagta',
+          'kya sochte', 'opinion', 'feel', 'feeling', 'mood', 'pyaar', 'love', 'crush',
+          'relationship', 'job', 'college', 'exam', 'result', 'interview'
+        ];
+        const isPersonal = PERSONAL_SIGNALS.some(s => content.includes(s));
+
+        // Determine the cutoff based on seriousness:
+        // Serious → 2 min, Personal → 5 min, Casual → 12 min
+        const cutoffMinutes = isSerious ? 2 : isPersonal ? 5 : 12;
+
+        // Not old enough yet — skip for now
+        if (ageMinutes < cutoffMinutes) continue;
+
         const { data: newerMsgs } = await supabaseAdmin
           .from('chat_history')
           .select('id')
