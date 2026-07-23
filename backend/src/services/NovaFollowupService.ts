@@ -230,10 +230,25 @@ export class NovaFollowupService {
           continue; // Already has a pending follow-up
         }
 
-        // Schedule a follow-up right now
+        // Schedule a follow-up right now using an LLM-generated context-aware message
         logger.info('[NovaFollowup] Detected stuck conversation, scheduling double-text', { userId: userMsg.user_id, convId });
-        const doubleTextMsg = "Hey, sab theek? Tune reply nahi kiya?";
-        await this.queueFollowup(userMsg.user_id, convId, doubleTextMsg, 0); // delay 0 hours = fire immediately
+        
+        // Generate a context-aware follow-up rather than a generic hard-coded one
+        let doubleTextMsg = "Hey?";
+        try {
+          const { novaBrain } = await import('./NovaBrainService');
+          const lastContent = userMsg.content?.substring(0, 200) || '';
+          const generated = await novaBrain.evaluateConsciousnessTier2(
+            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a very short (1 sentence max) casual Hinglish follow-up message as if you just noticed you haven't replied. Warm, not pushy. Like a friend who genuinely just noticed.`
+          );
+          if (generated?.message && generated.message.length < 200) {
+            doubleTextMsg = generated.message;
+          }
+        } catch (e) {
+          logger.warn('[NovaFollowup] LLM double-text generation failed, using fallback', { error: e instanceof Error ? e.message : String(e) });
+        }
+        
+        await this.queueFollowup(userMsg.user_id, convId, doubleTextMsg, 0); // fire immediately
       }
 
     } catch (err) {

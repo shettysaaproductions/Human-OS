@@ -13,7 +13,7 @@ import { sendPushNotification } from '../lib/pushNotifications';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 import crypto from 'crypto';
 
-const MIN_GAP_MINUTES = 45; // Reduced from 90 to allow more fluid back-to-back if needed
+const MIN_GAP_MINUTES = 45; // Minimum gap between consecutive Nova outreach messages
 
 export class NovaConsciousnessEngine {
 
@@ -69,7 +69,7 @@ export class NovaConsciousnessEngine {
     if (recentOutreach) {
       const minutesSinceLast = (Date.now() - new Date(recentOutreach.created_at).getTime()) / 60000;
       if (minutesSinceLast < MIN_GAP_MINUTES) {
-        return; // Too soon
+        return; // Too soon since last outreach
       }
     }
 
@@ -84,8 +84,8 @@ export class NovaConsciousnessEngine {
       .maybeSingle();
 
     const gapMinutes = lastUserMsg ? (Date.now() - new Date(lastUserMsg.created_at).getTime()) / 60000 : 0;
-    // If user was active within 60 minutes — don't interrupt. Skip entirely (save LLM cost).
-    if (gapMinutes < 60) return;
+    // If user was active within 30 minutes — don't interrupt. Skip entirely (save LLM cost).
+    if (gapMinutes < 30) return;
 
     // 4. Pending Agenda
     const { data: pendingAgenda } = await supabaseAdmin
@@ -100,8 +100,6 @@ export class NovaConsciousnessEngine {
     const agendaItem = (pendingAgenda && pendingAgenda.length > 0) ? pendingAgenda[0] : null;
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
-    // In production, chatCompletion could be configured to use a smaller model via options
-    // e.g. chatCompletion(..., { model: 'llama-3-8b-instruct' })
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
 Is Sleep Window: ${tContext.isSleepWindow}
 User Gap: ${Math.round(gapMinutes / 60)} hours
@@ -118,7 +116,7 @@ Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}`;
       logger.warn('[NACE] Tier 1 failed, defaulting to logic-based fallback');
       // Fallback logic
       if (agendaItem && !tContext.isSleepWindow) shouldReach = true;
-      else if (gapMinutes > 240 && !tContext.isSleepWindow && Math.random() > 0.5) shouldReach = true;
+      else if (gapMinutes > 120 && !tContext.isSleepWindow && Math.random() > 0.5) shouldReach = true;
     }
 
     if (!shouldReach) return;
@@ -210,10 +208,11 @@ ${lastConvSnippet || 'No recent conversation.'}`;
       await sendPushNotification([{
         to: profile.push_token,
         title: 'Nova',
-        body: message,
+        body: message.length > 100 ? message.substring(0, 97) + '...' : message,
         sound: 'default',
         channelId: 'nova_messages',
         priority: 'high',
+        ttl: 3600,
         data: { type: 'nova_consciousness', conversationId },
       }]);
     }

@@ -32,6 +32,12 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 - **Auto Upgrade Protocol Execution**: Strict anti-robot patches applied to `promptBuilder.ts` (Anti-formality "Aap", anti-echoing)
 - **True WhatsApp Async Messaging**: Network request returns 202 instantly, bypassing Android OS suspending threads.
 - **Smart "Left on Read" Engine**: Nova intelligently double-texts after 6-15 mins if her question was ignored.
+- **NACE Consciousness Gap reduced to 30 minutes** — Nova checks in sooner after user silence.
+- **LLM-generated smart double-texts** — replaced generic "sab theek?" with context-aware Hinglish follow-ups.
+- **`Message.timestamp` bug fixed** — critical missing field causing sort failures and silent proactive check aborts.
+- **Push notification race condition fixed** — `checkProactiveMessages` now loads convId from cache if store is not yet hydrated.
+- **XML bleed protection** — `NovaBrainService` now strips any `<subconscious_actions>` JSON that bleeds into replies.
+- **Nova Consciousness rules** — No self-narration, living presence, unique reactions, return warmth.
 - Message Reactions & Close-Ended Options UI on mobile (`ChatScreen.tsx`)
 - Graceful handling of NVIDIA API Moderation/Content Policy errors
 - Swipe-to-reply with context injection into LLM

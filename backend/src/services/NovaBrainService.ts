@@ -91,6 +91,15 @@ If no tools need to be called, leave the JSON array empty: []
         reply = rawRes.replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '').trim();
       }
 
+      // Safety strip: Remove any XML or JSON bleed from the reply
+      reply = reply
+        .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
+        .replace(/<subconscious_actions>[\s\S]*/g, '') // unclosed tag
+        .replace(/\[\s*\{.*"tool".*\}.*\]/gs, '') // JSON array bleed
+        .trim();
+
+      if (!reply) reply = "Yaar, ek second ruk."; // absolute last resort
+
       const subMatch = rawRes.match(/<subconscious_actions>([\s\S]*?)<\/subconscious_actions>/);
       if (subMatch) {
         try {
