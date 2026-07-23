@@ -10,6 +10,7 @@ export interface Message {
   role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
   content: string;
   status: 'sending' | 'sent' | 'responded' | 'error';
+  timestamp?: string; // ISO string from DB created_at — CRITICAL for sorting and proactive checks
   errorMessage?: string;
   chunkIndex?: number;
   chunkTotal?: number;
@@ -713,7 +714,17 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       _proactiveCheckInProgress = true;
       try {
-        const convId = get().conversationId;
+        // convId may be null if app just opened from a push notification before
+        // hydrateMessages has completed. Fall back to cache to avoid silent abort.
+        let convId = get().conversationId;
+        if (!convId) {
+          const cache = await loadMessageCache();
+          convId = cache.conversationId;
+          // Also restore conversationId in store so future calls work
+          if (convId) {
+            set({ conversationId: convId });
+          }
+        }
         if (!convId) return;
 
         const currentMessages = get().messages;
