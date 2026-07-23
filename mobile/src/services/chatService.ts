@@ -51,7 +51,6 @@ export const chatService = {
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
         body: JSON.stringify(payload),
-        keepalive: true, // Crucial for background completion
         signal: controller.signal
       });
 

@@ -41,7 +41,8 @@ This document tracks identified bugs, limitations, and workarounds.
 
 | Issue | Resolution | Date |
 |---|---|---|
-| Messages getting stuck (yellow dot forever) | Fixed race condition — DB write now happens BEFORE 202 response | July 2026 |
+| Messages getting stuck (yellow dot forever) | Fixed React Native Android `keepalive: true` infinite fetch loop bug | July 2026 |
+| Fallback "technical issue" message | Added NVIDIA rate-limit fallback and 70B timeout fallback to 8B | July 2026 |
 | Nova using "Aap" (formal) | Added STRICT PRONOUN RULE to `promptBuilder.ts` final instructions | July 2026 |
 | Nova echoing user's words | Added ANTI-ROBOT ECHO rule to `promptBuilder.ts` | July 2026 |
 | Nova interrogating with questions every message | Added INTERROGATION rule to `promptBuilder.ts` | July 2026 |

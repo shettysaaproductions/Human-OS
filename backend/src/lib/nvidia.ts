@@ -14,11 +14,13 @@ import { logger } from './logger';
 export const nvidiaClient = new OpenAI({
   apiKey: config.nvidia.apiKey || 'dummy_key',
   baseURL: config.nvidia.baseUrl,
+  maxRetries: 0, // Fail fast on 429 so we can use secondary key
 });
 
 export const nvidiaClientSecondary = new OpenAI({
-  apiKey: config.nvidia.apiKey2 || config.nvidia.apiKey || 'dummy_key', // fallback to primary if not set
+  apiKey: config.nvidia.apiKey2 || config.nvidia.apiKey || 'dummy_key',
   baseURL: config.nvidia.baseUrl,
+  maxRetries: 0,
 });
 
 
@@ -177,19 +179,38 @@ export async function chatCompletion(
 
   try {
     // Race the SDK call against a 30-second hard deadline.
-    const response = await withNvidiaTimeout((signal) =>
-      nvidiaClient.chat.completions.create(payload, { signal })
-    );
-    const message = response.choices[0]?.message;
-    if (message?.tool_calls?.length) {
-      // Return the JSON representation of tool_calls instead of raw string
-      return JSON.stringify({ tool_calls: message.tool_calls });
-    }
+    try {
+      const response = await withNvidiaTimeout((signal) =>
+        nvidiaClient.chat.completions.create(payload, { signal })
+      );
+      const message = response.choices[0]?.message;
+      if (message?.tool_calls?.length) {
+        return JSON.stringify({ tool_calls: message.tool_calls });
+      }
+      if (!message?.content) throw new Error('NVIDIA API returned an empty response');
+      return message.content;
+    } catch (primaryErr: any) {
+      if (primaryErr.status === 429 || primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') {
+        logger.warn('NVIDIA primary key failed/rate-limited, falling back to secondary', { error: primaryErr.message });
+        
+        // If it's a timeout/503 on the 70B model, fallback to 8B model to ensure a response
+        if ((primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') && payload.model.includes('70b')) {
+          payload.model = EXTRACTION_MODEL;
+          logger.info('Falling back to 8B extraction model to avoid 70B timeout', { model: payload.model });
+        }
 
-    if (!message?.content) {
-      throw new Error('NVIDIA API returned an empty response');
+        const responseSecondary = await withNvidiaTimeout((signal) =>
+          nvidiaClientSecondary.chat.completions.create(payload, { signal })
+        );
+        const messageSec = responseSecondary.choices[0]?.message;
+        if (messageSec?.tool_calls?.length) {
+          return JSON.stringify({ tool_calls: messageSec.tool_calls });
+        }
+        if (!messageSec?.content) throw new Error('NVIDIA API returned an empty response');
+        return messageSec.content;
+      }
+      throw primaryErr;
     }
-    return message.content;
   } catch (err: any) {
     const isDev = process.env.NODE_ENV === 'development';
 
