@@ -196,7 +196,7 @@ authRouter.post('/push-token', authenticateUser, async (req: Request, res: Respo
     const userId = (req as any).user?.id;
     const { token } = req.body;
 
-    if (!token || !token.startsWith('ExponentPushToken[')) {
+    if (!token || (!token.startsWith('ExponentPushToken[') && !token.startsWith('ExpoPushToken['))) {
       res.status(400).json({ error: 'Invalid push token format' });
       return;
     }
