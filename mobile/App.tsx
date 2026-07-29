@@ -65,23 +65,23 @@ function AppContent() {
   }, []);
 
   const runBackgroundChecks = async () => {
+    // Check changelog FIRST (independent of OTA)
+    await checkChangelog();
     // Skip OTA check in development
     if (!__DEV__) {
       try {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
           await Updates.fetchUpdateAsync();
-          // Only surface popup when update is actually ready
+          // Show update-ready popup (replaces changelog popup if both triggered)
           setModalType('downloaded');
           setModalVisible(true);
-          return; // skip changelog if update downloaded
         }
-      } catch {
-        // Non-fatal — silently ignore
+      } catch (e: any) {
+        // Non-fatal — log so we can diagnose OTA issues
+        console.warn('[OTA] checkForUpdateAsync failed:', e?.message);
       }
     }
-    // Check changelog after OTA check (or in dev)
-    await checkChangelog();
   };
 
   const checkChangelog = async () => {
