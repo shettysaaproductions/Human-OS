@@ -576,14 +576,14 @@ chatRouter.post(
                 .eq('id', userId).maybeSingle()
             ),
 
-        // 3. Recent chat history (last 20, for context continuity)
+        // 3. Recent chat history (last 100, for deep context continuity)
         qt.track('get_chat_history', 'chat_history', () =>
           supabaseAdmin.from('chat_history')
             .select('role, content')
             .eq('user_id', userId)
             .eq('conversation_id', activeConversationId)
             .order('created_at', { ascending: false })
-            .limit(20)
+            .limit(100)
         ),
 
         // 3.5 Cross-session recent context
