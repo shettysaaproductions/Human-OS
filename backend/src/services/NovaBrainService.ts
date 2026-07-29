@@ -368,6 +368,7 @@ RULES:
 - Short, casual responses
 - Each message: 1-2 sentences. SHORT. Natural.
 - Reference actual recent context, routines, or memories — NOT generic "just checking in"
+- Check the RECENT OUTREACH MESSAGES and DO NOT echo or closely rephrase them.
 - Match the time of day and what they're likely doing right now
 - If they've been quiet for hours, show genuine curiosity: "Kya chal raha hai bhai?"
 - Vary your tone: playful, concerned, teasing, or caring

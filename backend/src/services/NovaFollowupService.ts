@@ -137,6 +137,35 @@ export class NovaFollowupService {
       return;
     }
 
+    // Dedup check before inserting
+    const { data: recentMsgs } = await supabaseAdmin
+      .from('chat_history')
+      .select('content')
+      .eq('user_id', followup.user_id)
+      .eq('conversation_id', followup.conversation_id)
+      .eq('role', 'assistant')
+      .gte('created_at', new Date(Date.now() - 5 * 60000).toISOString())
+      .order('created_at', { ascending: false });
+
+    let isDuplicate = false;
+    if (recentMsgs) {
+      const normalizedNew = followup.message.toLowerCase().trim();
+      for (const msg of recentMsgs) {
+        const normalizedOld = msg.content.toLowerCase().trim();
+        if (normalizedOld === normalizedNew || 
+            (normalizedNew.length > 20 && normalizedOld.includes(normalizedNew.substring(0, 20))) ||
+            (normalizedOld.length > 20 && normalizedNew.includes(normalizedOld.substring(0, 20)))) {
+          isDuplicate = true;
+          break;
+        }
+      }
+    }
+
+    if (isDuplicate) {
+       logger.warn('[NovaFollowup] Prevented firing duplicate followup', { id: followup.id, userId: followup.user_id });
+       return;
+    }
+
     // Insert as Nova's message in chat history
     await supabaseAdmin.from('chat_history').insert({
       user_id: followup.user_id,
@@ -251,16 +280,31 @@ export class NovaFollowupService {
           continue;
         }
 
-        // It is stuck! Check if a follow-up is already queued
-        const { data: pendingFollowup } = await supabaseAdmin
+        // Add additional check: was ANY assistant message sent in the last 2 minutes?
+        // This handles cases where conversationId rotated or time filtering is slightly off
+        const { data: recentAssistantMsgs } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userMsg.user_id)
+          .eq('role', 'assistant')
+          .gte('created_at', new Date(Date.now() - 2 * 60000).toISOString())
+          .limit(1);
+
+        if (recentAssistantMsgs && recentAssistantMsgs.length > 0) {
+           continue; // Reply already sent recently
+        }
+
+        // It is stuck! Check if a follow-up is already queued OR recently sent (cooldown)
+        const { data: recentFollowups } = await supabaseAdmin
           .from('nova_followups')
           .select('id')
           .eq('user_id', userMsg.user_id)
-          .eq('status', 'pending')
+          .in('status', ['pending', 'sent'])
+          .gte('created_at', new Date(Date.now() - 5 * 60000).toISOString())
           .limit(1);
           
-        if (pendingFollowup && pendingFollowup.length > 0) {
-          continue; // Already has a pending follow-up
+        if (recentFollowups && recentFollowups.length > 0) {
+          continue; // Already has a pending or recently sent follow-up
         }
 
         // Schedule a follow-up right now using an LLM-generated context-aware message
