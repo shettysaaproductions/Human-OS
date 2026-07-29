@@ -45,7 +45,7 @@ export async function sendPushNotification(messages: ExpoPushMessage[]): Promise
   if (!messages.length) return;
 
   // Filter out non-Expo tokens (safety guard)
-  const validMessages = messages.filter(m => m.to.startsWith('ExponentPushToken['));
+  const validMessages = messages.filter(m => m.to.startsWith('ExponentPushToken[') || m.to.startsWith('ExpoPushToken['));
   if (!validMessages.length) {
     logger.warn('[Push] No valid ExponentPushToken tokens found — skipping', {
       tokenPreviews: messages.map(m => m.to.substring(0, 20)),
