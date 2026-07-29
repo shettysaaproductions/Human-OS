@@ -4,6 +4,20 @@ Chronological log of all agent-executed changes. Maintained by `update agent` co
 
 ---
 
+## [2026-07-30 03:30 IST] Auto Upgrade V2 (Cont.) — 100-Message Context & MVP Docs
+
+### Trigger
+User requested completion of the "Power Up Auto-Upgrade" Mode while waiting for the fresh APK to build.
+
+### Changes Made
+- **Deep Context History**: Increased the `get_chat_history` query limit in `backend/src/routes/chat.ts` from 20 to 100 messages. This ensures Nova has massive context when identifying conversational flaws.
+- **Architecture MVP Update**: Updated `NOVA_ARCHITECTURE.md` to formally document the **Quad NVIDIA Key Pool Strategy** (Keys 1-4) handling chat, NACE, learning, and extraction.
+
+### Status
+Changes committed and pushed to `main`. APK is currently building via GitHub Actions.
+
+---
+
 ## [2026-07-30 00:45 IST] Auto Upgrade V2 — Real-Time Self-Correction & Architecture Overhaul
 
 ### Trigger
