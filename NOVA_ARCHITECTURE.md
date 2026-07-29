@@ -73,14 +73,18 @@ NovaBrainService.processInteraction()
 
 ---
 
-## 5. Dual NVIDIA Key Strategy
+## 5. Quad NVIDIA Key Pool Strategy (Multi-LLM Load Balancing)
 
-| Key | Client | Usage | Free-Tier Impact |
+To handle the immense computational load of the Auto-Upgrade background scans and NACE outreach without ever rate-limiting the user-facing chat, Nova employs a Quad-Key Pool Strategy using 4 distinct free-tier NVIDIA API keys in parallel:
+
+| Key | Client Instance | Domain Focus | Rate-Limit Priority |
 |---|---|---|---|
-| `NVIDIA_API_KEY` (Key 1) | `nvidiaClient` | All user-facing chat replies | Primary |
-| `NVIDIA_API_KEY_2` (Key 2) | `nvidiaClientSecondary` | Background engines: Reflection, NACE, Self-Improvement | Secondary / Background |
+| `NVIDIA_API_KEY` (Key 1) | `nvidiaClient` | User-facing chat replies (NovaBrain) | Highest |
+| `NVIDIA_API_KEY_2` (Key 2) | `nvidiaClientSecondary` | NACE Consciousness, Reflection Scheduler | Background |
+| `NVIDIA_API_KEY_3` (Key 3) | `nvidiaClientLearning` | Self-Improvement Scans, Real-time Learning | Deep Background |
+| `NVIDIA_API_KEY_4` (Key 4) | `nvidiaClientExtraction`| Working Memory extraction, DB decay | Background |
 
-If Key 1 rate-limits (HTTP 429), Key 2 is used as transparent fallback.
+If Key 1 rate-limits (HTTP 429), it automatically fails over to Key 2. Each engine is statically bound to its domain key to distribute the request throughput evenly across the free tiers.
 
 ---
 

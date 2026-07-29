@@ -302,8 +302,11 @@ class NotificationService {
       tokenResult = await Notifications.getExpoPushTokenAsync({
         projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
       });
-    } catch (tokenErr) {
+    } catch (tokenErr: any) {
       console.warn('[Notifications] Failed to get push token:', tokenErr);
+      import('react-native').then(({ Alert }) => {
+        Alert.alert('Push Token Error', String(tokenErr.message || tokenErr));
+      });
       // Common cause: google-services.json missing / FCM not configured
       // Background notifications will NOT work until Firebase is set up
       return;
