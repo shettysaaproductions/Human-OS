@@ -73,6 +73,23 @@ export class NovaConsciousnessEngine {
       }
     }
 
+    // 2.5 Fetch Recent Assistant Chat (don't reach out if Nova just spoke)
+    const { data: recentAssistantChat } = await supabaseAdmin
+      .from('chat_history')
+      .select('created_at')
+      .eq('user_id', userId)
+      .eq('role', 'assistant')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentAssistantChat) {
+      const minutesSinceLastReply = (Date.now() - new Date(recentAssistantChat.created_at).getTime()) / 60000;
+      if (minutesSinceLastReply < MIN_GAP_MINUTES) {
+        return; // Nova recently spoke
+      }
+    }
+
     // 3. Last user message gap
     const { data: lastUserMsg } = await supabaseAdmin
       .from('chat_history')
@@ -98,6 +115,13 @@ export class NovaConsciousnessEngine {
       .limit(1);
 
     const agendaItem = (pendingAgenda && pendingAgenda.length > 0) ? pendingAgenda[0] : null;
+
+    // Do not disturb during sleep, unless it's a high urgency agenda
+    if (tContext.isSleepWindow) {
+      if (!agendaItem || agendaItem.urgency !== 'high') {
+        return;
+      }
+    }
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
@@ -143,12 +167,24 @@ Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}`;
       .map((m: any) => `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content.substring(0, 150)}`)
       .join('\n');
 
+    // Fetch recent outreach to pass to Tier 2 (to prevent repetitive messages)
+    const { data: recentOutreaches } = await supabaseAdmin
+      .from('nova_outreach_log')
+      .select('message')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(3);
+    const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
+
     const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
 Silence Duration: ${Math.round(gapMinutes / 60)} hours
 Trigger: ${triggerType}
 Agenda Context: ${agendaItem ? agendaItem.follow_up_question : 'N/A'}
 Recent Memories: ${memorySummary}
+
+RECENT OUTREACH MESSAGES (Do NOT repeat or closely rephrase these):
+${recentOutreachSnippet || 'None.'}
 
 LAST CONVERSATION (what was actually said — reference this naturally):
 ${lastConvSnippet || 'No recent conversation.'}`;

@@ -19,6 +19,41 @@ import { reminderService } from '../services/reminderService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
+
+/**
+ * Checks if a highly similar assistant message was recently sent.
+ * Prevents identical double-texts during race conditions.
+ */
+async function isDuplicateAssistantMessage(userId: string, conversationId: string, content: string, minutes: number = 5): Promise<boolean> {
+  try {
+    const timeThreshold = new Date(Date.now() - minutes * 60000).toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('chat_history')
+      .select('content')
+      .eq('user_id', userId)
+      .eq('conversation_id', conversationId)
+      .eq('role', 'assistant')
+      .gte('created_at', timeThreshold)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (error || !data || data.length === 0) return false;
+
+    // Basic similarity check (exact match or very high substring overlap)
+    const normalizedNew = content.toLowerCase().trim();
+    for (const msg of data) {
+      const normalizedOld = msg.content.toLowerCase().trim();
+      if (normalizedOld === normalizedNew) return true;
+      // High overlap check for generated variations
+      if (normalizedNew.length > 20 && normalizedOld.includes(normalizedNew.substring(0, 20))) return true;
+      if (normalizedOld.length > 20 && normalizedNew.includes(normalizedOld.substring(0, 20))) return true;
+    }
+    return false;
+  } catch (err) {
+    return false;
+  }
+}
+
 export const MAX_CHUNKS = 5;
 export const MAX_CHARS_PER_CHUNK = 1500;
 export const MAX_TOTAL_RESPONSE_CHARS = 7500;
@@ -375,7 +410,7 @@ chatRouter.post(
 
       const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content } = parseResult.data;
       const userId = (req as any).user!.id;
-      const activeConversationId = conversation_id || crypto.randomUUID();
+      let activeConversationId = conversation_id || crypto.randomUUID();
 
 
       const isDegraded = dbHealthService.isDegraded();
@@ -597,7 +632,7 @@ chatRouter.post(
       const isFallback = (content: string) =>
         FALLBACK_PREFIXES.some(p => content.includes(p));
 
-      const recentMessages = ((historyResult.data || []) as any[])
+      let recentMessages = ((historyResult.data || []) as any[])
         .filter(msg => !isFallback(msg.content))  // ← strip fallback messages from LLM context
         .reverse()
         .map(msg => ({
@@ -743,6 +778,25 @@ chatRouter.post(
         if (lastMsgResult.data?.created_at) {
           gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;
         }
+
+        // Apply Gap Truncation logic to recentMessages
+        if (gapMinutes !== null) {
+          if (gapMinutes > 1440) { // 24 hours
+            logger.info('[SituationalAwareness] Gap > 24h. Truncating context and rotating conversation_id.', { gapMinutes });
+            // Rotate conversation ID so future DB fetches are clean
+            activeConversationId = crypto.randomUUID();
+            // Keep ONLY the latest user message
+            if (recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user') {
+              recentMessages = [recentMessages[recentMessages.length - 1]];
+            } else {
+              recentMessages = [];
+            }
+          } else if (gapMinutes > 360) { // 6 hours
+            logger.info('[SituationalAwareness] Gap > 6h. Limiting context to last 3 messages.', { gapMinutes });
+            recentMessages = recentMessages.slice(-3);
+          }
+        }
+
         logger.info('[SituationalAwareness] Context loaded', {
           hasEmotion: !!latestEmotion,
           episodes: recentEpisodes.length,
@@ -973,20 +1027,27 @@ chatRouter.post(
       const reply = parsedMessages.join('\n\n');
 
       // 7. Save AI response ONCE (with telemetry meta)
-      await qt.track('save_ai_response', 'chat_history', () =>
-        supabaseAdmin.from('chat_history')
-          .insert({ 
-            user_id: userId, 
-            conversation_id: activeConversationId, 
-            role: 'assistant', 
-            content: rawReply,
-            meta: {
-              situationBrief: situationBrief || null,
-              subconsciousActions: extractedActions,
-              options: optionsArray
-            }
-          })
-      );
+      // Check for duplicates due to race conditions
+      const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, rawReply, 5);
+      
+      if (!isDuplicate) {
+        await qt.track('save_ai_response', 'chat_history', () =>
+          supabaseAdmin.from('chat_history')
+            .insert({ 
+              user_id: userId, 
+              conversation_id: activeConversationId, 
+              role: 'assistant', 
+              content: rawReply,
+              meta: {
+                situationBrief: situationBrief || null,
+                subconsciousActions: extractedActions,
+                options: optionsArray
+              }
+            })
+        );
+      } else {
+        logger.warn('[Chat] Prevented saving duplicate assistant message', { userId, conversation_id: activeConversationId });
+      }
 
       // Generate chunks for UI (only needed for REST response)
       let chunks: any[] = [];
