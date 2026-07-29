@@ -41,38 +41,54 @@ Notifications.setNotificationHandler({
   },
 });
 
-// Pre-create Android channels at module load
-if (Platform.OS === 'android') {
-  Notifications.setNotificationChannelAsync('nova_messages', {
-    name: 'Nova Messages',
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#8B5CF6',
-    sound: 'default',
-    enableVibrate: true,
-    showBadge: true,
-  }).catch(err => console.error('[Notifications] Channel setup error:', err));
+// ── Pre-create Android notification channels at module load ────────────────────
+// IMPORTANT: Android notification channels are immutable after creation.
+// If a channel was previously created with wrong importance/settings, the only
+// fix is to delete it and recreate. We do this on every app start to ensure
+// channels always have the correct HIGH importance settings.
+async function _ensureAndroidChannels() {
+  if (Platform.OS !== 'android') return;
+  try {
+    // Delete old channels first so immutable settings get refreshed
+    await Notifications.deleteNotificationChannelAsync('nova_messages').catch(() => {});
+    await Notifications.deleteNotificationChannelAsync('nova_moments').catch(() => {});
+    await Notifications.deleteNotificationChannelAsync('nova_reminders').catch(() => {});
 
-  Notifications.setNotificationChannelAsync('nova_moments', {
-    name: 'Nova Moments & Check-ins',
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 150],
-    lightColor: '#8B5CF6',
-    sound: 'default',
-    enableVibrate: true,
-    showBadge: true,
-  }).catch(err => console.error('[Notifications] Channel setup error:', err));
-
-  Notifications.setNotificationChannelAsync('nova_reminders', {
-    name: 'Nova Reminders',
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 300, 150, 300],
-    lightColor: '#8B5CF6',
-    sound: 'default',
-    enableVibrate: true,
-    showBadge: false,
-  }).catch(err => console.error('[Notifications] Channel setup error:', err));
+    // Recreate with correct HIGH importance
+    await Notifications.setNotificationChannelAsync('nova_messages', {
+      name: 'Nova Messages',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+    });
+    await Notifications.setNotificationChannelAsync('nova_moments', {
+      name: 'Nova Moments & Check-ins',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 150],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+    });
+    await Notifications.setNotificationChannelAsync('nova_reminders', {
+      name: 'Nova Reminders',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 300, 150, 300],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: false,
+    });
+    console.log('[Notifications] Android channels created/refreshed ✅');
+  } catch (err) {
+    console.error('[Notifications] Channel setup error:', err);
+  }
 }
+// Fire immediately at module load — don't wait for initialize()
+_ensureAndroidChannels();
 
 class NotificationService {
   private _pushToken: string | null = null;
