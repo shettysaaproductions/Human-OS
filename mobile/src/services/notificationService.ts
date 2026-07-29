@@ -41,20 +41,15 @@ Notifications.setNotificationHandler({
   },
 });
 
-// ── Pre-create Android notification channels at module load ────────────────────
-// IMPORTANT: Android notification channels are immutable after creation.
-// If a channel was previously created with wrong importance/settings, the only
-// fix is to delete it and recreate. We do this on every app start to ensure
-// channels always have the correct HIGH importance settings.
+// ── Ensure Android notification channels always have HIGH importance ──────────
+// Android caches channel settings immutably. Delete + recreate on every start
+// so importance is always correct even if a previous install set it wrong.
 async function _ensureAndroidChannels() {
   if (Platform.OS !== 'android') return;
   try {
-    // Delete old channels first so immutable settings get refreshed
     await Notifications.deleteNotificationChannelAsync('nova_messages').catch(() => {});
     await Notifications.deleteNotificationChannelAsync('nova_moments').catch(() => {});
     await Notifications.deleteNotificationChannelAsync('nova_reminders').catch(() => {});
-
-    // Recreate with correct HIGH importance
     await Notifications.setNotificationChannelAsync('nova_messages', {
       name: 'Nova Messages',
       importance: Notifications.AndroidImportance.HIGH,
@@ -82,15 +77,15 @@ async function _ensureAndroidChannels() {
       enableVibrate: true,
       showBadge: false,
     });
-    console.log('[Notifications] Android channels created/refreshed ✅');
+    console.log('[Notifications] Android channels refreshed ✅');
   } catch (err) {
-    console.error('[Notifications] Channel setup error:', err);
+    console.warn('[Notifications] Channel setup error (non-critical):', err);
   }
 }
-// Fire immediately at module load — don't wait for initialize()
 _ensureAndroidChannels();
 
 class NotificationService {
+
   private _pushToken: string | null = null;
   private _registered = false;
   private _tokenListener: Notifications.EventSubscription | null = null;
@@ -118,10 +113,15 @@ class NotificationService {
   }
 
   /**
-   * Call once on app startup.
+   * Call once on app startup. Creates Android channels only — no token fetch.
+   * Safe to call before auth is complete.
    */
   async initialize(): Promise<void> {
-    console.log('[Notifications] Initialized');
+    try {
+      await this._createAndroidChannels();
+    } catch (err) {
+      console.warn('[Notifications] Channel setup failed (non-critical):', err);
+    }
   }
 
   /**
@@ -249,6 +249,40 @@ class NotificationService {
     console.log('[Notifications] Token rotation listener active ✅');
   }
 
+  private async _createAndroidChannels(): Promise<void> {
+    if (Platform.OS !== 'android') return;
+
+    await Notifications.setNotificationChannelAsync('nova_messages', {
+      name: 'Nova Messages',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+    });
+
+    await Notifications.setNotificationChannelAsync('nova_moments', {
+      name: 'Nova Moments & Check-ins',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 150],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+    });
+
+    await Notifications.setNotificationChannelAsync('nova_reminders', {
+      name: 'Nova Reminders',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 300, 150, 300],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: false,
+    });
+  }
+
   private async _requestPermissionAndRegister(): Promise<void> {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -269,7 +303,9 @@ class NotificationService {
         projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
       });
     } catch (tokenErr) {
-      console.error('[Notifications] Failed to get push token. Ensure Firebase/FCM configured:', tokenErr);
+      console.warn('[Notifications] Failed to get push token:', tokenErr);
+      // Common cause: google-services.json missing / FCM not configured
+      // Background notifications will NOT work until Firebase is set up
       return;
     }
 
@@ -288,7 +324,7 @@ class NotificationService {
       } catch (err) {
         attempt++;
         if (attempt >= 3) {
-          console.error('[Notifications] Critical: Failed to register token after 3 attempts:', err);
+          console.warn('[Notifications] Failed to register token after 3 attempts:', err);
           return;
         }
         console.warn(`[Notifications] Token registration attempt ${attempt} failed, retrying in ${delay}ms`);
