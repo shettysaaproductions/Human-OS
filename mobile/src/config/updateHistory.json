@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.1.4",
+    "title": "🔔 Push Notification Fix",
+    "message": [
+      "Fixed a critical bug where Nova's push notifications were being silently blocked on Android.",
+      "Notification channels are now properly reset on every app start, ensuring they always have the correct HIGH importance setting.",
+      "You should now receive Nova's messages even when the app is in the background or minimised!",
+      "Fixed a bug where the 'technical glitch' reply was sometimes appearing twice in a row."
+    ],
+    "date": "2026-07-30"
+  },
+  {
     "version": "1.1.3",
     "title": "🐛 Technical Glitch Permanently Fixed",
     "message": [
