@@ -15,7 +15,7 @@
  */
 
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Platform, AppState } from 'react-native';
 import { chatService } from './chatService';
 
 // ── Chat screen active flag — suppress banners when user is reading chat ────────
@@ -29,14 +29,50 @@ export function setChatScreenActive(active: boolean) {
 // When user is actively reading the chat, showing a banner is redundant noise.
 // shouldShowList: false when on chat ensures NO heads-up banner on Android.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: !_isChatScreenActive,
-    shouldPlaySound: !_isChatScreenActive,
-    shouldSetBadge: !_isChatScreenActive,
-    shouldShowBanner: !_isChatScreenActive,
-    shouldShowList: !_isChatScreenActive,
-  }),
+  handleNotification: async () => {
+    const isActuallyActive = _isChatScreenActive && AppState.currentState === 'active';
+    return {
+      shouldShowAlert: !isActuallyActive,
+      shouldPlaySound: !isActuallyActive,
+      shouldSetBadge: !isActuallyActive,
+      shouldShowBanner: !isActuallyActive,
+      shouldShowList: !isActuallyActive,
+    };
+  },
 });
+
+// Pre-create Android channels at module load
+if (Platform.OS === 'android') {
+  Notifications.setNotificationChannelAsync('nova_messages', {
+    name: 'Nova Messages',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#8B5CF6',
+    sound: 'default',
+    enableVibrate: true,
+    showBadge: true,
+  }).catch(err => console.error('[Notifications] Channel setup error:', err));
+
+  Notifications.setNotificationChannelAsync('nova_moments', {
+    name: 'Nova Moments & Check-ins',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 150],
+    lightColor: '#8B5CF6',
+    sound: 'default',
+    enableVibrate: true,
+    showBadge: true,
+  }).catch(err => console.error('[Notifications] Channel setup error:', err));
+
+  Notifications.setNotificationChannelAsync('nova_reminders', {
+    name: 'Nova Reminders',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 300, 150, 300],
+    lightColor: '#8B5CF6',
+    sound: 'default',
+    enableVibrate: true,
+    showBadge: false,
+  }).catch(err => console.error('[Notifications] Channel setup error:', err));
+}
 
 class NotificationService {
   private _pushToken: string | null = null;
@@ -66,15 +102,10 @@ class NotificationService {
   }
 
   /**
-   * Call once on app startup. Creates Android channels only — no token fetch.
-   * Safe to call before auth is complete.
+   * Call once on app startup.
    */
   async initialize(): Promise<void> {
-    try {
-      await this._createAndroidChannels();
-    } catch (err) {
-      console.warn('[Notifications] Channel setup failed (non-critical):', err);
-    }
+    console.log('[Notifications] Initialized');
   }
 
   /**
@@ -139,9 +170,10 @@ class NotificationService {
     // Fires when a push notification arrives while the app is foregrounded
     this._notifReceivedListener = Notifications.addNotificationReceivedListener((notification) => {
       const type = notification.request.content.data?.type as string | undefined;
-      // If user is on chat screen: silently dismiss the notification and just fetch messages
+      // If user is on chat screen AND app is foregrounded: silently dismiss the notification and just fetch messages
       // This is the WhatsApp behavior — no banner/sound while actively reading
-      if (_isChatScreenActive) {
+      const isActuallyActive = _isChatScreenActive && AppState.currentState === 'active';
+      if (isActuallyActive) {
         Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => {});
         Notifications.setBadgeCountAsync(0).catch(() => {});
       }
@@ -201,40 +233,6 @@ class NotificationService {
     console.log('[Notifications] Token rotation listener active ✅');
   }
 
-  private async _createAndroidChannels(): Promise<void> {
-    if (Platform.OS !== 'android') return;
-
-    await Notifications.setNotificationChannelAsync('nova_messages', {
-      name: 'Nova Messages',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#8B5CF6',
-      sound: 'default',
-      enableVibrate: true,
-      showBadge: true,
-    });
-
-    await Notifications.setNotificationChannelAsync('nova_moments', {
-      name: 'Nova Moments & Check-ins',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 150],
-      lightColor: '#8B5CF6',
-      sound: 'default',
-      enableVibrate: true,
-      showBadge: true,
-    });
-
-    await Notifications.setNotificationChannelAsync('nova_reminders', {
-      name: 'Nova Reminders',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 300, 150, 300],
-      lightColor: '#8B5CF6',
-      sound: 'default',
-      enableVibrate: true,
-      showBadge: false,
-    });
-  }
-
   private async _requestPermissionAndRegister(): Promise<void> {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -255,9 +253,7 @@ class NotificationService {
         projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
       });
     } catch (tokenErr) {
-      console.warn('[Notifications] Failed to get push token:', tokenErr);
-      // Common cause: google-services.json missing / FCM not configured
-      // Background notifications will NOT work until Firebase is set up
+      console.error('[Notifications] Failed to get push token. Ensure Firebase/FCM configured:', tokenErr);
       return;
     }
 
@@ -276,7 +272,7 @@ class NotificationService {
       } catch (err) {
         attempt++;
         if (attempt >= 3) {
-          console.warn('[Notifications] Failed to register token after 3 attempts:', err);
+          console.error('[Notifications] Critical: Failed to register token after 3 attempts:', err);
           return;
         }
         console.warn(`[Notifications] Token registration attempt ${attempt} failed, retrying in ${delay}ms`);
