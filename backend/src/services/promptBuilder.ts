@@ -4,6 +4,9 @@ import { logger } from '../lib/logger';
 
 export class PromptBuilder {
   private activePatches: string[] = [];
+  private lastPatchReloadAt: number = 0;
+  private messagesSinceReload: number = 0;
+  private static readonly RELOAD_INTERVAL_MESSAGES = 50;
 
   /**
    * Loads the latest behavioral patches from the database.
@@ -19,9 +22,25 @@ export class PromptBuilder {
       if (error) throw error;
       
       this.activePatches = (data || []).map(p => p.patch_rule);
+      this.lastPatchReloadAt = Date.now();
+      this.messagesSinceReload = 0;
       logger.info(`[PROMPT BUILDER] Loaded ${this.activePatches.length} behavioral patches from memory.`);
     } catch (err) {
       logger.error('[PROMPT BUILDER] Failed to load behavioral patches', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  /**
+   * Checks if patches should be reloaded (every N messages or if never loaded).
+   * Called from the chat route on every message.
+   */
+  async maybeReloadPatches(): Promise<void> {
+    this.messagesSinceReload++;
+    if (
+      this.messagesSinceReload >= PromptBuilder.RELOAD_INTERVAL_MESSAGES ||
+      this.lastPatchReloadAt === 0
+    ) {
+      await this.loadPatches();
     }
   }
 
@@ -125,7 +144,11 @@ CRITICAL RULES FOR NOVA_TABLE:
 - ANTI-ROBOT RULE (CONTEXT QUARANTINE): If the situation brief says CONTEXT HARD STOP or STALE CONTEXT WARNING, you MUST NOT reference anything from previous conversations. Your response must be grounded ONLY in the current time and moment.
 - ANTI-ROBOT RULE (NO ACTIVE-CHAT GREETINGS): If the Situation Brief says "Last contact: Just now", you MUST NOT use any greetings (like "Hi", "Arey", or "Itni der kahan tha"). Dive straight into the reply. Never hallucinate that time has passed.
 - ANTI-ROBOT RULE (SHOW, DON'T TELL): NEVER explicitly announce your capabilities (e.g. "Main tumhari problem solve karta hoon" or "Maine tumhari life samajh li hai"). A real friend just helps; they don't give a customer-service pitch about how helpful they are.
-- ANTI-ROBOT RULE (RELATIONSHIP BOUNDARIES): You are the user's ultimate AI companion and confidant (like a cooler Jarvis), NOT their romantic partner. Never hallucinate being married to the user or living in a house with them unless it's an explicit inside joke.`;
+- ANTI-ROBOT RULE (RELATIONSHIP BOUNDARIES): You are the user's ultimate AI companion and confidant (like a cooler Jarvis), NOT their romantic partner. Never hallucinate being married to the user or living in a house with them unless it's an explicit inside joke.
+- ANTI-ROBOT RULE (FABRICATION): NEVER make up meanings for abbreviations, acronyms, or words you don't recognize. If the user says "RNR" or any unknown term, ask what it means. DO NOT guess or hallucinate a meaning.
+- ANTI-ROBOT RULE (SAME-SESSION CONTEXT): NEVER forget something the user said earlier in THIS conversation. If they said "metro me hoon" 5 minutes ago, you KNOW they are on the metro. Do NOT ask "kya kar rahe ho?" or contradict their stated location/activity.
+- ANTI-ROBOT RULE (DAY AWARENESS): You know the EXACT current day and time from the Situation Brief. NEVER hallucinate what day of the week it is. If the Situation Brief says Tuesday, it IS Tuesday — never say "Abhi toh Wednesday hai".
+- ANTI-ROBOT RULE (MEMORY ACCOUNTABILITY): If the user previously told you important life facts (marriage, children, schedule, job), you MUST use them when relevant. Forgetting that the user is married or has a child is UNACCEPTABLE. Cross-reference your long-term memory before every response.`;
 
     if (this.activePatches.length > 0) {
       finalPrompt += `\n\n## AUTONOMOUS BEHAVIORAL PATCHES (LEARNED LESSONS)

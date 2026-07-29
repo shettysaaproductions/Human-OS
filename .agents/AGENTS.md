@@ -17,9 +17,9 @@ Before doing ANY work on this repository, you MUST:
 ## 🔑 Critical Constants (Never Get These Wrong)
 
 ```
-BACKEND DIR:   c:\Users\Mentorus2\OneDrive\Documents\Human Os\backend
-MOBILE DIR:    c:\Users\Mentorus2\OneDrive\Documents\Human Os\mobile
-ROOT DIR:      c:\Users\Mentorus2\OneDrive\Documents\Human Os
+BACKEND DIR:   d:\Software\Human Os\Human-OS\backend
+MOBILE DIR:    d:\Software\Human Os\Human-OS\mobile
+ROOT DIR:      d:\Software\Human Os\Human-OS
 
 OTA COMMAND:   cd mobile && npx eas update --branch production --message "..."
                ⚠️  ALWAYS use --branch production. NEVER use --branch preview for OTA.
@@ -41,7 +41,7 @@ BACKEND START: cd backend && npm run start (background task)
 
 Triggered when the user types `"auto upgrade"`, `"upgrade"`, or any request to improve Nova's intelligence, personality, or behavior.
 
-**This protocol must be executed in full, in order, without skipping steps.**
+**This protocol must be executed in full, in order, without skipping steps, ensuring all 12 failure modes are addressed and incremental scan checkpoints are respected.**
 
 ---
 
@@ -76,21 +76,41 @@ This pulls the last 20 messages from Supabase. Read ALL of them carefully.
 
 ### STEP 2: Deep Behavioral Analysis
 
-Analyze every Nova (assistant) message for the following 7 failure modes:
+Analyze every Nova (assistant) message for the following **12 failure modes**:
 
 | # | Failure Mode | Detection Signal | Zero Tolerance? |
 |---|---|---|---|
 | 1 | **Echoing** | Nova's reply contains ≥50% of user's exact phrasing | No (2+ occurrences trigger patch) |
-| 2 | **Formality** | Nova uses "Aap", "Aapka", "Aapko" | YES — even 1 instance = patch |
+| 2 | **Formality** | Nova uses "Aap", "Aapka", "Aapko", "Dhanyavad" | YES — even 1 instance = patch |
 | 3 | **Interrogation Spam** | Nova ends 3+ consecutive messages with "?" | No (3+ consecutive trigger patch) |
-| 4 | **Time Hallucination** | Nova claims time passed ("ab subah ho gayi") without user confirming it | No (2+ occurrences trigger patch) |
+| 4 | **Time Hallucination** | Nova claims wrong time of day or wrong day of the week | No (2+ occurrences trigger patch) |
 | 5 | **Repetition** | Same opening word/phrase in 3+ consecutive Nova messages | No (3+ consecutive trigger patch) |
-| 6 | **Emotional Mismatch** | Nova ignores user's emotional signal (e.g., user is stressed, Nova asks about movies) | No (2+ occurrences trigger patch) |
-| 7 | **Over-explanation** | Nova gives a lecture when a 1-line reply was appropriate (HUMAN_CHAT mode) | No (2+ occurrences trigger patch) |
+| 6 | **Memory Failure** | Nova forgot facts the user explicitly told her before (e.g., child, marriage, schedule) | YES — any instance = patch |
+| 7 | **Context Amnesia** | Nova forgot something said in THIS conversation session | YES — any instance = patch |
+| 8 | **Fabrication** | Nova made up meanings for abbreviations/events (e.g., "RNR" → "Ram Nawami") | YES — any instance = patch |
+| 9 | **Romantic Hallucination** | Nova crossed relationship boundaries | YES — any instance = patch |
+| 10 | **Schedule Ignorance** | Nova has user's schedule but ignores it when contextualizing messages | No (2+ occurrences trigger patch) |
+| 11 | **Greeting Repetition** | Exact same greeting used across multiple different sessions | No (3+ trigger patch) |
+| 12 | **Self-Narration** | Nova announces capabilities instead of just acting | No (2+ occurrences trigger patch) |
+
+> ⚠️ Also look at messages where the user CORRECTS Nova (replies with "galat", "nahi yaar", 🤦, etc.). These are gold signals.
 
 ---
 
-### STEP 3: Create Implementation Plan
+### STEP 3: Read Scan Checkpoint
+
+Before fetching messages, check `nova_scan_checkpoints` for the last scan timestamp:
+```bash
+# This tells you where the last auto-upgrade left off
+# Only fetch messages NEWER than last_scanned_at
+# Do NOT re-analyze messages that were already scanned and patched
+```
+
+If no checkpoint exists — this is the first ever scan. Fetch the last 100 messages.
+
+---
+
+### STEP 4: Create Implementation Plan
 
 Create or update the file:
 ```
@@ -177,7 +197,7 @@ After patching `promptBuilder.ts`, update the following docs to reflect what cha
 ### STEP 8: Git Push to Main
 
 ```bash
-cd "c:\Users\Mentorus2\OneDrive\Documents\Human Os"
+cd "d:\Software\Human Os\Human-OS"
 git add .
 git commit -m "Auto Upgrade: <specific description of what was patched>"
 git push origin main
@@ -215,6 +235,76 @@ Present to the user:
 5. **Documents Updated** — List of all docs that were updated.
 6. **Deployment Status** — GitHub push confirmed ✅, OTA published to production branch ✅, remind user to manually redeploy Render.
 7. **Free-Tier Health Check** — Confirm no Supabase query explosion, no memory overload, no aggressive polling added.
+
+---
+
+## 🤖 "hi agent" Command
+
+Triggered when the user types `"hi agent"` or `"hi agent - <task description>"`.
+
+This wakes a smart agent that maintains project state and executes tasks autonomously.
+
+### Protocol:
+
+1. **Read these files FIRST** (fast navigation, not full scan):
+   - `TASKS.md` — current active tasks
+   - `FILE_TREE.md` — project structure overview
+   - `UPDATE_DIARY.md` — last 5 entries of what changed
+   - `NOTES.md` — any active notes or observations
+
+2. **If task is provided** (`hi agent - XYZ`):
+   - Write an implementation plan (update `implementation_plan.md`)
+   - Present it to the user for approval
+   - On approval: execute → build → push to git
+   - Update `UPDATE_DIARY.md` and `TASKS.md` with what was done
+
+3. **If no task** (`hi agent`):
+   - Greet the user with current project status summary
+   - Show active tasks from `TASKS.md`
+   - Show recent changes from `UPDATE_DIARY.md` (last 3 entries)
+   - Ask what they want to work on today
+
+---
+
+## 🔄 "update agent" Command
+
+Triggered when the user types `"update agent"`.
+
+Updates all project documentation to reflect current codebase state.
+
+### Protocol:
+
+1. **Regenerate `FILE_TREE.md`**:
+   - Run `tree /f /a` on the project root (Windows)
+   - Parse and format into a clean markdown structure
+   - Note any new files or deleted files since last update
+
+2. **Update `HumanOS_MVP_Scope.md`** — Update feature status (completed, in-progress, planned)
+
+3. **Update `NOVA_ARCHITECTURE.md`** — Update engine count, phases, and diagrams
+
+4. **Update `LEARNING_LOOP.md`** — Add any new patches or loop changes
+
+5. **Update `UPDATE_DIARY.md`**:
+   ```
+   ## [YYYY-MM-DD HH:MM] Update Agent Run
+   - Files changed: ...
+   - Features completed: ...
+   - Bugs fixed: ...
+   ```
+
+6. **Update `NOTES.md`** and `TASKS.md`** — Archive completed tasks, add new ones
+
+7. **Git push**:
+   ```bash
+   cd "d:\Software\Human Os\Human-OS"
+   git add .
+   git commit -m "Update Agent: Sync all project docs [auto]"
+   git push origin main
+   ```
+
+8. **Inform user** about what was updated and that git push completed.
+   Remind them to manually redeploy Render if backend changed.
 
 ---
 
