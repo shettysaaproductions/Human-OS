@@ -32,6 +32,23 @@ async function main(): Promise<void> {
   // Load autonomous behavioral patches into memory before accepting traffic
   await promptBuilder.loadPatches();
 
+  // Record server boot time for Nova's coma awareness
+  // Nova tracks when she was online/offline to avoid pretending she was 'thinking' during downtime
+  try {
+    await (await import('./lib/supabase')).supabaseAdmin.from('nova_scan_checkpoints').insert({
+      scan_type: 'server_boot',
+      last_scanned_at: new Date().toISOString(),
+      messages_scanned: 0,
+      flaws_found: 0,
+      patches_applied: 0
+    });
+    logger.info('[UPTIME] Server boot recorded — Nova is awake.');
+  } catch (uptimeErr) {
+    logger.warn('[UPTIME] Failed to record boot time (non-critical)', {
+      error: uptimeErr instanceof Error ? uptimeErr.message : String(uptimeErr)
+    });
+  }
+
   // Initialize Background Queue Workers
   // DISABLE_REFLECTIONS=true → skip all background workers for debugging
   if (process.env.DISABLE_REFLECTIONS !== 'true') {
@@ -76,6 +93,16 @@ async function main(): Promise<void> {
       }
     }, 15 * 60 * 1000); // 15 minutes
     if (naceInterval.unref) naceInterval.unref();
+
+    // NACE Habit Trigger Sync (runs every 6 hours — creates agenda items from routines)
+    const habitInterval = setInterval(async () => {
+      try {
+        await novaConsciousnessEngine.syncHabitTriggers();
+      } catch (err) {
+        logger.error('Error in habit trigger sync', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 6 * 60 * 60 * 1000); // 6 hours
+    if (habitInterval.unref) habitInterval.unref();
 
     // Daily Reflection + Memory Pruning Scheduler (runs once per day)
     const dailyReflectionInterval = setInterval(async () => {
@@ -142,6 +169,21 @@ async function main(): Promise<void> {
       logger.error('Forced shutdown after timeout');
       process.exit(1);
     }, 10_000);
+
+    // Record shutdown time for Nova's coma awareness (best effort — non-blocking)
+    void (async () => {
+      try {
+        const { supabaseAdmin: sb } = await import('./lib/supabase');
+        await sb.from('nova_scan_checkpoints').insert({
+          scan_type: 'server_shutdown',
+          last_scanned_at: new Date().toISOString(),
+          messages_scanned: 0,
+          flaws_found: 0,
+          patches_applied: 0
+        });
+        logger.info('[UPTIME] Shutdown recorded — Nova is going to sleep.');
+      } catch { /* Best effort */ }
+    })();
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

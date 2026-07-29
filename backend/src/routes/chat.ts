@@ -489,6 +489,20 @@ chatRouter.post(
         });
       }
 
+      // Real-time correction detection: If user replied to a specific Nova message,
+      // check if it's a correction and auto-generate a behavioral patch.
+      if (reply_to_content && !is_proactive) {
+        import('../services/NovaRealtimeLearningService').then(({ novaRealtimeLearning }) => {
+          novaRealtimeLearning.analyzeCorrection(userId, message, reply_to_content)
+            .catch(e => logger.warn('[REALTIME LEARNING] Background correction analysis failed', { error: e }));
+        });
+      }
+
+      // Periodically reload behavioral patches so recently-applied corrections take effect
+      import('../services/promptBuilder').then(({ promptBuilder: pb }) => {
+        pb.maybeReloadPatches().catch(() => {});
+      });
+
       // 2. If fast async mode is requested, return 202 IMMEDIATELY NOW THAT THE MESSAGE IS IN DB
       // so the client can mark it as delivered. The rest happens in the background.
       if (async_mode) {

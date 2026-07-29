@@ -23,6 +23,20 @@ export const nvidiaClientSecondary = new OpenAI({
   maxRetries: 0,
 });
 
+// Key 3: Dedicated to Self-Improvement + Realtime Learning
+export const nvidiaClientLearning = new OpenAI({
+  apiKey: config.nvidia.apiKey3 || config.nvidia.apiKey2 || config.nvidia.apiKey || 'dummy_key',
+  baseURL: config.nvidia.baseUrl,
+  maxRetries: 0,
+});
+
+// Key 4: Dedicated to Memory Extraction + Background Actions
+export const nvidiaClientExtraction = new OpenAI({
+  apiKey: config.nvidia.apiKey4 || config.nvidia.apiKey2 || config.nvidia.apiKey || 'dummy_key',
+  baseURL: config.nvidia.baseUrl,
+  maxRetries: 0,
+});
+
 
 /** Thrown when the NVIDIA API does not respond within NVIDIA_TIMEOUT_MS. */
 export class NvidiaTimeoutError extends Error {
@@ -285,6 +299,58 @@ export async function chatCompletionBackground(
       status: err.status,
     });
     throw err;
+  }
+}
+
+/**
+ * Sends a chat completion request using the LEARNING key (Key 3).
+ * Use this for NovaSelfImprovementService and NovaRealtimeLearningService.
+ * Falls back to Key 2, then Key 1 if Key 3 is not configured.
+ */
+export async function chatCompletionLearning(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: ChatOptions,
+): Promise<string> {
+  const payload: any = {
+    model: options?.model ?? config.nvidia.chatModel,
+    messages,
+    max_tokens: options?.maxTokens ?? 1024,
+    temperature: options?.temperature ?? 0.85,
+    stream: false,
+  };
+
+  if (options?.frequency_penalty !== undefined) payload.frequency_penalty = options.frequency_penalty;
+  if (options?.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty;
+  if (options?.response_format) payload.response_format = options.response_format;
+
+  try {
+    const response = await withNvidiaTimeout((signal) =>
+      nvidiaClientLearning.chat.completions.create(payload, { signal })
+    );
+    const message = response.choices[0]?.message;
+    if (!message?.content) {
+      throw new Error('NVIDIA learning API returned an empty response');
+    }
+    return message.content;
+  } catch (err: any) {
+    // Fallback to secondary key
+    logger.warn('NVIDIA learning key failed, falling back to secondary', { error: err.message });
+    try {
+      const response = await withNvidiaTimeout((signal) =>
+        nvidiaClientSecondary.chat.completions.create(payload, { signal })
+      );
+      const message = response.choices[0]?.message;
+      if (!message?.content) throw new Error('NVIDIA fallback API returned empty');
+      return message.content;
+    } catch (fallbackErr: any) {
+      const isDev = process.env.NODE_ENV === 'development';
+      if (isDev) {
+        logger.warn('NVIDIA API call failed (learning) — returning mock response', { error: fallbackErr.message });
+        return getMockResponse(messages, options);
+      }
+      logger.error('NVIDIA learning API call failed (all keys)', { error: fallbackErr.message });
+      throw fallbackErr;
+    }
   }
 }
 

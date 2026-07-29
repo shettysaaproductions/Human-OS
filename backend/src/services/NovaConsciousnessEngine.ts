@@ -13,9 +13,43 @@ import { sendPushNotification } from '../lib/pushNotifications';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 import crypto from 'crypto';
 
-const MIN_GAP_MINUTES = 45; // Minimum gap between consecutive Nova outreach messages
+const MIN_GAP_MINUTES = 15; // Absolute minimum between consecutive outreach (safety floor)
+const SERVER_BOOT_COOLDOWN_MS = 5 * 60 * 1000; // Don't reach out within 5 min of server boot
+let serverBootTime = Date.now();
 
 export class NovaConsciousnessEngine {
+
+  /**
+   * Calculate dynamic gap based on situation instead of a fixed timer.
+   * User free → 15 min gap, User busy → 60 min, Important task pending → 30 min.
+   */
+  private _calculateDynamicGap(context: {
+    isSleepWindow: boolean;
+    gapMinutes: number;
+    hasAgenda: boolean;
+    agendaUrgency?: string;
+    timeOfDayLabel: string;
+  }): number {
+    // Sleep window — very long gap unless high urgency
+    if (context.isSleepWindow) {
+      return context.agendaUrgency === 'high' ? 60 : 480; // 1 hr or 8 hrs
+    }
+
+    // Work hours (morning/afternoon) — longer gap, don't disturb
+    if (['morning', 'afternoon'].includes(context.timeOfDayLabel)) {
+      return context.hasAgenda ? 45 : 90; // 45 min if task pending, else 90 min
+    }
+
+    // Evening/night — user is likely free, shorter gap
+    if (['evening', 'late_night'].includes(context.timeOfDayLabel)) {
+      if (context.hasAgenda && context.agendaUrgency === 'high') return 20;
+      if (context.hasAgenda) return 30;
+      return 45; // Casual check-in
+    }
+
+    // Default
+    return 30;
+  }
 
   async pulse(): Promise<void> {
     try {
@@ -46,6 +80,12 @@ export class NovaConsciousnessEngine {
   }
 
   private async _processUser(userId: string): Promise<void> {
+    // Coma awareness: Don't reach out right after server boot to avoid spam
+    if (Date.now() - serverBootTime < SERVER_BOOT_COOLDOWN_MS) {
+      logger.info('[NACE] Skipping outreach — server just booted (coma cooldown)');
+      return;
+    }
+
     // 1. Fetch Profile & Temporal Context
     const { data: profile } = await supabaseAdmin
       .from('profiles')
@@ -69,7 +109,7 @@ export class NovaConsciousnessEngine {
     if (recentOutreach) {
       const minutesSinceLast = (Date.now() - new Date(recentOutreach.created_at).getTime()) / 60000;
       if (minutesSinceLast < MIN_GAP_MINUTES) {
-        return; // Too soon since last outreach
+        return; // Absolute floor — never outreach faster than 15 min
       }
     }
 
@@ -86,7 +126,7 @@ export class NovaConsciousnessEngine {
     if (recentAssistantChat) {
       const minutesSinceLastReply = (Date.now() - new Date(recentAssistantChat.created_at).getTime()) / 60000;
       if (minutesSinceLastReply < MIN_GAP_MINUTES) {
-        return; // Nova recently spoke
+        return; // Nova just spoke — absolute floor
       }
     }
 
@@ -116,6 +156,23 @@ export class NovaConsciousnessEngine {
 
     const agendaItem = (pendingAgenda && pendingAgenda.length > 0) ? pendingAgenda[0] : null;
 
+    // Calculate dynamic gap based on situation
+    const dynamicGap = this._calculateDynamicGap({
+      isSleepWindow: tContext.isSleepWindow,
+      gapMinutes,
+      hasAgenda: !!agendaItem,
+      agendaUrgency: agendaItem?.urgency,
+      timeOfDayLabel: tContext.timeOfDayLabel
+    });
+
+    // Enforce dynamic gap against last outreach
+    if (recentOutreach) {
+      const minutesSinceLast = (Date.now() - new Date(recentOutreach.created_at).getTime()) / 60000;
+      if (minutesSinceLast < Math.max(dynamicGap, MIN_GAP_MINUTES)) {
+        return; // Too soon based on situational gap
+      }
+    }
+
     // Do not disturb during sleep, unless it's a high urgency agenda
     if (tContext.isSleepWindow) {
       if (!agendaItem || agendaItem.urgency !== 'high') {
@@ -124,10 +181,20 @@ export class NovaConsciousnessEngine {
     }
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
+    // Now includes richer context for intelligent gap decisions
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
 Is Sleep Window: ${tContext.isSleepWindow}
-User Gap: ${Math.round(gapMinutes / 60)} hours
-Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}`;
+User Gap: ${Math.round(gapMinutes / 60)} hours (${Math.round(gapMinutes)} minutes)
+Dynamic Gap Applied: ${dynamicGap} minutes
+Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}
+Agenda Urgency: ${agendaItem?.urgency || 'none'}
+
+DECISION RULES:
+- If user has been free for ${dynamicGap}+ minutes AND there's something meaningful to say, reach out.
+- If user has a pending high-urgency task/goal, ALWAYS reach out during non-sleep hours.
+- If user is likely busy (work hours), only reach out for important agenda items.
+- If user seems free (evening, weekend), casual check-ins are OK.
+- NEVER reach out if the gap is less than ${MIN_GAP_MINUTES} minutes.`;
 
     let shouldReach = false;
     let triggerType = 'engagement';
@@ -269,6 +336,74 @@ ${lastConvSnippet || 'No recent conversation.'}`;
       .update({ status: 'expired', updated_at: new Date().toISOString() })
       .in('status', ['pending', 'active'])
       .lt('follow_up_after', cutoff);
+  }
+  /**
+   * Creates habit-based agenda items from working_memory schedule data.
+   * For example, if user's logout time is 8:30 PM, create an outreach trigger at 8:35 PM.
+   * Called once per pulse cycle.
+   */
+  async syncHabitTriggers(): Promise<void> {
+    try {
+      // Find all users with schedule-related working memory
+      const scheduleKeys = ['logout', 'login', 'work', 'gym', 'sleep', 'routine', 'schedule', 'office'];
+      const { data: scheduleMemories } = await supabaseAdmin
+        .from('working_memory')
+        .select('user_id, key, value, expires_at')
+        .gt('expires_at', new Date().toISOString());
+
+      if (!scheduleMemories || scheduleMemories.length === 0) return;
+
+      // Filter for schedule-relevant entries
+      const relevantEntries = scheduleMemories.filter(wm =>
+        scheduleKeys.some(k => wm.key.toLowerCase().includes(k) || wm.value.toLowerCase().includes(k))
+      );
+
+      if (relevantEntries.length === 0) return;
+
+      // Group by user
+      const userSchedules = new Map<string, typeof relevantEntries>();
+      for (const entry of relevantEntries) {
+        const existing = userSchedules.get(entry.user_id) || [];
+        existing.push(entry);
+        userSchedules.set(entry.user_id, existing);
+      }
+
+      for (const [userId, entries] of userSchedules) {
+        // Check if we already have a habit-based agenda item for today
+        const today = new Date().toISOString().split('T')[0];
+        const { data: existingAgenda } = await supabaseAdmin
+          .from('nova_agenda')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('source_message', 'habit_trigger')
+          .gte('created_at', today + 'T00:00:00Z')
+          .limit(1);
+
+        if (existingAgenda && existingAgenda.length > 0) continue; // Already have today's triggers
+
+        // Create a habit-based agenda item
+        const scheduleDescription = entries.map(e => `${e.key}: ${e.value}`).join(', ');
+        const followUpTime = new Date(Date.now() + 30 * 60 * 1000); // 30 mins from now as default
+
+        await supabaseAdmin.from('nova_agenda').insert({
+          user_id: userId,
+          event_description: `Daily habit check-in based on schedule: ${scheduleDescription.substring(0, 300)}`,
+          follow_up_question: 'Check in based on their known daily routine and schedule',
+          follow_up_after: followUpTime.toISOString(),
+          source_message: 'habit_trigger',
+          status: 'pending',
+          next_retry_at: followUpTime.toISOString(),
+          urgency: 'low',
+          is_recurring: true,
+        });
+
+        logger.info('[NACE] Created habit-based trigger for user', { userId, schedule: scheduleDescription.substring(0, 100) });
+      }
+    } catch (err) {
+      logger.warn('[NACE] Habit trigger sync failed (non-critical)', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 }
 
