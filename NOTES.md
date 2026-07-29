@@ -23,6 +23,13 @@ Working notes and observations maintained by the Antigravity agent.
 - Engine count: 7 → 9 (added NovaRealtimeLearningService + FreeTierGuardService)
 - Self-improvement: weekly → daily, 5 flaws → 12 flaws, incremental scan
 - NACE gap: fixed 45 min → intelligent dynamic gap (15–480 min based on situation)
+- **Deep Context limit**: 20 → 100 messages (loaded for Nova to have massive context)
+- **Multi-NVIDIA Pool**: 4 keys operating in parallel across background + user chat
+
+### Current Push Notification Status
+- Attempted to fix Android Push Notification (DeviceNotRegistered error). 
+- Found that Android Auto-Backup was forcing a corrupted/old Expo push token to Google Play Services.
+- Currently waiting for a fresh APK build via GitHub Actions to permanently reset the Firebase Installation ID and clear the cache. Next step is to test the push notification on the new APK.
 
 ### Free-Tier Budget Status
 - Supabase: ~30 chat messages in history, 30+ test memories being cleaned. Storage should be well under 500MB.
