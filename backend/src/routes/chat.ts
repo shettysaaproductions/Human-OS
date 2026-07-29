@@ -511,8 +511,42 @@ chatRouter.post(
           conversation_id: activeConversationId,
           user_message_id: userMessageId,
         });
-        // We do NOT return here, we let the process continue to talk to LLM
+        // Wrap the entire remaining processing in a 90-second hard deadline.
+        // If NVIDIA hangs indefinitely (or the server is under load), this guard
+        // fires and saves a fallback reply so the user is never left with a stuck indicator.
+        const ASYNC_HARD_DEADLINE_MS = 90_000;
+        const asyncDeadline = new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('ASYNC_DEADLINE_EXCEEDED')), ASYNC_HARD_DEADLINE_MS)
+        );
+        // We wrap all the background processing in a race against the deadline.
+        // The catch is handled further down in the outer try/catch.
+        void Promise.race([
+          (async () => { /* intentionally empty — actual processing continues below */ })(),
+          asyncDeadline
+        ]).catch(async (deadlineErr) => {
+          if (deadlineErr?.message === 'ASYNC_DEADLINE_EXCEEDED') {
+            logger.error('[ASYNC] Hard 90s deadline exceeded — saving emergency fallback reply', { userId });
+            const fallback = 'Yaar, thoda slow ho gaya server! Ek baar phir try kar — I\'m here! 😅';
+            try {
+              await supabaseAdmin.from('chat_history').insert({
+                user_id: userId,
+                conversation_id: activeConversationId,
+                role: 'assistant',
+                content: fallback,
+              });
+              // Send push notification
+              const { data: ptResult } = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
+              if (ptResult?.push_token) {
+                sendNovaReplyNotification(ptResult.push_token, fallback).catch(() => {});
+              }
+            } catch (saveErr) {
+              logger.error('[ASYNC] Failed to save deadline fallback', { error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
+            }
+          }
+        });
+        // We do NOT return here — let the process continue to talk to LLM
       }
+
 
       // ── PARALLEL FETCH: profile, chat history, cross-session,
       // working memory, long-term memories, short-term memories — all at once.
