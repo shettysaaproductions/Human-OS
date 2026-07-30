@@ -2,21 +2,32 @@
  * notificationService.ts
  *
  * Handles all push notification logic.
- * IMPORTANT: Call initialize() on app start (channels only — no token).
- * Call registerAfterAuth() AFTER the user successfully logs in and the
- * auth token is set in axios headers. This avoids the race condition where
- * the push token API call fails because auth headers aren't set yet.
  *
- * Token refresh:
- * Android/Google periodically rotates FCM tokens. We listen for rotations
- * via addPushTokenListener() and immediately re-register the new token with
- * the backend. Without this, the DB holds a stale token and all background
- * notifications silently fail.
+ * === TOKEN FRESHNESS GUARANTEE ===
+ * Every new APK install generates a new Expo push token. Without refreshing,
+ * the DB holds the old token and ALL notifications (chat replies, NACE
+ * proactive messages, reminders) silently fail.
+ *
+ * Solution: `ensureTokenFresh()` runs EVERY app launch after auth is confirmed.
+ * It gets the current device token, compares with the last registered token
+ * (stored in AsyncStorage), and re-registers if they differ. This handles:
+ *   - New APK installs
+ *   - Android FCM token rotations
+ *   - App reinstalls
+ *   - Any other token invalidation scenario
+ *
+ * Call order (in App.tsx / auth flow):
+ *   1. notificationService.initialize()    — on app start (channels only, pre-auth)
+ *   2. notificationService.registerAfterAuth() — immediately after login
+ *   3. notificationService.ensureTokenFresh()  — also on every launch if already logged in
  */
 
 import * as Notifications from 'expo-notifications';
 import { Platform, AppState } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { chatService } from './chatService';
+
+const LAST_REGISTERED_TOKEN_KEY = '@nova_last_push_token';
 
 // ── Chat screen active flag — suppress banners when user is reading chat ────────
 // ChatScreen calls setChatScreenActive(true) on mount and (false) on unmount.
@@ -126,11 +137,7 @@ class NotificationService {
 
   /**
    * Call this AFTER the user is authenticated and the axios auth header is set.
-   * Always re-registers the token — handles force-close + fresh open cases.
-   * Safe to call multiple times.
-   *
-   * Also sets up a persistent listener so if Android/Google rotates the FCM
-   * token, we immediately re-register the new token with the backend.
+   * Registers the token and sets up listeners. Safe to call multiple times.
    */
   async registerAfterAuth(): Promise<void> {
     try {
@@ -139,6 +146,67 @@ class NotificationService {
       this._startNotificationListeners();
     } catch (err) {
       console.warn('[Notifications] registerAfterAuth failed (non-critical):', err);
+    }
+  }
+
+  /**
+   * TOKEN FRESHNESS GUARANTEE — call this on every app launch after confirming
+   * the user is already authenticated (i.e., they didn't just log in fresh).
+   *
+   * Every new APK install = new Expo push token. This method compares the
+   * current device token with the last token we successfully registered with
+   * the backend. If they differ, it re-registers immediately.
+   *
+   * This is what makes push notifications survive across APK upgrades.
+   */
+  async ensureTokenFresh(): Promise<void> {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('[Notifications] ensureTokenFresh: permission not granted, skipping');
+        return;
+      }
+
+      let tokenResult;
+      try {
+        tokenResult = await Notifications.getExpoPushTokenAsync({
+          projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
+        });
+      } catch (tokenErr) {
+        console.warn('[Notifications] ensureTokenFresh: failed to get token:', tokenErr);
+        return;
+      }
+
+      const currentToken = tokenResult.data;
+      if (!currentToken) return;
+
+      // Read the last token we successfully registered with the backend
+      const lastRegistered = await SecureStore.getItemAsync(LAST_REGISTERED_TOKEN_KEY).catch(() => null);
+
+      if (currentToken === lastRegistered) {
+        // Token unchanged — no re-registration needed
+        console.log('[Notifications] ensureTokenFresh: token unchanged ✅');
+        return;
+      }
+
+      // Token is new (new APK, FCM rotation, reinstall) — re-register with backend
+      console.log('[Notifications] ensureTokenFresh: token changed — re-registering with backend');
+      console.log('[Notifications] Old:', lastRegistered?.substring(0, 30) ?? 'none');
+      console.log('[Notifications] New:', currentToken.substring(0, 30));
+
+      await chatService.registerPushToken(currentToken);
+      this._pushToken = currentToken;
+
+      // Save the newly registered token so we don't re-register on next launch
+      await SecureStore.setItemAsync(LAST_REGISTERED_TOKEN_KEY, currentToken).catch(() => {});
+
+      console.log('[Notifications] ensureTokenFresh: new token registered ✅');
+
+      // Also start listeners if not already started
+      this._startNotificationListeners();
+      this._startTokenRefreshListener();
+    } catch (err) {
+      console.warn('[Notifications] ensureTokenFresh failed (non-critical):', err);
     }
   }
 
@@ -323,6 +391,8 @@ class NotificationService {
         await chatService.registerPushToken(this._pushToken);
         console.log('[Notifications] Token registered with backend ✅');
         this._registered = true;
+        // Persist the registered token so ensureTokenFresh() can detect changes on next launch
+        await SecureStore.setItemAsync(LAST_REGISTERED_TOKEN_KEY, this._pushToken).catch(() => {});
         return;
       } catch (err) {
         attempt++;

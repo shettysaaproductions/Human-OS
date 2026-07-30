@@ -19,9 +19,10 @@ This document tracks identified bugs, limitations, and workarounds.
 - **Workaround:** Both listeners call `checkProactiveMessages()` but there is an idempotency check in the outreach log. If it still occurs, add a client-side dedup using the `nova_outreach_log` ID.
 
 ### 3. OTA Updates Not Received by Test APK
-- **Root Cause:** APK builds (`eas build --profile apk`) target the `production` EAS channel. Previous OTA pushes were made to the `production` branch — APK did not receive them.
-- **Fix Applied:** All OTA updates must use `--branch preview` to reach the installed APK.
-- **Correct Command:** `npx eas update --branch preview --message "..."`
+- **Root Cause:** APK builds (`eas build --profile apk`) target the `production` EAS channel. Previous OTA pushes were made to the `preview` branch — APK did not receive them.
+- **Fix Applied:** All OTA updates must use `--branch production` to reach the installed APK.
+- **Correct Command:** `npx eas update --branch production --message "..."`
+
 
 ---
 
