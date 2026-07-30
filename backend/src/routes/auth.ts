@@ -203,7 +203,7 @@ authRouter.post('/push-token', authenticateUser, async (req: Request, res: Respo
 
     const { error } = await supabaseAdmin
       .from('profiles')
-      .update({ push_token: token, push_token_updated_at: new Date().toISOString() })
+      .update({ push_token: token })
       .eq('id', userId);
 
     if (error) {
