@@ -47,6 +47,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           const user = await authService.getMe();
           set({ accessToken, user, onboardingStatus: user.onboardingCompleted || false, isLoading: false });
           notificationService.registerAfterAuth().catch(() => {});
+          notificationService.ensureTokenFresh().catch(() => {}); // handles new APK install token change
           return;
         } catch {
           // Token expired — fall through to refresh
@@ -61,6 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           await SecureStore.setItemAsync('refreshToken', data.refresh_token);
           set({ accessToken: data.access_token, user: data.user, onboardingStatus: data.user?.onboardingCompleted || false, isLoading: false });
           notificationService.registerAfterAuth().catch(() => {});
+          notificationService.ensureTokenFresh().catch(() => {}); // handles new APK install token change
           return;
         } catch {
           // Refresh token also expired — force re-login

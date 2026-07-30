@@ -44,6 +44,7 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 - Message staggering (5-10s human-like delays between bubbles)
 - Never-stuck message guarantee (DB write before 202 response)
 - OTA update popup system (targets `production` branch for APK builds)
+- **Auto Upgrade (July 2026)**: Fixed OTA checking (`checkAutomatically: ON_LOAD`), fixed push token freshness on new APK installs, added `fetch_recent_chats.ts`, added 3 new behavioral patches (Schedule pre-check, Same-session amnesia, Proactive depth).
 
 ### 🔜 Next Sprint (Planned)
 1. Fix `reminders.status` column bug (P1 blocker — spams logs every 10s)
