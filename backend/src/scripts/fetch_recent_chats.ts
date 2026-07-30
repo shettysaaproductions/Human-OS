@@ -5,7 +5,7 @@
  * and prints them in a readable format for behavioral analysis.
  */
 
-import { supabase } from '../lib/supabase';
+import { supabaseAdmin as supabase } from '../lib/supabase';
 import readline from 'readline';
 
 async function promptUser(): Promise<string | null> {
@@ -87,7 +87,7 @@ async function fetchTelemetry() {
     }
 
     // Print chronologically (oldest first)
-    messages.reverse().forEach(msg => {
+    messages.reverse().forEach((msg: any) => {
       const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const sender = msg.role === 'user' ? `[${name}]` : '[Nova]';
       const color = msg.role === 'nova' ? '\x1b[35m' : '\x1b[36m'; // Magenta for Nova, Cyan for User
