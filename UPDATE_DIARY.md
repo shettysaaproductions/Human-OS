@@ -4,6 +4,23 @@ Chronological log of all agent-executed changes. Maintained by `update agent` co
 
 ---
 
+## [2026-07-30] Push Notification Bug Fix & Root Cause
+
+### Trigger
+User reported push notifications were not being delivered on their newly installed APK (v1.2.33-stable).
+
+### Changes Made
+- **Fixed backend crash**: Removed `push_token_updated_at` column reference in `backend/src/routes/auth.ts` which was causing a fatal DB crash and preventing token registration.
+- **Mobile OTA Fixes**: Updated `mobile/src/services/notificationService.ts` to include `ensureTokenFresh()` for seamless token regeneration across APK upgrades.
+- **OTA Strategy**: Changed `checkAutomatically` in `mobile/app.json` to `ON_LOAD` to guarantee users receive JS fixes.
+- **Behavioral Patches**: Added 3 new patches to `promptBuilder.ts` to improve Nova's context awareness.
+- **Docs**: Regenerated `FILE_TREE.md` via `update agent`.
+
+### Status
+Backend changes pushed to `main` and manually deployed to Render. Mobile JS changes committed to `main` — User instructed to trigger GitHub Actions to build a fresh APK since the old `v1.2.33-stable` APK ignores OTA updates.
+
+---
+
 ## [2026-07-30 03:30 IST] Auto Upgrade V2 (Cont.) — 100-Message Context & MVP Docs
 
 ### Trigger

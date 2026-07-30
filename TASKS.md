@@ -1,16 +1,21 @@
 # HumanOS Active Tasks
 
 ## 🔥 In Progress
+- [ ] Build new Android APK via GitHub Actions to include `ensureTokenFresh()` logic
 - [ ] Deploy Auto Upgrade V2 to Render (manual step — user to trigger)
 - [ ] Add NVIDIA_API_KEY_3 and NVIDIA_API_KEY_4 to Render env vars
 - [ ] Run `021_nova_corrections_log.sql` migration in Supabase
 - [ ] Run `npx tsx scripts/cleanupTestMemories.ts` to seed real memories
 
 ## 📋 Backlog
-- [ ] OTA update after Render redeploy
 - [ ] Test correction flow: reply to Nova msg → verify patch appears in nova_behavioral_patches
 - [ ] Test proactive outreach: wait 30 min silence → verify Nova reaches out
 - [ ] Monitor FreeTierGuard logs for any limit warnings
+
+## ✅ Completed
+- [x] Fix push notification backend crash (`push_token_updated_at`)
+- [x] Write `ensureTokenFresh()` for mobile token freshness
+- [x] Add 3 new behavioral patches to promptBuilder
 
 ## ✅ Completed (Auto Upgrade V2 — 2026-07-30)
 - [x] NovaRealtimeLearningService.ts — real-time correction detection
