@@ -103,7 +103,6 @@ async function main() {
 
     // ── 4. Behavioral analysis hints ──────────────────────────────────────────
     const novaMessages = reversed.filter(m => m.role === 'assistant');
-    const userMessages = reversed.filter(m => m.role === 'user');
 
     console.log('🔍 Quick Behavioral Scan:');
 
@@ -115,7 +114,7 @@ async function main() {
       if (prev.role === 'user' && curr.role === 'assistant') {
         const userWords = prev.content.toLowerCase().split(/\s+/);
         const novaWords = curr.content.toLowerCase().split(/\s+/);
-        const sharedWords = userWords.filter(w => w.length > 3 && novaWords.includes(w));
+        const sharedWords = userWords.filter((w: string) => w.length > 3 && novaWords.includes(w));
         if (sharedWords.length / userWords.length > 0.5) echoCount++;
       }
     }
