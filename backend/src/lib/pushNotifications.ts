@@ -66,6 +66,7 @@ export async function sendPushNotification(messages: ExpoPushMessage[]): Promise
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
+        ...(process.env.EXPO_ACCESS_TOKEN ? { 'Authorization': `Bearer ${process.env.EXPO_ACCESS_TOKEN}` } : {}),
       },
       body: JSON.stringify(messagesWithTtl),
       signal: AbortSignal.timeout(8000), // 8-second timeout
