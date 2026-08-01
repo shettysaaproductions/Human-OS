@@ -64,18 +64,14 @@ const _inFlightIds = new Set<string>();
 let _proactiveCheckInProgress = false;
 
 // ── Reply-wait polling — unified poller that covers both foreground and post-restart ──
-// Only one poller runs at a time. Checks every 3 seconds while isTyping=true.
-// Max 120 polls = 6 minutes, then gives up and marks message as delivered
-// (backend already has it, just waiting is pointless).
 let _replyPollTimer: ReturnType<typeof setInterval> | null = null;
-let _replyPollCount = 0;
-const MAX_REPLY_POLLS = 120; // 6 minutes
+let _replyPollStartTime = 0;
+const MAX_REPLY_WAIT_MS = 90_000; // 90 seconds max absolute wait time
 
 function startReplyPolling(checkFn: () => Promise<void>) {
   if (_replyPollTimer) return; // already running
-  _replyPollCount = 0;
+  _replyPollStartTime = Date.now();
   _replyPollTimer = setInterval(async () => {
-    _replyPollCount++;
     const live = useChatStore.getState();
 
     // Stop if reply arrived
@@ -84,11 +80,11 @@ function startReplyPolling(checkFn: () => Promise<void>) {
       return;
     }
 
-    // After max polls — give up waiting, clear typing indicator
-    // The message was sent and delivered to server (202 confirmed).
-    // The reply IS in the DB, user will see it next time they open the app.
-    if (_replyPollCount > MAX_REPLY_POLLS) {
-      console.warn('[REPLY_POLL] Max polls reached. Stopping. Reply will load on next open.');
+    // After absolute max wait — give up waiting, clear typing indicator.
+    // By using absolute time (Date.now()), we correctly handle when the app is
+    // backgrounded/locked (setInterval pauses in background).
+    if (Date.now() - _replyPollStartTime > MAX_REPLY_WAIT_MS) {
+      console.warn('[REPLY_POLL] Absolute max wait time (90s) reached. Stopping.');
       stopReplyPolling();
       useChatStore.getState().set_isTyping(false);
       return;
@@ -96,14 +92,14 @@ function startReplyPolling(checkFn: () => Promise<void>) {
 
     await checkFn();
   }, 3000);
-  console.log('[REPLY_POLL] Started (3s interval, max 6min)');
+  console.log('[REPLY_POLL] Started (3s interval, 90s max wait)');
 }
 
 function stopReplyPolling() {
   if (_replyPollTimer) {
     clearInterval(_replyPollTimer);
     _replyPollTimer = null;
-    _replyPollCount = 0;
+    _replyPollStartTime = 0;
     console.log('[REPLY_POLL] Stopped');
   }
 }
@@ -673,7 +669,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       set((state) => ({ 
         messages: [...state.messages, userMsg],
         pendingQueue: newQueue,
-        replyingTo: null
+        replyingTo: null,
+        isTyping: true
       }));
 
       // Fire and forget, don't block the network request!
