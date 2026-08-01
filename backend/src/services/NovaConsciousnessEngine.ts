@@ -13,9 +13,49 @@ import { sendPushNotification } from '../lib/pushNotifications';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 import crypto from 'crypto';
 
-const MIN_GAP_MINUTES = 15; // Absolute minimum between consecutive outreach (safety floor)
+const MIN_GAP_MINUTES = 45; // Absolute minimum between consecutive outreach (safety floor)
 const SERVER_BOOT_COOLDOWN_MS = 5 * 60 * 1000; // Don't reach out within 5 min of server boot
 let serverBootTime = Date.now();
+
+// Human-like response timing (in seconds)
+const HUMAN_TIMING = {
+  quick: { min: 15, max: 30 },       // 15-30s (user just replied)
+  normal: { min: 45, max: 90 },      // 45-90s (natural pause)
+  thoughtful: { min: 120, max: 180 } // 2-3min (deep thought)
+};
+
+function randomBetween(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function getNextMessageDelay(userLastReplyMs: number): number {
+  const secondsSinceReply = (Date.now() - userLastReplyMs) / 1000;
+  
+  if (secondsSinceReply < 60) {
+    return randomBetween(HUMAN_TIMING.quick.min, HUMAN_TIMING.quick.max) * 1000;
+  } else if (secondsSinceReply < 300) {
+    return randomBetween(HUMAN_TIMING.normal.min, HUMAN_TIMING.normal.max) * 1000;
+  } else {
+    return randomBetween(HUMAN_TIMING.thoughtful.min, HUMAN_TIMING.thoughtful.max) * 1000;
+  }
+}
+
+// NVIDIA rate limit safety
+const RATE_LIMIT = {
+  maxRequestsPerMinute: 30,
+  windowMs: 60000,
+  requests: [] as number[]
+};
+
+function canSendMessage(): boolean {
+  const now = Date.now();
+  RATE_LIMIT.requests = RATE_LIMIT.requests.filter(t => now - t < RATE_LIMIT.windowMs);
+  return RATE_LIMIT.requests.length < RATE_LIMIT.maxRequestsPerMinute;
+}
+
+function recordMessageSent(): void {
+  RATE_LIMIT.requests.push(Date.now());
+}
 
 export class NovaConsciousnessEngine {
 
@@ -141,8 +181,8 @@ export class NovaConsciousnessEngine {
       .maybeSingle();
 
     const gapMinutes = lastUserMsg ? (Date.now() - new Date(lastUserMsg.created_at).getTime()) / 60000 : 0;
-    // If user was active within 30 minutes — don't interrupt. Skip entirely (save LLM cost).
-    if (gapMinutes < 30) return;
+    // If user was active within MIN_GAP_MINUTES — don't interrupt. Skip entirely (save LLM cost).
+    if (gapMinutes < MIN_GAP_MINUTES) return;
 
     // 4. Pending Agenda
     const { data: pendingAgenda } = await supabaseAdmin
@@ -260,7 +300,7 @@ ${lastConvSnippet || 'No recent conversation.'}`;
       const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
 
       if (generated.message) {
-        await this._sendOutreach(userId, profile, generated.message, triggerType, generated.tone);
+        await this._sendOutreach(userId, profile, generated.message, triggerType, generated.tone, gapMinutes);
         if (agendaItem) {
           const newRetryCount = (agendaItem.retry_count || 0) + 1;
           if (newRetryCount >= (agendaItem.max_retries || 3)) {
@@ -289,7 +329,19 @@ ${lastConvSnippet || 'No recent conversation.'}`;
     }
   }
 
-  private async _sendOutreach(userId: string, profile: any, message: string, type: string, tone: string) {
+  private async _sendOutreach(userId: string, profile: any, message: string, type: string, tone: string, gapMinutes: number) {
+    if (!canSendMessage()) {
+      logger.warn('[NACE] Rate limit reached. Aborting outreach.');
+      return;
+    }
+    recordMessageSent();
+
+    // Human-like timing delay
+    const userLastReplyMs = Date.now() - (gapMinutes * 60 * 1000);
+    const delayMs = getNextMessageDelay(userLastReplyMs);
+    logger.info(`[NACE] Applying human-like delay of ${delayMs}ms before sending`);
+    await new Promise(r => setTimeout(r, delayMs));
+
     const { data: latestChat } = await supabaseAdmin
       .from('chat_history')
       .select('conversation_id')
