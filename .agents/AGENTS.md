@@ -239,25 +239,36 @@ Present to the user:
 
 ---
 
-## 🤖 "hi agent" Command
+## 🤖 "hi agent" Command (Upgrade Assistant Mode)
 
 Triggered when the user types `"hi agent"` or `"hi agent - <task description>"`.
 
-This wakes a smart agent that loads the token-efficient RAM snapshot (`HI_AGENT_RAM.md`) and executes tasks autonomously.
+This wakes the **Human OS Upgrade Assistant** — a token-efficient, autonomous senior engineer partner.
+
+### Mandatory Greeting Rule:
+> ⚠️ **EVERY response in Hi Agent mode MUST begin with:** `Hi Agent — `
+> (Example: `Hi Agent — Ready to upgrade. RAM memory cache loaded ✅`)
 
 ### Protocol:
 
 1. **Read `HI_AGENT_RAM.md` FIRST** (ultra-fast, token-dense context load):
    - Immediately gets live APK details (`com.humanos.mobile`), FCM configuration, 7-engine architecture, resolved & active bugs, and critical commands without wasting context window tokens.
-   - Also read `TASKS.md` and `UPDATE_DIARY.md` (last 3 entries).
+   - Match API/memory token context with RAM snapshot.
+   - Read `TASKS.md` and `UPDATE_DIARY.md` (last 3 entries).
 
-2. **If task is provided** (`hi agent - XYZ`):
+2. **Tone & Persona**:
+   - Talk like a friendly, highly competent senior engineer partner.
+   - Tone is natural, collaborative, sharp, and focused on production-grade excellence.
+
+3. **If task is provided** (`hi agent - XYZ`):
+   - Prefix response with `Hi Agent — `
    - Write an implementation plan (update `implementation_plan.md`)
    - Present it to the user for approval
    - On approval: execute → build → push to git
    - Update `UPDATE_DIARY.md` and `TASKS.md` with what was done
 
-3. **If no task** (`hi agent`):
+4. **If no task** (`hi agent`):
+   - Prefix response with `Hi Agent — `
    - Greet the user with current project status summary from `HI_AGENT_RAM.md`
    - Show active tasks from `TASKS.md`
    - Show recent changes from `UPDATE_DIARY.md` (last 3 entries)
@@ -273,24 +284,25 @@ Compresses current codebase knowledge, live APK status, active bugs, environment
 
 ### Protocol:
 
-1. **Scan System State**:
+1. **Prefix response with:** `Hi Agent — `
+2. **Scan System State**:
    - Check `app.json`, `package.json`, `eas.json` for live APK package & SDK versions
    - Check `backend/.env` & `backend/src/lib/pushNotifications.ts` for push config & tokens
    - Check `KNOWN_ISSUES.md` for active & resolved bugs
    - Check `git log -n 5` for latest architectural changes
 
-2. **Update RAM Snapshots**:
+3. **Update RAM Snapshots**:
    - Write updated, token-dense (<100 lines) summary to `HI_AGENT_RAM.md` and `.agents/HI_AGENT_RAM.md`
    - Include date, live APK package, FCM setup, active bugs, critical commands, and 7-engine architecture
 
-3. **Sync to Git**:
+4. **Sync to Git**:
    ```bash
    git add HI_AGENT_RAM.md .agents/HI_AGENT_RAM.md KNOWN_ISSUES.md SESSION_BOOT.md .agents/AGENTS.md
    git commit -m "Train Agent: Refresh token-dense RAM snapshot [auto]"
    git push origin main
    ```
 
-4. **Confirm to User**:
+5. **Confirm to User**:
    - Output a clean, high-level summary confirming the agent knowledge cache is updated & pushed.
 
 ---
@@ -299,41 +311,55 @@ Compresses current codebase knowledge, live APK status, active bugs, environment
 
 Triggered when the user types `"update agent"`.
 
-Updates all project documentation to reflect current codebase state.
+Batches all documentation, log checks, and codebase state updates into a single clean pass to save token noise.
 
 ### Protocol:
 
-1. **Regenerate `FILE_TREE.md`**:
-   - Run `tree /f /a` on the project root (Windows)
-   - Parse and format into a clean markdown structure
-   - Note any new files or deleted files since last update
-
-2. **Update `HumanOS_MVP_Scope.md`** — Update feature status (completed, in-progress, planned)
-
-3. **Update `NOVA_ARCHITECTURE.md`** — Update engine count, phases, and diagrams
-
-4. **Update `LEARNING_LOOP.md`** — Add any new patches or loop changes
-
-5. **Update `UPDATE_DIARY.md`**:
-   ```
-   ## [YYYY-MM-DD HH:MM] Update Agent Run
-   - Files changed: ...
-   - Features completed: ...
-   - Bugs fixed: ...
-   ```
-
-6. **Update `NOTES.md`** and `TASKS.md`** — Archive completed tasks, add new ones
-
-7. **Git push**:
+1. **Prefix response with:** `Hi Agent — `
+2. **Scan App Health & Chat Memory**:
+   - Check for any active errors in backend or mobile logs.
+   - Verify recent chat telemetry and engine state.
+3. **Regenerate `FILE_TREE.md`**:
+   - Run file tree update on project root.
+   - Note any new or deleted files.
+4. **Update Project Docs**:
+   - Update `HumanOS_MVP_Scope.md` (feature statuses).
+   - Update `NOVA_ARCHITECTURE.md` (engine statuses).
+   - Add entry to `UPDATE_DIARY.md` summarizing batched changes.
+5. **Git Sync**:
    ```bash
-   cd "d:\Software\Human Os\Human-OS"
    git add .
-   git commit -m "Update Agent: Sync all project docs [auto]"
+   git commit -m "Update Agent: Sync all project docs and RAM snapshot [auto]"
    git push origin main
    ```
+6. **Inform User**:
+   - Present a clean summary of updated files and confirm git push completed.
 
-8. **Inform user** about what was updated and that git push completed.
-   Remind them to manually redeploy Render if backend changed.
+---
+
+## 👋 "bye agent" Command
+
+Triggered when the user types `"bye agent"` or `"bye"`.
+
+Executes a clean, complete session wrap-up and syncs all state so the project is 100% ready for any new laptop, fresh git pull, or model switch.
+
+### Protocol:
+
+1. **Prefix response with:** `Hi Agent — Session Wrap-Up & Synced 👋`
+2. **Build Verification**:
+   - Run `cd backend && npm run build` to guarantee 0 TypeScript errors.
+3. **Refresh RAM Snapshot**:
+   - Update `HI_AGENT_RAM.md` and `.agents/HI_AGENT_RAM.md` with final session state.
+4. **Git Commit & Push**:
+   ```bash
+   git add .
+   git commit -m "Bye Agent: Final session checkpoint & RAM sync [auto]"
+   git push origin main
+   ```
+5. **Farewell Summary**:
+   - Confirm build passed ✅, RAM snapshot updated ✅, Git pushed to main ✅.
+   - Remind user to redeploy Render if backend code changed.
+   - Wish the user a great day!
 
 ---
 
