@@ -1038,6 +1038,9 @@ chatRouter.post(
         remindersContext,
         recentMessages,
         memoryContext,
+        lengthInstruction: message.length < 20
+          ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
+          : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN'
       };
 
