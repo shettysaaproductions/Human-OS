@@ -200,39 +200,7 @@ export class NovaConsciousnessEngine {
       }
     }
 
-    // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
-    // Now includes richer context for intelligent gap decisions
-    const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
-Is Sleep Window: ${tContext.isSleepWindow}
-User Gap: ${Math.round(gapMinutes / 60)} hours (${Math.round(gapMinutes)} minutes)
-Dynamic Gap Applied: ${dynamicGap} minutes
-Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}
-Agenda Urgency: ${agendaItem?.urgency || 'none'}
-
-DECISION RULES:
-- If user has been free for ${dynamicGap}+ minutes AND there's something meaningful to say, reach out.
-- If user has a pending high-urgency task/goal, ALWAYS reach out during non-sleep hours.
-- If user is likely busy (work hours), only reach out for important agenda items.
-- If user seems free (evening, weekend), casual check-ins are OK.
-- NEVER reach out if the gap is less than ${MIN_GAP_MINUTES} minutes.`;
-
-    let shouldReach = false;
-    let triggerType = 'engagement';
-
-    try {
-      const decision = await novaBrain.evaluateConsciousnessTier1(tier1Context);
-      shouldReach = decision.shouldReach;
-      triggerType = decision.triggerType || 'engagement';
-    } catch (e) {
-      logger.warn('[NACE] Tier 1 failed, defaulting to logic-based fallback');
-      // Fallback logic
-      if (agendaItem && !tContext.isSleepWindow) shouldReach = true;
-      else if (gapMinutes > 120 && !tContext.isSleepWindow && Math.random() > 0.5) shouldReach = true;
-    }
-
-    if (!shouldReach) return;
-
-    // --- TIER 2: Generation (Full Model) ---
+    // --- GATHER FULL CONTEXT (All Engines) ---
     const { data: recentMemories } = await supabaseAdmin
       .from('memories')
       .select('key, value, memory_type')
@@ -262,6 +230,42 @@ DECISION RULES:
       .order('created_at', { ascending: false })
       .limit(3);
     const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
+
+    // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
+    // Now includes richer context for intelligent gap decisions
+    const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
+Is Sleep Window: ${tContext.isSleepWindow}
+User Gap: ${Math.round(gapMinutes / 60)} hours (${Math.round(gapMinutes)} minutes)
+Dynamic Gap Applied: ${dynamicGap} minutes
+Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}
+Agenda Urgency: ${agendaItem?.urgency || 'none'}
+Recent Memories: ${memorySummary || 'None'}
+Last Conversation: ${lastConvSnippet || 'None'}
+
+DECISION RULES:
+- If user has been free for ${dynamicGap}+ minutes AND there's something meaningful to say, reach out.
+- If user has a pending high-urgency task/goal, ALWAYS reach out during non-sleep hours.
+- If user is likely busy (work hours), only reach out for important agenda items.
+- If user seems free (evening, weekend), casual check-ins are OK.
+- NEVER reach out if the gap is less than ${MIN_GAP_MINUTES} minutes.`;
+
+    let shouldReach = false;
+    let triggerType = 'engagement';
+
+    try {
+      const decision = await novaBrain.evaluateConsciousnessTier1(tier1Context);
+      shouldReach = decision.shouldReach;
+      triggerType = decision.triggerType || 'engagement';
+    } catch (e) {
+      logger.warn('[NACE] Tier 1 failed, defaulting to logic-based fallback');
+      // Fallback logic
+      if (agendaItem && !tContext.isSleepWindow) shouldReach = true;
+      else if (gapMinutes > 120 && !tContext.isSleepWindow && Math.random() > 0.5) shouldReach = true;
+    }
+
+    if (!shouldReach) return;
+
+    // --- TIER 2: Generation (Full Model) ---
 
     const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)

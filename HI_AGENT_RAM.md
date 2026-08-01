@@ -63,6 +63,12 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Master Production Fix (Aug 1, 2026):** 
+  - NACE (Nova Autonomous Consciousness Engine) now gathers all 7 engines' context (Memories, Conversations, Temporal, Agenda) and feeds them into Tier 1 subconscious decision-making.
+  - Added `MessageFormatter` for WhatsApp-style multi-bubble output with contextual emojis.
+  - Fixed NACE absolute minimum gap bugs (reduced dynamic thresholds based on typing, online, away, offline status).
+  - Wired `NovaTriggerEngine` to NACE for human-like proactive delays and push notifications.
+  - Implemented proactive DedupeCache to stop redundant repetitive messages.
 - ✅ **Hi Agent Header Framing & Mode Lock (Aug 1, 2026):** Codified mandatory `Planner Mode` vs `Execute Mode` headers and persistent mode lock until `bye agent`.
 - ✅ **Universal Auto-Detector & Model Auto-Routing (Aug 1, 2026):** `hi agent init` generates RAM from any stack; agent auto-routes execution/planning.
 - ✅ **RAM Auto-Compressor & Multi-Machine Sync (Aug 1, 2026):** Implemented `.agents/memory/state.json` sync and >70% token auto-pruning.
