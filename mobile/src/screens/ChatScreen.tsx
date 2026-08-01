@@ -451,6 +451,12 @@ export function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
+  const [presence, setPresence] = useState(presenceService.getState());
+
+  useEffect(() => {
+    return presenceService.subscribe(setPresence);
+  }, []);
+
 
   const isSelectionMode = selectedMessageIds.length > 0;
   
@@ -680,8 +686,8 @@ export function ChatScreen() {
                 borderLeftWidth: 3,
                 borderLeftColor: '#8B5CF6'
               }}>
-                <Text style={{ color: isUser ? colors.buttonText : colors.assistantText, fontSize: 13, opacity: 0.9, fontWeight: '500' }} numberOfLines={3}>
-                  {item.reply_to_content}
+                <Text style={{ color: isUser ? colors.buttonText : colors.assistantText, fontSize: 13, opacity: 0.9, fontWeight: '500' }} numberOfLines={1}>
+                  {item.reply_to_content.length > 50 ? item.reply_to_content.substring(0, 50) + '...' : item.reply_to_content}
                 </Text>
               </View>
             )}
@@ -896,7 +902,22 @@ export function ChatScreen() {
               </View>
               <View>
                 <Text style={[s.headerTitle, { color: colors.textPrimary }]}>Nova</Text>
-                <Text style={[s.headerSubtitle, { color: colors.textSecondary }]}>Your AI companion</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                  <Text style={[s.headerSubtitle, { color: colors.textSecondary, marginRight: 6 }]}>Your AI companion</Text>
+                  {presence.status === 'typing' ? (
+                    <Text style={{ fontSize: 10, color: '#8B5CF6', fontStyle: 'italic' }}>typing...</Text>
+                  ) : presence.status === 'online' ? (
+                    <>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E', marginRight: 4 }} />
+                      <Text style={{ fontSize: 10, color: colors.textSecondary }}>online</Text>
+                    </>
+                  ) : presence.status === 'away' ? (
+                    <>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#F59E0B', marginRight: 4 }} />
+                      <Text style={{ fontSize: 10, color: colors.textSecondary }}>away</Text>
+                    </>
+                  ) : null}
+                </View>
               </View>
             </View>
             <View style={s.headerRight}>
