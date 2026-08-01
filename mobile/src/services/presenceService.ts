@@ -1,5 +1,6 @@
 import { AppState, AppStateStatus } from 'react-native';
 import { useAuthStore } from '../store/useAuthStore';
+import { api } from './api';
 
 // Simple debounce implementation
 function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T {
@@ -123,17 +124,10 @@ class PresenceService {
       const user = useAuthStore.getState().user;
       if (!user?.id) return; // Don't send if not logged in
 
-      await fetch(`${process.env.EXPO_PUBLIC_API_URL}/presence`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${useAuthStore.getState().accessToken}`
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          ...data,
-          timestamp: Date.now(),
-        }),
+      await api.post('/presence', {
+        userId: user.id,
+        ...data,
+        timestamp: Date.now(),
       });
     } catch (e) {
       // Non-fatal

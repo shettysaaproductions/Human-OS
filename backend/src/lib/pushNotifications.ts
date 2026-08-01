@@ -150,7 +150,8 @@ export async function sendNovaReplyNotification(
   pushToken: string,
   replyPreview: string,
   conversationId?: string,
-  messageId?: string
+  messageId?: string,
+  presence?: string
 ): Promise<void> {
   const preview = replyPreview.length > 100
     ? replyPreview.substring(0, 97) + '...'
@@ -172,7 +173,8 @@ export async function sendNovaReplyNotification(
       type: 'nova_reply',
       conversationId: conversationId || '',
       messageId: messageId || '',
-      message: fullMessage
+      message: fullMessage,
+      presence: presence || 'unknown'
     },
   }]);
 }
@@ -183,7 +185,8 @@ export async function sendNovaReplyNotification(
 export async function sendMomentNotification(
   pushToken: string,
   title: string,
-  body: string
+  body: string,
+  presence?: string
 ): Promise<void> {
   await sendPushNotification([{
     to: pushToken,
@@ -193,6 +196,9 @@ export async function sendMomentNotification(
     channelId: 'nova_moments',
     priority: 'normal',
     ttl: 21600, // 6 hours — less urgent, still retried
-    data: { type: 'nova_moment' },
+    data: { 
+      type: 'nova_moment',
+      presence: presence || 'unknown'
+    },
   }]);
 }

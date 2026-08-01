@@ -74,56 +74,16 @@ function isExcessiveRequest(message: string): boolean {
   return false;
 }
 
+import { MessageFormatter } from '../services/MessageFormatter';
+
 function chunkResponse(text: string, preserveTables: boolean = false): string[] {
   // CRITICAL: Never split a response that contains a markdown table.
   // Splitting a table across bubbles destroys the renderer.
   const hasTable = /^\|.+/m.test(text);
   if (hasTable || preserveTables) return [text];
 
-  if (text.length <= MAX_CHARS_PER_CHUNK) return [text];
-
-  const chunks: string[] = [];
-  const paragraphs = text.split(/\n\n+/);
-  let current = '';
-
-  const pushChunk = (str: string) => {
-    let remaining = str.trim();
-    while (remaining.length > MAX_CHARS_PER_CHUNK) {
-      chunks.push(remaining.substring(0, MAX_CHARS_PER_CHUNK));
-      remaining = remaining.substring(MAX_CHARS_PER_CHUNK);
-    }
-    if (remaining.length > 0) {
-      chunks.push(remaining);
-    }
-  };
-
-  for (const para of paragraphs) {
-    const candidate = current ? `${current}\n\n${para}` : para;
-
-    if (candidate.length <= MAX_CHARS_PER_CHUNK) {
-      current = candidate;
-    } else {
-      if (current) { pushChunk(current); current = ''; }
-
-      if (para.length > MAX_CHARS_PER_CHUNK) {
-        const sentences = para.match(/[^.!?]+[.!?]+\s*/g) ?? [para];
-        for (const sentence of sentences) {
-          const sc = current ? `${current} ${sentence}` : sentence;
-          if (sc.length <= MAX_CHARS_PER_CHUNK) {
-            current = sc;
-          } else {
-            if (current) { pushChunk(current); }
-            current = sentence.trim();
-          }
-        }
-      } else {
-        current = para;
-      }
-    }
-  }
-
-  if (current.trim()) pushChunk(current);
-  return chunks.length ? chunks : [text];
+  // Use the human-like MessageFormatter (Part 5)
+  return MessageFormatter.splitIntoBubbles(text, MAX_CHARS_PER_CHUNK);
 }
 
 function shouldExtractShortTermMemory(message: string): boolean {
