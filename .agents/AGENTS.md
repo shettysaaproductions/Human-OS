@@ -5,10 +5,11 @@
 ## 🧠 CRITICAL: SESSION BOOT — Read This First, Every Time
 
 Before doing ANY work on this repository, you MUST:
-1. Read `SESSION_BOOT.md` — it has the full current system state, engine list, and active bugs.
-2. Read `MEMORY.md` — it has all architectural epochs, constraints, and the OTA branch fix.
-3. Read `NOVA_ARCHITECTURE.md` — it has the 7-engine diagram and the full cognition pipeline.
-4. Read `KNOWN_ISSUES.md` — to know what bugs are active before making changes.
+1. Read `HI_AGENT_RAM.md` — ultra token-dense snapshot of live APK, FCM config, active bugs, and critical commands.
+2. Read `SESSION_BOOT.md` — full system state, engine list, and active bugs.
+3. Read `MEMORY.md` — architectural epochs, constraints, and the OTA branch fix.
+4. Read `NOVA_ARCHITECTURE.md` — the 7-engine diagram and full cognition pipeline.
+5. Read `KNOWN_ISSUES.md` — active bugs to avoid breaking changes.
 
 **DO NOT skip this.** A model that skips the session boot will break things that were already fixed.
 
@@ -242,15 +243,13 @@ Present to the user:
 
 Triggered when the user types `"hi agent"` or `"hi agent - <task description>"`.
 
-This wakes a smart agent that maintains project state and executes tasks autonomously.
+This wakes a smart agent that loads the token-efficient RAM snapshot (`HI_AGENT_RAM.md`) and executes tasks autonomously.
 
 ### Protocol:
 
-1. **Read these files FIRST** (fast navigation, not full scan):
-   - `TASKS.md` — current active tasks
-   - `FILE_TREE.md` — project structure overview
-   - `UPDATE_DIARY.md` — last 5 entries of what changed
-   - `NOTES.md` — any active notes or observations
+1. **Read `HI_AGENT_RAM.md` FIRST** (ultra-fast, token-dense context load):
+   - Immediately gets live APK details (`com.humanos.mobile`), FCM configuration, 7-engine architecture, resolved & active bugs, and critical commands without wasting context window tokens.
+   - Also read `TASKS.md` and `UPDATE_DIARY.md` (last 3 entries).
 
 2. **If task is provided** (`hi agent - XYZ`):
    - Write an implementation plan (update `implementation_plan.md`)
@@ -259,10 +258,40 @@ This wakes a smart agent that maintains project state and executes tasks autonom
    - Update `UPDATE_DIARY.md` and `TASKS.md` with what was done
 
 3. **If no task** (`hi agent`):
-   - Greet the user with current project status summary
+   - Greet the user with current project status summary from `HI_AGENT_RAM.md`
    - Show active tasks from `TASKS.md`
    - Show recent changes from `UPDATE_DIARY.md` (last 3 entries)
    - Ask what they want to work on today
+
+---
+
+## 🏋️ "train agent" / "train" Command
+
+Triggered when the user types `"train agent"`, `"train"`, or `/train`.
+
+Compresses current codebase knowledge, live APK status, active bugs, environment variables, and recent fixes into a token-efficient RAM snapshot (`HI_AGENT_RAM.md`).
+
+### Protocol:
+
+1. **Scan System State**:
+   - Check `app.json`, `package.json`, `eas.json` for live APK package & SDK versions
+   - Check `backend/.env` & `backend/src/lib/pushNotifications.ts` for push config & tokens
+   - Check `KNOWN_ISSUES.md` for active & resolved bugs
+   - Check `git log -n 5` for latest architectural changes
+
+2. **Update RAM Snapshots**:
+   - Write updated, token-dense (<100 lines) summary to `HI_AGENT_RAM.md` and `.agents/HI_AGENT_RAM.md`
+   - Include date, live APK package, FCM setup, active bugs, critical commands, and 7-engine architecture
+
+3. **Sync to Git**:
+   ```bash
+   git add HI_AGENT_RAM.md .agents/HI_AGENT_RAM.md KNOWN_ISSUES.md SESSION_BOOT.md .agents/AGENTS.md
+   git commit -m "Train Agent: Refresh token-dense RAM snapshot [auto]"
+   git push origin main
+   ```
+
+4. **Confirm to User**:
+   - Output a clean, high-level summary confirming the agent knowledge cache is updated & pushed.
 
 ---
 
