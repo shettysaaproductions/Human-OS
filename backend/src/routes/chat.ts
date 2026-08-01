@@ -128,10 +128,14 @@ SCHEDULE LEARNING (mandatory — do this actively):
 - RIGHT: "Office mein hi ho abhi? Kab tak hai aaj?" → shows you remember and are thinking
 
 ## 💬 MESSAGE FORMATTING
-Real friends text naturally. You will reply with ONE single cohesive message.
-- SINGLE TOPIC RULE: Stick to ONE topic and ONE question per response. Never bombard the user with multiple different questions.
-- Keep your reply SHORT (1-3 sentences max).
-- NEVER use special formatting tokens or try to split your message into multiple bubbles. Just reply naturally in one go.
+Real friends text naturally. You can reply with MULTIPLE short messages when it feels natural.
+- If you have 2-3 separate thoughts, send them as separate short messages
+- Each message should be 1-2 sentences max
+- Use the <NOVA_MSG> tag to separate multiple messages:
+  <NOVA_MSG>First short thought</NOVA_MSG>
+  <NOVA_MSG>Second short thought</NOVA_MSG>
+- Do NOT combine everything into one long paragraph
+- This feels more like real WhatsApp texting
 
 ## 🧠 MEMORY & CONTEXT INTELLIGENCE — CRITICAL
 You have access to long-term memory, short-term memory, working memory, and full chat history.
@@ -260,9 +264,13 @@ function timeAgo(dateStr: string): string {
  * Level 4 (external): chunkResponse max length limit
  */
 function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] {
-  // Level 1: Explicit <NOVA_MESSAGE_BREAK>
-  if (rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
-    const segments = rawReply.split('<NOVA_MESSAGE_BREAK>').map(m => m.trim()).filter(Boolean);
+  // Level 1: Explicit <NOVA_MSG> or <NOVA_MESSAGE_BREAK>
+  if (rawReply.includes('<NOVA_MSG>') || rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
+    const segments = rawReply
+      .replace(/<NOVA_MESSAGE_BREAK>/g, '<NOVA_MSG>')
+      .split(/<NOVA_MSG>|<\/NOVA_MSG>/)
+      .map(m => m.trim())
+      .filter(Boolean);
     if (segments.length > 0) {
       return segments;
     }
@@ -959,6 +967,28 @@ chatRouter.post(
         recentMessages,
         userCountry: profile?.country || 'IN'
       };
+
+      // Check trigger engine for realistic timing
+      const { NovaTriggerEngine } = await import('../services/NovaTriggerEngine');
+      const triggerEngine = new NovaTriggerEngine();
+      const { data: presenceData } = await supabaseAdmin.from('user_presence').select('status').eq('user_id', userId).maybeSingle();
+      
+      const triggerContext = {
+        userPresence: presenceData?.status || 'online',
+        lastUserMessageAt: Date.now(),
+        lastNovaReplyAt: Date.now() - 60000, // placeholder
+        conversationIntensity: 'casual' as const,
+        userActivity: null,
+        pendingReminders: upcoming?.length || 0,
+        emotionalState: situationBrief || null,
+      };
+
+      const triggerResult = await triggerEngine.shouldTrigger(triggerContext);
+      if (!triggerResult.shouldSend) {
+        logger.info('[TriggerEngine] Blocked by rate limit or timing', triggerResult);
+      }
+      // Log the timing decision for debugging
+      logger.info('[TriggerEngine] Decision:', triggerResult);
 
       let extractedActions: any[] = [];
       let rawReply = '';
