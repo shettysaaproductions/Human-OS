@@ -1060,7 +1060,6 @@ export function ChatScreen() {
             <View style={[s.typingDot, { opacity: 0.3 }]} />
           </View>
         )}
-        )}
 
         {/* Reply Preview */}
         {replyingTo && (

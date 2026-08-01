@@ -69,7 +69,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **Surgical Planning Standard (Aug 1, 2026):** Codified line-level planning protocol in `AGENTS.md` for zero-error execution by Gemini 3.6 Flash High.
 - ✅ **Push Notifications (Aug 1, 2026):** FCM V1 key uploaded to Expo + `EXPO_ACCESS_TOKEN` set in Render & `backend/.env`.
 - ✅ **Push Hardening (Aug 1, 2026):** Added startup validation, enhanced error logging, `/admin/diagnostics/push-diagnostic` live test endpoint, and `config.expo.accessToken` formalization.
-- ✅ **Token Freshness:** `notificationService.ensureTokenFresh()` re-registers tokens automatically on new APK installs.
+- ✅ **Token Freshness (Aug 1, 2026):** Fixed FCM `DeviceNotRegistered` stale token bug by forcing `getDevicePushTokenAsync` before `getExpoPushTokenAsync` in `ensureTokenFresh()` and `_requestPermissionAndRegister()`.
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
 - ✅ **Database Bug Resolved (Aug 1, 2026):** `reminders.status` column successfully added to Supabase.
 

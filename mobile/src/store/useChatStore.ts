@@ -809,7 +809,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
           set((s) => {
             const combined = [...s.messages, ...newMessages];
-            combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            combined.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
             return {
               messages: combined,
               isTyping: delayedChunks.length > 0,
@@ -830,7 +830,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                   if (s.messages.some(m => m.id === msg.id)) return s;
                   const msgWithFreshTime = { ...msg, timestamp: new Date().toISOString() };
                   const combined = [...s.messages, msgWithFreshTime];
-                  combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  combined.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
                   return {
                     messages: combined,
                     isTyping: index < delayedChunks.length - 1,
