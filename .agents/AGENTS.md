@@ -239,6 +239,34 @@ Present to the user:
 
 ---
 
+## 🎯 SURGICAL IMPLEMENTATION PLANNING STANDARD (Senior Staff Engineer Level)
+
+When creating or updating `implementation_plan.md`, the plan must be so clear, structured, and surgically precise that ANY model (such as **Gemini 3.6 Flash High**) can execute it flawlessly without making assumptions or hallucinating details.
+
+### Surgical Plan Structure Requirements:
+
+1. **User Review & Architecture Decisions**:
+   - Clearly highlight breaking changes, architectural choices, and external dependency requirements upfront.
+   - List explicit non-goals to keep scope tight.
+
+2. **File-by-File Surgical Blueprint**:
+   - For EVERY file to be created, modified, or deleted:
+     - Full file path: `[MODIFY] [filename](file:///absolute/path/to/file)`
+     - Exact target function, class, or lines: (e.g. `notificationService.ts:L160-L190`).
+     - Precise Intent & Code Diff Blueprint: Specify exact props, state types, error boundaries, and return values.
+
+3. **Risk & Defensive Failure Matrix**:
+   - Identify top 3 edge cases (e.g., network offline, async race condition, null token, Supabase schema desync).
+   - Define exact defensive code safeguards for each.
+
+4. **Phase-by-Phase Execution Order**:
+   - **Phase 1: Type & Dependency Pre-Flight** — Check interfaces and imports first.
+   - **Phase 2: Core Implementation** — Execute file edits sequentially.
+   - **Phase 3: Build & Automated Verification** — `cd backend && npm run build` & `npx expo-doctor`.
+   - **Phase 4: RAM Cache & Documentation Sync** — Update `HI_AGENT_RAM.md`, `UPDATE_DIARY.md`, `TASKS.md`.
+
+---
+
 ## 🤖 "hi agent" Command (Upgrade Assistant Mode)
 
 Triggered when the user types `"hi agent"` or `"hi agent - <task description>"`.

@@ -3,6 +3,12 @@
 
 ---
 
+## 🎯 Surgical Implementation Standard (Senior Staff Engineer Level)
+- **High-Rigor Planning:** Every `implementation_plan.md` MUST contain line-level target mappings (`file:///...#L12-L30`), exact prop & state contracts, defensive failure matrix, and phase-by-phase execution sequence.
+- **Implementer Compatibility:** Structured so fast/high-tier implementer models (e.g. Gemini 3.6 Flash High) execute edits with surgical accuracy without guessing or breaking existing code contracts.
+
+---
+
 ## 🚀 Live APK & Push Notification Configuration (Aug 1, 2026 Fixed)
 - **Package Name:** `com.humanos.mobile` (Expo SDK 56)
 - **FCM Push Setup:** FCM V1 HTTP API with Firebase project `humanos-3895f`.
@@ -40,6 +46,7 @@ TRAIN COMMAND: Type "train agent" or "train" to compress and refresh this RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Surgical Planning Standard (Aug 1, 2026):** Codified line-level planning protocol in `AGENTS.md` for zero-error execution by Gemini 3.6 Flash High.
 - ✅ **Push Notifications (Aug 1, 2026):** FCM V1 key uploaded to Expo + `EXPO_ACCESS_TOKEN` set in Render & `backend/.env`.
 - ✅ **Token Freshness:** `notificationService.ensureTokenFresh()` re-registers tokens automatically on new APK installs.
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
