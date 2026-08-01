@@ -493,6 +493,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                   chunkTotal: finalChunks.length > 1 ? finalChunks.length : undefined,
                   options: msg.meta?.options,
                   user_reaction: msg.user_reaction,
+                  reply_to_content: msg.reply_to_content,
                 });
               });
             } else {
@@ -503,7 +504,8 @@ export const useChatStore = create<ChatState>((set, get) => {
                 status: 'sent',
                 timestamp,
                 options: msg.meta?.options,
-                user_reaction: msg.user_reaction
+                user_reaction: msg.user_reaction,
+                reply_to_content: msg.reply_to_content,
               });
             }
           }
