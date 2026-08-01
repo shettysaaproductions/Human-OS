@@ -148,10 +148,16 @@ export async function sendPushNotification(messages: ExpoPushMessage[]): Promise
  */
 export async function sendNovaReplyNotification(
   pushToken: string,
-  replyPreview: string
+  replyPreview: string,
+  conversationId?: string,
+  messageId?: string
 ): Promise<void> {
   const preview = replyPreview.length > 100
     ? replyPreview.substring(0, 97) + '...'
+    : replyPreview;
+
+  const fullMessage = replyPreview.length > 500
+    ? replyPreview.substring(0, 497) + '...'
     : replyPreview;
 
   await sendPushNotification([{
@@ -162,7 +168,12 @@ export async function sendNovaReplyNotification(
     channelId: 'nova_messages',
     priority: 'high',
     ttl: 3600, // 1 hour — if device is offline, try for up to an hour
-    data: { type: 'nova_reply' },
+    data: { 
+      type: 'nova_reply',
+      conversationId: conversationId || '',
+      messageId: messageId || '',
+      message: fullMessage
+    },
   }]);
 }
 

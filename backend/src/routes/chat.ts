@@ -1209,7 +1209,7 @@ chatRouter.post(
       const pushToken = pushTokenResult.data?.push_token as string | undefined;
       if (pushToken) {
         logger.info('[Push] Sending nova_reply notification', { userId, tokenPreview: pushToken.substring(0, 30) });
-        sendNovaReplyNotification(pushToken, reply).catch((err) => {
+        sendNovaReplyNotification(pushToken, reply, activeConversationId).catch((err) => {
           logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message });
         });
       } else {

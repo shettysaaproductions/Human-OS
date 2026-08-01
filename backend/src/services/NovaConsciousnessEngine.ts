@@ -368,7 +368,11 @@ ${lastConvSnippet || 'No recent conversation.'}`;
         channelId: 'nova_messages',
         priority: 'high',
         ttl: 3600,
-        data: { type: 'nova_consciousness', conversationId },
+        data: { 
+          type: 'nova_consciousness', 
+          conversationId,
+          message: message.length > 500 ? message.substring(0, 497) + '...' : message
+        },
       }]);
     }
 

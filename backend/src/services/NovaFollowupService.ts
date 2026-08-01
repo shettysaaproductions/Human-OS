@@ -194,6 +194,7 @@ export class NovaFollowupService {
         data: {
           type: 'nova_followup',
           conversationId: followup.conversation_id,
+          message: followup.message.length > 500 ? followup.message.substring(0, 497) + '...' : followup.message
         },
       }]);
 

@@ -46,16 +46,28 @@ function AppContent() {
       const data = response.notification.request.content.data as any;
       const type = data?.type;
       // Navigate to Chat for any Nova notification type
-      const novaTypes = ['nova_reply', 'nova_followup', 'nova_reminder', 'nova_auto_reminder', 'nova_moment'];
+      const novaTypes = ['nova_reply', 'nova_followup', 'nova_reminder', 'nova_auto_reminder', 'nova_moment', 'nova_consciousness'];
+      
       if (novaTypes.includes(type)) {
+        // 1. Optimistic UI: inject message from push payload immediately
+        if (data?.message) {
+          useChatStore.getState().injectPendingMessage({
+            id: data.messageId || `pending-${Date.now()}`,
+            role: 'assistant',
+            content: data.message,
+            status: 'sent',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
         // Small delay to allow navigation to mount after cold start
         setTimeout(() => {
           if (navigationRef.current?.isReady()) {
             navigationRef.current.navigate('Chat' as never);
           }
-          // Refresh messages to show Nova's new message
+          // Refresh messages to show full history
           useChatStore.getState().checkProactiveMessages();
-        }, 300);
+        }, 100);
       }
     });
 
