@@ -54,7 +54,7 @@ MOBILE DIR:    d:\Software\Human Os\Human-OS\mobile
 ROOT DIR:      d:\Software\Human Os\Human-OS
 
 BUILD CHECK:   cd backend && npm run build (Run before git push — 0 errors required!)
-OTA COMMAND:   cd mobile && npx eas update --branch production --message "..."
+OTA COMMAND:   cd mobile && npx eas update --branch production --environment production --message "..."
 GIT PUSH:      git add . && git commit -m "..." && git push origin main
 TRAIN COMMAND: Type "train agent" or "train" to compress and refresh this RAM snapshot.
 INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM snapshot.
