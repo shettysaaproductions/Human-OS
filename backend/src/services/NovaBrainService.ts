@@ -22,7 +22,7 @@ export class NovaBrainService {
     
     // Build the system prompt using the existing robust promptBuilder
     const systemPrompt = promptBuilder.buildSystemPrompt(
-      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.',
+      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.\n\n## 🧠 MEMORY USAGE (MANDATORY)\nYou have access to the user\'s stored memories above. You MUST:\n- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")\n- Mention specific people by name (e.g., "How is Sakshi doing?")\n- Recall specific events with dates when relevant\n- NEVER give generic template responses\n- If asked "what do you remember", quote memories VERBATIM\n- If you don\'t see relevant memories, say "I need to check my notes" instead of making things up',
       context.memories || [],
       context.workingMemories || [],
       context.profile?.preferred_name,
@@ -33,8 +33,7 @@ export class NovaBrainService {
       'HUMAN_CHAT',
       context.situationBrief
     );
-
-    const fullPrompt = `${systemPrompt}
+    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}
 
 ## 🧠 SUBCONSCIOUS ACTIONS & STREAMING (CRITICAL FORMAT)
 You are capable of generating a conversational reply AND taking background actions simultaneously.
@@ -129,7 +128,7 @@ If no tools need to be called, leave the JSON array empty: []
   ): AsyncGenerator<string, { subconscious_actions: any[] }, unknown> {
     
     const systemPrompt = promptBuilder.buildSystemPrompt(
-      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.',
+      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.\n\n## 🧠 MEMORY USAGE (MANDATORY)\nYou have access to the user\'s stored memories above. You MUST:\n- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")\n- Mention specific people by name (e.g., "How is Sakshi doing?")\n- Recall specific events with dates when relevant\n- NEVER give generic template responses\n- If asked "what do you remember", quote memories VERBATIM\n- If you don\'t see relevant memories, say "I need to check my notes" instead of making things up',
       context.memories || [],
       context.workingMemories || [],
       context.profile?.preferred_name,
@@ -141,7 +140,7 @@ If no tools need to be called, leave the JSON array empty: []
       context.situationBrief
     );
 
-    const fullPrompt = `${systemPrompt}
+    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}
 
 ## 🧠 SUBCONSCIOUS ACTIONS & STREAMING (CRITICAL FORMAT)
 You are capable of generating a conversational reply AND taking background actions simultaneously.
