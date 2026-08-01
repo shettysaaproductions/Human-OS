@@ -7,55 +7,15 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
-import { novaBrain } from './NovaBrainService';
 import { logger } from '../lib/logger';
-import { sendPushNotification } from '../lib/pushNotifications';
+import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
-import crypto from 'crypto';
 
 const MIN_GAP_MINUTES = 45; // Absolute minimum between consecutive outreach (safety floor)
 const SERVER_BOOT_COOLDOWN_MS = 5 * 60 * 1000; // Don't reach out within 5 min of server boot
 let serverBootTime = Date.now();
 
 // Human-like response timing (in seconds)
-const HUMAN_TIMING = {
-  quick: { min: 15, max: 30 },       // 15-30s (user just replied)
-  normal: { min: 45, max: 90 },      // 45-90s (natural pause)
-  thoughtful: { min: 120, max: 180 } // 2-3min (deep thought)
-};
-
-function randomBetween(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function getNextMessageDelay(userLastReplyMs: number): number {
-  const secondsSinceReply = (Date.now() - userLastReplyMs) / 1000;
-  
-  if (secondsSinceReply < 60) {
-    return randomBetween(HUMAN_TIMING.quick.min, HUMAN_TIMING.quick.max) * 1000;
-  } else if (secondsSinceReply < 300) {
-    return randomBetween(HUMAN_TIMING.normal.min, HUMAN_TIMING.normal.max) * 1000;
-  } else {
-    return randomBetween(HUMAN_TIMING.thoughtful.min, HUMAN_TIMING.thoughtful.max) * 1000;
-  }
-}
-
-// NVIDIA rate limit safety
-const RATE_LIMIT = {
-  maxRequestsPerMinute: 30,
-  windowMs: 60000,
-  requests: [] as number[]
-};
-
-function canSendMessage(): boolean {
-  const now = Date.now();
-  RATE_LIMIT.requests = RATE_LIMIT.requests.filter(t => now - t < RATE_LIMIT.windowMs);
-  return RATE_LIMIT.requests.length < RATE_LIMIT.maxRequestsPerMinute;
-}
-
-function recordMessageSent(): void {
-  RATE_LIMIT.requests.push(Date.now());
-}
 
 export class NovaConsciousnessEngine {
 
@@ -317,91 +277,42 @@ LAST CONVERSATION (what was actually said — reference this naturally):
 ${lastConvSnippet || 'No recent conversation.'}`;
 
     try {
-      const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
+      const { novaTriggerEngine } = await import('../services/NovaTriggerEngine');
+      const triggerContext: any = {
+        userPresence: userPresence || 'offline',
+        lastUserMessageAt: gapMinutes ? Date.now() - (gapMinutes * 60000) : 0,
+        lastNovaReplyAt: Date.now() - 3600000,
+        conversationIntensity: 'casual',
+        userActivity: null,
+        pendingReminders: agendaItem ? 1 : 0,
+        emotionalState: null,
+      };
 
-      if (generated.message) {
-        await this._sendOutreach(userId, profile, generated.message, triggerType, generated.tone, gapMinutes);
+      await novaTriggerEngine.scheduleMessage(userId, triggerContext, async () => {
+        const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
+        
+        if (!generated.message) {
+          throw new Error('NACE returned empty message');
+        }
+
         if (agendaItem) {
           const newRetryCount = (agendaItem.retry_count || 0) + 1;
           if (newRetryCount >= (agendaItem.max_retries || 3)) {
             await supabaseAdmin.from('nova_agenda').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
           } else {
-            // Calculate next retry time based on urgency
             let delayHours = 24; // Default to next day
             if (agendaItem.urgency === 'high') delayHours = 4;
-            else if (agendaItem.urgency === 'medium') delayHours = 12;
-            
-            // Backoff logic: double the delay on each retry
-            delayHours = delayHours * Math.pow(2, newRetryCount - 1);
-            
-            const nextRetryAt = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
-            await supabaseAdmin.from('nova_agenda').update({ 
-              status: 'active', 
-              retry_count: newRetryCount,
-              next_retry_at: nextRetryAt,
-              updated_at: new Date().toISOString() 
-            }).eq('id', agendaItem.id);
+            else if (agendaItem.urgency === 'medium') delayHours = 8;
+            const nextRetry = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
+            await supabaseAdmin.from('nova_agenda').update({ retry_count: newRetryCount, next_retry_at: nextRetry, updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
           }
         }
-      }
+        
+        return generated.message;
+      });
     } catch (e) {
       logger.warn('[NACE] Tier 2 generation failed', { error: e instanceof Error ? e.message : String(e) });
     }
-  }
-
-  private async _sendOutreach(userId: string, profile: any, message: string, type: string, tone: string, gapMinutes: number) {
-    if (!canSendMessage()) {
-      logger.warn('[NACE] Rate limit reached. Aborting outreach.');
-      return;
-    }
-    recordMessageSent();
-
-    // Human-like timing delay
-    const userLastReplyMs = Date.now() - (gapMinutes * 60 * 1000);
-    const delayMs = getNextMessageDelay(userLastReplyMs);
-    logger.info(`[NACE] Applying human-like delay of ${delayMs}ms before sending`);
-    await new Promise(r => setTimeout(r, delayMs));
-
-    const { data: latestChat } = await supabaseAdmin
-      .from('chat_history')
-      .select('conversation_id')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const conversationId = latestChat?.conversation_id || crypto.randomUUID();
-
-    await supabaseAdmin.from('chat_history').insert({
-      user_id: userId,
-      conversation_id: conversationId,
-      role: 'assistant',
-      content: message,
-    });
-
-    if (profile.push_token) {
-      await sendPushNotification([{
-        to: profile.push_token,
-        title: 'Nova',
-        body: message.length > 100 ? message.substring(0, 97) + '...' : message,
-        sound: 'default',
-        channelId: 'nova_messages',
-        priority: 'high',
-        ttl: 3600,
-        data: { 
-          type: 'nova_consciousness', 
-          conversationId,
-          message: message.length > 500 ? message.substring(0, 497) + '...' : message
-        },
-      }]);
-    }
-
-    await supabaseAdmin.from('nova_outreach_log').insert({
-      user_id: userId,
-      outreach_type: type,
-      message,
-      reason: tone,
-    });
   }
 
   async expireOldAgendaItems(): Promise<void> {
