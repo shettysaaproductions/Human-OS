@@ -1,4 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase';
+import { logger } from '../lib/logger';
+import { sendNovaReplyNotification } from '../lib/pushNotifications';
 
 interface TriggerContext {
   userPresence: 'online' | 'typing' | 'away' | 'offline';
@@ -17,6 +19,71 @@ export class NovaTriggerEngine {
   // NVIDIA rate limit safety: 30 req/min (buffer under 40 limit)
   private readonly MAX_REQUESTS_PER_MINUTE = 30;
   private requestTimestamps: number[] = [];
+  private scheduledMessages: Map<string, NodeJS.Timeout> = new Map();
+
+  async scheduleMessage(userId: string, context: TriggerContext, messageGenerator: () => Promise<string>): Promise<void> {
+    const triggerResult = await this.shouldTrigger(context);
+    
+    if (!triggerResult.shouldSend) {
+      logger.info(`[TriggerEngine] Blocked for ${userId}: ${triggerResult.reason}`);
+      return;
+    }
+    
+    // Cancel any existing scheduled message for this user
+    const existing = this.scheduledMessages.get(userId);
+    if (existing) clearTimeout(existing);
+    
+    // Schedule the message
+    const timeout = setTimeout(async () => {
+      try {
+        const message = await messageGenerator();
+        // Send via push notification
+        const { data: user } = await supabaseAdmin
+          .from('profiles')
+          .select('push_token')
+          .eq('id', userId)
+          .maybeSingle();
+          
+        if (user?.push_token) {
+          await sendNovaReplyNotification(user.push_token, message);
+        }
+        
+        // Also save to chat_history so Nova remembers saying this
+        const { data: latestChat } = await supabaseAdmin
+          .from('chat_history')
+          .select('conversation_id')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const conversationId = latestChat?.conversation_id || crypto.randomUUID();
+
+        await supabaseAdmin.from('chat_history').insert({
+          user_id: userId,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: message,
+          status: 'sent'
+        });
+
+        // Also save to outreach log
+        await supabaseAdmin.from('nova_outreach_log').insert({
+          user_id: userId,
+          message,
+          type: 'proactive',
+          sent_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        logger.error('[TriggerEngine] Failed to send scheduled message:', e);
+      }
+      
+      this.scheduledMessages.delete(userId);
+    }, triggerResult.delayMs);
+    
+    this.scheduledMessages.set(userId, timeout);
+    logger.info(`[TriggerEngine] Scheduled message for ${userId} in ${triggerResult.delayMs}ms`);
+  }
 
   // Timing profiles based on user presence
   private readonly TIMING_PROFILES = {
