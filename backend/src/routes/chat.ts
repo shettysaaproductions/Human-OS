@@ -55,7 +55,7 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
 }
 
 export const MAX_CHUNKS = 5;
-export const MAX_CHARS_PER_CHUNK = 1500;
+export const MAX_CHARS_PER_CHUNK = 500; // Updated from 1500 to 500 to match user spec
 export const MAX_TOTAL_RESPONSE_CHARS = 7500;
 export const MAX_INPUT_CHARS = 10000;
 
@@ -165,6 +165,19 @@ You are not a reply machine. You initiate, follow up, and keep conversations ali
 - Short replies like "ok", "haan", "hmm" = they want you to CONTINUE, not recap. Move forward.
 - ZERO formal Hindi. No "Parantu", "Dhanyavad", "Bilkul". Pure casual Hinglish.
 - Maximum 1 emoji per reply. Only when it adds something real.
+
+## 💬 TEXTING STYLE
+You text like a real friend on WhatsApp. Send multiple short messages (1-2 sentences each) instead of one long paragraph. Use the <NOVA_MSG> tag to separate messages:
+<NOVA_MSG>First thought</NOVA_MSG>
+<NOVA_MSG>Second thought</NOVA_MSG>
+<NOVA_MSG>Final question</NOVA_MSG>
+
+## 📏 LENGTH MATCHING
+Match your reply length to the user's message:
+- If user sends 1-5 words → reply with 1-10 words
+- If user sends 1 sentence → reply with 1-2 sentences
+- If user sends a paragraph → reply with 2-4 sentences
+Never send a long paragraph in response to a short 'thanks' or 'ok'.
 
 ## EMOTIONAL INTELLIGENCE
 - Read the situation. Rushed? Keep it snappy. Hurting? Just BE there.
@@ -1094,29 +1107,46 @@ chatRouter.post(
         }
       }
 
-      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), effectiveMessage);
-      const reply = parsedMessages.join('\n\n');
+      // Add Emoji
+      let parsedEmotion = 'joy';
+      try {
+        if (situationBrief) {
+          const emotionMatch = situationBrief.match(/Current Emotion: (\w+)/);
+          if (emotionMatch && emotionMatch[1]) {
+            parsedEmotion = emotionMatch[1].toLowerCase();
+          }
+        }
+      } catch (e) {}
+      
+      const processedReply = MessageFormatter.addEmoji(rawReply, parsedEmotion);
+
+      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(processedReply)), effectiveMessage);
+      
+      // Split each parsed message further if it's too long
+      let finalBubbles = parsedMessages.flatMap(m => chunkResponse(m));
+      const reply = finalBubbles.join('\n\n');
 
       // 7. Save AI response ONCE (with telemetry meta)
       // Check for duplicates due to race conditions
-      const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, rawReply, 5);
+      const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, processedReply, 5);
       
       if (!isDuplicate) {
-        await qt.track('save_ai_response', 'chat_history', () =>
-          supabaseAdmin.from('chat_history')
-            .insert({ 
-              user_id: userId, 
-              conversation_id: activeConversationId, 
-              role: 'assistant', 
-              content: rawReply,
-              reply_to_id: userMessageId,
-              reply_to_content: message.substring(0, 100),
-              meta: {
-                situationBrief: situationBrief || null,
-                subconsciousActions: extractedActions,
-                options: optionsArray
-              }
-            })
+        const rowsToInsert = finalBubbles.map((bubbleContent, idx) => ({
+          user_id: userId,
+          conversation_id: activeConversationId,
+          role: 'assistant',
+          content: bubbleContent,
+          reply_to_id: idx === 0 ? userMessageId : null,
+          reply_to_content: idx === 0 ? message.substring(0, 100) : null,
+          meta: idx === finalBubbles.length - 1 ? {
+            situationBrief: situationBrief || null,
+            subconsciousActions: extractedActions,
+            options: optionsArray
+          } : null
+        }));
+        
+        await qt.track('save_ai_response', 'chat_history', () => 
+          supabaseAdmin.from('chat_history').insert(rowsToInsert)
         );
       } else {
         logger.warn('[Chat] Prevented saving duplicate assistant message', { userId, conversation_id: activeConversationId });
@@ -1127,10 +1157,9 @@ chatRouter.post(
       let parsedMessagesArray: string[] = [];
       
       if (!isStreaming) {
-        parsedMessagesArray = parsedMessages;
-        const textChunks = parsedMessages.flatMap(m => chunkResponse(m));
-        const totalChunks = textChunks.length;
-        chunks = textChunks.map((content, idx) => ({
+        parsedMessagesArray = finalBubbles;
+        const totalChunks = finalBubbles.length;
+        chunks = finalBubbles.map((content, idx) => ({
           index: idx + 1,
           total: totalChunks,
           content
@@ -1324,12 +1353,14 @@ chatRouter.post(
       const userId = (req as any).user!.id;
       const { messageId } = req.params;
       const { reaction } = req.body;
+      const cleanMessageId = messageId.replace(/_part_\d+$/, '');
 
       const { data, error } = await qt.track('set_reaction', 'chat_history', () =>
         supabaseAdmin
           .from('chat_history')
           .update({ user_reaction: reaction })
-          .eq('id', messageId)
+          .eq('id', cleanMessageId)
+
           .eq('user_id', userId)
           .select()
           .single()
