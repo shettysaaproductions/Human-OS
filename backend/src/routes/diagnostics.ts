@@ -239,3 +239,98 @@ diagnosticsRouter.post('/prune-history', async (req: Request, res: Response, nex
     next(err);
   }
 });
+
+// ── Push Notification Diagnostic (Live End-to-End Test) ───────────────────────
+// GET /admin/diagnostics/push-diagnostic?user_id=<optional>
+// Checks EXPO_ACCESS_TOKEN, reads push_token from DB, sends a test push,
+// and returns the raw Expo response inline so you can see exactly what happens.
+diagnosticsRouter.get('/push-diagnostic', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.query.user_id as string || (req as any).user?.id;
+    const checks: Record<string, any> = {};
+
+    // 1. Check EXPO_ACCESS_TOKEN
+    const expoToken = process.env.EXPO_ACCESS_TOKEN;
+    checks.expo_access_token = expoToken
+      ? { status: 'OK', preview: expoToken.substring(0, 8) + '...' }
+      : { status: 'MISSING', message: 'EXPO_ACCESS_TOKEN is not set in environment. Push will fail with FCM V1.' };
+
+    // 2. Check user push_token in DB
+    let pushToken: string | null = null;
+    if (userId) {
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('push_token')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) {
+        checks.db_push_token = { status: 'ERROR', message: error.message };
+      } else if (!data?.push_token) {
+        checks.db_push_token = { status: 'MISSING', message: 'No push_token found in profiles for this user. The app may not have registered yet.' };
+      } else {
+        pushToken = data.push_token;
+        checks.db_push_token = { status: 'OK', tokenPreview: pushToken!.substring(0, 30) + '...' };
+      }
+    } else {
+      checks.db_push_token = { status: 'SKIPPED', message: 'No user_id provided — cannot check DB token.' };
+    }
+
+    // 3. Send a test push if we have both tokens
+    if (expoToken && pushToken) {
+      try {
+        const testPayload = [{
+          to: pushToken,
+          title: '🔔 Push Test',
+          body: 'If you see this, push notifications are working!',
+          sound: 'default' as const,
+          channelId: 'nova_messages',
+          priority: 'high' as const,
+          ttl: 60,
+          data: { type: 'push_diagnostic_test' },
+        }];
+
+        const response = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${expoToken}`,
+          },
+          body: JSON.stringify(testPayload),
+          signal: AbortSignal.timeout(8000),
+        });
+
+        const result = await response.json();
+        checks.test_push = {
+          status: response.ok ? 'SENT' : 'FAILED',
+          http_status: response.status,
+          expo_response: result,
+        };
+      } catch (pushErr) {
+        checks.test_push = {
+          status: 'ERROR',
+          message: pushErr instanceof Error ? pushErr.message : String(pushErr),
+        };
+      }
+    } else {
+      checks.test_push = {
+        status: 'SKIPPED',
+        reason: !expoToken ? 'Missing EXPO_ACCESS_TOKEN' : 'Missing push_token in DB',
+      };
+    }
+
+    // 4. Overall verdict
+    const allOk = checks.expo_access_token?.status === 'OK' &&
+                  checks.db_push_token?.status === 'OK' &&
+                  checks.test_push?.status === 'SENT';
+
+    res.status(200).json({
+      overall: allOk ? '✅ PUSH WORKING' : '❌ PUSH HAS ISSUES — see checks below',
+      checks,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});

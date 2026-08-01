@@ -7,7 +7,14 @@
 - **Mode Lock:** Once `hi agent` is called, the agent **NEVER leaves Hi Agent mode** across turns until explicitly ended with `"bye agent"` or `"update agent"`.
 - **`Hi Agent — Planner Mode`**: Header used for research, architectural planning, design, and `implementation_plan.md` creation (recommended for reasoning models: Claude Sonnet, Gemini Pro).
 - **`Hi Agent — Execute Mode`**: Header used for terminal execution, code modifications, surgical edits, build verification, and git pushes (ideal for fast execution models: Gemini Flash).
+- **Model Auto-Routing:** The agent must proactively route between Planner/Execute modes depending on the active LLM engine in use.
 
+---
+
+## ⚡ Multi-Machine Sync & RAM Auto-Compression
+- **Token Compression:** If chat context exceeds >70% window limits, the agent must silently compress active state into this RAM file, trim chat history, and continue executing seamlessly.
+- **Multi-Machine Resume:** On a new machine, `git pull` fetches `.agents/memory/state.json`. The agent reads this file + RAM to immediately resume mid-thought with zero context loss.
+- **Universal Auto-Detector:** Running `hi agent init` in any new directory scans `.env`, `package.json`, etc., and automatically generates a tailored version of this RAM snapshot.
 ---
 
 ## 🎯 Surgical Implementation Standard (Senior Staff Engineer Level)
@@ -21,7 +28,9 @@
 - **FCM Push Setup:** FCM V1 HTTP API with Firebase project `humanos-3895f`.
 - **Expo Credentials:** FCM V1 Service Account Key uploaded to Expo Dashboard (`expo.dev` -> Credentials -> Android -> Service Credentials).
 - **Client Config:** `google-services.json` present in `/mobile` root and linked in `mobile/app.json` (`android.googleServicesFile`). Tracked in Git.
-- **Backend Auth Token:** `EXPO_ACCESS_TOKEN` set in `backend/.env` AND Render environment variables.
+- **Backend Auth Token:** `EXPO_ACCESS_TOKEN` set in `backend/.env` AND **MUST be in Render environment variables** (local `.env` is NOT deployed to Render).
+- **Push Diagnostic:** `GET /admin/diagnostics/push-diagnostic?user_id=<id>` performs a live end-to-end push test.
+- **Startup Validation:** Backend logs `✅ EXPO_ACCESS_TOKEN is configured` or `⚠️ ...NOT set` on every boot.
 - **EAS Channel:** `production` (APK listens to `production` channel ONLY for OTA updates).
 
 ---
@@ -48,17 +57,21 @@ BUILD CHECK:   cd backend && npm run build (Run before git push — 0 errors req
 OTA COMMAND:   cd mobile && npx eas update --branch production --message "..."
 GIT PUSH:      git add . && git commit -m "..." && git push origin main
 TRAIN COMMAND: Type "train agent" or "train" to compress and refresh this RAM snapshot.
+INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM snapshot.
 ```
 
 ---
 
 ## 🐛 Recent Fixes & Active Status
 - ✅ **Hi Agent Header Framing & Mode Lock (Aug 1, 2026):** Codified mandatory `Planner Mode` vs `Execute Mode` headers and persistent mode lock until `bye agent`.
+- ✅ **Universal Auto-Detector & Model Auto-Routing (Aug 1, 2026):** `hi agent init` generates RAM from any stack; agent auto-routes execution/planning.
+- ✅ **RAM Auto-Compressor & Multi-Machine Sync (Aug 1, 2026):** Implemented `.agents/memory/state.json` sync and >70% token auto-pruning.
 - ✅ **Surgical Planning Standard (Aug 1, 2026):** Codified line-level planning protocol in `AGENTS.md` for zero-error execution by Gemini 3.6 Flash High.
 - ✅ **Push Notifications (Aug 1, 2026):** FCM V1 key uploaded to Expo + `EXPO_ACCESS_TOKEN` set in Render & `backend/.env`.
+- ✅ **Push Hardening (Aug 1, 2026):** Added startup validation, enhanced error logging, `/admin/diagnostics/push-diagnostic` live test endpoint, and `config.expo.accessToken` formalization.
 - ✅ **Token Freshness:** `notificationService.ensureTokenFresh()` re-registers tokens automatically on new APK installs.
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
-- 🔴 **Active Issue:** `reminders.status` column missing in Supabase schema (causes log warning every 10s).
+- ✅ **Database Bug Resolved (Aug 1, 2026):** `reminders.status` column successfully added to Supabase.
 
 ---
 

@@ -61,6 +61,10 @@ export async function sendPushNotification(messages: ExpoPushMessage[]): Promise
   }));
 
   try {
+    if (!process.env.EXPO_ACCESS_TOKEN) {
+      logger.warn('[Push] ⚠️ Sending WITHOUT EXPO_ACCESS_TOKEN — FCM V1 requires this token. Push will likely be rejected by Expo.');
+    }
+
     const response = await fetch(EXPO_PUSH_URL, {
       method: 'POST',
       headers: {
@@ -89,7 +93,14 @@ export async function sendPushNotification(messages: ExpoPushMessage[]): Promise
     }
 
     if (errors.length > 0) {
-      logger.warn('[Push] Some tokens rejected by Expo', { errors });
+      logger.warn('[Push] Some tokens rejected by Expo', {
+        errors: errors.map((e, i) => ({
+          status: e.status,
+          message: e.message,
+          errorCode: e.details?.error,
+          sentTo: validMessages[i]?.to?.substring(0, 30),
+        })),
+      });
 
       // Auto-clear DeviceNotRegistered tokens — these are stale FCM tokens
       // that Android/Google has rotated. Keeping them in the DB means all future

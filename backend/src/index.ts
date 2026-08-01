@@ -29,6 +29,17 @@ async function main(): Promise<void> {
     environment: config.server.nodeEnv,
   });
 
+  // ── Push notification environment check ──────────────────────────────────
+  // This MUST log on every boot so Render logs immediately reveal if push
+  // notifications will silently fail due to a missing access token.
+  if (!process.env.EXPO_ACCESS_TOKEN) {
+    logger.error('⚠️ EXPO_ACCESS_TOKEN is NOT set! Push notifications will FAIL silently. Add it to Render environment variables.');
+  } else {
+    logger.info('✅ EXPO_ACCESS_TOKEN is configured', {
+      tokenPreview: process.env.EXPO_ACCESS_TOKEN.substring(0, 8) + '...',
+    });
+  }
+
   // Load autonomous behavioral patches into memory before accepting traffic
   await promptBuilder.loadPatches();
 
