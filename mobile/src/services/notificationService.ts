@@ -169,8 +169,12 @@ class NotificationService {
 
       let tokenResult;
       try {
+        // Force fetch underlying FCM native token first to bypass Expo's cache on reinstall
+        const deviceToken = await Notifications.getDevicePushTokenAsync();
+        
         tokenResult = await Notifications.getExpoPushTokenAsync({
           projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
+          devicePushToken: deviceToken.data,
         });
       } catch (tokenErr) {
         console.warn('[Notifications] ensureTokenFresh: failed to get token:', tokenErr);
@@ -215,6 +219,9 @@ class NotificationService {
    * Call this on logout to avoid re-registering a stale auth session.
    */
   cleanup(): void {
+    // Wipe local cache so re-login forces a fresh sync
+    SecureStore.deleteItemAsync(LAST_REGISTERED_TOKEN_KEY).catch(() => {});
+    
     if (this._tokenListener) {
       this._tokenListener.remove();
       this._tokenListener = null;
@@ -367,8 +374,12 @@ class NotificationService {
 
     let tokenResult;
     try {
+      // Force fetch underlying FCM native token first to bypass Expo's cache on reinstall
+      const deviceToken = await Notifications.getDevicePushTokenAsync();
+      
       tokenResult = await Notifications.getExpoPushTokenAsync({
         projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
+        devicePushToken: deviceToken.data,
       });
     } catch (tokenErr: any) {
       console.warn('[Notifications] Failed to get push token:', tokenErr);
