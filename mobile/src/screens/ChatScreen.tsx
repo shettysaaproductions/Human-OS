@@ -3,13 +3,14 @@ import { AppState, AppStateStatus } from 'react-native';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
-  Pressable, ScrollView, TouchableWithoutFeedback, Animated
+  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { notificationService, setChatScreenActive } from '../services/notificationService';
+import { presenceService } from '../services/presenceService';
 import * as Notifications from 'expo-notifications';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
@@ -499,6 +500,16 @@ export function ChatScreen() {
     }
   }, [isHydrated]);
 
+  useEffect(() => {
+    navigation.setOptions({
+      gestureEnabled: !isSelectionMode,
+    });
+  }, [navigation, isSelectionMode]);
+
+  useEffect(() => {
+    presenceService.onChatOpen();
+  }, []);
+
   const hasRenderedList = useRef(false);
   if (!hasRenderedList.current && isHydrated) {
     hasRenderedList.current = true;
@@ -578,12 +589,16 @@ export function ChatScreen() {
 
   const handleSend = useCallback(() => {
     if (!inputText.trim()) return;
+    
+    presenceService.onMessageSent();
+    
     sendMessage(inputText.trim());
     setInputText('');
     isNearBottomRef.current = true;
   }, [inputText, sendMessage]);
 
   const handleScroll = useCallback((event: any) => {
+    presenceService.onUserActivity();
     const { contentOffset } = event.nativeEvent;
     currentOffsetRef.current = contentOffset.y;
     const paddingToBottom = 150;
@@ -931,7 +946,10 @@ export function ChatScreen() {
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
-            onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: mainScrollY } } }], { useNativeDriver: false })}
+            onScroll={(e) => {
+              Animated.event([{ nativeEvent: { contentOffset: { y: mainScrollY } } }], { useNativeDriver: false })(e);
+              presenceService.onUserActivity();
+            }}
             onContentSizeChange={(w, h) => {
               setMainWidths(prev => ({ ...prev, content: h }));
               logEvent('ON_CONTENT_SIZE_CHANGE');
@@ -1088,7 +1106,10 @@ export function ChatScreen() {
           <TextInput
             style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg }]}
             value={inputText}
-            onChangeText={setInputText}
+            onChangeText={(text) => {
+              setInputText(text);
+              presenceService.onTypingStart();
+            }}
             placeholder="Message Nova..."
             placeholderTextColor={colors.placeholder}
             multiline
