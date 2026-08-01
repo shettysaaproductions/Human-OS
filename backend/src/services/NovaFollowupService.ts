@@ -41,11 +41,40 @@ export class NovaFollowupService {
         .eq('status', 'pending');
 
       // Allow as low as 1 minute for urgent/serious follow-ups
-      // The LLM picks delayHours based on conversation seriousness:
-      //   deep/emotional conversation → 0.03 hrs (~2 min)
-      //   casual chat → 0.1-0.25 hrs (6-15 min)
-      //   concluded conversation → skip (LLM won't queue one)
-      const delayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 1), 24 * 60);
+      const baseDelayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 1), 24 * 60);
+      let delayMinutes = baseDelayMinutes;
+
+      // Inject TriggerEngine for realistic timing adjustments
+      const { NovaTriggerEngine } = await import('./NovaTriggerEngine');
+      const triggerEngine = new NovaTriggerEngine();
+      
+      const { data: presenceData } = await supabaseAdmin
+        .from('user_presence')
+        .select('status')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      const userPresence = presenceData?.status || 'offline';
+      
+      const trigger = await triggerEngine.shouldTrigger({
+        userPresence,
+        lastUserMessageAt: Date.now(),
+        lastNovaReplyAt: Date.now(),
+        conversationIntensity: 'casual',
+        userActivity: null,
+        pendingReminders: 0,
+        emotionalState: null
+      });
+
+      // If TriggerEngine says we shouldn't send at all right now (e.g. rate limit), delay by 15 min
+      if (!trigger.shouldSend && trigger.reason === 'rate_limited') {
+        delayMinutes = Math.max(delayMinutes, 15);
+      } else {
+        // Adjust the base delay slightly using TriggerEngine's micro-delay logic to feel more human
+        // (Convert TriggerEngine ms to minutes)
+        delayMinutes += (trigger.delayMs / 60000);
+      }
+
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
       await supabaseAdmin.from('nova_followups').insert({

@@ -181,8 +181,28 @@ export class NovaConsciousnessEngine {
       .maybeSingle();
 
     const gapMinutes = lastUserMsg ? (Date.now() - new Date(lastUserMsg.created_at).getTime()) / 60000 : 0;
-    // If user was active within MIN_GAP_MINUTES — don't interrupt. Skip entirely (save LLM cost).
-    if (gapMinutes < MIN_GAP_MINUTES) return;
+    
+    // Fetch user presence to calculate dynamic gap
+    const { data: presenceData } = await supabaseAdmin
+      .from('user_presence')
+      .select('status')
+      .eq('user_id', userId)
+      .maybeSingle();
+      
+    const userPresence = presenceData?.status || 'offline';
+
+    const getEffectiveMinGap = (presence: string): number => {
+      switch (presence) {
+        case 'typing': return 0; // Instant if user is typing
+        case 'online': return 2; // 2 min for active chat
+        case 'away': return 15; // 15 min if user stepped away
+        case 'offline': return 45; // 45 min if offline
+        default: return 5;
+      }
+    };
+
+    const effectiveMinGap = getEffectiveMinGap(userPresence);
+    if (gapMinutes < effectiveMinGap) return;
 
     // 4. Pending Agenda
     const { data: pendingAgenda } = await supabaseAdmin
