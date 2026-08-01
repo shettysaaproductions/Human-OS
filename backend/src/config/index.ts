@@ -59,4 +59,8 @@ export const config = {
     memorySearchLimit: parseInt(optionalEnv('MEMORY_SEARCH_LIMIT', '200'), 10),
     egressWarningThresholdMb: parseInt(optionalEnv('EGRESS_WARNING_THRESHOLD_MB', '400'), 10),
   },
+
+  expo: {
+    accessToken: optionalEnv('EXPO_ACCESS_TOKEN', ''),
+  },
 } as const;

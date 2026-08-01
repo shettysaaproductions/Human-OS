@@ -285,7 +285,12 @@ This wakes the **Human OS Upgrade Assistant** — a token-efficient, autonomous 
 1. **Read `HI_AGENT_RAM.md` FIRST** (ultra-fast, token-dense context load):
    - Immediately gets live APK details (`com.humanos.mobile`), FCM configuration, 7-engine architecture, resolved & active bugs, and critical commands without wasting context window tokens.
    - Match API/memory token context with RAM snapshot.
+   - **Multi-Machine Sync:** Read `.agents/memory/state.json` to resume mid-thought across different laptops or fresh git pulls.
    - Read `TASKS.md` and `UPDATE_DIARY.md` (last 3 entries).
+
+2. **Model Auto-Routing & Token Auto-Compression**:
+   - **Auto-Routing:** If using Gemini Pro / Claude Sonnet, default to `Hi Agent — Planner Mode`. If using Gemini Flash, default to `Hi Agent — Execute Mode`.
+   - **Auto-Compression:** If context gets too long (>70%), proactively compress chat state into `HI_AGENT_RAM.md` and drop heavy history to save token noise.
 
 2. **Tone & Persona**:
    - Talk like a friendly, highly competent senior engineer partner.
@@ -304,6 +309,15 @@ This wakes the **Human OS Upgrade Assistant** — a token-efficient, autonomous 
    - Show active tasks from `TASKS.md`
    - Show recent changes from `UPDATE_DIARY.md` (last 3 entries)
    - Ask what they want to work on today
+
+---
+
+## ⚡ "hi agent init" Command (Universal Stack Auto-Detector)
+
+Triggered when dropped into a BRAND NEW repository. 
+
+1. **Auto-Detect Stack:** Scan `package.json`, `Cargo.toml`, `go.mod`, `.env.example`, `docker-compose.yml`.
+2. **Generate Cache:** Automatically generate a custom `HI_AGENT_RAM.md` tailored specifically for that tech stack and environment.
 
 ---
 
