@@ -63,6 +63,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Messaging Frequency Fix (Aug 2, 2026):** Reduced NACE MIN_GAP from 45min to 10min, dynamic gaps from 20-90min to 8-25min, follow-up delays from 6-15min to 1-3min, and unanswered conversation cutoff from 12min to 6min. Nova now messages 3-5x more frequently during active hours.
 - ✅ **Master Production Fix (Aug 1, 2026):** 
   - NACE (Nova Autonomous Consciousness Engine) now gathers all 7 engines' context (Memories, Conversations, Temporal, Agenda) and feeds them into Tier 1 subconscious decision-making.
   - Added `MessageFormatter` for WhatsApp-style multi-bubble output with contextual emojis.
