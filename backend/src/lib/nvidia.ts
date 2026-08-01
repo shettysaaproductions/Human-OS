@@ -148,6 +148,20 @@ function getMockResponse(
     if (combined.includes('extracted_memories') || combined.includes('persist')) {
       return JSON.stringify([]);
     }
+    if (combined.includes('flawsdetected') || combined.includes('behavioral flaws')) {
+      return JSON.stringify({
+        flawsDetected: [
+          {
+            flaw_type: "Repetition",
+            severity: "medium",
+            evidence: "Repeated 'Hey!' multiple times",
+            patch_rule: "ANTI-ROBOT RULE (REPETITION): Never start messages with the exact same greeting consecutively."
+          }
+        ],
+        healthScore: 85,
+        summary: "Nova is mostly healthy but repeating greetings."
+      });
+    }
     return '{}';
   }
 
