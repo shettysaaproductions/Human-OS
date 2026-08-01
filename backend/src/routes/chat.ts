@@ -402,6 +402,9 @@ chatRouter.post(
 
       const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content } = parseResult.data;
       const userId = (req as any).user!.id;
+      
+      const requestStartTime = Date.now();
+      logger.info('[Chat] Request started', { userId, messageLength: message.length });
       let activeConversationId = conversation_id || crypto.randomUUID();
 
       let releaseLock: (() => void) | undefined;
@@ -581,6 +584,7 @@ chatRouter.post(
 
       const skipMemory = process.env.DISABLE_MEMORY === 'true';
 
+      const dbStartTime = Date.now();
       const [
         profileResult,
         historyResult,
@@ -650,6 +654,8 @@ chatRouter.post(
                 .limit(20)
             ),
       ]);
+      const dbDuration = Date.now() - dbStartTime;
+      logger.info('[Chat] Context fetch completed', { userId, durationMs: dbDuration });
 
       // ── Unpack results ─────────────────────────────────────────────────────────
       // 1. Profile
@@ -976,55 +982,37 @@ chatRouter.post(
 
       const isStreaming = req.headers.accept === 'text/event-stream';
 
-      // === MEMORY RETRIEVAL (CRITICAL FIX) ===
+      // === MEMORY RETRIEVAL (REUSE ALREADY-FETCHED DATA) ===
       let memoryContext = '';
       try {
-        const { data: relevantMemories } = await supabaseAdmin
-          .from('memories')
-          .select('*')
-          .eq('user_id', userId)
-          .order('relevance_score', { ascending: false })
-          .limit(5);
-          
-        const { data: recentEpisodic } = await supabaseAdmin
-          .from('episodic_memories')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(3);
-          
-        const { data: workingMem } = await supabaseAdmin
-          .from('working_memory')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        if (relevantMemories?.length || recentEpisodic?.length) {
+        if (memories.length || shortTermMemories.length || workingMemories.length) {
           memoryContext = `\n\n## 🧠 WHAT YOU REMEMBER ABOUT THIS USER\n`;
           
-          if (workingMem) {
-            memoryContext += `Current focus: ${workingMem.current_focus || 'None'}\n`;
-            memoryContext += `Active goals: ${(workingMem.active_goals || []).join(', ')}\n`;
+          if (workingMemories.length) {
+            const currentFocus = workingMemories.find(w => w.key === 'current_focus')?.value;
+            const activeGoals = workingMemories.find(w => w.key === 'active_goals')?.value;
+            if (currentFocus) memoryContext += `Current focus: ${currentFocus}\n`;
+            if (activeGoals) memoryContext += `Active goals: ${activeGoals}\n`;
           }
           
-          if (relevantMemories?.length) {
+          if (memories.length) {
             memoryContext += `\nLong-term memories:\n`;
-            relevantMemories.forEach(m => {
-              memoryContext += `- ${m.content} (${m.category})\n`;
+            memories.forEach(m => {
+              memoryContext += `- ${m.content || m.memory || m.key + ': ' + m.value} (${m.category || m.memory_type || 'general'})\n`;
             });
           }
           
-          if (recentEpisodic?.length) {
-            memoryContext += `\nRecent events:\n`;
-            recentEpisodic.forEach(e => {
-              memoryContext += `- ${e.event_description} (${new Date(e.created_at).toLocaleDateString()})\n`;
+          if (shortTermMemories.length) {
+            memoryContext += `\nRecent short-term memories:\n`;
+            shortTermMemories.forEach(e => {
+              memoryContext += `- ${e.memory || e.content || e.key + ': ' + e.value}\n`;
             });
           }
           
           memoryContext += `\nCRITICAL: When asked "what do you remember" or "what are my goals", LIST THESE SPECIFIC MEMORIES. Never give generic answers like "motivation and life satisfaction". Use actual names, dates, and facts from above.\n`;
         }
       } catch (e) {
-        logger.warn('[Memory] Retrieval failed:', e);
+        logger.warn('[Memory] Context building failed:', e);
       }
 
       const brainContext = {
@@ -1044,27 +1032,8 @@ chatRouter.post(
         userCountry: profile?.country || 'IN'
       };
 
-      // Check trigger engine for realistic timing
-      const { NovaTriggerEngine } = await import('../services/NovaTriggerEngine');
-      const triggerEngine = new NovaTriggerEngine();
-      const { data: presenceData } = await supabaseAdmin.from('user_presence').select('status').eq('user_id', userId).maybeSingle();
-      
-      const triggerContext = {
-        userPresence: presenceData?.status || 'online',
-        lastUserMessageAt: Date.now(),
-        lastNovaReplyAt: Date.now() - 60000, // placeholder
-        conversationIntensity: 'casual' as const,
-        userActivity: null,
-        pendingReminders: upcoming?.length || 0,
-        emotionalState: situationBrief || null,
-      };
-
-      const triggerResult = await triggerEngine.shouldTrigger(triggerContext);
-      if (!triggerResult.shouldSend) {
-        logger.info('[TriggerEngine] Blocked by rate limit or timing', triggerResult);
-      }
-      // Log the timing decision for debugging
-      logger.info('[TriggerEngine] Decision:', triggerResult);
+      // Trigger engine is for proactive scheduling only — skip for direct replies
+      logger.info('[Chat] Processing direct reply', { userId });
 
       let extractedActions: any[] = [];
       let rawReply = '';
@@ -1080,6 +1049,9 @@ chatRouter.post(
         }
       } else {
         try {
+          const llmStartTime = Date.now();
+          logger.info('[Chat] Calling LLM', { userId });
+          
           if (isStreaming) {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
@@ -1123,6 +1095,13 @@ chatRouter.post(
               });
             }
           }
+          
+          const llmDuration = Date.now() - llmStartTime;
+          logger.info('[Chat] LLM response received', { userId, durationMs: llmDuration });
+          if (llmDuration > 5000) {
+            logger.warn('[Chat] LLM call slow', { userId, durationMs: llmDuration });
+          }
+          
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
           if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
             const extraText = '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
@@ -1309,6 +1288,12 @@ chatRouter.post(
       }
 
       // Push notifications are now sent per-bubble directly after DB insert
+
+      const totalDuration = Date.now() - requestStartTime;
+      logger.info('[Chat] Request completed', { userId, totalDurationMs: totalDuration });
+      if (totalDuration > 10000) {
+        logger.warn('[Chat] Total request slow', { userId, totalDurationMs: totalDuration });
+      }
 
       // In async_mode the 202 was already sent above — skip the synchronous response
       if (!isStreaming && !async_mode) {
