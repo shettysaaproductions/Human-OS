@@ -20,6 +20,8 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { sendPushNotification } from '../lib/pushNotifications';
 
+// Deduplication cache to prevent duplicate messages
+const dedupCache = new Map<string, { lastContent: string, lastSentAt: number }>();
 
 export class NovaFollowupService {
 
@@ -166,34 +168,26 @@ export class NovaFollowupService {
       return;
     }
 
-    // Dedup check before inserting
-    const { data: recentMsgs } = await supabaseAdmin
-      .from('chat_history')
-      .select('content')
-      .eq('user_id', followup.user_id)
-      .eq('conversation_id', followup.conversation_id)
-      .eq('role', 'assistant')
-      .gte('created_at', new Date(Date.now() - 5 * 60000).toISOString())
-      .order('created_at', { ascending: false });
-
-    let isDuplicate = false;
-    if (recentMsgs) {
-      const normalizedNew = followup.message.toLowerCase().trim();
-      for (const msg of recentMsgs) {
-        const normalizedOld = msg.content.toLowerCase().trim();
-        if (normalizedOld === normalizedNew || 
-            (normalizedNew.length > 20 && normalizedOld.includes(normalizedNew.substring(0, 20))) ||
-            (normalizedOld.length > 20 && normalizedNew.includes(normalizedOld.substring(0, 20)))) {
-          isDuplicate = true;
-          break;
-        }
-      }
-    }
-
-    if (isDuplicate) {
+    // Dedup check before inserting using cache
+    const normalizedNew = followup.message.toLowerCase().trim();
+    const cached = dedupCache.get(followup.user_id);
+    
+    // Check if same message sent within last 10 minutes
+    if (cached && 
+        Date.now() - cached.lastSentAt < 10 * 60 * 1000 && 
+        (cached.lastContent === normalizedNew || 
+         (normalizedNew.length > 20 && cached.lastContent.includes(normalizedNew.substring(0, 20))) ||
+         (cached.lastContent.length > 20 && normalizedNew.includes(cached.lastContent.substring(0, 20))))) {
        logger.warn('[NovaFollowup] Prevented firing duplicate followup', { id: followup.id, userId: followup.user_id });
        return;
     }
+
+    // Update cache
+    dedupCache.set(followup.user_id, {
+      lastContent: normalizedNew,
+      lastSentAt: Date.now()
+    });
+
 
     // Insert as Nova's message in chat history
     await supabaseAdmin.from('chat_history').insert({
