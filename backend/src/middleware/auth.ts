@@ -9,11 +9,21 @@ export const authenticateUser = async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    // In development: inject a fixed UUID so DB inserts always succeed.
-    // In production: Supabase JWT is validated by the mobile app's auth layer.
+    const token = authHeader.split(' ')[1];
+    
+    // We import supabaseAnon dynamically or from lib to verify the token
+    const { getSupabaseAnon } = await import('../lib/supabase');
+    const supabase = getSupabaseAnon();
+    const { data, error } = await supabase.auth.getUser(token);
+
+    if (error || !data?.user) {
+      res.status(401).json({ error: 'Unauthorized: Invalid token' });
+      return;
+    }
+
     (req as any).user = {
-      id: '00000000-0000-0000-0000-000000000000',
-      email: 'test@example.com'
+      id: data.user.id,
+      email: data.user.email
     };
 
     next();
