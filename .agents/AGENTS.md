@@ -436,6 +436,7 @@ These constraints are permanent. Any code change must respect them:
 - **Do not run `eas build`** unless the user explicitly asks for a new APK. OTA is sufficient for JS changes.
 - **If EAS Free Plan Android build limits are exhausted (15/month)**, instruct the user to build the APK from the GitHub Actions tab.
 - **Bundle size must stay under 4MB** — do not add heavy native dependencies without a new build.
+- **Push Notification Token Rule:** When fetching an Expo token using `Notifications.getExpoPushTokenAsync()`, you MUST pass the entire `deviceToken` object returned by `getDevicePushTokenAsync()` to the `devicePushToken` option. **DO NOT pass `deviceToken.data`** (the string), as this strips the FCM `type` and will cause a `VALIDATION_ERROR` from Expo's servers.
 
 ---
 
