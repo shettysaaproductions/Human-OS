@@ -53,6 +53,7 @@ interface ChatState {
   checkProactiveMessages: () => Promise<void>;
   set_isTyping: (v: boolean) => void;
   updateMessageReaction: (messageId: string, reaction: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null) => Promise<void>;
+  injectPendingMessage: (message: Message) => void;
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
@@ -588,6 +589,16 @@ export const useChatStore = create<ChatState>((set, get) => {
       } catch (e) {
         console.error('Failed to hydrate history from backend:', e);
         set({ isHydrated: true });
+      }
+    },
+
+    injectPendingMessage: (message: Message) => {
+      const state = get();
+      // Only inject if it doesn't already exist
+      if (!state.messages.some(m => m.id === message.id)) {
+        const newMessages = [message, ...state.messages];
+        set({ messages: newMessages });
+        saveMessageCache(newMessages).catch(console.warn);
       }
     },
 

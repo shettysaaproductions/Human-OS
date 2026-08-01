@@ -592,18 +592,22 @@ export function ChatScreen() {
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
     
-    let ledColor = 'transparent';
+    let StatusIcon = null;
     if (isUser) {
       if (item.status === 'sending') {
-        ledColor = '#F59E0B'; // Yellow — in transit (online, awaiting response)
+        StatusIcon = <Text style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 4 }}>🕒</Text>;
       } else if (item.status === 'error') {
-        ledColor = '#EF4444'; // Red — network error / offline / server unreachable
+        StatusIcon = <Text style={{ fontSize: 10, color: '#EF4444', marginLeft: 4 }}>❌</Text>;
       } else if (item.status === 'responded') {
-        ledColor = '#10B981'; // Green — Nova replied
+        StatusIcon = <Text style={{ fontSize: 10, color: '#3B82F6', marginLeft: 4 }}>✓✓</Text>;
       } else {
         // 'sent' — delivered, awaiting Nova reply
         const hasReply = reversedMessages.slice(0, index).some(m => m.role === 'assistant');
-        ledColor = hasReply ? '#10B981' : '#F59E0B'; // Green : Yellow
+        if (hasReply) {
+          StatusIcon = <Text style={{ fontSize: 10, color: '#3B82F6', marginLeft: 4 }}>✓✓</Text>;
+        } else {
+          StatusIcon = <Text style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 4 }}>✓✓</Text>;
+        }
       }
     }
     
@@ -770,16 +774,7 @@ export function ChatScreen() {
               ]}>
                 {formatTime(item.timestamp)}
               </Text>
-              {isUser && (
-                <View style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 3,
-                  backgroundColor: ledColor,
-                  marginLeft: 6,
-                  marginTop: 1
-                }} />
-              )}
+              {isUser && StatusIcon}
             </View>
             </View>
 
