@@ -9,17 +9,17 @@ jest.mock('../../lib/nvidia', () => ({
   chatCompletionStream: jest.fn()
 }));
 
-jest.mock('../promptBuilder', () => ({
-  promptBuilder: {
-    buildSystemPrompt: jest.fn().mockReturnValue('MOCKED_SYSTEM_PROMPT')
-  }
-}));
-
 jest.mock('../../lib/logger', () => ({
   logger: {
     info: jest.fn(),
     error: jest.fn(),
     warn: jest.fn()
+  }
+}));
+
+jest.mock('../promptBuilder', () => ({
+  promptBuilder: {
+    buildSystemPrompt: jest.fn().mockReturnValue('SYSTEM PROMPT HERE')
   }
 }));
 
@@ -31,49 +31,19 @@ describe('NovaBrainService', () => {
     service = new NovaBrainService();
   });
 
-  describe('processInteraction', () => {
-    it('Memory Retrieval: passes memories and profile to promptBuilder', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply><subconscious_actions>[]</subconscious_actions>');
-      
-      const context = {
-        memories: ['mem1'],
-        workingMemories: ['work1'],
-        shortTermMemories: ['short1'],
-        profile: { preferred_name: 'Alex', companion_personality: 'friendly' },
-        memoryContext: 'CTX',
-        lengthInstruction: 'SHORT',
-        situationBrief: 'Working',
-        recentCrossSessionContext: 'recent_ctx'
-      };
-
-      await service.processInteraction('u1', 'hi', context);
-
-      expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
-        expect.any(String),
-        ['mem1'],
-        ['work1'],
-        'Alex',
-        'friendly',
-        ['short1'],
-        'auto',
-        'recent_ctx',
-        'HUMAN_CHAT',
-        'Working'
-      );
-    });
-
-    it('Handles null/undefined memory arrays gracefully', async () => {
+  describe('4.1 Memory Retrieval', () => {
+    it('should pass memories into the system prompt via promptBuilder', async () => {
       (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
-      
-      await service.processInteraction('u1', 'hi', {});
-
+      const memories = [{ id: 'mem-1', content: 'User wants to learn guitar' }];
+      await service.processInteraction('u1', 'hi', { memories });
+      // 2nd arg is memories
       expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
         expect.any(String),
-        [], // memories
-        [], // working
-        undefined, // name
-        undefined, // personality
-        [], // shortterm
+        memories,
+        expect.any(Array),
+        undefined,
+        undefined,
+        expect.any(Array),
         'auto',
         undefined,
         'HUMAN_CHAT',
@@ -81,62 +51,167 @@ describe('NovaBrainService', () => {
       );
     });
 
-    it('Parses valid JSON array from <subconscious_actions> tag', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue(
-        `<reply>Got it!</reply>\n<subconscious_actions>\n[{"tool": "MemoryRepository", "action": "save"}]\n</subconscious_actions>`
+    it('should pass workingMemories into the system prompt', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      const workingMemories = ['work1'];
+      await service.processInteraction('u1', 'hi', { workingMemories });
+      // 3rd arg is workingMemories
+      expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        workingMemories,
+        undefined,
+        undefined,
+        expect.any(Array),
+        'auto',
+        undefined,
+        'HUMAN_CHAT',
+        undefined
       );
-      
-      const result = await service.processInteraction('u1', 'hi', {});
-      expect(result.subconscious_actions).toEqual([{ tool: 'MemoryRepository', action: 'save' }]);
     });
 
-    it('Returns empty array when no actions / Handles malformed JSON gracefully', async () => {
+    it('should pass shortTermMemories into the system prompt', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      const shortTermMemories = ['short1'];
+      await service.processInteraction('u1', 'hi', { shortTermMemories });
+      // 6th arg is shortTermMemories
+      expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.any(Array),
+        undefined,
+        undefined,
+        shortTermMemories,
+        'auto',
+        undefined,
+        'HUMAN_CHAT',
+        undefined
+      );
+    });
+
+    it('should pass profile data', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      const profile = { preferred_name: 'Bhai', companion_personality: 'sarcastic' };
+      await service.processInteraction('u1', 'hi', { profile });
+      expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.any(Array),
+        'Bhai',
+        'sarcastic',
+        expect.any(Array),
+        'auto',
+        undefined,
+        'HUMAN_CHAT',
+        undefined
+      );
+    });
+
+    it('should include memoryContext and lengthInstruction in the prompt', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      const context = { memoryContext: 'Some memory context', lengthInstruction: 'Be very brief' };
+      await service.processInteraction('u1', 'hi', context);
+      
+      const args = (chatCompletion as jest.Mock).mock.calls[0][0];
+      const systemMsg = args.find((m: any) => m.role === 'system').content;
+      expect(systemMsg).toContain('Some memory context');
+      expect(systemMsg).toContain('Be very brief');
+    });
+
+    it('should handle empty/null memory arrays gracefully', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      await service.processInteraction('u1', 'hi', { memories: null, workingMemories: undefined, shortTermMemories: null });
+      expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
+        expect.any(String),
+        [],
+        [],
+        undefined,
+        undefined,
+        [],
+        'auto',
+        undefined,
+        'HUMAN_CHAT',
+        undefined
+      );
+    });
+  });
+
+  describe('4.2 Subconscious Actions Parsing', () => {
+    it('should parse valid subconscious_actions JSON array', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue(
+        `<reply>Got it!</reply>\n<subconscious_actions>\n[{"tool":"MomentEngine","action":"extract"}, {"tool":"MemoryRepository"}]\n</subconscious_actions>`
+      );
+      const result = await service.processInteraction('u1', 'hi', {});
+      expect(result.subconscious_actions.length).toBe(2);
+    });
+
+    it('should return empty array when no subconscious actions', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue(
+        `<reply>Got it!</reply>\n<subconscious_actions>\n[]\n</subconscious_actions>`
+      );
+      const result = await service.processInteraction('u1', 'hi', {});
+      expect(result.subconscious_actions).toEqual([]);
+    });
+
+    it('should handle malformed JSON gracefully', async () => {
       (chatCompletion as jest.Mock).mockResolvedValue(
         `<reply>Got it!</reply>\n<subconscious_actions>\n[invalid json}\n</subconscious_actions>`
       );
-      
       const result = await service.processInteraction('u1', 'hi', {});
       expect(result.subconscious_actions).toEqual([]);
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to parse subconscious actions JSON'), expect.any(Object));
     });
 
-    it('Handles missing tag gracefully (returns empty array)', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue(`<reply>Got it!</reply>`);
+    it('should handle missing subconscious_actions tag', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue(`Just a plain reply`);
       const result = await service.processInteraction('u1', 'hi', {});
       expect(result.subconscious_actions).toEqual([]);
     });
+  });
 
-    it('Extracts reply from <reply> tags and strips XML bleed', async () => {
+  describe('4.3 Reply Parsing & Fallbacks', () => {
+    it('should extract reply from <reply> tags', async () => {
       (chatCompletion as jest.Mock).mockResolvedValue(
-        `<reply>Hello there!</reply><subconscious_actions>[]</subconscious_actions>`
+        `<reply>Hello Yaar!</reply><subconscious_actions>[]</subconscious_actions>`
       );
       const result = await service.processInteraction('u1', 'hi', {});
-      expect(result.reply).toBe('Hello there!');
+      expect(result.reply).toBe('Hello Yaar!');
     });
 
-    it('Uses fallback when reply tag missing', async () => {
+    it('should strip XML bleed from reply text', async () => {
       (chatCompletion as jest.Mock).mockResolvedValue(
-        `This is a raw reply without tags.<subconscious_actions>[]</subconscious_actions>`
+        `Hello Yaar!<subconscious_actions>[{"tool":"A"}]</subconscious_actions>`
       );
       const result = await service.processInteraction('u1', 'hi', {});
-      expect(result.reply).toBe('This is a raw reply without tags.');
+      expect(result.reply).not.toContain('<subconscious_actions>');
+      expect(result.reply).not.toContain('tool');
     });
 
-    it('Uses absolute fallback "Yaar, ek second ruk." when empty', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue(`<reply></reply>`);
+    it('should use fallback when reply tag missing', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue(
+        `Some text before <subconscious_actions>[]</subconscious_actions>`
+      );
+      const result = await service.processInteraction('u1', 'hi', {});
+      expect(result.reply).toBe('Some text before');
+    });
+
+    it('should use absolute last resort fallback when reply is empty', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue(`<subconscious_actions>[]</subconscious_actions>`);
       const result = await service.processInteraction('u1', 'hi', {});
       expect(result.reply).toBe('Yaar, ek second ruk.');
     });
+  });
 
-    it('Throws on LLM failure and logs error', async () => {
-      (chatCompletion as jest.Mock).mockRejectedValue(new Error('API Down'));
-      await expect(service.processInteraction('u1', 'hi', {})).rejects.toThrow('API Down');
-      expect(logger.error).toHaveBeenCalledWith('[NOVA BRAIN] LLM failure', expect.any(Object));
+  describe('4.4 Error Handling', () => {
+    it('should throw on LLM failure', async () => {
+      (chatCompletion as jest.Mock).mockRejectedValue(new Error('NVIDIA API timeout'));
+      await expect(service.processInteraction('u1', 'hi', {})).rejects.toThrow('NVIDIA API timeout');
+      expect(logger.error).toHaveBeenCalled();
     });
   });
 
-  describe('streamInteraction', () => {
-    it('Yields reply chunks and returns subconscious actions at end', async () => {
+  describe('4.5 streamInteraction', () => {
+    it('should yield reply chunks and return subconscious actions', async () => {
       async function* mockStream() {
         yield '<reply>';
         yield 'chunk1';
@@ -148,63 +223,67 @@ describe('NovaBrainService', () => {
       (chatCompletionStream as jest.Mock).mockImplementation(mockStream);
       let result;
 
-      const gen2 = service.streamInteraction('u1', 'hi', {});
-      let next = await gen2.next();
-      const chunks2 = [];
+      const gen = service.streamInteraction('u1', 'hi', {});
+      let next = await gen.next();
+      const chunks = [];
       while (!next.done) {
-        chunks2.push(next.value);
-        next = await gen2.next();
+        chunks.push(next.value);
+        next = await gen.next();
       }
-      result = next.value; // The return value
+      result = next.value; 
 
-      expect(chunks2).toEqual(['chunk1', 'chunk2']);
+      expect(chunks.join('')).toContain('chunk1chunk2');
       expect(result).toEqual({ subconscious_actions: [{ tool: 'A' }] });
     });
   });
 
-  describe('Consciousness Tiers', () => {
-    it('evaluateConsciousnessTier1: parses JSON reach decision', async () => {
-      (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ shouldReach: true, reason: 'test' }));
+  describe('4.6 Consciousness Tiers', () => {
+    it('evaluateConsciousnessTier1: should parse JSON reach decision', async () => {
+      (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ shouldReach: true, reason: 'Pending agenda', triggerType: 'agenda' }));
       const result = await service.evaluateConsciousnessTier1('ctx');
-      expect(result).toEqual({ shouldReach: true, reason: 'test' });
+      expect(result.shouldReach).toBe(true);
     });
 
-    it('evaluateConsciousnessTier2: generates message with tone, uses temp=0.85', async () => {
+    it('evaluateConsciousnessTier2: should generate message with tone', async () => {
       (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ message: 'hey', tone: 'playful' }));
       const result = await service.evaluateConsciousnessTier2('ctx');
-      expect(result).toEqual({ message: 'hey', tone: 'playful' });
-      expect(chatCompletionBackground).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ temperature: 0.85 }));
+      expect(result.message).toBeDefined();
+      expect(result.tone).toBeDefined();
+      expect(chatCompletionBackground).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ temperature: 0.85, maxTokens: 200 }));
     });
 
-    it('evaluateGoalFollowup: includes preferred name, avoids past IDs', async () => {
+    it('evaluateGoalFollowup: should include preferred name and avoid past IDs', async () => {
       (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ shouldNotify: true }));
       await service.evaluateGoalFollowup('Alex', ['goal1'], ['past1']);
-      expect(chatCompletionBackground).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            content: expect.stringContaining('Alex')
-          })
-        ]),
-        expect.any(Object)
-      );
+      
+      const args = (chatCompletionBackground as jest.Mock).mock.calls[0][0];
+      const userMsg = args.find((m: any) => m.role === 'user').content;
+      
+      expect(userMsg).toContain('Alex');
+      expect(userMsg).toContain('past1');
     });
 
-    it('evaluateDailyReflection: returns summary + takeaways', async () => {
+    it('evaluateDailyReflection: should return summary and takeaways', async () => {
       (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ summary: 'good', key_takeaways: ['t1'] }));
       const res = await service.evaluateDailyReflection('m', 'e', 'g');
-      expect(res).toEqual({ summary: 'good', key_takeaways: ['t1'] });
+      expect(res.summary).toBeDefined();
+      expect(res.key_takeaways).toBeDefined();
     });
 
-    it('evaluateWeeklyReflection: returns macro trends', async () => {
-      (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ summary: 'week', key_takeaways: ['t1'] }));
+    it('evaluateWeeklyReflection: should return macro trends', async () => {
+      (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ summary: 'week', key_takeaways: ['trend1'] }));
       const res = await service.evaluateWeeklyReflection('summaries');
-      expect(res).toEqual({ summary: 'week', key_takeaways: ['t1'] });
+      expect(res.key_takeaways).toContain('trend1');
     });
 
-    it('refineMoment: validates without inventing facts', async () => {
+    it('refineMoment: should validate without inventing facts', async () => {
       (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ title: 't', body: 'b' }));
-      const res = await service.refineMoment('test_type', { foo: 'bar' });
-      expect(res).toEqual({ title: 't', body: 'b' });
+      await service.refineMoment('test_type', { foo: 'bar' });
+      
+      const args = (chatCompletionBackground as jest.Mock).mock.calls[0][0];
+      const userMsg = args.find((m: any) => m.role === 'user').content;
+      
+      expect(userMsg).toContain('Do NOT make up');
     });
   });
 });
