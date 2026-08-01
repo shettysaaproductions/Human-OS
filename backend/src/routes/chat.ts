@@ -286,46 +286,45 @@ function timeAgo(dateStr: string): string {
  * Level 4 (external): chunkResponse max length limit
  */
 function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] {
-  // Level 1: Explicit <NOVA_MSG> or <NOVA_MESSAGE_BREAK>
-  if (rawReply.includes('<NOVA_MSG>') || rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
+  // Level 1: Try explicit <NOVA_MSG> tags
+  if (rawReply.includes('<NOVA_MSG>')) {
     const segments = rawReply
-      .replace(/<NOVA_MESSAGE_BREAK>/g, '<NOVA_MSG>')
-      .split(/<NOVA_MSG>|<\/NOVA_MSG>/)
+      .replace(/<NOVA_MSG>/g, '')
+      .split(/<\/NOVA_MSG>/)
       .map(m => m.trim())
       .filter(Boolean);
-    if (segments.length > 0) {
-      return segments;
-    }
+    if (segments.length > 1) return segments;
   }
 
-  const text = '\n' + rawReply; 
+  // Level 2: Aggressive sentence splitting for natural texting
+  // Split on sentence endings, keeping punctuation
+  const sentences = rawReply
+    .replace(/([.!?])\s+/g, "$1|SPLIT|")
+    .replace(/\n+/g, "|SPLIT|")
+    .split('|SPLIT|')
+    .map(s => s.trim())
+    .filter(s => s.length > 5); // Skip tiny fragments
+
+  // Group into bubbles of 1-2 sentences
+  const bubbles: string[] = [];
+  for (let i = 0; i < sentences.length; i += 2) {
+    const chunk = sentences.slice(i, i + 2).join(' ').trim();
+    if (chunk.length > 10) bubbles.push(chunk);
+  }
+
+  let finalBubbles = bubbles.length === 0 ? [rawReply.trim()] : bubbles;
   
-  // Level 2: Message X: pattern
-  const msgXSegments = text.split(/(?=\nMessage \d+:)/i)
-    .map(m => m.trim())
-    .filter(Boolean);
-  if (msgXSegments.length > 1) {
-    return msgXSegments;
+  // If only one bubble but it's very long, force split by commas
+  if (finalBubbles.length === 1 && finalBubbles[0].length > 200) {
+    const parts = finalBubbles[0].split(/, |; /);
+    if (parts.length > 1) finalBubbles = parts.filter(p => p.length > 20);
   }
-
-  // Level 3: Intent Fallback
-  // If the user explicitly asks for multiple messages, fallback to splitting by paragraphs
-  const lowerUser = userMessage.toLowerCase();
-  const askedForMultiple = /\b(\d+)\s+(messages|msgs|bubbles|jokes|parts|tweets|posts)\b/.test(lowerUser) || 
-                           lowerUser.includes('different msgs') || 
-                           lowerUser.includes('separate msgs') ||
-                           lowerUser.includes('different messages') ||
-                           lowerUser.includes('separate messages');
-                           
-  if (askedForMultiple) {
-    const paragraphs = rawReply.split(/\n\n+/).map(m => m.trim()).filter(Boolean);
-    if (paragraphs.length > 1) {
-      return paragraphs;
-    }
-  }
-
-  // Default: single bubble
-  return rawReply.trim() ? [rawReply.trim()] : [];
+  
+  // After parsing, enforce max length per bubble
+  const MAX_BUBBLE_LENGTH = userMessage.length < 20 ? 100 : 250;
+  return finalBubbles.map(b => 
+    b.length > MAX_BUBBLE_LENGTH ? b.substring(0, MAX_BUBBLE_LENGTH) + '...' : b
+  );
 }
 
 /**
@@ -1192,23 +1191,44 @@ chatRouter.post(
       const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, processedReply, 5);
       
       if (!isDuplicate) {
-        const rowsToInsert = finalBubbles.map((bubbleContent, idx) => ({
-          user_id: userId,
-          conversation_id: activeConversationId,
-          role: 'assistant',
-          content: bubbleContent,
-          reply_to_id: idx === 0 ? userMessageId : null,
-          reply_to_content: idx === 0 ? message.substring(0, 100) : null,
-          meta: idx === finalBubbles.length - 1 ? {
-            situationBrief: situationBrief || null,
-            subconsciousActions: extractedActions,
-            options: optionsArray
-          } : null
-        }));
-        
-        await qt.track('save_ai_response', 'chat_history', () => 
-          supabaseAdmin.from('chat_history').insert(rowsToInsert)
-        );
+        // Fetch push token fresh for the loop
+        const pushTokenResult = await supabaseAdmin
+          .from('profiles')
+          .select('push_token')
+          .eq('id', userId)
+          .maybeSingle();
+        const pushToken = pushTokenResult.data?.push_token as string | undefined;
+
+        // Create separate DB rows for each bubble
+        for (let idx = 0; idx < finalBubbles.length; idx++) {
+          const msgText = finalBubbles[idx];
+          const rowData = {
+            user_id: userId,
+            conversation_id: activeConversationId,
+            role: 'assistant',
+            content: msgText,
+            reply_to_id: idx === 0 ? userMessageId : null,
+            reply_to_content: idx === 0 ? message.substring(0, 100) : null,
+            meta: idx === finalBubbles.length - 1 ? {
+              situationBrief: situationBrief || null,
+              subconsciousActions: extractedActions,
+              options: optionsArray
+            } : null,
+            status: 'sent'
+          };
+          
+          const { data: savedMsg } = await qt.track('save_ai_response', 'chat_history', () => 
+            supabaseAdmin.from('chat_history').insert(rowData).select().single()
+          );
+
+          // Send push for each bubble (with small delay between)
+          if (savedMsg && pushToken) {
+            await sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id).catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
+            if (idx < finalBubbles.length - 1) {
+              await new Promise(r => setTimeout(r, 800)); // 800ms between bubbles for realism
+            }
+          }
+        }
       } else {
         logger.warn('[Chat] Prevented saving duplicate assistant message', { userId, conversation_id: activeConversationId });
       }
@@ -1279,22 +1299,7 @@ chatRouter.post(
         logger.info('[DEBUG] DISABLE_MEMORY=true — skipping background extraction jobs');
       }
 
-      // 10. Fire push notification — always fetch push_token fresh so a stale cache
-      // never causes silent delivery failures. This is a tiny single-column fetch.
-      const pushTokenResult = await supabaseAdmin
-        .from('profiles')
-        .select('push_token')
-        .eq('id', userId)
-        .maybeSingle();
-      const pushToken = pushTokenResult.data?.push_token as string | undefined;
-      if (pushToken) {
-        logger.info('[Push] Sending nova_reply notification', { userId, tokenPreview: pushToken.substring(0, 30) });
-        sendNovaReplyNotification(pushToken, reply, activeConversationId).catch((err) => {
-          logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message });
-        });
-      } else {
-        logger.warn('[Push] No push_token for user — background notification skipped', { userId });
-      }
+      // Push notifications are now sent per-bubble directly after DB insert
 
       // In async_mode the 202 was already sent above — skip the synchronous response
       if (!isStreaming && !async_mode) {
