@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.2.1-beta",
+    "date": "2026-08-01",
+    "title": "Nova Trigger Engine + Presence + Reply Threading",
+    "message": [
+      "🟢 Online presence — Nova now sees when you're typing, active, away, or offline",
+      "⏱️ Human-like reply timing — Nova responds instantly when you're typing, pauses naturally when you're away",
+      "🧵 Reply threading — Nova shows which message she's replying to",
+      "💬 Multi-bubble messages — Long replies now split into WhatsApp-style short bubbles",
+      "✅ WhatsApp checkmarks — Message delivery status (sending, delivered, read)",
+      "🔔 Instant push notifications — Tap notification, message appears immediately"
+    ]
+  },
+  {
     "version": "1.1.4",
     "title": "🔔 Push Notification Fix",
     "message": [
