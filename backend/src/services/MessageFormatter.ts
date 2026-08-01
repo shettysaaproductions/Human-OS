@@ -23,22 +23,37 @@ export class MessageFormatter {
 
   // Add emoji based on emotional context
   static addEmoji(text: string, emotion: string): string {
+    // Don't add emoji if text already has emoji
+    if (/[\u{1F600}-\u{1F64F}]/u.test(text)) return text;
+    
     const emojiMap: Record<string, string[]> = {
-      joy: ['😊', '✨', '🎉', '💫'],
-      concern: ['🤗', '💙', '🌟'],
-      curiosity: ['🤔', '💭', '✨'],
-      excitement: ['🎉', '✨', '🚀', '💫'],
-      comfort: ['🤗', '💙', '🌸'],
-      playful: ['😄', '✨', '🎈'],
+      joy: ['😊', '✨', '🎉', '💫', '😄'],
+      concern: ['🤗', '💙', '🌟', '❤️'],
+      curiosity: ['🤔', '💭', '✨', '🧐'],
+      excitement: ['🎉', '✨', '🚀', '💫', '🔥'],
+      comfort: ['🤗', '💙', '🌸', '☺️'],
+      playful: ['😄', '✨', '🎈', '😜'],
+      motivation: ['💪', '🔥', '✨', '🚀'],
+      calm: ['🌙', '✨', '☺️', '🌸'],
     };
     
     const emojis = emojiMap[emotion] || ['✨'];
     const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
     
-    // Add emoji at natural break points (not at start of every message)
-    if (text.length > 50 && !text.includes('?')) {
+    // Add emoji at natural break points
+    if (text.includes('?') && text.length > 30) {
+      // Add after question
+      return text.replace(/\?/, `? ${randomEmoji}`);
+    }
+    if (text.includes('!') && text.length > 30) {
+      return text.replace(/!/, `! ${randomEmoji}`);
+    }
+    
+    // Add at end for longer messages
+    if (text.length > 50) {
       return `${text} ${randomEmoji}`;
     }
+    
     return text;
   }
 

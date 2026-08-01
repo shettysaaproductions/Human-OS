@@ -1178,17 +1178,23 @@ chatRouter.post(
         }
       } catch (e) {}
       
-      const processedReply = MessageFormatter.addEmoji(rawReply, parsedEmotion);
+      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), effectiveMessage);
 
-      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(processedReply)), effectiveMessage);
+      // Add emoji based on detected emotion
+      const emotion = parsedEmotion || 'neutral';
+      const messagesWithEmoji = parsedMessages.map(msg => {
+        // Don't add emoji to very short messages
+        if (msg.length < 15) return msg;
+        return MessageFormatter.addEmoji(msg, emotion);
+      });
       
       // Split each parsed message further if it's too long
-      let finalBubbles = parsedMessages.flatMap(m => chunkResponse(m));
+      let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m));
       const reply = finalBubbles.join('\n\n');
 
       // 7. Save AI response ONCE (with telemetry meta)
       // Check for duplicates due to race conditions
-      const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, processedReply, 5);
+      const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, reply, 5);
       
       if (!isDuplicate) {
         // Fetch push token fresh for the loop
