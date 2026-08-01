@@ -13,7 +13,9 @@
     "db:reset": "ts-node scripts/db_reset.ts",
     "db:backup": "ts-node scripts/db_backup.ts",
     "doctor": "ts-node scripts/doctor.ts",
-    "boot": "ts-node scripts/session_boot.ts"
+    "boot": "ts-node scripts/session_boot.ts",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.44.4",

@@ -188,14 +188,16 @@ If no tools need to be called, leave the JSON array empty: []
 
     let fullText = '';
     let isInsideReply = false;
+    let hasSeenReplyTag = false;
     let replyStreamed = '';
 
     for await (const chunk of stream) {
       fullText += chunk;
 
       // Start streaming once we see the open tag
-      if (!isInsideReply && fullText.includes('<reply>')) {
+      if (!hasSeenReplyTag && fullText.includes('<reply>')) {
         isInsideReply = true;
+        hasSeenReplyTag = true;
         // Output whatever came after <reply>
         const afterTag = fullText.split('<reply>')[1];
         if (afterTag) {
