@@ -20,6 +20,7 @@ export class NovaTriggerEngine {
   private readonly MAX_REQUESTS_PER_MINUTE = 30;
   private requestTimestamps: number[] = [];
   private scheduledMessages: Map<string, NodeJS.Timeout> = new Map();
+  private dedupeCache: Map<string, { lastContent: string, lastSentAt: number }> = new Map();
 
   async scheduleMessage(userId: string, context: TriggerContext, messageGenerator: () => Promise<string>): Promise<void> {
     const triggerResult = await this.shouldTrigger(context);
@@ -37,6 +38,15 @@ export class NovaTriggerEngine {
     const timeout = setTimeout(async () => {
       try {
         const message = await messageGenerator();
+        
+        // Deduplication check
+        const cached = this.dedupeCache.get(userId);
+        if (cached && cached.lastContent === message && (Date.now() - cached.lastSentAt) < 10 * 60 * 1000) {
+          logger.info(`[TriggerEngine] Deduplicated exact message for ${userId}`);
+          return;
+        }
+        this.dedupeCache.set(userId, { lastContent: message, lastSentAt: Date.now() });
+
         // Send via push notification
         const { data: user } = await supabaseAdmin
           .from('profiles')
