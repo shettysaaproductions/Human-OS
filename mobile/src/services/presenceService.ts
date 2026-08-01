@@ -1,6 +1,14 @@
 import { AppState, AppStateStatus } from 'react-native';
-import { debounce } from 'lodash';
 import { useAuthStore } from '../store/useAuthStore';
+
+// Simple debounce implementation
+function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T {
+  let timeout: NodeJS.Timeout | null = null;
+  return function(this: any, ...args: any[]) {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  } as T;
+}
 
 type PresenceStatus = 'online' | 'typing' | 'away' | 'offline';
 
