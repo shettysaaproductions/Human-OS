@@ -174,7 +174,7 @@ class NotificationService {
         
         tokenResult = await Notifications.getExpoPushTokenAsync({
           projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
-          devicePushToken: deviceToken.data,
+          devicePushToken: deviceToken,
         });
       } catch (tokenErr) {
         console.warn('[Notifications] ensureTokenFresh: failed to get token:', tokenErr);
@@ -374,12 +374,11 @@ class NotificationService {
 
     let tokenResult;
     try {
-      // Force fetch underlying FCM native token first to bypass Expo's cache on reinstall
       const deviceToken = await Notifications.getDevicePushTokenAsync();
       
       tokenResult = await Notifications.getExpoPushTokenAsync({
         projectId: '17e73685-4785-47b5-8302-82d1df185f8c',
-        devicePushToken: deviceToken.data,
+        devicePushToken: deviceToken,
       });
     } catch (tokenErr: any) {
       console.warn('[Notifications] Failed to get push token:', tokenErr);
