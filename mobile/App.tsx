@@ -12,6 +12,7 @@ import { useChatStore } from './src/store/useChatStore';
 import * as Notifications from 'expo-notifications';
 import { NavigationContainerRef, useNavigationContainerRef } from '@react-navigation/native';
 import updateHistory from './src/config/updateHistory.json';
+import { presenceService } from './src/services/presenceService';
 
 const latestUpdate = updateHistory[0];
 
@@ -31,6 +32,7 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
     // Initialize notification channels only (safe before auth)
     // Token registration happens post-login via notificationService.registerAfterAuth()
     notificationService.initialize();
+    presenceService.initialize();
     registerBackgroundFetchAsync();
 
     // ── Notification tap handler: user tapped a Nova notification ──────────────
