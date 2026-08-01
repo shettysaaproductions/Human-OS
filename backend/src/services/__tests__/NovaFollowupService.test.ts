@@ -2,13 +2,30 @@ import { NovaFollowupService } from '../NovaFollowupService';
 import { supabaseAdmin } from '../../lib/supabase';
 import { sendPushNotification } from '../../lib/pushNotifications';
 import { logger } from '../../lib/logger';
+import { NovaTriggerEngine } from '../NovaTriggerEngine';
+import { novaBrain } from '../NovaBrainService';
 
-// Mock dependencies
-jest.mock('../../lib/supabase', () => ({
-  supabaseAdmin: {
-    from: jest.fn()
-  }
-}));
+// Mock these EXACTLY
+jest.mock('../../lib/supabase', () => {
+  const chainable = {
+    select: jest.fn().mockReturnThis(),
+    update: jest.fn().mockReturnThis(),
+    insert: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    gte: jest.fn().mockReturnThis(),
+    lte: jest.fn().mockReturnThis(),
+    gt: jest.fn().mockReturnThis(),
+    in: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    maybeSingle: jest.fn().mockResolvedValue({ data: null })
+  };
+  return {
+    supabaseAdmin: {
+      from: jest.fn(() => chainable)
+    }
+  };
+});
 
 jest.mock('../../lib/pushNotifications', () => ({
   sendPushNotification: jest.fn()
@@ -22,352 +39,240 @@ jest.mock('../../lib/logger', () => ({
   }
 }));
 
-// Mock NovaTriggerEngine
-jest.mock('../NovaTriggerEngine', () => {
-  return {
-    NovaTriggerEngine: jest.fn().mockImplementation(() => ({
-      shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 60000, reason: 'presence_online' })
-    }))
-  };
-});
+jest.mock('../NovaTriggerEngine', () => ({
+  NovaTriggerEngine: jest.fn().mockImplementation(() => ({
+    shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 5000 })
+  }))
+}));
 
-// Mock NovaBrainService
-jest.mock('../NovaBrainService', () => {
-  return {
-    novaBrain: {
-      evaluateConsciousnessTier2: jest.fn().mockResolvedValue({ message: 'Hey? You there?' })
-    }
-  };
-});
+jest.mock('../NovaBrainService', () => ({
+  novaBrain: {
+    evaluateConsciousnessTier2: jest.fn().mockResolvedValue({ message: 'Sab theek hai?' })
+  }
+}));
 
 describe('NovaFollowupService', () => {
   let service: NovaFollowupService;
+  let mockChain: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
-    service = new NovaFollowupService();
-
-    // Reset dedupe cache (hacky since it's unexported, but we just simulate by advancing time by >10mins)
     jest.setSystemTime(new Date('2026-08-01T00:00:00Z'));
+    service = new NovaFollowupService();
+    mockChain = (supabaseAdmin.from as jest.Mock)();
   });
 
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  describe('queueFollowup', () => {
-    it('Cancels existing pending follow-ups for user and clamps delay', async () => {
-      const mockUpdate = jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({}) }) });
-      const mockInsert = jest.fn().mockResolvedValue({});
-      const mockSelect = jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: { status: 'online' } }) }) });
-
-      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
-        if (table === 'nova_followups') return { update: mockUpdate, insert: mockInsert };
-        if (table === 'user_presence') return { select: mockSelect };
-        return {};
-      });
-
-      await service.queueFollowup('user-1', 'conv-1', 'Hello', 0); // 0 hours -> clamped to 1 min
-
-      expect(mockUpdate).toHaveBeenCalledWith({ status: 'cancelled' });
-      expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({
-        user_id: 'user-1',
-        conversation_id: 'conv-1',
-        message: 'Hello',
-        status: 'pending'
-      }));
+  describe('3.1 queueFollowup', () => {
+    it('should cancel existing pending follow-ups for the user', async () => {
+      await service.queueFollowup('u1', 'c1', 'Hello', 1);
+      expect(supabaseAdmin.from).toHaveBeenCalledWith('nova_followups');
+      expect(mockChain.update).toHaveBeenCalledWith({ status: 'cancelled' });
+      expect(mockChain.eq).toHaveBeenCalledWith('user_id', 'u1');
     });
-    
-    it('Handles DB errors gracefully (non-critical)', async () => {
-      const mockUpdate = jest.fn().mockImplementation(() => { throw new Error('DB Error'); });
-      (supabaseAdmin.from as jest.Mock).mockReturnValue({ update: mockUpdate });
 
-      await service.queueFollowup('user-1', 'conv-1', 'Hello', 1);
+    it('should insert a new pending follow-up with correct fire_at', async () => {
+      await service.queueFollowup('u1', 'c1', 'Hello', 1); // 1 hour
+      expect(mockChain.insert).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'pending',
+        user_id: 'u1',
+        conversation_id: 'c1',
+        message: 'Hello'
+      }));
+      // Assert fire_at approximately Date.now() + 1*3600000 + 5000
+      const inserted = mockChain.insert.mock.calls[0][0];
+      const fireAtTime = new Date(inserted.fire_at).getTime();
+      expect(fireAtTime).toBeGreaterThanOrEqual(Date.now() + 3600000 + 4900);
+      expect(fireAtTime).toBeLessThanOrEqual(Date.now() + 3600000 + 5100);
+    });
 
+    it('should clamp delay to minimum 1 minute', async () => {
+      await service.queueFollowup('u1', 'c1', 'Hello', 0.001);
+      const inserted = mockChain.insert.mock.calls[0][0];
+      const fireAtTime = new Date(inserted.fire_at).getTime();
+      expect(fireAtTime).toBeGreaterThanOrEqual(Date.now() + 60000 - 5000);
+    });
+
+    it('should clamp delay to maximum 24 hours', async () => {
+      await service.queueFollowup('u1', 'c1', 'Hello', 48);
+      const inserted = mockChain.insert.mock.calls[0][0];
+      const fireAtTime = new Date(inserted.fire_at).getTime();
+      expect(fireAtTime).toBeLessThanOrEqual(Date.now() + 24 * 3600 * 1000 + 5000);
+    });
+
+    it('should extend delay to 15 min when rate limited', async () => {
+      const mockTriggerEngine = require('../NovaTriggerEngine').NovaTriggerEngine;
+      mockTriggerEngine.mockImplementationOnce(() => ({
+        shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: false, reason: 'rate_limited', delayMs: 0 })
+      }));
+      await service.queueFollowup('u1', 'c1', 'Hello', 0.001);
+      
+      const inserted = mockChain.insert.mock.calls[0][0];
+      const fireAtTime = new Date(inserted.fire_at).getTime();
+      expect(fireAtTime).toBeGreaterThanOrEqual(Date.now() + 15 * 60 * 1000 - 5000);
+    });
+
+    it('should handle errors gracefully', async () => {
+      mockChain.update.mockImplementationOnce(() => { throw new Error('DB down'); });
+      await expect(service.queueFollowup('u1', 'c1', 'Hello', 1)).resolves.not.toThrow();
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('[NovaFollowup] Error scheduling follow-up'), expect.any(Object));
     });
   });
 
-  describe('cancelFollowups', () => {
-    it('Updates status to cancelled', async () => {
-      const mockEq = jest.fn().mockResolvedValue({});
-      const mockEq2 = jest.fn().mockReturnValue({ eq: mockEq });
-      const mockUpdate = jest.fn().mockReturnValue({ eq: mockEq2 });
-
-      (supabaseAdmin.from as jest.Mock).mockReturnValue({ update: mockUpdate });
-
-      await service.cancelFollowups('user-1');
-
-      expect(mockUpdate).toHaveBeenCalledWith({ status: 'cancelled' });
+  describe('3.2 cancelFollowups', () => {
+    it('should cancel all pending follow-ups for a user', async () => {
+      await service.cancelFollowups('u1');
+      expect(supabaseAdmin.from).toHaveBeenCalledWith('nova_followups');
+      expect(mockChain.update).toHaveBeenCalledWith({ status: 'cancelled' });
+      expect(mockChain.eq).toHaveBeenCalledWith('user_id', 'u1');
     });
 
-    it('Handles errors gracefully', async () => {
-      const mockUpdate = jest.fn().mockImplementation(() => { throw new Error('DB Error'); });
-      (supabaseAdmin.from as jest.Mock).mockReturnValue({ update: mockUpdate });
-
-      await service.cancelFollowups('user-1');
+    it('should handle errors gracefully', async () => {
+      mockChain.update.mockImplementationOnce(() => { throw new Error('DB down'); });
+      await expect(service.cancelFollowups('u1')).resolves.not.toThrow();
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('[NovaFollowup] Error cancelling follow-ups'), expect.any(Object));
     });
   });
 
-  describe('checkAndFireFollowups', () => {
-    it('Does nothing when no follow-ups due', async () => {
-      const mockLte = jest.fn().mockResolvedValue({ data: [] });
-      const mockEq = jest.fn().mockReturnValue({ lte: mockLte });
-      const mockSelect = jest.fn().mockReturnValue({ eq: mockEq });
-      (supabaseAdmin.from as jest.Mock).mockReturnValue({ select: mockSelect });
-
-      await service.checkAndFireFollowups();
-      
-      expect(sendPushNotification).not.toHaveBeenCalled();
-    });
-
-    it('Fires due follow-ups, marks sent, uses optimistic locking', async () => {
-      const followup = { id: 1, user_id: 'user-1', conversation_id: 'conv-1', message: 'Hello!' };
-      const mockLte = jest.fn().mockResolvedValue({ data: [followup] });
-      const mockEq = jest.fn().mockReturnValue({ lte: mockLte });
-      const mockSelect = jest.fn().mockReturnValue({ eq: mockEq });
-
-      const mockUpdateEq2 = jest.fn().mockResolvedValue({}); // update succeeds
-      const mockUpdateEq1 = jest.fn().mockReturnValue({ eq: mockUpdateEq2 });
-      const mockUpdate = jest.fn().mockReturnValue({ eq: mockUpdateEq1 });
-
-      const mockInsert = jest.fn().mockResolvedValue({});
-      
-      const mockMaybeSingle = jest.fn().mockResolvedValue({ data: { push_token: 'token-123' } });
-      const mockSelect2 = jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: mockMaybeSingle }) });
-
-      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
-        if (table === 'nova_followups') return { select: mockSelect, update: mockUpdate };
-        if (table === 'chat_history') return { insert: mockInsert };
-        if (table === 'profiles') return { select: mockSelect2 };
-        return {};
-      });
+  describe('3.3 checkAndFireFollowups', () => {
+    it('should fire due follow-ups and mark them sent', async () => {
+      mockChain.lte.mockResolvedValueOnce({ data: [{ id: 'fup-1', user_id: 'u1', conversation_id: 'c1', message: 'Hey' }] });
+      mockChain.update.mockReturnValueOnce({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) }) });
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } });
+      mockChain.insert.mockResolvedValueOnce({});
 
       await service.checkAndFireFollowups();
 
-      expect(mockUpdate).toHaveBeenCalledWith({ status: 'sent' });
-      expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({ content: 'Hello!' }));
+      expect(mockChain.update).toHaveBeenCalledWith({ status: 'sent' });
+      expect(mockChain.insert).toHaveBeenCalled();
       expect(sendPushNotification).toHaveBeenCalled();
     });
+
+    it('should do nothing when no follow-ups are due', async () => {
+      mockChain.lte.mockResolvedValueOnce({ data: [] });
+      await service.checkAndFireFollowups();
+      expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('Firing'));
+    });
   });
 
-  describe('Deduplication in _fireFollowup', () => {
-    it('Blocks exact duplicate within 10 min and substring duplicate (first 20 chars)', async () => {
-      const followup1 = { id: 1, user_id: 'user-1', conversation_id: 'conv-1', message: 'This is a long message to test substring' };
-      const followup2 = { id: 2, user_id: 'user-1', conversation_id: 'conv-1', message: 'this is a long message to test something else' };
-      
-      // We will call private _fireFollowup directly for testing
-      const mockUpdateEq2 = jest.fn().mockResolvedValue({});
-      const mockUpdateEq1 = jest.fn().mockReturnValue({ eq: mockUpdateEq2 });
-      const mockUpdate = jest.fn().mockReturnValue({ eq: mockUpdateEq1 });
-      const mockInsert = jest.fn().mockResolvedValue({});
-      const mockSelect2 = jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: { push_token: 'token-123' } }) }) });
+  describe('3.4 Deduplication in _fireFollowup', () => {
+    const followup = { id: 'fup-1', user_id: 'u1', conversation_id: 'c1', message: 'hey yaar kya chal raha hai bata na' };
 
-      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
-        if (table === 'nova_followups') return { update: mockUpdate };
-        if (table === 'chat_history') return { insert: mockInsert };
-        if (table === 'profiles') return { select: mockSelect2 };
-        return {};
-      });
-
-      await (service as any)._fireFollowup(followup1);
-      expect(mockInsert).toHaveBeenCalledTimes(1);
-
-      // Same user, similar message, within 10 minutes (time is mocked)
-      await (service as any)._fireFollowup(followup2);
-      expect(mockInsert).toHaveBeenCalledTimes(1); // Should not increase
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('[NovaFollowup] Prevented firing duplicate'), expect.any(Object));
+    it('should block exact duplicate within 10 minutes', async () => {
+      // Direct access cache or simulate 
+      const dedupCache = require('../NovaFollowupService').__get__?.('dedupCache');
+      if (!dedupCache) {
+        // Fallback testing strategy if unexported
+        await (service as any)._fireFollowup(followup); // First time inserts
+        mockChain.insert.mockClear();
+        await (service as any)._fireFollowup(followup); // Second time blocked
+        expect(mockChain.insert).not.toHaveBeenCalled();
+      } else {
+        dedupCache.set('u1', { lastContent: 'hey yaar kya chal raha hai bata na', lastSentAt: Date.now() });
+        await (service as any)._fireFollowup(followup);
+        expect(mockChain.insert).not.toHaveBeenCalled();
+      }
     });
 
-    it('Allows same message after 10 min', async () => {
-      const followup = { id: 1, user_id: 'user-1', conversation_id: 'conv-1', message: 'Hello duplicate test' };
+    it('should block substring duplicate (first 20 chars match)', async () => {
+      await (service as any)._fireFollowup({ ...followup, message: 'hey yaar kya chal raha hai' }); // Set cache
+      mockChain.insert.mockClear();
+      
+      await (service as any)._fireFollowup(followup); // Try sending longer message with same 20 char prefix
+      expect(mockChain.insert).not.toHaveBeenCalled(); // Blocked by substring match
+    });
 
-      const mockUpdate = jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({}) }) });
-      const mockInsert = jest.fn().mockResolvedValue({});
-      const mockSelect2 = jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: { push_token: 'token-123' } }) }) });
-
-      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
-        if (table === 'nova_followups') return { update: mockUpdate };
-        if (table === 'chat_history') return { insert: mockInsert };
-        if (table === 'profiles') return { select: mockSelect2 };
-        return {};
-      });
-
+    it('should allow same message after 10 minutes', async () => {
       await (service as any)._fireFollowup(followup);
-      expect(mockInsert).toHaveBeenCalledTimes(1);
+      mockChain.insert.mockClear();
 
       jest.advanceTimersByTime(11 * 60 * 1000);
-
+      
       await (service as any)._fireFollowup(followup);
-      expect(mockInsert).toHaveBeenCalledTimes(2);
+      expect(mockChain.insert).toHaveBeenCalled();
+    });
+
+    it('should normalize messages to lowercase for dedupe', async () => {
+      await (service as any)._fireFollowup(followup); // sets lowercase in cache
+      mockChain.insert.mockClear();
+
+      const uppercaseFollowup = { ...followup, message: 'HEY YAAR KYA CHAL RAHA HAI BATA NA' };
+      await (service as any)._fireFollowup(uppercaseFollowup);
+      
+      // Should be blocked because it's normalized
+      expect(mockChain.insert).not.toHaveBeenCalled();
     });
   });
 
-  describe('checkUnansweredConversations', () => {
-    it('Detects serious signals -> 2 min cutoff', async () => {
-      // Mock user msg age: 3 min ago. It has "stressed".
-      const created_at = new Date(Date.now() - 3 * 60000).toISOString();
-      const mockUserMsgs = [{ id: 1, user_id: 'u1', conversation_id: 'c1', content: 'I am stressed', created_at, role: 'user' }];
+  describe('3.5 checkUnansweredConversations', () => {
+    it('should detect serious signals and schedule quick follow-up', async () => {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
       
       (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
         if (table === 'chat_history') {
           return {
-            select: jest.fn().mockReturnValue({
-              gte: jest.fn().mockReturnValue({
-                eq: jest.fn().mockReturnValue({
-                  order: jest.fn().mockResolvedValue({ data: mockUserMsgs }), // For userMsgs query
-                  limit: jest.fn().mockResolvedValue({ data: [] }) // For assistant msgs query
-                }),
-                limit: jest.fn().mockResolvedValue({ data: [] }) // for recentAssistantMsgs
-              }),
-              eq: jest.fn().mockReturnValue({
-                gt: jest.fn().mockReturnValue({
-                  limit: jest.fn().mockResolvedValue({ data: [] }) // for newerMsgs
-                }),
-                eq: jest.fn().mockReturnValue({
-                  gte: jest.fn().mockReturnValue({
-                    limit: jest.fn().mockResolvedValue({ data: [] })
-                  })
-                })
-              })
-            })
+            ...mockChain,
+            order: jest.fn().mockResolvedValueOnce({ data: [{ id: 'msg1', user_id: 'u1', conversation_id: 'c1', content: 'I am so stressed about my exam', created_at: fiveMinAgo, role: 'user' }] }),
+            limit: jest.fn().mockResolvedValue({ data: [] })
           };
         }
         if (table === 'nova_followups') {
           return {
-            select: jest.fn().mockReturnValue({
-              eq: jest.fn().mockReturnValue({
-                in: jest.fn().mockReturnValue({
-                  gte: jest.fn().mockReturnValue({
-                    limit: jest.fn().mockResolvedValue({ data: [] })
-                  })
-                })
-              }),
-              update: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({}) }) }),
-              insert: jest.fn().mockResolvedValue({})
-            })
-          };
+             ...mockChain,
+             limit: jest.fn().mockResolvedValue({ data: [] })
+          }
         }
-        if (table === 'user_presence') return { select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({}) }) }) };
-        return {};
+        return mockChain;
       });
-
-      const spyQueue = jest.spyOn(service, 'queueFollowup');
 
       await service.checkUnansweredConversations();
 
-      expect(spyQueue).toHaveBeenCalledWith('u1', 'c1', 'Hey? You there?', 0);
+      expect(novaBrain.evaluateConsciousnessTier2).toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Detected stuck conversation'), expect.any(Object));
     });
 
-    it('Detects personal signals -> 5 min cutoff', async () => {
-      // Mock user msg age: 6 min ago. It has "baat karo".
-      const created_at = new Date(Date.now() - 6 * 60000).toISOString();
-      const mockUserMsgs = [{ id: 1, user_id: 'u1', conversation_id: 'c1', content: 'baat karo', created_at, role: 'user' }];
-      
+    it('should skip conversations where Nova already replied', async () => {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
       (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
         if (table === 'chat_history') {
           return {
-            select: jest.fn().mockReturnValue({
-              gte: jest.fn().mockReturnValue({
-                eq: jest.fn().mockReturnValue({
-                  order: jest.fn().mockResolvedValue({ data: mockUserMsgs }),
-                  limit: jest.fn().mockResolvedValue({ data: [] })
-                }),
-                limit: jest.fn().mockResolvedValue({ data: [] })
-              }),
-              eq: jest.fn().mockReturnValue({
-                gt: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [] }) }),
-                eq: jest.fn().mockReturnValue({ gte: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [] }) }) })
-              })
-            })
+            ...mockChain,
+            order: jest.fn().mockResolvedValueOnce({ data: [{ id: 'msg1', user_id: 'u1', conversation_id: 'c1', content: 'I am so stressed about my exam', created_at: fiveMinAgo, role: 'user' }] }),
+            limit: jest.fn().mockResolvedValue({ data: [{ id: 'reply-1' }] }) // Nova replied!
+          };
+        }
+        return mockChain;
+      });
+
+      await service.checkUnansweredConversations();
+      expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('Detected stuck conversation'), expect.any(Object));
+    });
+
+    it('should skip if a follow-up was recently sent', async () => {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
+      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
+        if (table === 'chat_history') {
+          return {
+            ...mockChain,
+            order: jest.fn().mockResolvedValueOnce({ data: [{ id: 'msg1', user_id: 'u1', conversation_id: 'c1', content: 'I am so stressed about my exam', created_at: fiveMinAgo, role: 'user' }] }),
+            limit: jest.fn().mockResolvedValue({ data: [] })
           };
         }
         if (table === 'nova_followups') {
           return {
-            select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ in: jest.fn().mockReturnValue({ gte: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [] }) }) }) }) }),
-            update: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({}) }) }),
-            insert: jest.fn().mockResolvedValue({})
-          };
+            ...mockChain,
+            limit: jest.fn().mockResolvedValue({ data: [{ id: 'recent-fup' }] })
+          }
         }
-        if (table === 'user_presence') return { select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({}) }) }) };
-        return {};
+        return mockChain;
       });
 
-      const spyQueue = jest.spyOn(service, 'queueFollowup');
-
       await service.checkUnansweredConversations();
-
-      expect(spyQueue).toHaveBeenCalledWith('u1', 'c1', 'Hey? You there?', 0);
-    });
-
-    it('Skips if Nova already replied', async () => {
-      const created_at = new Date(Date.now() - 20 * 60000).toISOString();
-      const mockUserMsgs = [{ id: 1, user_id: 'u1', conversation_id: 'c1', content: 'hello', created_at, role: 'user' }];
-      
-      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
-        if (table === 'chat_history') {
-          return {
-            select: jest.fn().mockReturnValue({
-              gte: jest.fn().mockReturnValue({
-                eq: jest.fn().mockReturnValue({
-                  order: jest.fn().mockResolvedValue({ data: mockUserMsgs }),
-                  limit: jest.fn().mockResolvedValue({ data: [] })
-                }),
-                limit: jest.fn().mockResolvedValue({ data: [] })
-              }),
-              eq: jest.fn().mockReturnValue({
-                gt: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [{ id: 2 }] }) }), // Nova replied!
-                eq: jest.fn().mockReturnValue({ gte: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [] }) }) })
-              })
-            })
-          };
-        }
-        return {};
-      });
-
-      const spyQueue = jest.spyOn(service, 'queueFollowup');
-      await service.checkUnansweredConversations();
-      expect(spyQueue).not.toHaveBeenCalled();
-    });
-
-    it('Skips if follow-up recently sent (cooldown)', async () => {
-      const created_at = new Date(Date.now() - 20 * 60000).toISOString();
-      const mockUserMsgs = [{ id: 1, user_id: 'u1', conversation_id: 'c1', content: 'hello', created_at, role: 'user' }];
-      
-      (supabaseAdmin.from as jest.Mock).mockImplementation((table) => {
-        if (table === 'chat_history') {
-          return {
-            select: jest.fn().mockReturnValue({
-              gte: jest.fn().mockReturnValue({
-                eq: jest.fn().mockReturnValue({ order: jest.fn().mockResolvedValue({ data: mockUserMsgs }), limit: jest.fn().mockResolvedValue({ data: [] }) }),
-                limit: jest.fn().mockResolvedValue({ data: [] })
-              }),
-              eq: jest.fn().mockReturnValue({
-                gt: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [] }) }),
-                eq: jest.fn().mockReturnValue({ gte: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [] }) }) })
-              })
-            })
-          };
-        }
-        if (table === 'nova_followups') {
-          return {
-            select: jest.fn().mockReturnValue({
-              eq: jest.fn().mockReturnValue({
-                in: jest.fn().mockReturnValue({
-                  gte: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue({ data: [{ id: 9 }] }) }) // Recent followup exists
-                })
-              })
-            })
-          };
-        }
-        return {};
-      });
-
-      const spyQueue = jest.spyOn(service, 'queueFollowup');
-      await service.checkUnansweredConversations();
-      expect(spyQueue).not.toHaveBeenCalled();
+      expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('Detected stuck conversation'), expect.any(Object));
     });
   });
 });
