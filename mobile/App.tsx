@@ -10,15 +10,12 @@ import { notificationService } from './src/services/notificationService';
 import { registerBackgroundFetchAsync } from './src/services/backgroundTaskService';
 import { useChatStore } from './src/store/useChatStore';
 import * as Notifications from 'expo-notifications';
-import { NavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainerRef, useNavigationContainerRef } from '@react-navigation/native';
 import updateHistory from './src/config/updateHistory.json';
 
 const latestUpdate = updateHistory[0];
 
-// Navigation ref so we can navigate from outside React tree (notification tap handler)
-const navigationRef = React.createRef<NavigationContainerRef<any>>();
-
-function AppContent() {
+function AppContent({ navigationRef }: { navigationRef: any }) {
   const { isDark, colors } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'downloaded' | 'changelog'>('changelog');
@@ -174,10 +171,11 @@ function AppContent() {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function App() {
+  const navigationRef = useNavigationContainerRef();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
-        <AppContent />
+        <AppContent navigationRef={navigationRef} />
       </ThemeProvider>
     </GestureHandlerRootView>
   );
