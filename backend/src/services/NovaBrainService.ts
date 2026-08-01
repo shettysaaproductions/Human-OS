@@ -33,9 +33,9 @@ export class NovaBrainService {
       'HUMAN_CHAT',
       context.situationBrief
     );
-    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}
+    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}\n${context.lengthInstruction || ''}
 
-## 🧠 SUBCONSCIOUS ACTIONS & STREAMING (CRITICAL FORMAT)
+## 🧠 SUBCONSCIOUS ACTIONS & JSON FORMAT (CRITICAL)
 You are capable of generating a conversational reply AND taking background actions simultaneously.
 You MUST format your EXACT output using these two XML tags:
 
@@ -140,7 +140,7 @@ If no tools need to be called, leave the JSON array empty: []
       context.situationBrief
     );
 
-    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}
+    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}\n${context.lengthInstruction || ''}
 
 ## 🧠 SUBCONSCIOUS ACTIONS & STREAMING (CRITICAL FORMAT)
 You are capable of generating a conversational reply AND taking background actions simultaneously.
