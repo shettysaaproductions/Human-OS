@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     }, 10 * 1000); // 10 seconds
     if (remindersInterval.unref) remindersInterval.unref();
 
-    // NACE: Nova Autonomous Consciousness Engine (runs every 15 minutes)
+    // NACE: Nova Autonomous Consciousness Engine (runs every 3 minutes)
     const naceInterval = setInterval(async () => {
       try {
         logger.info('Scheduler: Triggering NACE pulse...');
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error('Error in NACE pulse', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 15 * 60 * 1000); // 15 minutes
+    }, 3 * 60 * 1000); // NACE pulse every 3 minutes for more responsive proactive messaging (was 15 minutes — caused 10-15 min delays in active conversations)
     if (naceInterval.unref) naceInterval.unref();
 
     // NACE Habit Trigger Sync (runs every 6 hours — creates agenda items from routines)
