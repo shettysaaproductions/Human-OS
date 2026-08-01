@@ -399,6 +399,9 @@ function sanitizeMarkdown(raw: string): string {
   return cleaned.join('\n');
 }
 
+// ── User-level Mutex to prevent race conditions on rapid messages ───────────
+const userLocks = new Map<string, Promise<void>>();
+
 chatRouter.post(
   '/',
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -411,6 +414,15 @@ chatRouter.post(
       const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content } = parseResult.data;
       const userId = (req as any).user!.id;
       let activeConversationId = conversation_id || crypto.randomUUID();
+
+      // Acquire lock for this user to ensure sequential message processing
+      const previousLock = userLocks.get(userId) || Promise.resolve();
+      let releaseLock!: () => void;
+      const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
+      userLocks.set(userId, previousLock.then(() => newLock));
+
+      try {
+        await previousLock;
 
 
       const isDegraded = dbHealthService.isDegraded();
@@ -1228,10 +1240,20 @@ chatRouter.post(
       }
       
       if (!isAsync) {
-        next(err);
+        throw err; // throw to the outer catch
+      }
+    } finally {
+      if (releaseLock) {
+        releaseLock();
+        if (userLocks.get(userId) === newLock) {
+          userLocks.delete(userId);
+        }
       }
     }
+  } catch (outerErr) {
+    next(outerErr);
   }
+}
 );
 
 // ── GET History ───────────────────────────────────────────────────────────────
