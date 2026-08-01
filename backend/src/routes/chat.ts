@@ -137,6 +137,15 @@ Real friends text naturally. You can reply with MULTIPLE short messages when it 
 - Do NOT combine everything into one long paragraph
 - This feels more like real WhatsApp texting
 
+## 🧠 MEMORY USAGE (MANDATORY)
+You have access to the user's stored memories above. You MUST:
+- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")
+- Mention specific people by name (e.g., "How is Sakshi doing?")
+- Recall specific events with dates when relevant
+- NEVER give generic template responses
+- If asked "what do you remember", quote memories VERBATIM
+- If you don't see relevant memories, say "I need to check my notes" instead of making things up
+
 ## 🧠 MEMORY & CONTEXT INTELLIGENCE — CRITICAL
 You have access to long-term memory, short-term memory, working memory, and full chat history.
 ALWAYS cross-reference before responding:
@@ -968,6 +977,57 @@ chatRouter.post(
 
       const isStreaming = req.headers.accept === 'text/event-stream';
 
+      // === MEMORY RETRIEVAL (CRITICAL FIX) ===
+      let memoryContext = '';
+      try {
+        const { data: relevantMemories } = await supabaseAdmin
+          .from('memories')
+          .select('*')
+          .eq('user_id', userId)
+          .order('relevance_score', { ascending: false })
+          .limit(5);
+          
+        const { data: recentEpisodic } = await supabaseAdmin
+          .from('episodic_memories')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(3);
+          
+        const { data: workingMem } = await supabaseAdmin
+          .from('working_memory')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (relevantMemories?.length || recentEpisodic?.length) {
+          memoryContext = `\n\n## 🧠 WHAT YOU REMEMBER ABOUT THIS USER\n`;
+          
+          if (workingMem) {
+            memoryContext += `Current focus: ${workingMem.current_focus || 'None'}\n`;
+            memoryContext += `Active goals: ${(workingMem.active_goals || []).join(', ')}\n`;
+          }
+          
+          if (relevantMemories?.length) {
+            memoryContext += `\nLong-term memories:\n`;
+            relevantMemories.forEach(m => {
+              memoryContext += `- ${m.content} (${m.category})\n`;
+            });
+          }
+          
+          if (recentEpisodic?.length) {
+            memoryContext += `\nRecent events:\n`;
+            recentEpisodic.forEach(e => {
+              memoryContext += `- ${e.event_description} (${new Date(e.created_at).toLocaleDateString()})\n`;
+            });
+          }
+          
+          memoryContext += `\nCRITICAL: When asked "what do you remember" or "what are my goals", LIST THESE SPECIFIC MEMORIES. Never give generic answers like "motivation and life satisfaction". Use actual names, dates, and facts from above.\n`;
+        }
+      } catch (e) {
+        logger.warn('[Memory] Retrieval failed:', e);
+      }
+
       const brainContext = {
         memories,
         workingMemories,
@@ -978,6 +1038,7 @@ chatRouter.post(
         temporalContextBlock,
         remindersContext,
         recentMessages,
+        memoryContext,
         userCountry: profile?.country || 'IN'
       };
 
