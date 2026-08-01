@@ -70,6 +70,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **Push Notifications (Aug 1, 2026):** FCM V1 key uploaded to Expo + `EXPO_ACCESS_TOKEN` set in Render & `backend/.env`.
 - ✅ **Critical Auth Fix (Aug 1, 2026):** Fixed fatal zero-UUID bug in `backend/src/middleware/auth.ts`. Replaced hardcoded `00000000...` dummy user with actual Supabase JWT validation (`supabaseAnon.auth.getUser()`). This fixes 500 crashes on telemetry events and ensures push tokens are mapped to the correct user.
 - ✅ **Auto Upgrade Protocol (Aug 1, 2026):** Patched hallucination bug in `promptBuilder.ts` (Rules 18 & 19 added) and fixed the rapid-message race condition (double texts) by adding an in-memory Mutex lock per user in `backend/src/routes/chat.ts`.
+- ✅ **Tag Replies & Message Merging (Aug 1, 2026):** Re-architected `chat.ts` to solve cascading timeouts. Rapid messages are now debounced (if a newer user message exists, older generation aborts gracefully), forcing Nova to merge rapid texts into a single response. Assistant inserts also now use `reply_to_id` to enable WhatsApp-style quote tags in the UI.
 - ✅ **Token Freshness (Aug 1, 2026):** Fixed FCM `DeviceNotRegistered` stale token bug by forcing `getDevicePushTokenAsync` before `getExpoPushTokenAsync` in `ensureTokenFresh()` and `_requestPermissionAndRegister()`.
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
 - ✅ **Database Bug Resolved (Aug 1, 2026):** `reminders.status` column successfully added to Supabase.

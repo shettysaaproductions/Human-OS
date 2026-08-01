@@ -415,14 +415,8 @@ chatRouter.post(
       const userId = (req as any).user!.id;
       let activeConversationId = conversation_id || crypto.randomUUID();
 
-      // Acquire lock for this user to ensure sequential message processing
-      const previousLock = userLocks.get(userId) || Promise.resolve();
-      let releaseLock!: () => void;
-      const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
-      userLocks.set(userId, previousLock.then(() => newLock));
-
-      try {
-        await previousLock;
+      let releaseLock: (() => void) | undefined;
+      // Lock will be acquired after user message is inserted
 
 
       const isDegraded = dbHealthService.isDegraded();
@@ -560,6 +554,33 @@ chatRouter.post(
       }
 
 
+      // ── Mutex & Debounce ───────────────────────────────────────────────────
+      // Acquire lock NOW, after DB insert and async response
+      const previousLock = userLocks.get(userId) || Promise.resolve();
+      const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
+      userLocks.set(userId, previousLock.then(() => newLock));
+      
+      try {
+        await previousLock;
+
+        // DEBOUNCE CHECK: Are there any NEWER user messages in this conversation?
+        if (!is_proactive) {
+          const { data: latestUserMsg } = await supabaseAdmin
+            .from('chat_history')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('conversation_id', activeConversationId)
+            .eq('role', 'user')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (latestUserMsg && latestUserMsg.id !== userMessageId) {
+            logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId });
+            return; // Abort LLM generation, the newer message's request will handle it
+          }
+        }
+      
       // ── PARALLEL FETCH: profile, chat history, cross-session,
       // working memory, long-term memories, short-term memories — all at once.
       const keywords = extractKeywords(effectiveMessage);
@@ -1098,6 +1119,8 @@ chatRouter.post(
               conversation_id: activeConversationId, 
               role: 'assistant', 
               content: rawReply,
+              reply_to_id: userMessageId,
+              reply_to_content: message.substring(0, 100),
               meta: {
                 situationBrief: situationBrief || null,
                 subconsciousActions: extractedActions,
