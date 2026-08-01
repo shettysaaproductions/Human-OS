@@ -77,6 +77,8 @@ Every 7 days, the founder reviews:
    - Added ANTI-ROBOT RULE (REPETITION) to prevent reusing the same phrase
    - Added ANTI-ROBOT RULE (FORMALITY - STRICT ENFORCEMENT) to absolutely ban mirroring "aap"
    - Added ANTI-ROBOT RULE (STATEMENT ENDINGS) to force at least 50% statements vs questions
+   - Added ANTI-ROBOT RULE (NO HALLUCINATING ACTIONS) to stop Nova from inventing fake confusion when missing context
+   - Added ANTI-ROBOT RULE (CONTEXT ROLL-UP) to address multiple short messages as a single thought
    - Added ANTI-ROBOT RULE (EMOTIONAL PRIORITIZATION) to validate stress/emotion before logic
    - Added ANTI-ROBOT RULE (SCHEDULE PRE-CHECK) to cross-reference known events before asking activity questions
    - Added ANTI-ROBOT RULE (SAME-SESSION AMNESIA) to strictly enforce zero-tolerance for forgetting current context

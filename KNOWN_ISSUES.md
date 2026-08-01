@@ -51,3 +51,5 @@ This document tracks identified bugs, limitations, and workarounds.
 | `reminders.status` missing causing log spam | Applied migration `20260720000000_add_reminders_status.sql` | July 2026 |
 | Time Hallucination near midnight | Addressed via better context awareness in auto upgrade | July 2026 |
 | Repetition of exact phrases | Added ANTI-ROBOT REPETITION rule to `promptBuilder.ts` | July 2026 |
+| Race Condition (Double text) on rapid messages | Added in-memory Mutex lock per user in `backend/src/routes/chat.ts` | Aug 2026 |
+| Robotic Excuse Hallucination | Added NO HALLUCINATING ACTIONS and CONTEXT ROLL-UP rules to `promptBuilder.ts` | Aug 2026 |
