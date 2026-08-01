@@ -54,7 +54,10 @@ Available Tools for Subconscious Actions:
 2. "ReminderEngine" -> "schedule": Set a reminder ONLY IF EXPLICITLY ASKED.
    - data: { "time_phrase": "tomorrow at 10am", "description": "what to remind" }
 3. "NovaFollowupService" -> "queue": Queue a follow-up if you ask a question or want to keep the chat going. If they leave you on read, this fires to double-text them (e.g. "hey?", "busy?").
-   - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.1 for 6 mins, 0.25 for 15 mins)
+   - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.02 for 1.2 mins (active conversation), 0.05 for 3 mins (casual), 0.15 for 9 mins (long gap))
+   - If the user just sent a short message and you want to keep the chat going, use 0.02 (72 seconds).
+   - If the conversation has been quiet for a few minutes, use 0.05 (3 minutes).
+   - Only use 0.15+ (9+ minutes) if the user seems busy or the topic is concluded.
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
@@ -161,7 +164,10 @@ Available Tools for Subconscious Actions:
 2. "ReminderEngine" -> "schedule": Set a reminder ONLY IF EXPLICITLY ASKED.
    - data: { "time_phrase": "tomorrow at 10am", "description": "what to remind" }
 3. "NovaFollowupService" -> "queue": Queue a follow-up if you ask a question or want to keep the chat going. If they leave you on read, this fires to double-text them (e.g. "hey?", "busy?").
-   - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.1 for 6 mins, 0.25 for 15 mins)
+   - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.02 for 1.2 mins (active conversation), 0.05 for 3 mins (casual), 0.15 for 9 mins (long gap))
+   - If the user just sent a short message and you want to keep the chat going, use 0.02 (72 seconds).
+   - If the conversation has been quiet for a few minutes, use 0.05 (3 minutes).
+   - Only use 0.15+ (9+ minutes) if the user seems busy or the topic is concluded.
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
