@@ -208,14 +208,16 @@ git push origin main
 
 ---
 
-### STEP 9: OTA Update (Always — Even If Only Backend Changed)
+### STEP 9: OTA Update (Mandatory for ALL Mobile or Backend Changes)
 
 ```bash
-cd "c:\Users\Mentorus2\OneDrive\Documents\Human Os\mobile"
-npx eas update --branch production --message "Auto Upgrade: <same description>"
+cd backend && npm run build
+cd ../mobile
+npx eas update --branch production --environment production --message "Auto Upgrade: <same description>"
 ```
 
 ⚠️ ALWAYS use `--branch production`. The installed APK listens to the `production` EAS channel.
+You MUST run this OTA command yourself using the `run_command` tool at the end of every task where you make changes. The user should not have to ask you to do it.
 
 Wait for the EAS command to complete and confirm:
 - ✅ "Published!" message appears
