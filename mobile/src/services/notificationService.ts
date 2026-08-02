@@ -272,6 +272,14 @@ class NotificationService {
         console.log('[Notifications] Nova reply push received (foreground) — fetching messages');
         this._fireReplyCallback();
       }
+
+      if (type === 'vision_snap') {
+        console.log('[Notifications] Vision snap requested by backend. Emitting event.');
+        // Don't show notification for silent snap requests
+        Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => {});
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit('TRIGGER_VISION_SNAP');
+      }
     });
 
     // Fires when the user taps the notification (app was in background or killed)
