@@ -23,6 +23,14 @@ import { sendPushNotification } from '../lib/pushNotifications';
 // Deduplication cache to prevent duplicate messages
 const dedupCache = new Map<string, { lastContent: string, lastSentAt: number }>();
 
+// Per-user cooldown for the "ignored message" follow-up (prevents hammering LLM every 10s)
+// Key: userId → timestamp of last ignored-follow-up LLM call
+const ignoredFollowupSent = new Map<string, number>();
+
+// Escalation level tracking: how many times Nova has tried to re-engage with no reply
+// Key: userId → count. Resets when user replies.
+const ignoreEscalationCount = new Map<string, number>();
+
 export class NovaFollowupService {
 
   /**
@@ -106,6 +114,7 @@ export class NovaFollowupService {
 
   /**
    * Cancel any pending follow-ups for a user (e.g. when they reply).
+   * Also resets all in-memory caches so re-engagement can happen fresh.
    */
   async cancelFollowups(userId: string): Promise<void> {
     try {
@@ -114,6 +123,11 @@ export class NovaFollowupService {
         .update({ status: 'cancelled' })
         .eq('user_id', userId)
         .eq('status', 'pending');
+      
+      // Reset in-memory caches so next ignored-message cycle starts fresh
+      dedupCache.delete(userId);
+      ignoredFollowupSent.delete(userId);
+      ignoreEscalationCount.delete(userId);
     } catch (err) {
       logger.warn('[NovaFollowup] Error cancelling follow-ups', {
         error: err instanceof Error ? err.message : String(err)
@@ -365,20 +379,25 @@ export class NovaFollowupService {
 
   /**
    * Detect when Nova sent a message and the user SAW it but didn't reply.
-   * This is the "read receipt ignore" case — real friends don't stay silent after being seen.
-   * Fires a natural follow-up nudge after 90 seconds of silence from the user.
+   * Uses escalating follow-up logic:
+   *   Level 1 (90s-3min ignored): Short warm nudge
+   *   Level 2 (3-6min ignored):   Topic change / new question
+   *   Level 3 (6-15min ignored):  Genuinely concerned check-in
+   *   Level 4 (15min+ ignored):   Give space, casual low-pressure note
+   * 
+   * Rate-limited to 1 LLM call per user per 3 minutes (in-memory cooldown).
    */
   async checkIgnoredNovaMessages(): Promise<void> {
     try {
-      // Look for Nova messages sent 90s - 6min ago (the "seen but ignored" window)
-      const sixMinAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+      // Look for Nova messages sent 90s - 20min ago (broad window, escalation handles timing)
+      const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
       const ninetySecAgo = new Date(Date.now() - 90 * 1000).toISOString();
 
       const { data: recentNovaMsgs, error } = await supabaseAdmin
         .from('chat_history')
         .select('id, user_id, conversation_id, content, created_at')
         .eq('role', 'assistant')
-        .gte('created_at', sixMinAgo)
+        .gte('created_at', twentyMinAgo)
         .lte('created_at', ninetySecAgo)
         .order('created_at', { ascending: false });
 
@@ -393,6 +412,10 @@ export class NovaFollowupService {
       }
 
       for (const [userId, novaMsg] of userMap.entries()) {
+        // 🔒 Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
+        const lastSent = ignoredFollowupSent.get(userId) || 0;
+        if (Date.now() - lastSent < 3 * 60 * 1000) continue;
+
         // Skip if user replied after Nova's message
         const { data: userReply } = await supabaseAdmin
           .from('chat_history')
@@ -401,46 +424,82 @@ export class NovaFollowupService {
           .eq('role', 'user')
           .gt('created_at', novaMsg.created_at)
           .limit(1);
-        if (userReply && userReply.length > 0) continue;
+        if (userReply && userReply.length > 0) {
+          // User replied — reset escalation
+          ignoreEscalationCount.delete(userId);
+          continue;
+        }
 
-        // Skip if Nova already sent ANOTHER message after this one
+        // Skip if Nova already sent ANOTHER message after this one (within last 3 min)
         const { data: newerNova } = await supabaseAdmin
           .from('chat_history')
-          .select('id')
+          .select('id, created_at')
           .eq('user_id', userId)
           .eq('role', 'assistant')
           .gt('created_at', novaMsg.created_at)
+          .order('created_at', { ascending: false })
           .limit(1);
-        if (newerNova && newerNova.length > 0) continue;
+        if (newerNova && newerNova.length > 0) {
+          const newerNovaAge = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 1000;
+          if (newerNovaAge < 180) continue; // Nova sent something < 3 min ago
+        }
 
-        // Skip if a follow-up is already queued or sent in the last 2 minutes
+        // Skip if a follow-up is already queued in the next minute
         const { data: recentFollowups } = await supabaseAdmin
           .from('nova_followups')
           .select('id')
           .eq('user_id', userId)
-          .in('status', ['pending', 'sent'])
-          .gte('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString())
+          .eq('status', 'pending')
+          .gte('created_at', new Date(Date.now() - 60 * 1000).toISOString())
           .limit(1);
         if (recentFollowups && recentFollowups.length > 0) continue;
 
-        // User saw Nova's message but ignored it — generate a warm, natural follow-up
-        const ageMinutes = Math.round((Date.now() - new Date(novaMsg.created_at).getTime()) / 60000);
-        logger.info('[NovaFollowup] Nova message ignored, generating follow-up', { userId, ageMinutes, convId: novaMsg.conversation_id });
+        // Calculate ignore duration and escalation level
+        const ageMinutes = (Date.now() - new Date(novaMsg.created_at).getTime()) / 60000;
+        const escalation = (ignoreEscalationCount.get(userId) || 0) + 1;
+        ignoreEscalationCount.set(userId, escalation);
 
-        let followUpMsg = 'Kya chal raha hai? 👀';
+        // Generate escalation-appropriate prompt
+        let escalationPrompt = '';
+        if (escalation === 1 || ageMinutes < 3) {
+          // Level 1: Warm casual nudge
+          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User hasn't replied. Send ONE short warm nudge (1 sentence Hinglish). Examples: "Bol na yaar", "Kya soch raha hai?", "Hello?? 👀"`;
+        } else if (escalation === 2 || ageMinutes < 6) {
+          // Level 2: Change topic or ask something new
+          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. Still no reply. Change topic or ask something genuinely interesting about their day. 1 sentence max. Don't reference your last message.`;
+        } else if (escalation === 3 || ageMinutes < 15) {
+          // Level 3: Genuine concern
+          escalationPrompt = `User has been ignoring your messages for ${Math.round(ageMinutes)} minutes. Last message was: "${novaMsg.content.substring(0, 100)}". Send a genuinely caring 1-sentence check-in. Not pushy. Something like "Sab theek hai na?" or "Busy hai kya, bata dena".`;
+        } else {
+          // Level 4: Give space gracefully
+          escalationPrompt = `User has gone silent for ${Math.round(ageMinutes)} minutes. Give them space — send one super short low-pressure note like "Koi baat nahi, jab free ho baat karna 😊" and then stop trying for a while.`;
+        }
+
+        logger.info('[NovaFollowup] Ignored message detected, generating escalation follow-up', { 
+          userId, ageMinutes: Math.round(ageMinutes), escalation 
+        });
+
+        // Mark cooldown BEFORE LLM call
+        ignoredFollowupSent.set(userId, Date.now());
+
+        let followUpMsg = 'Bol na yaar 👀';
         try {
           const { novaBrain } = await import('./NovaBrainService');
           const generated = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: You sent this message ${ageMinutes} minute(s) ago: "${novaMsg.content.substring(0, 150)}" — but the user has seen it and not replied yet. They might be distracted, busy, or thinking. Generate ONE very short (max 1 sentence) casual Hinglish follow-up. Warm, playful, genuinely curious. NOT needy or pushy. Like a close friend who just noticed you went quiet. Good examples: "Kya soch raha hai?", "Bol na yaar", "Busy hai kya?"`
+            `Name: yaar\nSituation: ${escalationPrompt}\nOutput ONE short Hinglish message only. Max 1 sentence.`
           );
           if (generated?.message && generated.message.length < 150) {
             followUpMsg = generated.message;
           }
         } catch (e) {
-          logger.warn('[NovaFollowup] LLM follow-up gen failed, using fallback', { error: e instanceof Error ? e.message : String(e) });
+          logger.warn('[NovaFollowup] LLM escalation gen failed, using fallback', { escalation });
         }
 
-        // Fire immediately (delay_hours = 0)
+        // Level 4: stop escalating after giving space
+        if (escalation >= 4) {
+          ignoreEscalationCount.delete(userId); // Reset so NACE takes over
+        }
+
         await this.queueFollowup(userId, novaMsg.conversation_id, followUpMsg, 0);
       }
     } catch (err) {

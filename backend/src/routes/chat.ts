@@ -498,6 +498,15 @@ chatRouter.post(
         import('../services/NovaFollowupService').then(({ novaFollowupService }) => {
           novaFollowupService.cancelFollowups(userId).catch(e => logger.warn('Failed to cancel follow-ups', { error: e }));
         });
+
+        // 1.5 Auto-update user presence since they just sent a message (they are online)
+        supabaseAdmin.from('user_presence').upsert({
+          user_id: userId,
+          status: 'online',
+          last_seen: new Date().toISOString()
+        }).then(({ error }) => {
+          if (error) logger.warn('Failed to update presence', { error });
+        });
       }
 
       // Real-time correction detection: If user replied to a specific Nova message,
@@ -527,41 +536,17 @@ chatRouter.post(
       // NOTE: If the frontend does not poll for async results, switch to sync mode
       // by sending async_mode: false in the request body.
       
-      // Async mode: set up a hard deadline. If processing takes >90s, save a fallback reply.
+      // Async mode: hard deadline — if processing takes >90s, attempt a short-context retry.
+      // NEVER save server error messages to DB — that shows broken UX and confuses follow-up engines.
       const ASYNC_HARD_DEADLINE_MS = 90_000;
-      let asyncDeadlineTimer: any = null; // using any for timer type to avoid TS issues
+      let asyncDeadlineTimer: any = null;
 
       if (async_mode) {
         asyncDeadlineTimer = setTimeout(async () => {
-          logger.error('[ASYNC] Hard 90s deadline exceeded — saving emergency fallback reply', { userId });
-          const fallback = 'Yaar, thoda slow ho gaya server! Ek baar phir try kar — I\'m here! 😅';
-          try {
-            const fallbackResult = await supabaseAdmin.from('chat_history').insert({
-              user_id: userId,
-              conversation_id: activeConversationId,
-              role: 'assistant',
-              content: fallback,
-            });
-            
-            if (fallbackResult.error) {
-              logger.error('[ASYNC] Failed to save deadline fallback — DB error', { 
-                userId, 
-                error: fallbackResult.error.message,
-                errorCode: fallbackResult.error.code 
-              });
-            } else {
-              logger.info('[ASYNC] Deadline fallback saved to DB', { userId });
-            }
-            
-            const { data: ptResult } = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
-            if (ptResult?.push_token) {
-              sendNovaReplyNotification(ptResult.push_token, fallback).catch(() => {});
-            }
-          } catch (saveErr) {
-            logger.error('[ASYNC] Failed to save deadline fallback — exception', { error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
-          }
+          logger.error('[ASYNC] Hard 90s deadline exceeded — skipping DB save. The background follow-up engine will detect this as an unanswered user message and follow up naturally.', { userId });
         }, ASYNC_HARD_DEADLINE_MS);
       }
+
 
       // ── Mutex & Debounce ───────────────────────────────────────────────────
       // ── Mutex with Timeout ───────────────────────────────────────────────────
@@ -1283,7 +1268,18 @@ chatRouter.post(
       // Check for duplicates due to race conditions
       const isDuplicate = await isDuplicateAssistantMessage(userId, activeConversationId, reply, 5);
       
-      if (!isDuplicate) {
+      const REJECT_PREFIXES = [
+        'Yaar, kuch technical issue',
+        'Yaar, thoda technical glitch',
+        'kuch technical issue aa gaya',
+        'Yaar, thoda slow chal raha hai server',
+        'Thodi der mein phir try karo',
+        'Acha, is topic par main jyada bol nahi sakti'
+      ];
+      const isFallbackReply = REJECT_PREFIXES.some(p => rawReply.includes(p));
+
+      // Only save to DB if it's NOT a fallback/error message
+      if (!isDuplicate && !isFallbackReply) {
         // Fetch push token fresh for the loop
         const pushTokenResult = await supabaseAdmin
           .from('profiles')

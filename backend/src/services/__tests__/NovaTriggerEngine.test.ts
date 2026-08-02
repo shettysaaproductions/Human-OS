@@ -170,13 +170,13 @@ describe('NovaTriggerEngine', () => {
 
     it('casual intensity: 0.7x faster delay', async () => {
       const casual = await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'casual' }));
-      const focused = await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'focused' }));
+      await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'focused' }));
       expect(casual.delayMs).toBeLessThanOrEqual(8000 * 0.7);
     });
 
     it('should add 5s buffer when user just sent a message <3s ago', async () => {
       const recent = await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'focused', lastUserMessageAt: Date.now() - 1000 }));
-      const older = await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'focused', lastUserMessageAt: Date.now() - 10000 }));
+      await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'focused', lastUserMessageAt: Date.now() - 10000 }));
       
       expect(recent.delayMs).toBeGreaterThanOrEqual(2000 + 5000);
     });
