@@ -13,6 +13,7 @@ import * as Notifications from 'expo-notifications';
 import { NavigationContainerRef, useNavigationContainerRef } from '@react-navigation/native';
 import updateHistory from './src/config/updateHistory.json';
 import { presenceService } from './src/services/presenceService';
+import { AutonomousEyes } from './src/components/AutonomousEyes';
 
 const latestUpdate = updateHistory[0];
 
@@ -129,8 +130,7 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AppNavigator navigationRef={navigationRef} />
-      
-
+      <AutonomousEyes />
       
       {modalVisible && (
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>

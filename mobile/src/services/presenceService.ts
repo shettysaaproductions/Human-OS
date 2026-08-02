@@ -29,8 +29,8 @@ class PresenceService {
   };
   
   private listeners: Set<(state: PresenceState) => void> = new Set();
-  private typingTimeout: NodeJS.Timeout | null = null;
-  private awayTimeout: NodeJS.Timeout | null = null;
+  private typingTimeout: ReturnType<typeof setTimeout> | null = null;
+  private awayTimeout: ReturnType<typeof setTimeout> | null = null;
   private appStateSubscription: any = null;
 
   // Timing constants (in ms)

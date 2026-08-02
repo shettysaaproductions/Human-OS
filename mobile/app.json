@@ -33,7 +33,8 @@
         "VIBRATE",
         "POST_NOTIFICATIONS",
         "FOREGROUND_SERVICE",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "CAMERA"
       ]
     },
     "web": {
@@ -44,6 +45,12 @@
       "expo-updates",
       "expo-task-manager",
       "expo-background-fetch",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Human OS to access your camera for visual context awareness."
+        }
+      ],
       [
         "expo-notifications",
         {
