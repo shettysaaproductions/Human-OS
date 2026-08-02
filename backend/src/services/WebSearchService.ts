@@ -11,8 +11,8 @@ export class WebSearchService {
    */
   async evaluateSearchNeed(message: string): Promise<string | null> {
     const prompt = `You are a Search Intent Analyzer for an AI assistant. 
-Does this user message require searching the LIVE internet to answer correctly?
-(E.g., current news, weather, stock prices, recent sports scores, or highly specific obscure facts not in general training data).
+Does this user message require searching the LIVE internet to answer correctly or provide source links?
+(E.g., current news, weather, stock prices, recent sports scores, general factual questions, or anything outside of personal chat).
 
 Message: "${message}"
 
@@ -50,13 +50,13 @@ If NO, output exactly "NO_SEARCH".`;
           tools: [{ googleSearch: {} } as any], // Cast to any to bypass TS typing if it doesn't know googleSearch yet
         });
         
-        const prompt = `Search the live web for the following query and provide a detailed, factual summary of the current results. Query: "${query}"`;
+        const prompt = `Search the live web for the following query and provide a detailed, factual summary of the current results. IMPORTANT: You MUST include the source links/URLs (e.g. https://...) for the information you find so the user can verify it. Query: "${query}"`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
         
         if (!text || text.trim().length === 0) return null;
         
-        return `\n\n## LIVE WEB SEARCH RESULTS (Omniscience Protocol)\nYou automatically searched the web using Google Search for "${query}" and found this:\n\n${text}\n\nUse this information to answer the user accurately.`;
+        return `\n\n## LIVE WEB SEARCH RESULTS (Omniscience Protocol)\nYou automatically searched the web using Google Search for "${query}" and found this:\n\n${text}\n\nCRITICAL RULE: When answering the user, you MUST include the source links/URLs provided above so the user can click them (just like ChatGPT does).`;
       } catch (e) {
         logger.warn('[WebSearch] Gemini Search failed, falling back to Wikipedia', { error: e instanceof Error ? e.message : String(e) });
         // Fall through to Wikipedia
