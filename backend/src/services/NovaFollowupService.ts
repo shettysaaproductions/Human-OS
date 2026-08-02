@@ -42,8 +42,8 @@ export class NovaFollowupService {
         .eq('user_id', userId)
         .eq('status', 'pending');
 
-      // Allow as low as 30s for urgent/serious follow-ups
-      const baseDelayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 0.5), 24 * 60); // min 30s instead of 1min
+      // Allow as low as 15s for urgent/serious follow-ups
+      const baseDelayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), 0.25), 24 * 60); // min 15s
       let delayMinutes = baseDelayMinutes;
 
       // Inject TriggerEngine for realistic timing adjustments
@@ -79,7 +79,7 @@ export class NovaFollowupService {
 
       // Fast path: if user is online/typing, use much shorter delays
       if (userPresence === 'online' || userPresence === 'typing') {
-        delayMinutes = Math.min(delayMinutes, 3); // cap at 3 minutes for active users
+        delayMinutes = Math.min(delayMinutes, 1); // 1 minute max for active users
       }
 
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);
@@ -291,7 +291,7 @@ export class NovaFollowupService {
         const isPersonal = PERSONAL_SIGNALS.some(s => content.includes(s));
 
         // Determine the cutoff based on seriousness:
-        const cutoffMinutes = isSerious ? 2 : isPersonal ? 4 : 6; // was 2 / 5 / 12
+        const cutoffMinutes = isSerious ? 1 : isPersonal ? 2 : 3; // was 2/4/6
 
         // Not old enough yet — skip for now
         if (ageMinutes < cutoffMinutes) continue;
