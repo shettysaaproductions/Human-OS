@@ -85,9 +85,12 @@ export class NovaFollowupService {
         delayMinutes += (trigger.delayMs / 60000);
       }
 
-      // Fast path: if user is online/typing, use much shorter delays
-      if (userPresence === 'online' || userPresence === 'typing') {
-        delayMinutes = Math.min(delayMinutes, 1); // 1 minute max for active users
+      // Fast path: if user is online, delay by 1-2 mins to feel natural. 
+      // CRITICAL: If user is TYPING, DO NOT send it in 1 minute. Wait at least 10 minutes to avoid interrupting them!
+      if (userPresence === 'typing') {
+        delayMinutes = Math.max(delayMinutes, 10);
+      } else if (userPresence === 'online') {
+        delayMinutes = Math.min(delayMinutes, 2); // 2 minutes max if they are just staring at the screen
       }
 
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);

@@ -130,7 +130,28 @@ export class BackgroundActionService {
           }
         }
         else if (action.tool === 'AgendaManager' && action.action === 'add') {
-           const followUpAfter = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(); // ~4 hours later
+           const { data: profile } = await supabaseAdmin.from('profiles').select('timezone_offset').eq('id', userId).maybeSingle();
+           const tzOffset = profile?.timezone_offset || 0;
+           
+           let followUpIso = null;
+           try {
+             const { novaBrain } = await import('./NovaBrainService');
+             // Try to extract exact completion time via LLM based on task description
+             followUpIso = await novaBrain.extractTimeFromRoutine(action.data.task_description, tzOffset);
+           } catch (e) {
+             logger.warn('[BackgroundAction] Failed to extract time for implicit agenda', { error: e });
+           }
+
+           // Fallback to 4 hours if the LLM couldn't determine a time
+           let followUpAfter = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(); 
+           if (followUpIso) {
+             const parsedTarget = new Date(followUpIso);
+             // If the parsed time is in the future, use it!
+             if (parsedTarget.getTime() > Date.now()) {
+               followUpAfter = followUpIso;
+             }
+           }
+
            await supabaseAdmin.from('nova_agenda').insert({
              user_id: userId,
              event_description: action.data.task_description.substring(0, 500),
@@ -143,7 +164,7 @@ export class BackgroundActionService {
              urgency: 'low',
              is_recurring: false,
            });
-           logger.info('[BackgroundAction] Added implicit agenda item', { userId, task: action.data.task_description });
+           logger.info('[BackgroundAction] Added implicit agenda item', { userId, task: action.data.task_description, followUpAfter });
         }
       } catch (err) {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });
