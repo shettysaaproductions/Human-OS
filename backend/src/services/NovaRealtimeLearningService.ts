@@ -168,7 +168,7 @@ If this is NOT a correction (just normal conversation), return:
       await supabaseAdmin.from('working_memory').upsert({
         user_id: userId,
         key: 'correction_apology_required',
-        value: `The user just corrected you for: ${parsed.flawType}. You MUST explicitly apologize for this mistake in your very next message and acknowledge that you have learned from it. Do not just move on without apologizing.`,
+        value: `The user just corrected you for: ${parsed.flawType}. You MUST explicitly acknowledge this mistake in your very next message. CRITICAL: Do NOT give a corporate robotic apology like 'I am so sorry I forgot'. Be a real friend — be playful, embarrassed, or casual (e.g. 'Oh shit my bad 😂', 'Damn my memory is failing me today', 'Arre haan yaar my bad').`,
         expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() // Expires in 5 minutes
       }, { onConflict: 'user_id,key' });
       logger.info('[REALTIME LEARNING] Injected apology_required flag into working_memory');
