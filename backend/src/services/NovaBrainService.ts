@@ -154,7 +154,8 @@ Your conversational text response here. Max 1-2 sentences. Use natural Hinglish 
 </reply>
 <subconscious_actions>
 [
-  { "tool": "MomentEngine", "action": "extract", "data": { "moment": "...", "emotion": "..." } }
+  { "tool": "MomentEngine", "action": "extract", "data": { "moment": "...", "emotion": "..." } },
+  { "tool": "ReminderEngine", "action": "schedule", "data": { "time_phrase": "in 10 minutes", "description": "Check if user is back from being busy" } }
 ]
 </subconscious_actions>
 
