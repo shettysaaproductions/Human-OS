@@ -66,6 +66,8 @@ Available Tools for Subconscious Actions:
    - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
 7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
    - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
+8. "ExternalApiEngine" -> "webhook": Trigger a real-world webhook or external action IF the user asks you to control something (like lights, notion, etc).
+   - data: { "url": "the webhook url", "method": "POST|GET", "body": { "any": "data" } }
 
 If no tools need to be called, leave the JSON array empty: []
 `;

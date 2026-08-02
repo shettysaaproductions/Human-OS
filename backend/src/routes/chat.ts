@@ -643,6 +643,7 @@ chatRouter.post(
         wmResult,
         memoriesResult,
         stmResult,
+        searchNeedResult
       ] = await Promise.all([
         // 1. Profile (use cache only if it has a push_token — avoids stale cache killing push delivery)
         (cachedProfile && cachedProfile.push_token)
@@ -704,9 +705,29 @@ chatRouter.post(
                 .order('last_mentioned_at', { ascending: false })
                 .limit(20)
             ),
+            
+        // 5. Evaluate Web Search Need (Jarvis Protocol)
+        import('../services/WebSearchService')
+          .then(({ webSearchService }) => webSearchService.evaluateSearchNeed(effectiveMessage))
+          .catch(() => null),
       ]);
       const dbDuration = Date.now() - dbStartTime;
       logger.info('[Chat] Context fetch completed', { userId, durationMs: dbDuration });
+
+      // If a web search is needed, execute it immediately (before LLM generation)
+      let webSearchContext = '';
+      if (searchNeedResult) {
+        try {
+          const { webSearchService } = await import('../services/WebSearchService');
+          const searchData = await webSearchService.executeSearch(searchNeedResult);
+          if (searchData) {
+            webSearchContext = searchData;
+            logger.info('[Chat] Web Search Injected', { query: searchNeedResult });
+          }
+        } catch (e) {
+          logger.warn('[Chat] Failed to execute web search', { error: e });
+        }
+      }
 
       // ── Unpack results ─────────────────────────────────────────────────────────
       // 1. Profile
@@ -1031,13 +1052,14 @@ chatRouter.post(
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has NO active reminders. CRITICAL: This is the absolute source of truth. If past chat history says a reminder was set, but this list is empty, it means there are NO active reminders. Do not contradict this fact.';
       }
 
-
-
       // === MEMORY RETRIEVAL (REUSE ALREADY-FETCHED DATA) ===
       let memoryContext = '';
+      if (webSearchContext) {
+        memoryContext += webSearchContext;
+      }
       try {
         if (memories.length || shortTermMemories.length || workingMemories.length) {
-          memoryContext = `\n\n## 🧠 WHAT YOU REMEMBER ABOUT THIS USER\n`;
+          memoryContext += `\n\n## 🧠 WHAT YOU REMEMBER ABOUT THIS USER\n`;
           
           if (workingMemories.length) {
             const currentFocus = workingMemories.find(w => w.key === 'current_focus')?.value;

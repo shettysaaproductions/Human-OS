@@ -166,6 +166,23 @@ export class BackgroundActionService {
            });
            logger.info('[BackgroundAction] Added implicit agenda item', { userId, task: action.data.task_description, followUpAfter });
         }
+        else if (action.tool === 'ExternalApiEngine' && action.action === 'webhook') {
+           const { url, method, body } = action.data;
+           if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+             try {
+               const axios = (await import('axios')).default;
+               logger.info(`[ExternalApiEngine] Triggering webhook: ${method} ${url}`);
+               await axios({
+                 method: method || 'POST',
+                 url: url,
+                 data: body || {},
+                 timeout: 5000, // 5s timeout so it doesn't hang
+               });
+             } catch (webhookErr) {
+               logger.warn(`[ExternalApiEngine] Webhook failed for ${url}`, { error: webhookErr instanceof Error ? webhookErr.message : String(webhookErr) });
+             }
+           }
+        }
       } catch (err) {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });
       }
