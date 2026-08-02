@@ -63,6 +63,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Mutex Deadlock Fix v2 (Aug 2, 2026):** Replaced broken chained mutex (which created never-resolving promise chains) with a simple timeout lock. Previous lock is waited on with 30s timeout; if it hangs, it's deleted and the new request proceeds. Lock is unconditionally cleaned up in finally block.
 - ✅ **Critical Latency & Deadlock Fix (Aug 2, 2026):** Fixed Render build by excluding test files from tsconfig. Added 30s mutex timeout with stale lock cleanup to prevent deadlocks from hung LLM calls. Added 25s LLM timeout for sync requests and 30s for streaming. Fixed broken async deadline (was racing against empty function, now uses actual setTimeout).
 - ✅ **Messaging Latency Fix (Aug 2, 2026):** Reduced NACE pulse interval from 15min to 3min, removed unnecessary TriggerEngine check from chat.ts (saved 1 DB query per request), removed duplicate memory fetches (saved 3 DB queries), added response time logging to identify bottlenecks.
 - ✅ **Messaging Frequency Fix (Aug 2, 2026):** Reduced NACE MIN_GAP from 45min to 10min, dynamic gaps from 20-90min to 8-25min, follow-up delays from 6-15min to 1-3min, and unanswered conversation cutoff from 12min to 6min. Nova now messages 3-5x more frequently during active hours.
