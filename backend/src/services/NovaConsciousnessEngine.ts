@@ -10,7 +10,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
-const MIN_GAP_MINUTES = 10; // Reduced from 45 for more frequent engagement
+const MIN_GAP_MINUTES = 3; // Reduced from 10 — more frequent for active friend experience
 const SERVER_BOOT_COOLDOWN_MS = 5 * 60 * 1000; // Don't reach out within 5 min of server boot
 let serverBootTime = Date.now();
 
@@ -31,23 +31,23 @@ export class NovaConsciousnessEngine {
   }): number {
     // Sleep window — very long gap unless high urgency
     if (context.isSleepWindow) {
-      return context.agendaUrgency === 'high' ? 30 : 240; // was 60 / 480
+      return context.agendaUrgency === 'high' ? 15 : 120; // was 30/240
     }
 
     // Work hours (morning/afternoon) — moderate gap
     if (['morning', 'afternoon'].includes(context.timeOfDayLabel)) {
-      return context.hasAgenda ? 15 : 25; // was 45 / 90
+      return context.hasAgenda ? 8 : 12; // was 15/25
     }
 
     // Evening/night — user is likely free, shorter gap
     if (['evening', 'late_night'].includes(context.timeOfDayLabel)) {
-      if (context.hasAgenda && context.agendaUrgency === 'high') return 8;
-      if (context.hasAgenda) return 12;
-      return 15; // was 20 / 30 / 45
+      if (context.hasAgenda && context.agendaUrgency === 'high') return 3;
+      if (context.hasAgenda) return 5;
+      return 8; // was 8/12/15
     }
 
     // Default
-    return 12; // was 30
+    return 5; // was 12
   }
 
   async pulse(): Promise<void> {
@@ -153,10 +153,10 @@ export class NovaConsciousnessEngine {
     const getEffectiveMinGap = (presence: string): number => {
       switch (presence) {
         case 'typing': return 0;
-        case 'online': return 2;      // keep — 2 min for active chat
-        case 'away': return 8;        // was 15
-        case 'offline': return 20;    // was 45
-        default: return 5;            // was 5
+        case 'online': return 1;      // 1 min for active online users
+        case 'away': return 4;        // 4 min if user stepped away
+        case 'offline': return 15;    // 15 min if offline
+        default: return 2;
       }
     };
 
@@ -245,9 +245,10 @@ DECISION RULES:
 - If user has been free for ${dynamicGap}+ minutes AND there's something meaningful to say, reach out.
 - If user has a pending high-urgency task/goal, ALWAYS reach out during non-sleep hours.
 - If user is likely busy (work hours), only reach out for important agenda items.
-- NEVER reach out if the gap is less than ${MIN_GAP_MINUTES} minutes (except typing: instant).
-- If user is online and gap is 2+ min, casual check-ins are OK.
-- If user is away and gap is 8+ min, gentle check-ins are OK.`;
+- If user is online and gap is 1+ min, casual check-ins are OK.
+- If user is away and gap is 4+ min, gentle check-ins are OK.
+- If user read your message but didn't reply (gap 2+ min), send a follow-up.
+- NEVER reach out if the gap is less than ${MIN_GAP_MINUTES} minutes (except typing: instant).`;
 
     let shouldReach = false;
     let triggerType = 'engagement';
