@@ -87,6 +87,7 @@ async function main(): Promise<void> {
         await reminderSchedulerService.checkAndFireReminders();
         await novaFollowupService.checkAndFireFollowups();
         await novaFollowupService.checkUnansweredConversations();
+        await novaFollowupService.checkIgnoredNovaMessages(); // NEW: detects when Nova's message is seen but ignored
       } catch (err) {
         logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
       }
