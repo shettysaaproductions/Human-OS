@@ -415,8 +415,27 @@ ${abandonmentNote}`;
         if (existingAgenda && existingAgenda.length > 0) continue; // Already have today's triggers
 
         // Create a habit-based agenda item
+        const { data: profile } = await supabaseAdmin.from('profiles').select('timezone_offset').eq('id', userId).maybeSingle();
+        const tzOffset = profile?.timezone_offset || 0;
+
         const scheduleDescription = entries.map(e => `${e.key}: ${e.value}`).join(', ');
-        const followUpTime = new Date(Date.now() + 30 * 60 * 1000); // 30 mins from now as default
+        
+        let targetIso = null;
+        try {
+          const { novaBrain } = await import('./NovaBrainService');
+          targetIso = await novaBrain.extractTimeFromRoutine(scheduleDescription, tzOffset);
+        } catch (e) {
+          logger.warn('[NACE] Failed to extract time from routine via LLM', { error: e instanceof Error ? e.message : String(e) });
+        }
+
+        // Default to 30 mins if LLM fails or no specific time found
+        let followUpTime = new Date(Date.now() + 30 * 60 * 1000); 
+        if (targetIso) {
+          const parsedTarget = new Date(targetIso);
+          if (parsedTarget.getTime() > Date.now()) {
+            followUpTime = parsedTarget;
+          }
+        }
 
         await supabaseAdmin.from('nova_agenda').insert({
           user_id: userId,
@@ -430,7 +449,7 @@ ${abandonmentNote}`;
           is_recurring: true,
         });
 
-        logger.info('[NACE] Created habit-based trigger for user', { userId, schedule: scheduleDescription.substring(0, 100) });
+        logger.info('[NACE] Created habit-based trigger for user', { userId, schedule: scheduleDescription.substring(0, 100), followUpTime: followUpTime.toISOString() });
       }
     } catch (err) {
       logger.warn('[NACE] Habit trigger sync failed (non-critical)', {

@@ -66,13 +66,19 @@ export class SituationalAwareness {
     lines.push(`- Time of day: ${this.getTimeOfDay(ctx.nowLocal)}`);
     lines.push(`- Time-based persona: ${this.getTimedPersona(ctx.nowLocal, ctx.isWeekend)}`);
 
-    // ── Message Gap ──
+    const currentHour = ctx.nowLocal.getHours();
+    if (currentHour >= 1 && currentHour <= 4) {
+      lines.push(`- ⚠️ SLEEP WINDOW SCOLDING: The user is messaging you between 1 AM and 4 AM. A real human friend would immediately ask why they are awake at this hour instead of sleeping. Acknowledge the time explicitly and scold them gently!`);
+    }
+
     if (ctx.gapMinutes !== null) {
       lines.push(`- Last contact: ${this.describeGap(ctx.gapMinutes)}`);
       lines.push(`- Greeting strategy: ${this.getGreetingStrategy(ctx.gapMinutes, ctx.nowLocal)}`);
       // Hard-lock stale context when gap is significant
       if (ctx.gapMinutes > 1440) { // > 24 hours
         lines.push(`- ⛔ CONTEXT HARD STOP: It has been over 24 hours since last message. The previous conversation thread is CLOSED. Do NOT reference or continue it. Open fresh with something relevant to RIGHT NOW — current time, day, what they are likely doing.`);
+      } else if (ctx.gapMinutes > 720) { // > 12 hours TOPIC DECAY
+        lines.push(`- ⚠️ TOPIC DECAY: It has been over 12 hours. The previous casual topic is dead. Do not try to resume it or bridge the context unless it was a massive life goal. Start fresh.`);
       } else if (ctx.gapMinutes > 360) { // > 6 hours
         lines.push(`- ⚠️ STALE CONTEXT WARNING: ${Math.round(ctx.gapMinutes / 60)}h gap. Previous topic is likely stale. Start from the current moment — don't pick up mid-thread.`);
       }
