@@ -509,51 +509,59 @@ chatRouter.post(
           conversation_id: activeConversationId,
           user_message_id: userMessageId,
         });
-        // Wrap the entire remaining processing in a 90-second hard deadline.
-        // If NVIDIA hangs indefinitely (or the server is under load), this guard
-        // fires and saves a fallback reply so the user is never left with a stuck indicator.
-        const ASYNC_HARD_DEADLINE_MS = 90_000;
-        const asyncDeadline = new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error('ASYNC_DEADLINE_EXCEEDED')), ASYNC_HARD_DEADLINE_MS)
-        );
-        // We wrap all the background processing in a race against the deadline.
-        // The catch is handled further down in the outer try/catch.
-        void Promise.race([
-          (async () => { /* intentionally empty — actual processing continues below */ })(),
-          asyncDeadline
-        ]).catch(async (deadlineErr) => {
-          if (deadlineErr?.message === 'ASYNC_DEADLINE_EXCEEDED') {
-            logger.error('[ASYNC] Hard 90s deadline exceeded — saving emergency fallback reply', { userId });
-            const fallback = 'Yaar, thoda slow ho gaya server! Ek baar phir try kar — I\'m here! 😅';
-            try {
-              await supabaseAdmin.from('chat_history').insert({
-                user_id: userId,
-                conversation_id: activeConversationId,
-                role: 'assistant',
-                content: fallback,
-              });
-              // Send push notification
-              const { data: ptResult } = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
-              if (ptResult?.push_token) {
-                sendNovaReplyNotification(ptResult.push_token, fallback).catch(() => {});
-              }
-            } catch (saveErr) {
-              logger.error('[ASYNC] Failed to save deadline fallback', { error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
-            }
-          }
-        });
-        // We do NOT return here — let the process continue to talk to LLM
       }
+      
+      // Async mode: set up a hard deadline. If processing takes >90s, save a fallback reply.
+      const ASYNC_HARD_DEADLINE_MS = 90_000;
+      let asyncDeadlineTimer: any = null; // using any for timer type to avoid TS issues
 
+      if (async_mode) {
+        asyncDeadlineTimer = setTimeout(async () => {
+          logger.error('[ASYNC] Hard 90s deadline exceeded — saving emergency fallback reply', { userId });
+          const fallback = 'Yaar, thoda slow ho gaya server! Ek baar phir try kar — I\'m here! 😅';
+          try {
+            await supabaseAdmin.from('chat_history').insert({
+              user_id: userId,
+              conversation_id: activeConversationId,
+              role: 'assistant',
+              content: fallback,
+            });
+            const { data: ptResult } = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
+            if (ptResult?.push_token) {
+              sendNovaReplyNotification(ptResult.push_token, fallback).catch(() => {});
+            }
+          } catch (saveErr) {
+            logger.error('[ASYNC] Failed to save deadline fallback', { error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
+          }
+        }, ASYNC_HARD_DEADLINE_MS);
+      }
 
       // ── Mutex & Debounce ───────────────────────────────────────────────────
       // Acquire lock NOW, after DB insert and async response
+      const MUTEX_TIMEOUT_MS = 30_000; // 30 seconds max wait
+
       const previousLock = userLocks.get(userId) || Promise.resolve();
       const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
       userLocks.set(userId, previousLock.then(() => newLock));
       
+      // Timeout wrapper: if previous lock is stuck >30s, force-release and continue
+      const lockWithTimeout = Promise.race([
+        previousLock,
+        new Promise<void>((_, reject) => 
+          setTimeout(() => reject(new Error('MUTEX_TIMEOUT')), MUTEX_TIMEOUT_MS)
+        )
+      ]);
+      
       try {
-        await previousLock;
+        await lockWithTimeout.catch(err => {
+          if (err.message === 'MUTEX_TIMEOUT') {
+            logger.warn('[Chat] Mutex timeout — forcing lock release', { userId });
+            const staleLock = userLocks.get(userId);
+            if (staleLock) userLocks.delete(userId);
+          } else {
+            throw err;
+          }
+        });
 
         // DEBOUNCE CHECK: Are there any NEWER user messages in this conversation?
         if (!is_proactive) {
@@ -1062,8 +1070,18 @@ chatRouter.post(
             const { novaBrain } = await import('../services/NovaBrainService');
             const stream = novaBrain.streamInteraction(userId, effectiveMessage, brainContext);
             const iterator = stream[Symbol.asyncIterator]();
+            
+            const STREAM_TIMEOUT_MS = 30_000;
+            const streamStartTime = Date.now();
 
             while (true) {
+              if (Date.now() - streamStartTime > STREAM_TIMEOUT_MS) {
+                logger.error('[Chat] Streaming LLM timed out', { userId });
+                res.write(`data: ${JSON.stringify({ type: 'error', error: 'Response timed out. Please try again.' })}\n\n`);
+                res.end();
+                return;
+              }
+
               const { value, done } = await iterator.next();
               if (done) {
                 if (value && value.subconscious_actions && value.subconscious_actions.length > 0) {
@@ -1084,7 +1102,29 @@ chatRouter.post(
             }
           } else {
             const { novaBrain } = await import('../services/NovaBrainService');
-            const result = await novaBrain.processInteraction(userId, effectiveMessage, brainContext);
+            
+            const LLM_TIMEOUT_MS = 25_000; // 25 seconds max for LLM
+
+            const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
+            const timeoutPromise = new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('LLM_TIMEOUT')), LLM_TIMEOUT_MS)
+            );
+
+            let result: { reply: string; subconscious_actions: any[] };
+            try {
+              result = await Promise.race([llmPromise, timeoutPromise]);
+            } catch (llmErr: any) {
+              if (llmErr.message === 'LLM_TIMEOUT') {
+                logger.error('[Chat] LLM call timed out', { userId, messageLength: effectiveMessage.length });
+                result = { 
+                  reply: 'Yaar, thoda slow chal raha hai server. Ek minute mein phir try kar! 🙏',
+                  subconscious_actions: []
+                };
+              } else {
+                throw llmErr;
+              }
+            }
+
             rawReply = result.reply;
             if (result.subconscious_actions && result.subconscious_actions.length > 0) {
               extractedActions = result.subconscious_actions;
@@ -1293,6 +1333,10 @@ chatRouter.post(
       logger.info('[Chat] Request completed', { userId, totalDurationMs: totalDuration });
       if (totalDuration > 10000) {
         logger.warn('[Chat] Total request slow', { userId, totalDurationMs: totalDuration });
+      }
+      
+      if (asyncDeadlineTimer) {
+        clearTimeout(asyncDeadlineTimer);
       }
 
       // In async_mode the 202 was already sent above — skip the synchronous response
