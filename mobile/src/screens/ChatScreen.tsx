@@ -456,7 +456,8 @@ export function ChatScreen() {
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
 
   useEffect(() => {
-    return presenceService.subscribe(setPresence);
+    const unsubscribe = presenceService.subscribe(setPresence);
+    return () => { unsubscribe(); };
   }, []);
 
 
@@ -600,7 +601,8 @@ export function ChatScreen() {
     
     presenceService.onMessageSent();
     
-    const textToSend = inputText.trim() || ' ';
+    // If only image is sent with no text, use a meaningful placeholder so backend min(1) passes
+    const textToSend = inputText.trim() || '📷 (image attached)';
     sendMessage(textToSend, selectedImage?.base64);
     setInputText('');
     setSelectedImage(null);

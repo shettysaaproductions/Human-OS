@@ -88,6 +88,15 @@ async function _ensureAndroidChannels() {
       enableVibrate: true,
       showBadge: false,
     });
+    // Silent channel for autonomous vision snap triggers — no sound, no banner
+    await Notifications.setNotificationChannelAsync('nova_silent', {
+      name: 'Nova Background Tasks',
+      importance: Notifications.AndroidImportance.MIN,
+      vibrationPattern: [],
+      sound: null as any,
+      enableVibrate: false,
+      showBadge: false,
+    });
     console.log('[Notifications] Android channels refreshed ✅');
   } catch (err) {
     console.warn('[Notifications] Channel setup error (non-critical):', err);
@@ -362,6 +371,16 @@ class NotificationService {
       lightColor: '#8B5CF6',
       sound: 'default',
       enableVibrate: true,
+      showBadge: false,
+    });
+
+    // Silent channel for autonomous vision snap — no sound, no banner, no badge
+    await Notifications.setNotificationChannelAsync('nova_silent', {
+      name: 'Nova Background Tasks',
+      importance: Notifications.AndroidImportance.MIN,
+      vibrationPattern: [],
+      sound: null as any,
+      enableVibrate: false,
       showBadge: false,
     });
   }

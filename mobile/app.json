@@ -34,7 +34,11 @@
         "POST_NOTIFICATIONS",
         "FOREGROUND_SERVICE",
         "WAKE_LOCK",
-        "CAMERA"
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -49,6 +53,13 @@
         "expo-camera",
         {
           "cameraPermission": "Allow Human OS to access your camera for visual context awareness."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Human OS to access your photos so you can share images with Nova.",
+          "cameraPermission": "Allow Human OS to use the camera to share images with Nova."
         }
       ],
       [

@@ -1,5 +1,28 @@
 [
   {
+    "version": "0.2.4-beta",
+    "date": "2026-08-02",
+    "title": "🧠 NACE Beast Mode Upgrade",
+    "message": [
+      "Nova is now fully presence-aware: she knows when you are online, away, or offline.",
+      "Smarter follow-ups: No more random 'kya chal raha hai' after server errors.",
+      "Escalating engagement: Nova naturally follows up based on how long you've ignored her.",
+      "Subconscious memory: Background engines now silently save short-term conversational moments.",
+      "Removed the 45-minute silence blocker: Nova now proactively messages as frequently as her logic dictates."
+    ]
+  },
+  {
+    "version": "0.2.3-beta",
+    "date": "2026-08-02",
+    "title": "🚀 Major Messaging Stability Update",
+    "message": [
+      "Fixed the 'stuck typing' issue where messages wouldn't send properly.",
+      "Completely resolved the silent AI failure bug that caused conversations to hang.",
+      "Optimized backend database writes for faster response times.",
+      "No more random 'Heys' without replies! Nova's messaging is now robust and reliable."
+    ]
+  },
+  {
     "version": "0.2.2-beta",
     "date": "2026-08-02",
     "title": "🐛 Fatal Crash Fix & Stability Updates",
