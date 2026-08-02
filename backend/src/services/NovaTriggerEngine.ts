@@ -74,7 +74,6 @@ export class NovaTriggerEngine {
           conversation_id: conversationId,
           role: 'assistant',
           content: message,
-          status: 'sent'
         });
 
         // Also save to outreach log
