@@ -1090,7 +1090,7 @@ chatRouter.post(
             const stream = novaBrain.streamInteraction(userId, effectiveMessage, brainContext);
             const iterator = stream[Symbol.asyncIterator]();
             
-            const STREAM_CHUNK_TIMEOUT_MS = 25_000;
+            const STREAM_CHUNK_TIMEOUT_MS = 60_000; // Increased to 60s to allow for slow TTFT on 70B models
 
             while (true) {
               let chunkTimeoutId: NodeJS.Timeout | null = null;
@@ -1105,11 +1105,18 @@ chatRouter.post(
               } catch (err: any) {
                 if (err.message === 'STREAM_TIMEOUT') {
                   logger.error('[Chat] Streaming LLM chunk timed out', { userId });
-                  res.write(`data: ${JSON.stringify({ type: 'error', error: 'Response timed out. Please try again.' })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ type: 'error', error: 'Yaar, thoda slow chal raha hai server. Ek minute mein phir try kar! 🙏' })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
                   res.end();
                   return;
                 }
-                throw err;
+                
+                // Handle actual API errors (e.g. Nvidia 500/401) without crashing the server
+                logger.error('[Chat] LLM stream iteration failed', { error: err.message || err, userId });
+                res.write(`data: ${JSON.stringify({ type: 'error', error: 'Yaar, thoda technical glitch ho gaya. Ek second mein phir try kar!' })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+                res.end();
+                return;
               } finally {
                 if (chunkTimeoutId) clearTimeout(chunkTimeoutId);
               }
@@ -1421,7 +1428,16 @@ chatRouter.post(
       }
       
       if (!isAsync) {
-        throw err; // throw to the outer catch
+        if (res.headersSent) {
+          logger.error('[Chat] Unhandled error during streaming', { error: err instanceof Error ? err.message : String(err) });
+          try {
+            res.write(`data: ${JSON.stringify({ type: 'error', error: 'Yaar, thoda technical glitch ho gaya. Ek second mein phir try kar!' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+            res.end();
+          } catch (e) {}
+        } else {
+          throw err; // throw to the outer catch
+        }
       }
     } finally {
       if (releaseLock) {
