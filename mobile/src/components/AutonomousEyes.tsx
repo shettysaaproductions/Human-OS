@@ -70,8 +70,8 @@ export const AutonomousEyes: React.FC = () => {
             mime_type: 'image/jpeg',
           };
 
-          // Upload to backend using configured axios instance
-          api.post('/api/vision/snap', payload)
+          // Upload to backend using configured axios instance (baseURL already includes /api)
+          api.post('/vision/snap', payload)
             .then(() => console.log('[AutonomousEyes] Dual-snap uploaded successfully'))
             .catch((err) => console.error('[AutonomousEyes] Failed to upload dual-snap:', err));
         }

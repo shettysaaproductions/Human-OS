@@ -65,10 +65,10 @@ export function createApp(): express.Application {
     }),
   );
 
-  // ── Body parsers ─────────────────────────────────────────────────────────────
-  // Limit body size to 10kb — prevents large payload attacks
-  app.use(express.json({ limit: '10kb' }));
-  app.use(express.urlencoded({ extended: false }));
+  // Limit body size — 10mb allows base64 image uploads (chat eye button + vision snaps)
+  // Vision snap with dual images (front+rear at 0.3 quality) ~= 200-400kb base64 each
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
   // ── Global rate limiter ──────────────────────────────────────────────────────
   // 100 requests per 15 minutes per IP — adjust per-route as needed
