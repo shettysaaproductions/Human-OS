@@ -328,7 +328,7 @@ export class NovaFollowupService {
           .select('id')
           .eq('user_id', userMsg.user_id)
           .in('status', ['pending', 'sent'])
-          .gte('created_at', new Date(Date.now() - 5 * 60000).toISOString())
+          .gte('created_at', new Date(Date.now() - 60 * 1000).toISOString()) // 1 min cooldown (was 5 min)
           .limit(1);
           
         if (recentFollowups && recentFollowups.length > 0) {

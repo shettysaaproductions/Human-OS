@@ -94,6 +94,16 @@ async function main(): Promise<void> {
     if (remindersInterval.unref) remindersInterval.unref();
 
     // NACE: Nova Autonomous Consciousness Engine (runs every 3 minutes)
+    // Initial pulse fires 30s after boot so Nova is active immediately (not waiting up to 3 min for first tick)
+    setTimeout(async () => {
+      try {
+        logger.info('Scheduler: Initial NACE boot pulse...');
+        await novaConsciousnessEngine.pulse();
+      } catch (err) {
+        logger.error('Error in NACE initial boot pulse', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 30 * 1000);
+
     const naceInterval = setInterval(async () => {
       try {
         logger.info('Scheduler: Triggering NACE pulse...');

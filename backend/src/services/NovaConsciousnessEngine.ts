@@ -11,7 +11,7 @@ import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 const MIN_GAP_MINUTES = 3; // Reduced from 10 — more frequent for active friend experience
-const SERVER_BOOT_COOLDOWN_MS = 5 * 60 * 1000; // Don't reach out within 5 min of server boot
+const SERVER_BOOT_COOLDOWN_MS = 30 * 1000; // 30s cooldown after boot (was 5 min — caused 5-8min dead zones on Render restarts)
 let serverBootTime = Date.now();
 
 // Human-like response timing (in seconds)
@@ -282,41 +282,65 @@ LAST CONVERSATION (what was actually said — reference this naturally):
 ${lastConvSnippet || 'No recent conversation.'}`;
 
     try {
-      const { novaTriggerEngine } = await import('../services/NovaTriggerEngine');
-      const triggerContext: any = {
-        userPresence: userPresence || 'offline',
-        lastUserMessageAt: gapMinutes ? Date.now() - (gapMinutes * 60000) : 0,
-        lastNovaReplyAt: Date.now() - 3600000,
-        conversationIntensity: 'casual',
-        userActivity: null,
-        pendingReminders: agendaItem ? 1 : 0,
-        emotionalState: null,
-      };
+      // Generate the Tier 2 message directly — NACE is already on a scheduled timer, no extra delay needed
+      const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
+      
+      if (!generated.message) {
+        logger.warn('[NACE] Tier 2 returned empty message', { userId });
+        return;
+      }
 
-      await novaTriggerEngine.scheduleMessage(userId, triggerContext, async () => {
-        const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
-        
-        if (!generated.message) {
-          throw new Error('NACE returned empty message');
+      if (agendaItem) {
+        const newRetryCount = (agendaItem.retry_count || 0) + 1;
+        if (newRetryCount >= (agendaItem.max_retries || 3)) {
+          await supabaseAdmin.from('nova_agenda').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
+        } else {
+          let delayHours = 24;
+          if (agendaItem.urgency === 'high') delayHours = 4;
+          else if (agendaItem.urgency === 'medium') delayHours = 8;
+          const nextRetry = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
+          await supabaseAdmin.from('nova_agenda').update({ retry_count: newRetryCount, next_retry_at: nextRetry, updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
         }
+      }
 
-        if (agendaItem) {
-          const newRetryCount = (agendaItem.retry_count || 0) + 1;
-          if (newRetryCount >= (agendaItem.max_retries || 3)) {
-            await supabaseAdmin.from('nova_agenda').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
-          } else {
-            let delayHours = 24; // Default to next day
-            if (agendaItem.urgency === 'high') delayHours = 4;
-            else if (agendaItem.urgency === 'medium') delayHours = 8;
-            const nextRetry = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
-            await supabaseAdmin.from('nova_agenda').update({ retry_count: newRetryCount, next_retry_at: nextRetry, updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
-          }
-        }
-        
-        return generated.message;
+      const message = generated.message;
+
+      // Save to chat_history so Nova remembers saying this
+      const { data: latestChat } = await supabaseAdmin
+        .from('chat_history')
+        .select('conversation_id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const conversationId = latestChat?.conversation_id || crypto.randomUUID();
+
+      await supabaseAdmin.from('chat_history').insert({
+        user_id: userId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: message,
       });
+
+      // Log to outreach log so MIN_GAP check works correctly
+      await supabaseAdmin.from('nova_outreach_log').insert({
+        user_id: userId,
+        message,
+        type: 'proactive',
+        sent_at: new Date().toISOString(),
+      });
+
+      // Send push notification
+      if (profile.push_token) {
+        const { sendNovaReplyNotification } = await import('../lib/pushNotifications');
+        await sendNovaReplyNotification(profile.push_token, message, conversationId).catch(err =>
+          logger.warn('[NACE] Push notification failed', { error: err?.message })
+        );
+      }
+
+      logger.info('[NACE] Proactive message sent successfully', { userId, messagePreview: message.substring(0, 60) });
     } catch (e) {
-      logger.warn('[NACE] Tier 2 generation failed', { error: e instanceof Error ? e.message : String(e) });
+      logger.warn('[NACE] Tier 2 generation or send failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
