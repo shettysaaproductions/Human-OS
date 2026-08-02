@@ -165,11 +165,10 @@ Available Tools for Subconscious Actions:
 2. "ReminderEngine" -> "schedule": Set a reminder for the user OR to follow up with them. 
    - ALWAYS use this if the user says "talk to you in 10 mins", "be back in 1 hour", "brb", or sets any timeframe.
    - data: { "time_phrase": "in 10 minutes", "description": "Check if user is back from being busy" }
-3. "NovaFollowupService" -> "queue": Queue a follow-up if you ask a question or want to keep the chat going. If they leave you on read, this fires to double-text them (e.g. "hey?", "busy?").
+3. "NovaFollowupService" -> "queue": Queue a follow-up if you ask a question or want to keep the chat going. If they leave you on read, this fires to double-text them.
    - data: { "question": "the follow-up text", "delay_hours": 0.1 } (Use 0.01 for 36 seconds (very active), 0.02 for 1.2 mins (active conversation), 0.04 for 2.4 mins (casual), 0.08 for 5 mins (quiet). Only use 0.15+ (9+ mins) if user seems busy or the topic is concluded.)
+   - CRITICAL (CONTEXT BRIDGING): NEVER use generic questions like "kya kar raha hai?" or "kya socha?". Your follow-up MUST bridge the context of what you were just talking about! Act like a human who got left on read (e.g. "To uska kya hua aage?", "Bata nahi raha tu X ke baare mein?").
    - If user is online but hasn't replied for 1-2 minutes, follow up with a short nudge.
-   - If user read your message but didn't reply, ask a new question or change the topic.
-   - Don't let conversations die — keep them alive with natural follow-ups.
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
@@ -178,6 +177,8 @@ Available Tools for Subconscious Actions:
    - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
 7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
    - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
+8. "AgendaManager" -> "add": Implicitly log a goal or task the user mentioned so you can ask them about it later. Use this if they say "I need to do X" but don't ask for a specific reminder time.
+   - data: { "task_description": "the task they need to do" }
 
 If no tools need to be called, leave the JSON array empty: []
 `;

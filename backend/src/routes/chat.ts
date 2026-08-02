@@ -1087,6 +1087,16 @@ chatRouter.post(
           const llmStartTime = Date.now();
           logger.info('[Chat] Calling LLM', { userId });
           
+          // Simulated Reading Pacing
+          if (!is_proactive) {
+            const wordCount = effectiveMessage.split(/\s+/).length;
+            // Humans read ~250 words per minute (approx 200ms per word). Cap at 5000ms.
+            const readingDelayMs = Math.min(wordCount * 200, 5000);
+            if (readingDelayMs > 0) {
+              await new Promise(resolve => setTimeout(resolve, readingDelayMs));
+            }
+          }
+          
           if (isStreaming) {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');

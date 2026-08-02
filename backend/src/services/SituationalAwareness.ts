@@ -96,6 +96,16 @@ export class SituationalAwareness {
     if (ctx.latestEmotion) {
       lines.push(`- Last known mood: ${ctx.latestEmotion.mood} (intensity ${ctx.latestEmotion.intensity}/10). ${ctx.latestEmotion.notes}`);
       lines.push(`- Emotional guidance: ${this.getEmotionalGuidance(ctx.latestEmotion)}`);
+      
+      // Emotional Carry-over for long gaps
+      if (ctx.gapMinutes !== null && ctx.gapMinutes > 8 * 60 && ctx.latestEmotion.intensity >= 7) {
+        const isNegative = ['sad', 'depressed', 'dukhi', 'upset', 'down', 'angry', 'frustrated', 'anxious'].some(m => ctx.latestEmotion!.mood.toLowerCase().includes(m));
+        if (isNegative) {
+          lines.push(`- ⚠️ CRITICAL EMOTIONAL CARRY-OVER: The user was feeling very negative (${ctx.latestEmotion.mood}) the last time you spoke. Before saying anything else, genuinely check in on how they are feeling about it now.`);
+        } else {
+          lines.push(`- ✨ EMOTIONAL CARRY-OVER: The user was feeling highly positive (${ctx.latestEmotion.mood}) last time. Ask them if they are still riding that high before changing the topic!`);
+        }
+      }
     }
 
     // ── Recent Life Events ──
