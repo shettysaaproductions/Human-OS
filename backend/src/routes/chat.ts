@@ -16,6 +16,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
+import { visionService } from '../services/VisionService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -99,6 +100,7 @@ const ChatSchema = z.object({
   async_mode: z.boolean().optional().default(false),
   reply_to_id: z.string().uuid().optional(),
   reply_to_content: z.string().optional(),
+  image_base64: z.string().optional(),
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -372,7 +374,7 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content } = parseResult.data;
+      const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content, image_base64 } = parseResult.data;
       const userId = (req as any).user!.id;
       
       const requestStartTime = Date.now();
@@ -401,6 +403,13 @@ chatRouter.post(
 
       if (reply_to_content && !is_proactive) {
         effectiveMessage = `[Replying to: "${reply_to_content}"]\n\n${effectiveMessage}`;
+      }
+
+      if (image_base64) {
+        const imageDesc = await visionService.describeSharedImage(image_base64);
+        if (imageDesc) {
+          effectiveMessage = `[User attached an image showing: ${imageDesc}]\n\n${effectiveMessage}`;
+        }
       }
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────

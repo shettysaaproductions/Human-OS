@@ -3,7 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
-  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions
+  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions, Image, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -16,6 +16,7 @@ import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 import { ScrollView as GHScrollView, Swipeable } from 'react-native-gesture-handler';
+import * as ImagePicker from 'expo-image-picker';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -452,6 +453,7 @@ export function ChatScreen() {
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
   const [presence, setPresence] = useState(presenceService.getState());
+  const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
 
   useEffect(() => {
     return presenceService.subscribe(setPresence);
@@ -594,14 +596,61 @@ export function ChatScreen() {
   }, []);
 
   const handleSend = useCallback(() => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() && !selectedImage) return;
     
     presenceService.onMessageSent();
     
-    sendMessage(inputText.trim());
+    const textToSend = inputText.trim() || ' ';
+    sendMessage(textToSend, selectedImage?.base64);
     setInputText('');
+    setSelectedImage(null);
     isNearBottomRef.current = true;
-  }, [inputText, sendMessage]);
+  }, [inputText, selectedImage, sendMessage]);
+
+  const handlePickImage = useCallback(() => {
+    Alert.alert(
+      "Share Image",
+      "Choose a photo to share with Nova",
+      [
+        {
+          text: "Camera",
+          onPress: async () => {
+            const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+            if (permissionResult.granted === false) {
+              Alert.alert("Permission required", "You need to allow camera access to take a photo.");
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              base64: true,
+              quality: 0.5,
+            });
+            if (!result.canceled && result.assets[0].base64) {
+              setSelectedImage({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+            }
+          }
+        },
+        {
+          text: "Gallery",
+          onPress: async () => {
+            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (permissionResult.granted === false) {
+              Alert.alert("Permission required", "You need to allow gallery access to pick a photo.");
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              base64: true,
+              quality: 0.5,
+            });
+            if (!result.canceled && result.assets[0].base64) {
+              setSelectedImage({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+            }
+          }
+        },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
+  }, []);
 
   const handleScroll = useCallback((event: any) => {
     presenceService.onUserActivity();
@@ -1123,26 +1172,44 @@ export function ChatScreen() {
         )}
 
         {/* Input */}
-        <View style={[s.inputContainer, { borderTopColor: colors.border }]}>
-          <TextInput
-            style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg }]}
-            value={inputText}
-            onChangeText={(text) => {
-              setInputText(text);
-              presenceService.onTypingStart();
-            }}
-            placeholder="Message Nova..."
-            placeholderTextColor={colors.placeholder}
-            multiline
-            maxLength={2000}
-          />
-          <TouchableOpacity
-            style={[s.sendBtn, !inputText.trim() && s.sendBtnDisabled]}
-            onPress={handleSend}
-            disabled={!inputText.trim()}
-          >
-            <Text style={s.sendBtnText}>↑</Text>
-          </TouchableOpacity>
+        <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>
+          {selectedImage && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: 8 }}>
+              <View style={{ position: 'relative' }}>
+                <Image source={{ uri: selectedImage.uri }} style={{ width: 60, height: 60, borderRadius: 8 }} />
+                <TouchableOpacity
+                  style={{ position: 'absolute', top: -5, right: -5, backgroundColor: 'red', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}
+                  onPress={() => setSelectedImage(null)}
+                >
+                  <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          <View style={[s.inputContainer, { borderTopColor: colors.border }]}>
+            <TouchableOpacity onPress={handlePickImage} style={{ padding: 10 }}>
+              <Text style={{ fontSize: 24 }}>👁️</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg, marginLeft: 4 }]}
+              value={inputText}
+              onChangeText={(text) => {
+                setInputText(text);
+                presenceService.onTypingStart();
+              }}
+              placeholder="Message Nova..."
+              placeholderTextColor={colors.placeholder}
+              multiline
+              maxLength={2000}
+            />
+            <TouchableOpacity
+              style={[s.sendBtn, !inputText.trim() && !selectedImage && s.sendBtnDisabled]}
+              onPress={handleSend}
+              disabled={!inputText.trim() && !selectedImage}
+            >
+              <Text style={s.sendBtnText}>↑</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

@@ -59,6 +59,44 @@ export class VisionService {
       return null;
     }
   }
+
+  /**
+   * Describes an image manually shared by the user in chat.
+   * This description is injected into the LLM context.
+   */
+  async describeSharedImage(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
+    const key = geminiPool.getNextKey();
+    if (!key) {
+      logger.warn('[VisionService] No Gemini API keys available for chat image analysis.');
+      return null;
+    }
+
+    try {
+      const genAI = new GoogleGenerativeAI(key);
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      
+      const prompt = "Describe this image in detail but keep it concise (under 40 words). Focus on what a human would care about if they were sent this image in a chat.";
+      
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: imageBase64,
+            mimeType: mimeType
+          }
+        }
+      ]);
+
+      const text = result.response.text();
+      if (text && text.trim().length > 0) {
+        return text.trim();
+      }
+      return null;
+    } catch (error) {
+      logger.error('[VisionService] Chat image analysis failed', { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
 }
 
 export const visionService = new VisionService();
