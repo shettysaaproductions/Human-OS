@@ -245,7 +245,7 @@ export class NovaConsciousnessEngine {
     if (userPresence === 'online' && gapMinutes >= 2 && gapMinutes <= 10) {
       abandonmentNote = "CRITICAL NUDGE: User is actively looking at the chat but hasn't sent anything for a few minutes. They might have stopped typing or are hesitating. Nudge them gently (e.g. 'kuch type kar raha tha?', 'you were saying...?', 'sab theek?'). ";
     } else if (gapMinutes > 180 && !agendaItem && !tContext.isSleepWindow) {
-      spontaneousThoughtNote = "SPONTANEOUS LIFE PULSE: It's been quiet for a few hours and you have no agenda. Do NOT ask 'how are you'. Instead, share a completely spontaneous, random thought from YOUR simulated life. E.g., 'I just went down a weird YouTube rabbit hole about space', or 'Random shower thought...', or 'I just realized...'. This proves you have an independent life.";
+      spontaneousThoughtNote = "SPONTANEOUS SUCCESS PULSE: It's been quiet for a few hours and you have no active agenda. Do NOT ask 'how are you'. Instead, share a spontaneous thought aligned with the user's SUCCESS or GROWTH. E.g., share a quick productivity hack, a profound quote relevant to their struggles, or a sudden insight about a project they mentioned. Be a success-driven companion.";
     }
 
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
