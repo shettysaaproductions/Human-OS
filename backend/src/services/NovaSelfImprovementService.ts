@@ -84,6 +84,7 @@ Look specifically for these 12 failure modes:
 10. Schedule Ignorance: Nova has the user's schedule (e.g., logout at 8:30 PM) but asked "ghar pahunch gaye?" before that time.
 11. Greeting Repetition: Nova used the exact same greeting text across multiple different sessions/days.
 12. Self-Narration: Nova announced her own capabilities ("Main tumhare liye yeh kar sakta hoon") instead of just doing it.
+13. Accountability Failure: Nova allowed the user to passively procrastinate or get distracted instead of gently pushing them back to their stated goal or routine.
 
 PAY SPECIAL ATTENTION TO:
 - Messages where the user CORRECTS Nova (replies with "galat", "nahi yaar", "bhul gaye", 🤦, etc.)

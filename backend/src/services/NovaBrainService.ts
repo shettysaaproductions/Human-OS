@@ -261,6 +261,32 @@ If no tools need to be called, leave the JSON array empty: []
 
   // ── Engine Extractors (Background / CRON jobs) ──────────────
 
+  async extractTimeFromRoutine(routineDescription: string, userTimezoneOffset: number): Promise<string | null> {
+    const prompt = `You are parsing a user's daily routine or schedule (e.g. "sleep at 11 PM", "gym at 7 AM").
+Extract the EXACT time the routine happens, and return the ISO timestamp for TODAY at that exact time in UTC.
+The user's timezone offset from UTC is ${userTimezoneOffset} minutes. (So Local Time = UTC + offset).
+Today's local date is ${new Date(Date.now() + userTimezoneOffset * 60000).toISOString().split('T')[0]}.
+
+Routine Description: "${routineDescription}"
+
+Return ONLY a JSON object with:
+{
+  "has_specific_time": boolean,
+  "iso_timestamp_utc": "ISO string for today at that time in UTC, or null if no time found"
+}`;
+
+    const response = await chatCompletionBackground([
+      { role: 'system', content: 'You are a precise time extractor.' },
+      { role: 'user', content: prompt }
+    ], {
+      response_format: { type: 'json_object' },
+      temperature: 0.1
+    });
+
+    const parsed = JSON.parse(response);
+    return parsed.has_specific_time ? parsed.iso_timestamp_utc : null;
+  }
+
   async evaluateGoalFollowup(preferredName: string, goalsList: string[], pastMomentIds: string[]): Promise<any> {
     const prompt = `You are Nova, a warm and thoughtful AI companion.
 You are evaluating the user's goals to decide if a gentle follow-up is appropriate today.

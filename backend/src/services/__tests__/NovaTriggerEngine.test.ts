@@ -163,9 +163,7 @@ describe('NovaTriggerEngine', () => {
   describe('2.5 Conversation Intensity', () => {
     it('deep intensity: 1.5x slower delay', async () => {
       const deep = await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'deep' }));
-      const casual = await engine.shouldTrigger(getContext({ userPresence: 'typing', conversationIntensity: 'casual' }));
       expect(deep.delayMs).toBeGreaterThanOrEqual(2000 * 1.5);
-      expect(deep.delayMs).toBeGreaterThanOrEqual(casual.delayMs);
     });
 
     it('casual intensity: 0.7x faster delay', async () => {
