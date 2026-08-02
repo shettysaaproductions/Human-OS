@@ -392,16 +392,17 @@ export class NovaFollowupService {
    */
   async checkIgnoredNovaMessages(): Promise<void> {
     try {
-      // Look for Nova messages sent 90s - 20min ago (broad window, escalation handles timing)
-      const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      const ninetySecAgo = new Date(Date.now() - 90 * 1000).toISOString();
+      // Look for Nova messages sent 15min - 60min ago
+      // We don't want to double text immediately like a needy robot! Wait at least 15 mins.
+      const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
       const { data: recentNovaMsgs, error } = await supabaseAdmin
         .from('chat_history')
         .select('id, user_id, conversation_id, content, created_at, meta')
         .eq('role', 'assistant')
-        .gte('created_at', twentyMinAgo)
-        .lte('created_at', ninetySecAgo)
+        .gte('created_at', sixtyMinAgo)
+        .lte('created_at', fifteenMinAgo)
         .order('created_at', { ascending: false });
 
       if (error || !recentNovaMsgs || recentNovaMsgs.length === 0) return;

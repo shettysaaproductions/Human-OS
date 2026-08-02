@@ -240,8 +240,12 @@ export class NovaConsciousnessEngine {
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
     let abandonmentNote = '';
+    let spontaneousThoughtNote = '';
+
     if (userPresence === 'online' && gapMinutes >= 2 && gapMinutes <= 10) {
       abandonmentNote = "CRITICAL NUDGE: User is actively looking at the chat but hasn't sent anything for a few minutes. They might have stopped typing or are hesitating. Nudge them gently (e.g. 'kuch type kar raha tha?', 'you were saying...?', 'sab theek?'). ";
+    } else if (gapMinutes > 180 && !agendaItem && !tContext.isSleepWindow) {
+      spontaneousThoughtNote = "SPONTANEOUS LIFE PULSE: It's been quiet for a few hours and you have no agenda. Do NOT ask 'how are you'. Instead, share a completely spontaneous, random thought from YOUR simulated life. E.g., 'I just went down a weird YouTube rabbit hole about space', or 'Random shower thought...', or 'I just realized...'. This proves you have an independent life.";
     }
 
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
@@ -254,6 +258,7 @@ Pending Agenda Item: ${agendaItem ? agendaItem.event_description + ' [urgency: '
 Recent Memories: ${memorySummary || 'None'}
 Last Conversation Snippet: ${lastConvSnippet || 'None'}
 ${abandonmentNote}
+${spontaneousThoughtNote}
 
 DECISION RULES (use actual gap values above, not hardcoded numbers):
 - User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately.
@@ -296,7 +301,8 @@ ${recentOutreachSnippet || 'None.'}
 
 LAST CONVERSATION (what was actually said — reference this naturally):
 ${lastConvSnippet || 'No recent conversation.'}
-${abandonmentNote}`;
+${abandonmentNote}
+${spontaneousThoughtNote}`;
 
     try {
       // Generate the Tier 2 message directly — NACE is already on a scheduled timer, no extra delay needed
