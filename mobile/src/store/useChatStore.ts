@@ -18,6 +18,7 @@ export interface Message {
   reply_to_content?: string;
   options?: string[];
   user_reaction?: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null;
+  image_base64?: string;
 }
 
 export interface ChatDiagnostics {
@@ -39,14 +40,14 @@ interface ChatState {
   oldestMessageId: string | null;
   replyingTo: Message | null;
   setReplyingTo: (msg: Message | null) => void;
-  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string }[];
+  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string, imageBase64?: string }[];
   diagnostics: ChatDiagnostics | null;
   developerMode: boolean;
   setDeveloperMode: (val: boolean) => void;
   
   hydrateMessages: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, imageBase64?: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
   processQueue: () => Promise<void>;
@@ -132,7 +133,7 @@ async function savePendingQueue(queue: { id: string; content: string; replyToId?
     console.warn('[QUEUE] Failed to persist queue:', e);
   }
 }
-async function loadPendingQueue(): Promise<{ id: string; content: string; replyToId?: string; replyToContent?: string; }[]> {
+async function loadPendingQueue(): Promise<{ id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string; }[]> {
   try {
     const raw = await SecureStore.getItemAsync(QUEUE_KEY);
     return raw ? JSON.parse(raw) : [];
@@ -334,9 +335,10 @@ export const useChatStore = create<ChatState>((set, get) => {
               combinedContent,
               get().conversationId || undefined,
               batch[0].replyToId,
-              batch[0].replyToContent
+              batch[0].replyToContent,
+              batch[0].imageBase64
             );
-
+            console.log(`[PROCESS_QUEUE] Delivered message ${primaryId} to DB/backend`);
             const convId: string = data?.conversation_id || get().conversationId || '';
 
             // ── Update message status to 'sent' in store ─────────────────
@@ -345,7 +347,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               isTyping: true, // Keep true until reply arrives
               messages: s.messages.map(m =>
                 batch.some(b => b.id === m.id) 
-                  ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data.user_message_id || m.id) : m.id } 
+                  ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data?.user_message_id || m.id) : m.id } 
                   : m
               ),
             }));
@@ -579,6 +581,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             content: q.content,
             status: 'sending' as const,
             timestamp: new Date().toISOString(),
+            image_base64: q.imageBase64,
           }));
           set({
             isHydrated: true,
@@ -596,11 +599,10 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     injectPendingMessage: (message: Message) => {
       const state = get();
-      // Only inject if it doesn't already exist
       if (!state.messages.some(m => m.id === message.id)) {
         const newMessages = [message, ...state.messages];
         set({ messages: newMessages });
-        saveMessageCache(newMessages).catch(console.warn);
+        saveMessageCache(newMessages, get().conversationId).catch(console.warn);
       }
     },
 
@@ -661,7 +663,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    sendMessage: async (content: string) => {
+    sendMessage: async (content: string, imageBase64?: string) => {
       const replyingTo = get().replyingTo;
       const userMsg: Message = {
         id: Date.now().toString() + Math.random().toString().slice(2, 6),
@@ -670,14 +672,16 @@ export const useChatStore = create<ChatState>((set, get) => {
         status: 'sending',
         timestamp: new Date().toISOString(),
         reply_to_id: replyingTo?.id,
-        reply_to_content: replyingTo?.content
+        reply_to_content: replyingTo?.content,
+        image_base64: imageBase64
       };
 
       const newQueue = [...get().pendingQueue, { 
         id: userMsg.id, 
         content,
         replyToId: replyingTo?.id,
-        replyToContent: replyingTo?.content 
+        replyToContent: replyingTo?.content,
+        imageBase64
       }];
       set((state) => ({ 
         messages: [...state.messages, userMsg],
@@ -704,7 +708,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       set((s) => ({
         messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m),
-        pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content }]
+        pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content, imageBase64: msg.image_base64 }]
       }));
 
       get().processQueue();
