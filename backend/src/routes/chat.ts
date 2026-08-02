@@ -577,6 +577,12 @@ chatRouter.post(
           
           if (latestUserMsg && latestUserMsg.id !== userMessageId) {
             logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId });
+            if (req.headers.accept === 'text/event-stream') {
+              res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+              res.end();
+            } else {
+              res.status(200).json({ skipped: true, reason: 'debounced' });
+            }
             return; // Abort LLM generation, the newer message's request will handle it
           }
         }
@@ -1071,18 +1077,31 @@ chatRouter.post(
             const stream = novaBrain.streamInteraction(userId, effectiveMessage, brainContext);
             const iterator = stream[Symbol.asyncIterator]();
             
-            const STREAM_TIMEOUT_MS = 30_000;
-            const streamStartTime = Date.now();
+            const STREAM_CHUNK_TIMEOUT_MS = 25_000;
 
             while (true) {
-              if (Date.now() - streamStartTime > STREAM_TIMEOUT_MS) {
-                logger.error('[Chat] Streaming LLM timed out', { userId });
-                res.write(`data: ${JSON.stringify({ type: 'error', error: 'Response timed out. Please try again.' })}\n\n`);
-                res.end();
-                return;
+              let chunkTimeoutId: NodeJS.Timeout | null = null;
+              const chunkPromise = iterator.next();
+              const timeoutPromise = new Promise<never>((_, reject) => {
+                chunkTimeoutId = setTimeout(() => reject(new Error('STREAM_TIMEOUT')), STREAM_CHUNK_TIMEOUT_MS);
+              });
+              
+              let nextResult;
+              try {
+                nextResult = await Promise.race([chunkPromise, timeoutPromise]);
+              } catch (err: any) {
+                if (err.message === 'STREAM_TIMEOUT') {
+                  logger.error('[Chat] Streaming LLM chunk timed out', { userId });
+                  res.write(`data: ${JSON.stringify({ type: 'error', error: 'Response timed out. Please try again.' })}\n\n`);
+                  res.end();
+                  return;
+                }
+                throw err;
+              } finally {
+                if (chunkTimeoutId) clearTimeout(chunkTimeoutId);
               }
 
-              const { value, done } = await iterator.next();
+              const { value, done } = nextResult;
               if (done) {
                 if (value && value.subconscious_actions && value.subconscious_actions.length > 0) {
                   extractedActions = value.subconscious_actions;
