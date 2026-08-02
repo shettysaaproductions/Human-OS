@@ -436,6 +436,10 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       if (cachedData.messages.length > 0) {
         const filteredCachedMessages = cachedData.messages.filter(msg => {
+          // Hide internal system context from UI
+          if (msg.content && msg.content.startsWith('[HIDDEN_CONTEXT]')) return false;
+          // Hide proactive internal trigger commands
+          if (msg.content && (msg.content.startsWith('/proactive') || msg.content.startsWith('/checkin'))) return false;
           if (msg.role === 'assistant' && isBadMessage(msg.content)) return false;
           return true;
         });
@@ -770,6 +774,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           
           if (role === 'assistant' && isBadMessage(msg.content)) continue;
           
+          // Hide internal system context from UI
+          if (msg.content && msg.content.startsWith('[HIDDEN_CONTEXT]')) continue;
+          
           const msgId = msg.id;
 
           // Skip if already in store (by raw ID or any _part_N variant)
@@ -778,9 +785,14 @@ export const useChatStore = create<ChatState>((set, get) => {
           if (existingIds.has(partId1)) continue;
 
           // Skip user messages if the exact same content is already in the local store.
-          // This prevents duplicates where the local store has 'temp_xxx' and the backend returns 'uuid_yyy'.
-          // We DO NOT do this for assistant messages to avoid swallowing repeated LLM fallback messages.
           if (role === 'user' && existingUserContent.has(msg.content.trim())) continue;
+
+          // For assistant messages, avoid duplicates from SSE streams by checking if 
+          // we already have a message with the EXACT same content that was generated locally (starts with msg_)
+          if (role === 'assistant') {
+            const hasLocalDuplicate = currentMessages.some(m => m.role === 'assistant' && m.content.trim() === msg.content.trim() && m.id.startsWith('msg_'));
+            if (hasLocalDuplicate) continue;
+          }
 
           // NOTE: Timestamp filter intentionally removed — the ID+content dedup above
           // is comprehensive and prevents duplicates. The timestamp filter was silently
