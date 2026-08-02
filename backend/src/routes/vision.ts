@@ -8,17 +8,18 @@ export const visionRouter: Router = Router();
 // Zod schema for vision snap validation
 const VisionSnapSchema = z.object({
   user_id: z.string().uuid(),
-  image_base64: z.string(), // Base64 encoded image
+  front_image_base64: z.string().optional(), // Front camera (user)
+  rear_image_base64: z.string().optional(), // Rear camera (environment)
   mime_type: z.string().optional().default('image/jpeg'),
 });
 
 visionRouter.post('/snap', async (req: Request, res: Response): Promise<void> => {
   try {
     const validatedData = VisionSnapSchema.parse(req.body);
-    const { user_id, image_base64, mime_type } = validatedData;
+    const { user_id, front_image_base64, rear_image_base64, mime_type } = validatedData;
     
-    // Process image in the background (don't block the client)
-    visionService.analyzeContextImage(user_id, image_base64, mime_type).catch(e => {
+    // Process images in the background
+    visionService.analyzeContextImage(user_id, front_image_base64, rear_image_base64, mime_type).catch(e => {
       logger.error('[VisionRouter] Background vision processing failed', { error: e });
     });
     

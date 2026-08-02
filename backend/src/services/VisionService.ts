@@ -8,10 +8,14 @@ export class VisionService {
    * Analyzes an image to determine the user's current context.
    * Uses Gemini 1.5 Flash Vision capabilities.
    */
-  async analyzeContextImage(userId: string, imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
+  async analyzeContextImage(userId: string, frontImageBase64?: string, rearImageBase64?: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
     const key = geminiPool.getNextKey();
     if (!key) {
       logger.warn('[VisionService] No Gemini API keys available for vision analysis.');
+      return null;
+    }
+    if (!frontImageBase64 && !rearImageBase64) {
+      logger.warn('[VisionService] No images provided for vision analysis.');
       return null;
     }
 
@@ -19,17 +23,18 @@ export class VisionService {
       const genAI = new GoogleGenerativeAI(key);
       const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
       
-      const prompt = "Describe what the user is currently doing based on this image in exactly 10 words or less. Focus purely on their activity and environment (e.g., 'Working on a laptop in a dark room', 'Driving a car on a highway', 'Sleeping in bed'). Do not mention the camera or photo itself.";
+      const prompt = "Describe what the user is currently doing based on the provided images in exactly 15 words or less. If there are two images, one is the front camera (the user's face) and the other is the rear camera (their environment). Combine the context into a single seamless observation (e.g., 'User is working on a laptop in a dark bedroom', 'User is smiling while walking through a park'). Do not mention 'camera', 'image', 'front', or 'rear' in your description.";
       
-      const result = await model.generateContent([
-        prompt,
-        {
-          inlineData: {
-            data: imageBase64,
-            mimeType: mimeType
-          }
-        }
-      ]);
+      const parts: any[] = [prompt];
+      
+      if (frontImageBase64) {
+        parts.push({ inlineData: { data: frontImageBase64, mimeType: mimeType } });
+      }
+      if (rearImageBase64) {
+        parts.push({ inlineData: { data: rearImageBase64, mimeType: mimeType } });
+      }
+      
+      const result = await model.generateContent(parts);
 
       const text = result.response.text();
       if (text && text.trim().length > 0) {
