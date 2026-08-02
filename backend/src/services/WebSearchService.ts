@@ -1,6 +1,5 @@
 import { logger } from '../lib/logger';
 import { chatCompletion } from '../lib/nvidia';
-import * as cheerio from 'cheerio';
 import axios from 'axios';
 
 export class WebSearchService {
@@ -33,33 +32,28 @@ If NO, output exactly "NO_SEARCH".`;
   }
 
   /**
-   * Scrapes DuckDuckGo HTML for a query (keyless, free).
+   * Scrapes Wikipedia for a query (keyless, free).
    */
   async executeSearch(query: string): Promise<string | null> {
     logger.info('[WebSearch] Executing live search', { query });
     try {
-      const response = await axios.post(
-        'https://html.duckduckgo.com/html/',
-        `q=${encodeURIComponent(query)}`,
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-          }
-        }
+      const response = await axios.get(
+        `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`,
+        { headers: { 'User-Agent': 'NovaAI/1.0 (https://github.com/NovaApp)' } }
       );
-
-      const $ = cheerio.load(response.data);
-      const results: string[] = [];
       
-      $('.result').each((i, el) => {
-        if (i >= 3) return; // Keep top 3 results
-        const title = $(el).find('.result__title').text().trim();
-        const snippet = $(el).find('.result__snippet').text().trim();
-        if (title && snippet) {
-          results.push(`Source: ${title}\nInfo: ${snippet}`);
+      const searchResults = response.data?.query?.search;
+      if (!searchResults || searchResults.length === 0) return null;
+      
+      const results: string[] = [];
+      for (let i = 0; i < Math.min(3, searchResults.length); i++) {
+        const item = searchResults[i];
+        if (item.title && item.snippet) {
+          // Clean HTML from Wikipedia snippets
+          const cleanSnippet = item.snippet.replace(/<[^>]*>?/gm, '');
+          results.push(`Source: Wikipedia - ${item.title}\nInfo: ${cleanSnippet}`);
         }
-      });
+      }
 
       if (results.length === 0) return null;
       return `\n\n## LIVE WEB SEARCH RESULTS (Omniscience Protocol)\nYou automatically searched the web for "${query}" and found this:\n` + results.join('\n\n') + `\n\nUse this information to answer the user accurately.`;
