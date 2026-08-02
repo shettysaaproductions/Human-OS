@@ -76,14 +76,10 @@ function isExcessiveRequest(message: string): boolean {
 
 import { MessageFormatter } from '../services/MessageFormatter';
 
-function chunkResponse(text: string, preserveTables: boolean = false): string[] {
-  // CRITICAL: Never split a response that contains a markdown table.
-  // Splitting a table across bubbles destroys the renderer.
-  const hasTable = /^\|.+/m.test(text);
-  if (hasTable || preserveTables) return [text];
-
-  // Use the human-like MessageFormatter (Part 5)
-  return MessageFormatter.splitIntoBubbles(text, MAX_CHARS_PER_CHUNK);
+function chunkResponse(text: string): string[] {
+  // Trust the LLM. If it wants to send multiple bubbles, it will use <NOVA_MSG>.
+  // Do not artificially chop strings, which destroys lists, articles, and formatting.
+  return [text];
 }
 
 function shouldExtractShortTermMemory(message: string): boolean {
@@ -285,46 +281,22 @@ function timeAgo(dateStr: string): string {
  * Level 3: Intent detection (lists, bullets, distinct paragraphs)
  * Level 4 (external): chunkResponse max length limit
  */
-function parseLLMResponse(rawReply: string, userMessage: string = ''): string[] {
+function parseLLMResponse(rawReply: string): string[] {
+  rawReply = rawReply.trim();
+  if (!rawReply) return [];
+
   // Level 1: Try explicit <NOVA_MSG> tags
   if (rawReply.includes('<NOVA_MSG>')) {
     const segments = rawReply
-      .replace(/<NOVA_MSG>/g, '')
-      .split(/<\/NOVA_MSG>/)
+      .split(/<\/?NOVA_MSG>/)
       .map(m => m.trim())
       .filter(Boolean);
-    if (segments.length > 1) return segments;
+    if (segments.length > 0) return segments;
   }
 
-  // Level 2: Aggressive sentence splitting for natural texting
-  // Split on sentence endings, keeping punctuation
-  const sentences = rawReply
-    .replace(/([.!?])\s+/g, "$1|SPLIT|")
-    .replace(/\n+/g, "|SPLIT|")
-    .split('|SPLIT|')
-    .map(s => s.trim())
-    .filter(s => s.length > 5); // Skip tiny fragments
-
-  // Group into bubbles of 1-2 sentences
-  const bubbles: string[] = [];
-  for (let i = 0; i < sentences.length; i += 2) {
-    const chunk = sentences.slice(i, i + 2).join(' ').trim();
-    if (chunk.length > 10) bubbles.push(chunk);
-  }
-
-  let finalBubbles = bubbles.length === 0 ? [rawReply.trim()] : bubbles;
-  
-  // If only one bubble but it's very long, force split by commas
-  if (finalBubbles.length === 1 && finalBubbles[0].length > 200) {
-    const parts = finalBubbles[0].split(/, |; /);
-    if (parts.length > 1) finalBubbles = parts.filter(p => p.length > 20);
-  }
-  
-  // After parsing, enforce max length per bubble
-  const MAX_BUBBLE_LENGTH = userMessage.length < 20 ? 100 : 250;
-  return finalBubbles.map(b => 
-    b.length > MAX_BUBBLE_LENGTH ? b.substring(0, MAX_BUBBLE_LENGTH) + '...' : b
-  );
+  // If no explicit tags are used, do not aggressively chop the message!
+  // The LLM knows what it's doing. If it generated a long list or article, keep it intact.
+  return [rawReply];
 }
 
 /**
@@ -456,7 +428,7 @@ chatRouter.post(
           }
         }
 
-        const messages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), message);
+        const messages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
         const reply = messages.join('\n\n');
 
         const textChunks = messages.flatMap(m => chunkResponse(m));
@@ -1283,7 +1255,7 @@ chatRouter.post(
         }
       } catch (e) {}
       
-      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)), effectiveMessage);
+      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
 
       // Add emoji based on detected emotion
       const emotion = parsedEmotion || 'neutral';
@@ -1294,7 +1266,17 @@ chatRouter.post(
       });
       
       // Split each parsed message further if it's too long
-      let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m));
+      let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m)).filter(b => b.trim().length > 0);
+      
+      // If no valid bubbles were generated (e.g. LLM returned blank), safely abort
+      if (finalBubbles.length === 0) {
+        logger.info('[Chat] LLM returned a blank reply (likely Subconscious only). No bubbles generated.');
+        if (isStreaming) {
+          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+          res.end();
+        }
+        return;
+      }
       const reply = finalBubbles.join('\n\n');
 
       // 7. Save AI response ONCE (with telemetry meta)
