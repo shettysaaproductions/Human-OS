@@ -395,7 +395,7 @@ export class NovaFollowupService {
 
       const { data: recentNovaMsgs, error } = await supabaseAdmin
         .from('chat_history')
-        .select('id, user_id, conversation_id, content, created_at')
+        .select('id, user_id, conversation_id, content, created_at, meta')
         .eq('role', 'assistant')
         .gte('created_at', twentyMinAgo)
         .lte('created_at', ninetySecAgo)
@@ -415,6 +415,11 @@ export class NovaFollowupService {
         // 🔒 Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
         const lastSent = ignoredFollowupSent.get(userId) || 0;
         if (Date.now() - lastSent < 3 * 60 * 1000) continue;
+
+        // Skip if Nova's last message evaluated the user as BUSY (e.g. user said "bye" or "10 mins")
+        if (novaMsg.meta?.situationBrief?.includes('USER AVAILABILITY: User signalled they are BUSY')) {
+          continue;
+        }
 
         // Skip if user replied after Nova's message
         const { data: userReply } = await supabaseAdmin
