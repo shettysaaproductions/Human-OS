@@ -162,6 +162,10 @@ export class SituationalAwareness {
 
   detectAvailability(message: string): 'busy' | 'excited' | 'relationship' | 'neutral' {
     const lower = message.toLowerCase();
+    
+    // Check for explicit timeframe (e.g. "20 mins", "30 mins", "2 hours")
+    if (/\b\d+\s*(min|mins|minute|minutes|hr|hrs|hour|hours)\b/i.test(lower)) return 'busy';
+
     if (BUSY_SIGNALS.some(s => lower.includes(s))) return 'busy';
     if (RELATIONSHIP_SIGNALS.some(s => lower.includes(s))) return 'relationship';
     if (EXCITED_SIGNALS.some(s => lower.includes(s))) return 'excited';
