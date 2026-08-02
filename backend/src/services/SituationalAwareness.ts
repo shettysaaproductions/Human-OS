@@ -23,6 +23,7 @@ export interface SituationContext {
   replyToContent?: string | null; // Swipe-to-reply content
   last5Messages?: { role: string; content: string; created_at: string }[]; // For phase detection
   last3UserEmotions?: { mood: string; intensity: number }[]; // For momentum tracking
+  currentVisualContext?: string | null; // For Autonomous Eyes (Phase 8)
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -57,6 +58,10 @@ export class SituationalAwareness {
 
   buildBrief(ctx: SituationContext): string {
     const lines: string[] = [];
+    
+    if (ctx.currentVisualContext) {
+      lines.push(`👀 [AUTONOMOUS EYES]: You (Nova) can currently see: "${ctx.currentVisualContext}". Factor this into your awareness before replying!`);
+    }
 
     lines.push(`## SITUATION BRIEF — Nova's Internal Understanding`);
     lines.push(`- Right now: ${ctx.dayName}, ${ctx.dateStr}, ${ctx.timeStr} ${ctx.tzLabel} (${ctx.isWeekend ? 'Weekend / Weekoff' : 'Weekday'})`);
