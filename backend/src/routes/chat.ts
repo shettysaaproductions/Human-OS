@@ -549,9 +549,10 @@ chatRouter.post(
 
       if (previousLock) {
         // Wait for previous request with timeout
-        const timeoutPromise = new Promise<void>((_, reject) => 
-          setTimeout(() => reject(new Error('MUTEX_TIMEOUT')), MUTEX_TIMEOUT_MS)
-        );
+        let mutexTimeoutId: NodeJS.Timeout | null = null;
+        const timeoutPromise = new Promise<void>((_, reject) => {
+          mutexTimeoutId = setTimeout(() => reject(new Error('MUTEX_TIMEOUT')), MUTEX_TIMEOUT_MS);
+        });
         
         try {
           await Promise.race([previousLock, timeoutPromise]);
@@ -564,6 +565,8 @@ chatRouter.post(
           } else {
             throw err;
           }
+        } finally {
+          if (mutexTimeoutId) clearTimeout(mutexTimeoutId);
         }
       }
 
@@ -1135,9 +1138,10 @@ chatRouter.post(
             const LLM_TIMEOUT_MS = 25_000; // 25 seconds max for LLM
 
             const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
-            const timeoutPromise = new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('LLM_TIMEOUT')), LLM_TIMEOUT_MS)
-            );
+            let llmTimeoutId: NodeJS.Timeout | null = null;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              llmTimeoutId = setTimeout(() => reject(new Error('LLM_TIMEOUT')), LLM_TIMEOUT_MS);
+            });
 
             let result: { reply: string; subconscious_actions: any[] };
             try {
@@ -1152,6 +1156,8 @@ chatRouter.post(
               } else {
                 throw llmErr;
               }
+            } finally {
+              if (llmTimeoutId) clearTimeout(llmTimeoutId);
             }
 
             rawReply = result.reply;
