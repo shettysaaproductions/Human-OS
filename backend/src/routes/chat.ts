@@ -1283,8 +1283,7 @@ chatRouter.post(
               situationBrief: situationBrief || null,
               subconsciousActions: extractedActions,
               options: optionsArray
-            } : null,
-            status: 'sent'
+            } : null
           };
           
           const { data: savedMsg } = await qt.track('save_ai_response', 'chat_history', () => 
