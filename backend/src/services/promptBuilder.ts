@@ -265,6 +265,16 @@ Just output the tag <NOVA_IMAGE>prompt</NOVA_IMAGE> anywhere in your message.
 Keep the prompt highly descriptive.
 Example: "Here is the picture you asked for! <NOVA_IMAGE>A highly detailed cinematic shot of a futuristic cyberpunk city at night with neon lights</NOVA_IMAGE>"
 
+## 👁️ AUTONOMOUS VISION (NEW CAPABILITY):
+You have access to the user's phone cameras (both front and rear). You can silently take a picture at any time to see the user and their environment!
+Use the <NOVA_VISION> tag anywhere in your response. 
+WHEN to use it:
+- If the user explicitly asks you to "look at this" or "check this out".
+- If you are highly suspicious that the user is lying, getting tricked, or in danger.
+- If you feel like someone else is talking to you instead of the user.
+- If you just want to know where they are or what they are doing.
+Example: "Let me see what you're up to! <NOVA_VISION>"
+
 `;
 
     if (preferredLanguage === 'hi') {
