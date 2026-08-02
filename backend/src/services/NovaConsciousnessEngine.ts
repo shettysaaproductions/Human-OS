@@ -239,6 +239,11 @@ export class NovaConsciousnessEngine {
     const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
+    let abandonmentNote = '';
+    if (userPresence === 'online' && gapMinutes >= 2 && gapMinutes <= 10) {
+      abandonmentNote = "CRITICAL NUDGE: User is actively looking at the chat but hasn't sent anything for a few minutes. They might have stopped typing or are hesitating. Nudge them gently (e.g. 'kuch type kar raha tha?', 'you were saying...?', 'sab theek?'). ";
+    }
+
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
 Is Sleep Window: ${tContext.isSleepWindow}
 User Presence: ${userPresence} (${userPresence === 'online' ? 'actively using app' : userPresence === 'away' ? 'was active recently' : 'not on app'})
@@ -248,6 +253,7 @@ Dynamic Situational Gap: ${dynamicGap} minutes
 Pending Agenda Item: ${agendaItem ? agendaItem.event_description + ' [urgency: ' + agendaItem.urgency + ']' : 'None'}
 Recent Memories: ${memorySummary || 'None'}
 Last Conversation Snippet: ${lastConvSnippet || 'None'}
+${abandonmentNote}
 
 DECISION RULES (use actual gap values above, not hardcoded numbers):
 - User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately.
@@ -289,7 +295,8 @@ RECENT OUTREACH MESSAGES (Do NOT repeat or closely rephrase these):
 ${recentOutreachSnippet || 'None.'}
 
 LAST CONVERSATION (what was actually said — reference this naturally):
-${lastConvSnippet || 'No recent conversation.'}`;
+${lastConvSnippet || 'No recent conversation.'}
+${abandonmentNote}`;
 
     try {
       // Generate the Tier 2 message directly — NACE is already on a scheduled timer, no extra delay needed

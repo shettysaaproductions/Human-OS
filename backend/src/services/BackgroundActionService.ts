@@ -129,6 +129,22 @@ export class BackgroundActionService {
             logger.info('[BackgroundAction] Updated agenda item status', { userId, id: bestMatch.id, status: action.data.status });
           }
         }
+        else if (action.tool === 'AgendaManager' && action.action === 'add') {
+           const followUpAfter = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(); // ~4 hours later
+           await supabaseAdmin.from('nova_agenda').insert({
+             user_id: userId,
+             event_description: action.data.task_description.substring(0, 500),
+             expected_time: new Date().toISOString(), // no strict time, just today
+             follow_up_question: `Did you end up finishing: ${action.data.task_description}?`,
+             follow_up_after: followUpAfter,
+             source_message: 'Implicit Goal Extraction',
+             status: 'pending',
+             next_retry_at: followUpAfter,
+             urgency: 'low',
+             is_recurring: false,
+           });
+           logger.info('[BackgroundAction] Added implicit agenda item', { userId, task: action.data.task_description });
+        }
       } catch (err) {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });
       }
