@@ -30,6 +30,7 @@ import { telemetryRouter } from './routes/telemetry';
 import { exportRouter } from './routes/export';
 import { betaAnalyticsRouter } from './routes/betaAnalytics';
 import presenceRouter from './routes/presence';
+import { visionRouter } from './routes/vision';
 import { dbHealthService } from './services/DatabaseHealthService';
 import { degradedMode } from './services/DegradedModeService';
 import { authenticateUser } from './middleware/auth';
@@ -124,6 +125,7 @@ export function createApp(): express.Application {
   apiRouter.use('/admin/errors', authenticateUser, telemetryRouter);
   apiRouter.use('/admin/beta', authenticateUser, betaAnalyticsRouter);
   apiRouter.use('/presence', authenticateUser, presenceRouter);
+  apiRouter.use('/vision', authenticateUser, visionRouter);
 
   // Mount the API router
   app.use('/api', apiRouter);

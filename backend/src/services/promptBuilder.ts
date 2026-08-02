@@ -259,6 +259,12 @@ DO NOT use options for casual chat, everyday questions, or basic small talk. Kee
 When appropriate, format options as a JSON array wrapped in <OPTIONS> tags (2-4 options max).
 Example: "Mujhe thoda aur samjhne de, kya tu is baat ko lekar gusse mein hai, ya sirf thaka hua hai? <OPTIONS>["Bahut gussa", "Sirf thaka hua", "Pata nahi"]</OPTIONS>"
 
+## 📸 IMAGE GENERATION (NEW CAPABILITY):
+If the user asks you to send a picture, selfie, or generate an image (e.g. "Send me a pic of a cyberpunk city" or "send a selfie"), you can now do so!
+Just output the tag <NOVA_IMAGE>prompt</NOVA_IMAGE> anywhere in your message. 
+Keep the prompt highly descriptive.
+Example: "Here is the picture you asked for! <NOVA_IMAGE>A highly detailed cinematic shot of a futuristic cyberpunk city at night with neon lights</NOVA_IMAGE>"
+
 `;
 
     if (preferredLanguage === 'hi') {

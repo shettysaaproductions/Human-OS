@@ -602,7 +602,7 @@ chatRouter.post(
 
       const profileCacheKey = `profile:${userId}`;
       const wmCacheKey = `working_memory:${userId}`;
-      const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string }>(profileCacheKey);
+      const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string }>(profileCacheKey);
       const cachedWm = cache.get<{ key: string; value: string }[]>(wmCacheKey);
 
       const skipMemory = process.env.DISABLE_MEMORY === 'true';
@@ -622,7 +622,7 @@ chatRouter.post(
           ? Promise.resolve({ data: cachedProfile, error: null })
           : qt.track('get_profile', 'profiles', () =>
               supabaseAdmin.from('profiles')
-                .select('preferred_name, companion_personality, country, push_token')
+                .select('preferred_name, companion_personality, country, push_token, current_visual_context')
                 .eq('id', userId).maybeSingle()
             ),
 
@@ -703,7 +703,7 @@ chatRouter.post(
 
       // ── Unpack results ─────────────────────────────────────────────────────────
       // 1. Profile
-      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string; push_token?: string } | null;
+      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string } | null;
       if (profile && !cachedProfile) {
         cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
       }
@@ -950,7 +950,8 @@ chatRouter.post(
         dateStr,
         timeStr,
         lastUserMessage: effectiveMessage, // For availability/mood signal detection
-        upcomingReminders
+        upcomingReminders,
+        currentVisualContext: profile?.current_visual_context
       };
       const situationBrief = situationalAwareness.buildBrief(situationCtx);
 
@@ -1255,7 +1256,22 @@ chatRouter.post(
         }
       } catch (e) {}
       
-      const parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
+      // Extract Image Requests
+      let generatedImages: string[] = [];
+      const imageMatch = rawReply.match(/<NOVA_IMAGE>(.*?)<\/NOVA_IMAGE>/s);
+      if (imageMatch && imageMatch[1]) {
+        const prompt = imageMatch[1].trim();
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
+        generatedImages.push(`![${prompt}](${imageUrl})`);
+        rawReply = rawReply.replace(/<NOVA_IMAGE>.*?<\/NOVA_IMAGE>/s, '').trim();
+      }
+
+      let parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
+      
+      // Append generated images as separate bubbles after stripping so they aren't removed
+      if (generatedImages.length > 0) {
+        parsedMessages = [...parsedMessages, ...generatedImages];
+      }
 
       // Add emoji based on detected emotion
       const emotion = parsedEmotion || 'neutral';

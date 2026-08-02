@@ -2,6 +2,7 @@ import { logger } from '../lib/logger';
 import { chatCompletion } from '../lib/nvidia';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { geminiPool } from '../lib/geminiPool';
 
 export class WebSearchService {
   /**
@@ -38,8 +39,8 @@ If NO, output exactly "NO_SEARCH".`;
   async executeSearch(query: string): Promise<string | null> {
     logger.info('[WebSearch] Executing live search', { query });
     
-    // Check if user provided Gemini API Key
-    const geminiKey = process.env.GEMINI_API_KEY;
+    // Request a key from the load balancer
+    const geminiKey = geminiPool.getNextKey();
     if (geminiKey) {
       logger.info('[WebSearch] Using Gemini Google Search Grounding');
       try {
