@@ -116,6 +116,28 @@ async function main(): Promise<void> {
     }, 3 * 60 * 1000); // NACE pulse every 3 minutes for more responsive proactive messaging (was 15 minutes — caused 10-15 min delays in active conversations)
     if (naceInterval.unref) naceInterval.unref();
 
+    // Jarvis Protocol: Proactive Environment Monitoring (Runs every 3 hours)
+    const weatherWatcherInterval = setInterval(async () => {
+      try {
+        const { supabaseAdmin } = await import('./lib/supabase');
+        const { weatherWatcherService } = await import('./services/WeatherWatcherService');
+        // Fetch users active in the last 7 days to avoid wasting API calls on abandoned accounts
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: users } = await supabaseAdmin.from('profiles').select('id').gte('updated_at', sevenDaysAgo);
+        
+        if (users) {
+          logger.info(`[Scheduler] Running weather checks for ${users.length} active users`);
+          for (const user of users) {
+            await weatherWatcherService.checkWeatherForUser(user.id);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Sleep 2s to respect API rate limits
+          }
+        }
+      } catch (err) {
+        logger.error('Error in WeatherWatcher cron', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 3 * 60 * 60 * 1000); // 3 hours
+    if (weatherWatcherInterval.unref) weatherWatcherInterval.unref();
+
     // NACE Habit Trigger Sync (runs every 6 hours — creates agenda items from routines)
     const habitInterval = setInterval(async () => {
       try {
