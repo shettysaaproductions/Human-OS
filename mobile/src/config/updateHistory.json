@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.2.2-beta",
+    "date": "2026-08-02",
+    "title": "🐛 Fatal Crash Fix & Stability Updates",
+    "message": [
+      "Fixed a critical bug that caused the app to hang permanently on the typing indicator.",
+      "Increased the connection timeout, giving Nova more time to think on complex topics.",
+      "Added graceful error handling so the app always recovers smoothly if the AI server slows down."
+    ]
+  },
+  {
     "version": "0.2.1-beta",
     "date": "2026-08-01",
     "title": "Nova Trigger Engine + Presence + Reply Threading",
