@@ -177,9 +177,9 @@ export class NovaFollowupService {
     const normalizedNew = followup.message.toLowerCase().trim();
     const cached = dedupCache.get(followup.user_id);
     
-    // Check if same message sent within last 10 minutes
+    // Check if same message sent within last 3 minutes (was 10 — blocked all follow-ups too long)
     if (cached && 
-        Date.now() - cached.lastSentAt < 10 * 60 * 1000 && 
+        Date.now() - cached.lastSentAt < 3 * 60 * 1000 && 
         (cached.lastContent === normalizedNew || 
          (normalizedNew.length > 20 && cached.lastContent.includes(normalizedNew.substring(0, 20))) ||
          (cached.lastContent.length > 20 && normalizedNew.includes(cached.lastContent.substring(0, 20))))) {
@@ -315,7 +315,7 @@ export class NovaFollowupService {
           .select('id')
           .eq('user_id', userMsg.user_id)
           .eq('role', 'assistant')
-          .gte('created_at', new Date(Date.now() - 2 * 60000).toISOString())
+          .gte('created_at', new Date(Date.now() - 90 * 1000).toISOString()) // 90s guard (was 2 min)
           .limit(1);
 
         if (recentAssistantMsgs && recentAssistantMsgs.length > 0) {
@@ -358,6 +358,93 @@ export class NovaFollowupService {
 
     } catch (err) {
       logger.warn('[NovaFollowup] checkUnansweredConversations error', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
+  /**
+   * Detect when Nova sent a message and the user SAW it but didn't reply.
+   * This is the "read receipt ignore" case — real friends don't stay silent after being seen.
+   * Fires a natural follow-up nudge after 90 seconds of silence from the user.
+   */
+  async checkIgnoredNovaMessages(): Promise<void> {
+    try {
+      // Look for Nova messages sent 90s - 6min ago (the "seen but ignored" window)
+      const sixMinAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+      const ninetySecAgo = new Date(Date.now() - 90 * 1000).toISOString();
+
+      const { data: recentNovaMsgs, error } = await supabaseAdmin
+        .from('chat_history')
+        .select('id, user_id, conversation_id, content, created_at')
+        .eq('role', 'assistant')
+        .gte('created_at', sixMinAgo)
+        .lte('created_at', ninetySecAgo)
+        .order('created_at', { ascending: false });
+
+      if (error || !recentNovaMsgs || recentNovaMsgs.length === 0) return;
+
+      // Group by user — keep only the most recent Nova message per user
+      const userMap = new Map<string, typeof recentNovaMsgs[0]>();
+      for (const msg of recentNovaMsgs) {
+        if (!userMap.has(msg.user_id)) {
+          userMap.set(msg.user_id, msg);
+        }
+      }
+
+      for (const [userId, novaMsg] of userMap.entries()) {
+        // Skip if user replied after Nova's message
+        const { data: userReply } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('role', 'user')
+          .gt('created_at', novaMsg.created_at)
+          .limit(1);
+        if (userReply && userReply.length > 0) continue;
+
+        // Skip if Nova already sent ANOTHER message after this one
+        const { data: newerNova } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('role', 'assistant')
+          .gt('created_at', novaMsg.created_at)
+          .limit(1);
+        if (newerNova && newerNova.length > 0) continue;
+
+        // Skip if a follow-up is already queued or sent in the last 2 minutes
+        const { data: recentFollowups } = await supabaseAdmin
+          .from('nova_followups')
+          .select('id')
+          .eq('user_id', userId)
+          .in('status', ['pending', 'sent'])
+          .gte('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString())
+          .limit(1);
+        if (recentFollowups && recentFollowups.length > 0) continue;
+
+        // User saw Nova's message but ignored it — generate a warm, natural follow-up
+        const ageMinutes = Math.round((Date.now() - new Date(novaMsg.created_at).getTime()) / 60000);
+        logger.info('[NovaFollowup] Nova message ignored, generating follow-up', { userId, ageMinutes, convId: novaMsg.conversation_id });
+
+        let followUpMsg = 'Kya chal raha hai? 👀';
+        try {
+          const { novaBrain } = await import('./NovaBrainService');
+          const generated = await novaBrain.evaluateConsciousnessTier2(
+            `Name: yaar\nSituation: You sent this message ${ageMinutes} minute(s) ago: "${novaMsg.content.substring(0, 150)}" — but the user has seen it and not replied yet. They might be distracted, busy, or thinking. Generate ONE very short (max 1 sentence) casual Hinglish follow-up. Warm, playful, genuinely curious. NOT needy or pushy. Like a close friend who just noticed you went quiet. Good examples: "Kya soch raha hai?", "Bol na yaar", "Busy hai kya?"`
+          );
+          if (generated?.message && generated.message.length < 150) {
+            followUpMsg = generated.message;
+          }
+        } catch (e) {
+          logger.warn('[NovaFollowup] LLM follow-up gen failed, using fallback', { error: e instanceof Error ? e.message : String(e) });
+        }
+
+        // Fire immediately (delay_hours = 0)
+        await this.queueFollowup(userId, novaMsg.conversation_id, followUpMsg, 0);
+      }
+    } catch (err) {
+      logger.warn('[NovaFollowup] checkIgnoredNovaMessages error', {
         error: err instanceof Error ? err.message : String(err)
       });
     }
