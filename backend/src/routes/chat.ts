@@ -485,6 +485,24 @@ chatRouter.post(
         });
       } else if (userMsgResult.data) {
         logger.info('[Chat] User message saved to DB', { requestId, userId, messageId: userMsgResult.data.id });
+        
+        // 1.1 If there was an image, save the description as a hidden context message
+        // This ensures the LLM remembers the image in future turns, but the UI ignores it.
+        if (image_base64) {
+          // We already called describeSharedImage above and it modified effectiveMessage.
+          // Now we just save that extracted text to DB if it exists.
+          const imageDescMatch = effectiveMessage.match(/\[User attached an image showing: (.*?)\]/);
+          if (imageDescMatch && imageDescMatch[1]) {
+            await supabaseAdmin.from('chat_history')
+              .insert({
+                user_id: userId,
+                conversation_id: activeConversationId,
+                role: 'user',
+                content: `[HIDDEN_CONTEXT] User shared an image showing: ${imageDescMatch[1]}`
+              })
+              .catch(e => logger.warn('[Chat] Failed to save hidden image context', { error: e }));
+          }
+        }
       } else {
         logger.warn('[Chat] User message save returned no data and no error', { requestId, userId });
       }
