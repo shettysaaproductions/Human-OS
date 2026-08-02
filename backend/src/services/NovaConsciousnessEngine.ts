@@ -231,24 +231,25 @@ export class NovaConsciousnessEngine {
     const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
-    // Now includes richer context for intelligent gap decisions
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
 Is Sleep Window: ${tContext.isSleepWindow}
-User Gap: ${Math.round(gapMinutes / 60)} hours (${Math.round(gapMinutes)} minutes)
-Dynamic Gap Applied: ${dynamicGap} minutes
-Pending Agenda: ${agendaItem ? agendaItem.event_description : 'None'}
-Agenda Urgency: ${agendaItem?.urgency || 'none'}
+User Presence: ${userPresence} (${userPresence === 'online' ? 'actively using app' : userPresence === 'away' ? 'was active recently' : 'not on app'})
+Gap Since User Last Messaged: ${Math.round(gapMinutes)} minutes
+Min Gap Allowed Right Now: ${effectiveMinGap} minutes (based on presence)
+Dynamic Situational Gap: ${dynamicGap} minutes
+Pending Agenda Item: ${agendaItem ? agendaItem.event_description + ' [urgency: ' + agendaItem.urgency + ']' : 'None'}
 Recent Memories: ${memorySummary || 'None'}
-Last Conversation: ${lastConvSnippet || 'None'}
+Last Conversation Snippet: ${lastConvSnippet || 'None'}
 
-DECISION RULES:
-- If user has been free for ${dynamicGap}+ minutes AND there's something meaningful to say, reach out.
-- If user has a pending high-urgency task/goal, ALWAYS reach out during non-sleep hours.
-- If user is likely busy (work hours), only reach out for important agenda items.
-- If user is online and gap is 1+ min, casual check-ins are OK.
-- If user is away and gap is 4+ min, gentle check-ins are OK.
-- If user read your message but didn't reply (gap 2+ min), send a follow-up.
-- NEVER reach out if the gap is less than ${MIN_GAP_MINUTES} minutes (except typing: instant).`;
+DECISION RULES (use actual gap values above, not hardcoded numbers):
+- User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately.
+- User is AWAY: reach out if gap >= 4 min. They stepped away but will see it soon.
+- User is OFFLINE: reach out if gap >= 15 min. They're not active right now.
+- High urgency agenda item: ALWAYS reach out during non-sleep hours.
+- Morning/afternoon work hours without agenda: only reach if gap > 20 min.
+- Evening/night with no agenda: reach out freely if gap >= dynamic gap.
+- Sleep window: only high-urgency agenda. Otherwise NO.
+- NEVER refuse because of a fixed 45-minute rule — use the presence-based gap above.`;
 
     let shouldReach = false;
     let triggerType = 'engagement';
@@ -258,10 +259,11 @@ DECISION RULES:
       shouldReach = decision.shouldReach;
       triggerType = decision.triggerType || 'engagement';
     } catch (e) {
-      logger.warn('[NACE] Tier 1 failed, defaulting to logic-based fallback');
-      // Fallback logic
+      logger.warn('[NACE] Tier 1 failed, using agenda-only fallback');
+      // Tighter fallback: only fire if there's a real agenda item (not random)
       if (agendaItem && !tContext.isSleepWindow) shouldReach = true;
-      else if (gapMinutes > 120 && !tContext.isSleepWindow && Math.random() > 0.5) shouldReach = true;
+      // If user is online with a long gap, nudge even without agenda
+      else if (userPresence === 'online' && gapMinutes > 5 && !tContext.isSleepWindow) shouldReach = true;
     }
 
     if (!shouldReach) return;

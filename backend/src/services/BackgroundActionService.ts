@@ -30,9 +30,15 @@ export class BackgroundActionService {
           logger.info('[BackgroundAction] Scheduled reminders', { userId, count: allScheduled.length });
         }
         else if (action.tool === 'MomentEngine' && action.action === 'extract') {
-           // Insert into a pending queue or process directly
-           // We will implement this later when we refactor MomentEngine
-           logger.info('[BackgroundAction] Extracted moment', action.data);
+           // Save to short_term_memories
+           logger.info('[BackgroundAction] Saving short-term memory', action.data);
+           await supabaseAdmin.from('short_term_memories').insert({
+             user_id: userId,
+             memory: action.data.memory || action.data.summary || action.data.key,
+             emotion: action.data.emotion || 'neutral',
+             importance: action.data.importance || 5,
+             confidence: action.data.confidence || 0.8
+           });
         }
         else if (action.tool === 'MemoryRepository' && action.action === 'save') {
            // Direct save
