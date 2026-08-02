@@ -149,17 +149,29 @@ If this is NOT a correction (just normal conversation), return:
           .insert({
             patch_rule: parsed.patchRule,
             flaw_type: parsed.flawType,
-            severity: parsed.severity
+            severity: parsed.severity,
+            source_log: `User Correction:\nNova: ${originalNovaMessage}\nUser: ${userMessage}`,
+            is_active: true
           });
 
         if (insertError) {
-          logger.error('[REALTIME LEARNING] Failed to write patch', { error: insertError.message });
+          logger.error('[REALTIME LEARNING] Failed to insert patch', { error: insertError.message });
         } else {
-          logger.info(`[REALTIME LEARNING] ✅ Patch applied in real-time: ${parsed.flawType}`);
-          // Step 5: Immediately reload patches into memory
+          logger.info('[REALTIME LEARNING] Successfully injected real-time patch!');
+          // Reload patches in memory
           await promptBuilder.loadPatches();
         }
       }
+
+      // Step 5: INJECT APOLOGY FLAG! 
+      // We must immediately insert an active flag into working_memory so Nova apologizes in her next message.
+      await supabaseAdmin.from('working_memory').upsert({
+        user_id: userId,
+        key: 'correction_apology_required',
+        value: `The user just corrected you for: ${parsed.flawType}. You MUST explicitly apologize for this mistake in your very next message and acknowledge that you have learned from it. Do not just move on without apologizing.`,
+        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() // Expires in 5 minutes
+      }, { onConflict: 'user_id,key' });
+      logger.info('[REALTIME LEARNING] Injected apology_required flag into working_memory');
 
       // Step 6: Log the correction for founder review (always, even if patch is duplicate)
       await supabaseAdmin.from('nova_corrections_log').insert({
