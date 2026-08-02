@@ -14,7 +14,7 @@ import { qt } from '../lib/queryTracker';
 import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
-import { sendNovaReplyNotification } from '../lib/pushNotifications';
+import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
 import crypto from 'crypto';
 
@@ -1264,6 +1264,16 @@ chatRouter.post(
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
         generatedImages.push(`![${prompt}](${imageUrl})`);
         rawReply = rawReply.replace(/<NOVA_IMAGE>.*?<\/NOVA_IMAGE>/s, '').trim();
+      }
+
+      // Extract Autonomous Vision requests
+      if (rawReply.includes('<NOVA_VISION>')) {
+        rawReply = rawReply.replace(/<NOVA_VISION>/g, '').trim();
+        if (profile?.push_token) {
+          sendVisionSnapNotification(profile.push_token).catch(e => 
+            logger.error('[ChatRouter] Failed to send vision snap notification', { error: e.message })
+          );
+        }
       }
 
       let parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));

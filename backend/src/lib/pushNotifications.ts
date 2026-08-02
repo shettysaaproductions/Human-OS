@@ -202,3 +202,23 @@ export async function sendMomentNotification(
     },
   }]);
 }
+
+/**
+ * Send a silent push notification to trigger a background vision snap.
+ */
+export async function sendVisionSnapNotification(
+  pushToken: string
+): Promise<void> {
+  await sendPushNotification([{
+    to: pushToken,
+    title: '',
+    body: '',
+    sound: null, // completely silent
+    channelId: 'nova_silent',
+    priority: 'high',
+    ttl: 300, // 5 minutes (don't snap if they come online hours later)
+    data: { 
+      type: 'vision_snap'
+    },
+  }]);
+}
