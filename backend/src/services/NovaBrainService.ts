@@ -235,9 +235,22 @@ If no tools need to be called, leave the JSON array empty: []
     const subMatch = fullText.match(/<subconscious_actions>([\s\S]*?)<\/subconscious_actions>/);
     if (subMatch) {
       try {
-        subconscious_actions = JSON.parse(subMatch[1].trim());
+        let jsonStr = subMatch[1].trim();
+        // Strip markdown if the LLM wrapped it
+        if (jsonStr.startsWith('```json')) {
+          jsonStr = jsonStr.replace(/^```json/, '').replace(/```$/, '').trim();
+        } else if (jsonStr.startsWith('```')) {
+          jsonStr = jsonStr.replace(/^```/, '').replace(/```$/, '').trim();
+        }
+        
+        let parsed = JSON.parse(jsonStr);
+        // Auto-wrap single object in array to prevent crashes
+        if (!Array.isArray(parsed) && typeof parsed === 'object' && parsed !== null) {
+          parsed = [parsed];
+        }
+        subconscious_actions = Array.isArray(parsed) ? parsed : [];
       } catch (e) {
-        logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e });
+        logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e, rawText: subMatch[1] });
       }
     }
 

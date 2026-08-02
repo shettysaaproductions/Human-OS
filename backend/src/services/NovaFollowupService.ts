@@ -416,6 +416,16 @@ export class NovaFollowupService {
         const lastSent = ignoredFollowupSent.get(userId) || 0;
         if (Date.now() - lastSent < 3 * 60 * 1000) continue;
 
+        // Skip if user is currently typing (don't interrupt them!)
+        const { data: presence } = await supabaseAdmin
+          .from('user_presence')
+          .select('status')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (presence?.status === 'typing') {
+          continue;
+        }
+
         // Skip if Nova's last message evaluated the user as BUSY (e.g. user said "bye" or "10 mins")
         if (novaMsg.meta?.situationBrief?.includes('USER AVAILABILITY: User signalled they are BUSY')) {
           continue;

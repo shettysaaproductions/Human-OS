@@ -30,11 +30,29 @@ export class BackgroundActionService {
           logger.info('[BackgroundAction] Scheduled reminders', { userId, count: allScheduled.length });
         }
         else if (action.tool === 'MomentEngine' && action.action === 'extract') {
-           // Save to short_term_memories
+           // Save to short_term_memories with deduplication
+           const memString = action.data.memory || action.data.summary || action.data.key || action.data.moment;
+           if (!memString) continue;
+
+           // Dedupe: check if exact memory was saved in last 10 mins
+           const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+           const { data: existing } = await supabaseAdmin
+             .from('short_term_memories')
+             .select('id')
+             .eq('user_id', userId)
+             .eq('memory', memString)
+             .gte('created_at', tenMinsAgo)
+             .limit(1);
+
+           if (existing && existing.length > 0) {
+             logger.info('[BackgroundAction] Skipped duplicate short-term memory', { memString });
+             continue;
+           }
+
            logger.info('[BackgroundAction] Saving short-term memory', action.data);
            await supabaseAdmin.from('short_term_memories').insert({
              user_id: userId,
-             memory: action.data.memory || action.data.summary || action.data.key,
+             memory: memString,
              emotion: action.data.emotion || 'neutral',
              importance: action.data.importance || 5,
              confidence: action.data.confidence || 0.8

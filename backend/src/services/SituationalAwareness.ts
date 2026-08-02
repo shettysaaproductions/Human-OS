@@ -173,7 +173,7 @@ export class SituationalAwareness {
   }
 
   private getTimeOfDay(now: Date): string {
-    const hour = now.getUTCHours();
+    const hour = now.getHours();
     if (hour >= 5 && hour < 12) return 'Morning';
     if (hour >= 12 && hour < 17) return 'Afternoon';
     if (hour >= 17 && hour < 21) return 'Evening';
@@ -181,7 +181,7 @@ export class SituationalAwareness {
   }
 
   private getTimedPersona(now: Date, isWeekend: boolean): string {
-    const hour = now.getUTCHours();
+    const hour = now.getHours();
     if (hour >= 0 && hour < 5) return 'It\'s very late / early. User might be having trouble sleeping, studying late, or unwinding. Be low-key, warm, and chill. Don\'t be hyper.';
     if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ' on weekend' : ''}. ${isWeekend ? 'Might be early riser or insomnia. Casual check-in.' : 'Probably getting ready for work/college. Keep it snappy.'}`;
     if (hour >= 9 && hour < 12) return `${isWeekend ? 'Weekend morning' : 'Work hours morning'}. ${isWeekend ? 'Relaxed mode. They might be free.' : 'Mid-work/study. Don\'t distract unnecessarily.'}`;
@@ -205,7 +205,7 @@ export class SituationalAwareness {
   }
 
   private getGreetingStrategy(gapMinutes: number, now: Date): string {
-    const hour = now.getUTCHours();
+    const hour = now.getHours();
     if (gapMinutes < 2) return 'Continue naturally. Zero greeting.';
     if (gapMinutes < 30) return 'Pick up where you left off. No greeting.';
     if (gapMinutes < 120) return 'Brief acknowledgment is fine, but don\'t over-greet.';
