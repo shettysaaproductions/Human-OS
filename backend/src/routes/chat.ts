@@ -408,9 +408,18 @@ chatRouter.post(
       logger.info('[Chat] Request started', { requestId, userId, messageLength: message.length, isAsync: async_mode, isProactive: is_proactive });
       let activeConversationId = conversation_id || crypto.randomUUID();
 
+      const isStreaming = req.headers.accept === 'text/event-stream';
+      if (isStreaming) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+        // Send immediate ACK comment to instantly resolve the client's POST promise and clear the "clock" icon
+        res.write(`: connected\n\n`);
+      }
+
       let releaseLock: (() => void) | undefined;
       // Lock will be acquired after user message is inserted
-
 
       const isDegraded = dbHealthService.isDegraded();
       // For proactive triggers, rewrite the message to a natural system instruction
@@ -464,7 +473,14 @@ chatRouter.post(
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, created_at: new Date().toISOString() } });
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: reply, created_at: new Date().toISOString() } });
 
-        res.status(200).json({ reply, messages, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
+        if (isStreaming) {
+          res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'chunk', content: reply })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+          res.end();
+        } else {
+          res.status(200).json({ reply, messages, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
+        }
         return;
       }
 
@@ -598,7 +614,7 @@ chatRouter.post(
           
           if (latestUserMsg && latestUserMsg.id !== userMessageId) {
             logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId });
-            if (req.headers.accept === 'text/event-stream') {
+            if (isStreaming) {
               res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
               res.end();
             } else {
@@ -1015,7 +1031,7 @@ chatRouter.post(
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has NO active reminders. CRITICAL: This is the absolute source of truth. If past chat history says a reminder was set, but this list is empty, it means there are NO active reminders. Do not contradict this fact.';
       }
 
-      const isStreaming = req.headers.accept === 'text/event-stream';
+
 
       // === MEMORY RETRIEVAL (REUSE ALREADY-FETCHED DATA) ===
       let memoryContext = '';
@@ -1082,26 +1098,11 @@ chatRouter.post(
           res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
           res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
         }
-      } else {
         try {
           const llmStartTime = Date.now();
           logger.info('[Chat] Calling LLM', { userId });
           
-          // Simulated Reading Pacing
-          if (!is_proactive) {
-            const wordCount = effectiveMessage.split(/\s+/).length;
-            // Humans read ~250 words per minute (approx 200ms per word). Cap at 5000ms.
-            const readingDelayMs = Math.min(wordCount * 200, 5000);
-            if (readingDelayMs > 0) {
-              await new Promise(resolve => setTimeout(resolve, readingDelayMs));
-            }
-          }
-          
           if (isStreaming) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.flushHeaders();
             res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
             
             const { novaBrain } = await import('../services/NovaBrainService');
