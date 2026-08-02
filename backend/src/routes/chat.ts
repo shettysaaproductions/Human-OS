@@ -404,7 +404,8 @@ chatRouter.post(
       const userId = (req as any).user!.id;
       
       const requestStartTime = Date.now();
-      logger.info('[Chat] Request started', { userId, messageLength: message.length });
+      const requestId = crypto.randomUUID();
+      logger.info('[Chat] Request started', { requestId, userId, messageLength: message.length, isAsync: async_mode, isProactive: is_proactive });
       let activeConversationId = conversation_id || crypto.randomUUID();
 
       let releaseLock: (() => void) | undefined;
@@ -511,6 +512,9 @@ chatRouter.post(
         });
       }
       
+      // NOTE: If the frontend does not poll for async results, switch to sync mode
+      // by sending async_mode: false in the request body.
+      
       // Async mode: set up a hard deadline. If processing takes >90s, save a fallback reply.
       const ASYNC_HARD_DEADLINE_MS = 90_000;
       let asyncDeadlineTimer: any = null; // using any for timer type to avoid TS issues
@@ -537,31 +541,37 @@ chatRouter.post(
       }
 
       // ── Mutex & Debounce ───────────────────────────────────────────────────
-      // Acquire lock NOW, after DB insert and async response
-      const MUTEX_TIMEOUT_MS = 30_000; // 30 seconds max wait
+      // ── Mutex with Timeout ───────────────────────────────────────────────────
+      const MUTEX_TIMEOUT_MS = 30_000;
 
-      const previousLock = userLocks.get(userId) || Promise.resolve();
+      const previousLock = userLocks.get(userId);
       const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
-      userLocks.set(userId, previousLock.then(() => newLock));
-      
-      // Timeout wrapper: if previous lock is stuck >30s, force-release and continue
-      const lockWithTimeout = Promise.race([
-        previousLock,
-        new Promise<void>((_, reject) => 
+
+      if (previousLock) {
+        // Wait for previous request with timeout
+        const timeoutPromise = new Promise<void>((_, reject) => 
           setTimeout(() => reject(new Error('MUTEX_TIMEOUT')), MUTEX_TIMEOUT_MS)
-        )
-      ]);
-      
-      try {
-        await lockWithTimeout.catch(err => {
+        );
+        
+        try {
+          await Promise.race([previousLock, timeoutPromise]);
+          logger.info('[Chat] Previous lock resolved normally', { userId });
+        } catch (err: any) {
           if (err.message === 'MUTEX_TIMEOUT') {
-            logger.warn('[Chat] Mutex timeout — forcing lock release', { userId });
-            const staleLock = userLocks.get(userId);
-            if (staleLock) userLocks.delete(userId);
+            logger.warn('[Chat] Mutex timeout — previous request hung, continuing', { userId });
+            // Force-clear the stale lock
+            userLocks.delete(userId);
           } else {
             throw err;
           }
-        });
+        }
+      }
+
+      // Set the new lock ONLY after previous is done or timed out
+      userLocks.set(userId, newLock);
+      logger.info('[Chat] Mutex acquired', { userId });
+      
+      try {
 
         // DEBOUNCE CHECK: Are there any NEWER user messages in this conversation?
         if (!is_proactive) {
@@ -1349,7 +1359,7 @@ chatRouter.post(
       // Push notifications are now sent per-bubble directly after DB insert
 
       const totalDuration = Date.now() - requestStartTime;
-      logger.info('[Chat] Request completed', { userId, totalDurationMs: totalDuration });
+      logger.info('[Chat] Request completed', { requestId, userId, durationMs: totalDuration });
       if (totalDuration > 10000) {
         logger.warn('[Chat] Total request slow', { userId, totalDurationMs: totalDuration });
       }
@@ -1410,10 +1420,10 @@ chatRouter.post(
     } finally {
       if (releaseLock) {
         releaseLock();
-        if (userLocks.get(userId) === newLock) {
-          userLocks.delete(userId);
-        }
+        logger.info('[Chat] Mutex released', { userId });
       }
+      // Always clean up — even if the lock was replaced due to timeout
+      userLocks.delete(userId);
     }
   } catch (outerErr) {
     next(outerErr);
