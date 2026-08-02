@@ -63,6 +63,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Defensive DB Error Handling (Aug 2, 2026):** Added explicit error checking after every `chat_history` insert. If the primary insert fails (e.g., invalid column), an emergency fallback insert is attempted. Push notifications are sent even if DB save fails. All DB errors now log the full error code and message to Render logs for immediate debugging.
 - ✅ **Mutex Deadlock Fix v2 (Aug 2, 2026):** Replaced broken chained mutex (which created never-resolving promise chains) with a simple timeout lock. Previous lock is waited on with 30s timeout; if it hangs, it's deleted and the new request proceeds. Lock is unconditionally cleaned up in finally block.
 - ✅ **Critical Latency & Deadlock Fix (Aug 2, 2026):** Fixed Render build by excluding test files from tsconfig. Added 30s mutex timeout with stale lock cleanup to prevent deadlocks from hung LLM calls. Added 25s LLM timeout for sync requests and 30s for streaming. Fixed broken async deadline (was racing against empty function, now uses actual setTimeout).
 - ✅ **Messaging Latency Fix (Aug 2, 2026):** Reduced NACE pulse interval from 15min to 3min, removed unnecessary TriggerEngine check from chat.ts (saved 1 DB query per request), removed duplicate memory fetches (saved 3 DB queries), added response time logging to identify bottlenecks.

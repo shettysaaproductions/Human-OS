@@ -478,7 +478,19 @@ chatRouter.post(
               .select('id').single()
           );
 
-      if (userMsgResult.error) logger.error('Failed to save user message', { error: userMsgResult.error.message });
+      if (userMsgResult.error) {
+        logger.error('[Chat] FAILED to save user message to DB', { 
+          requestId, 
+          userId, 
+          error: userMsgResult.error.message || userMsgResult.error,
+          errorCode: userMsgResult.error.code,
+          messageLength: message.length 
+        });
+      } else if (userMsgResult.data) {
+        logger.info('[Chat] User message saved to DB', { requestId, userId, messageId: userMsgResult.data.id });
+      } else {
+        logger.warn('[Chat] User message save returned no data and no error', { requestId, userId });
+      }
       const userMessageId = userMsgResult.data?.id || 'msg_' + Date.now();
 
       // Cancel any pending follow-ups since the user replied
@@ -524,18 +536,29 @@ chatRouter.post(
           logger.error('[ASYNC] Hard 90s deadline exceeded — saving emergency fallback reply', { userId });
           const fallback = 'Yaar, thoda slow ho gaya server! Ek baar phir try kar — I\'m here! 😅';
           try {
-            await supabaseAdmin.from('chat_history').insert({
+            const fallbackResult = await supabaseAdmin.from('chat_history').insert({
               user_id: userId,
               conversation_id: activeConversationId,
               role: 'assistant',
               content: fallback,
             });
+            
+            if (fallbackResult.error) {
+              logger.error('[ASYNC] Failed to save deadline fallback — DB error', { 
+                userId, 
+                error: fallbackResult.error.message,
+                errorCode: fallbackResult.error.code 
+              });
+            } else {
+              logger.info('[ASYNC] Deadline fallback saved to DB', { userId });
+            }
+            
             const { data: ptResult } = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
             if (ptResult?.push_token) {
               sendNovaReplyNotification(ptResult.push_token, fallback).catch(() => {});
             }
           } catch (saveErr) {
-            logger.error('[ASYNC] Failed to save deadline fallback', { error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
+            logger.error('[ASYNC] Failed to save deadline fallback — exception', { error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
           }
         }, ASYNC_HARD_DEADLINE_MS);
       }
@@ -1286,16 +1309,63 @@ chatRouter.post(
             } : null
           };
           
-          const { data: savedMsg } = await qt.track('save_ai_response', 'chat_history', () => 
+          const saveResult = await qt.track('save_ai_response', 'chat_history', () => 
             supabaseAdmin.from('chat_history').insert(rowData).select().single()
           );
-
-          // Send push for each bubble (with small delay between)
-          if (savedMsg && pushToken) {
-            await sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id).catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
-            if (idx < finalBubbles.length - 1) {
-              await new Promise(r => setTimeout(r, 800)); // 800ms between bubbles for realism
+          
+          if (saveResult.error) {
+            logger.error('[Chat] FAILED to save AI response to DB', { 
+              requestId, 
+              userId, 
+              error: saveResult.error.message || saveResult.error,
+              errorCode: saveResult.error.code,
+              rowData: { 
+                user_id: rowData.user_id, 
+                conversation_id: rowData.conversation_id, 
+                role: rowData.role,
+                contentLength: rowData.content?.length 
+              }
+            });
+            
+            // EMERGENCY: Try to save without the .select().single() — just raw insert
+            const emergencyResult = await supabaseAdmin
+              .from('chat_history')
+              .insert({
+                user_id: userId,
+                conversation_id: activeConversationId,
+                role: 'assistant',
+                content: msgText,
+              });
+              
+            if (emergencyResult.error) {
+              logger.error('[Chat] EMERGENCY insert also failed', { 
+                requestId, 
+                userId, 
+                error: emergencyResult.error.message 
+              });
+            } else {
+              logger.info('[Chat] EMERGENCY insert succeeded', { requestId, userId });
             }
+            
+            // Always try to send push notification even if DB save failed
+            if (pushToken) {
+              await sendNovaReplyNotification(pushToken, msgText, activeConversationId, 'emergency_' + Date.now())
+                .catch(err => logger.warn('[Push] Emergency notification failed', { error: err?.message }));
+            }
+          } else if (saveResult.data) {
+            const savedMsg = saveResult.data;
+            logger.info('[Chat] AI response saved to DB', { requestId, userId, messageId: savedMsg.id });
+            
+            // Send push for each bubble (with small delay between)
+            if (pushToken) {
+              await sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)
+                .catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
+              if (idx < finalBubbles.length - 1) {
+                await new Promise(r => setTimeout(r, 800));
+              }
+            }
+          } else {
+            logger.warn('[Chat] AI response save returned no data and no error', { requestId, userId });
           }
         }
       } else {
