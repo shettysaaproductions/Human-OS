@@ -90,13 +90,13 @@ describe('NovaFollowupService', () => {
       expect(fireAtTime).toBeLessThanOrEqual(Date.now() + 3600000 + 5100);
     });
 
-    it('should clamp delay to minimum 30 seconds', async () => {
+    it('should clamp delay to minimum 15 seconds', async () => {
       // delay of 0
       await service.queueFollowup('u1', 'c1', 'Hello', 0);
       
       const inserted = mockChain.insert.mock.calls[0][0];
       const fireAtTime = new Date(inserted.fire_at).getTime();
-      expect(fireAtTime).toBeGreaterThanOrEqual(Date.now() + 30000 - 5000);
+      expect(fireAtTime).toBeGreaterThanOrEqual(Date.now() + 15000 - 5000);
     });
 
     it('should clamp delay to maximum 24 hours', async () => {
