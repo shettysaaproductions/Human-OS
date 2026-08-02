@@ -478,20 +478,17 @@ export class NovaFollowupService {
         const escalation = (ignoreEscalationCount.get(userId) || 0) + 1;
         ignoreEscalationCount.set(userId, escalation);
 
-        // Generate escalation-appropriate prompt
+        // Generate escalation-appropriate prompt based on age and count
         let escalationPrompt = '';
-        if (escalation === 1 || ageMinutes < 3) {
-          // Level 1: Warm casual nudge
-          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User hasn't replied. Send ONE short warm nudge (1 sentence Hinglish). Examples: "Bol na yaar", "Kya soch raha hai?", "Hello?? 👀"`;
-        } else if (escalation === 2 || ageMinutes < 6) {
-          // Level 2: Change topic or ask something new
-          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. Still no reply. Change topic or ask something genuinely interesting about their day. 1 sentence max. Don't reference your last message.`;
-        } else if (escalation === 3 || ageMinutes < 15) {
-          // Level 3: Genuine concern
-          escalationPrompt = `User has been ignoring your messages for ${Math.round(ageMinutes)} minutes. Last message was: "${novaMsg.content.substring(0, 100)}". Send a genuinely caring 1-sentence check-in. Not pushy. Something like "Sab theek hai na?" or "Busy hai kya, bata dena".`;
+        if (escalation === 1) {
+          // Level 1: First check-in after 15-30 mins
+          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User hasn't replied. Send ONE short, professional yet caring nudge to check if they are busy or working. Examples: "Looks like you're busy, everything good?", "Are you in the middle of something?", "Ping me when you are free."`;
+        } else if (escalation === 2) {
+          // Level 2: Second check-in
+          escalationPrompt = `User has ignored you twice over ${Math.round(ageMinutes)} minutes. Send a very brief, supportive note assuming they are focused on work/goals. E.g., "Must be deep in work, keep it up!", "No rush to reply, focus on your tasks."`;
         } else {
-          // Level 4: Give space gracefully
-          escalationPrompt = `User has gone silent for ${Math.round(ageMinutes)} minutes. Give them space — send one super short low-pressure note like "Koi baat nahi, jab free ho baat karna 😊" and then stop trying for a while.`;
+          // Level 3: Give space gracefully
+          escalationPrompt = `User has gone silent for ${Math.round(ageMinutes)} minutes. Give them space — send one super short low-pressure note like "Take your time, let's catch up later!" and then stop trying.`;
         }
 
         logger.info('[NovaFollowup] Ignored message detected, generating escalation follow-up', { 
@@ -514,8 +511,8 @@ export class NovaFollowupService {
           logger.warn('[NovaFollowup] LLM escalation gen failed, using fallback', { escalation });
         }
 
-        // Level 4: stop escalating after giving space
-        if (escalation >= 4) {
+        // Level 3: stop escalating after giving space
+        if (escalation >= 3) {
           ignoreEscalationCount.delete(userId); // Reset so NACE takes over
         }
 
