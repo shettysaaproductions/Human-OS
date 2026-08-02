@@ -144,11 +144,19 @@ export class NovaConsciousnessEngine {
     // Fetch user presence to calculate dynamic gap
     const { data: presenceData } = await supabaseAdmin
       .from('user_presence')
-      .select('status')
+      .select('status, updated_at')
       .eq('user_id', userId)
       .maybeSingle();
       
-    const userPresence = presenceData?.status || 'offline';
+    let userPresence = presenceData?.status || 'offline';
+    
+    // Presence Decay: If marked online but hasn't updated in 10 mins, downgrade to away
+    if (userPresence === 'online' && presenceData?.updated_at) {
+      const presenceAgeMinutes = (Date.now() - new Date(presenceData.updated_at).getTime()) / 60000;
+      if (presenceAgeMinutes > 10) {
+        userPresence = 'away';
+      }
+    }
 
     const getEffectiveMinGap = (presence: string): number => {
       switch (presence) {

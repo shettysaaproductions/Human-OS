@@ -163,6 +163,24 @@ If no flaws are detected, return { "flawsDetected": [], "healthScore": 100, "sum
       }
 
       if (patchesApplied > 0) {
+
+        
+        // Auto-prune to keep prompt lean (max 10 active patches)
+        const { data: allActive } = await supabaseAdmin
+          .from('nova_behavioral_patches')
+          .select('id')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+          
+        if (allActive && allActive.length > 10) {
+          const idsToDeactivate = allActive.slice(10).map(p => p.id);
+          await supabaseAdmin
+            .from('nova_behavioral_patches')
+            .update({ is_active: false })
+            .in('id', idsToDeactivate);
+          logger.info(`[SELF IMPROVEMENT] Auto-pruned ${idsToDeactivate.length} old patches to keep prompt lean.`);
+        }
+
         // Immediately reload patches into memory so the running instance uses them
         await promptBuilder.loadPatches();
         logger.info(`[SELF IMPROVEMENT] Reloaded ${patchesApplied} new patches into PromptBuilder.`);

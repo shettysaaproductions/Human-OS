@@ -114,7 +114,11 @@ If this is NOT a correction (just normal conversation), return:
         maxTokens: 512
       });
 
-      const parsed = JSON.parse(result);
+      let cleanResult = result.trim();
+      if (cleanResult.startsWith('```json')) cleanResult = cleanResult.replace(/^```json/, '').replace(/```$/, '').trim();
+      else if (cleanResult.startsWith('```')) cleanResult = cleanResult.replace(/^```/, '').replace(/```$/, '').trim();
+      
+      const parsed = JSON.parse(cleanResult);
 
       if (!parsed.isCorrection) {
         logger.info('[REALTIME LEARNING] LLM determined this is not a correction. Skipping.');
