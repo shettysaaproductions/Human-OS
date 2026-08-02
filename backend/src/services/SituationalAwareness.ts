@@ -25,13 +25,15 @@ export interface SituationContext {
   last3UserEmotions?: { mood: string; intensity: number }[]; // For momentum tracking
 }
 
-// Social signal patterns — user is signalling they are busy/unavailable
+// Social signal patterns — user is signalling they are busy/unavailable or ending the chat
 const BUSY_SIGNALS = [
   'busy', 'not now', 'later', 'baad mein', 'baad me', 'abhi nahi', 'kuch time de',
   'thodi der mein', 'call kar raha hoon', 'meeting mein', 'kaam kar raha',
   'gotta go', 'gtg', 'ttyl', 'talk later', 'in a bit', 'brb', 'occupied',
   'driving', 'gym', 'khana kha raha', 'so raha', 'neend aa rahi', 'kal baat',
-  'kal karte', 'not feeling', 'not in mood', 'mood nahi', 'thaka hua', 'rest kar raha'
+  'kal karte', 'not feeling', 'not in mood', 'mood nahi', 'thaka hua', 'rest kar raha',
+  'bye', 'good night', 'gn', 'cya', 'catch you later', 'alvida', 'soja', 'so jao',
+  '10 min', '10 mins', '5 min', '5 mins', 'goodnight', 'see ya'
 ];
 
 // User signals they are in good mood / excited — Nova should match energy
