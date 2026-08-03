@@ -174,6 +174,8 @@ If this is NOT a correction (just normal conversation), return:
       logger.info('[REALTIME LEARNING] Injected apology_required flag into working_memory');
 
       // Step 6: Log the correction for founder review (always, even if patch is duplicate)
+      // Note: nova_corrections_log schema: id, user_id, original_nova_message, user_correction,
+      //        detected_flaw_type, generated_patch, patch_applied, created_at
       await supabaseAdmin.from('nova_corrections_log').insert({
         user_id: userId,
         original_nova_message: originalNovaMessage.substring(0, 2000),

@@ -53,3 +53,7 @@ This document tracks identified bugs, limitations, and workarounds.
 | Repetition of exact phrases | Added ANTI-ROBOT REPETITION rule to `promptBuilder.ts` | July 2026 |
 | Race Condition (Double text) on rapid messages | Added in-memory Mutex lock per user in `backend/src/routes/chat.ts` | Aug 2026 |
 | Robotic Excuse Hallucination | Added NO HALLUCINATING ACTIONS and CONTEXT ROLL-UP rules to `promptBuilder.ts` | Aug 2026 |
+| **Infinite Follow-Up Spam (P0)** | After Level 3 escalation, `NovaFollowupService` now writes a persistent `followup_suppressed_until` to `working_memory` (4 hours). Survives restarts. Cleared when user replies. | Aug 2026 |
+| `fetch_recent_chats.ts` querying wrong table | Fixed `messages` → `chat_history`, `.single()` → `.maybeSingle()` | Aug 2026 |
+| `nova_behavioral_patches` missing `source_log` column | Added migration `023_add_source_log_to_patches.sql` | Aug 2026 |
+| Missing `axios` and `@google/generative-ai` in node_modules | Ran `npm install --prefer-offline` after git pull | Aug 2026 |
