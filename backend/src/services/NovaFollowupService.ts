@@ -131,6 +131,13 @@ export class NovaFollowupService {
       dedupCache.delete(userId);
       ignoredFollowupSent.delete(userId);
       ignoreEscalationCount.delete(userId);
+
+      // Clear DB suppression — user replied, so Nova can re-engage in future sessions
+      await supabaseAdmin
+        .from('working_memory')
+        .delete()
+        .eq('user_id', userId)
+        .eq('key', 'followup_suppressed_until');
     } catch (err) {
       logger.warn('[NovaFollowup] Error cancelling follow-ups', {
         error: err instanceof Error ? err.message : String(err)
@@ -345,7 +352,7 @@ export class NovaFollowupService {
           .select('id')
           .eq('user_id', userMsg.user_id)
           .in('status', ['pending', 'sent'])
-          .gte('created_at', new Date(Date.now() - 60 * 1000).toISOString()) // 1 min cooldown (was 5 min)
+          .gte('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString()) // 5 min cooldown
           .limit(1);
           
         if (recentFollowups && recentFollowups.length > 0) {
@@ -419,6 +426,21 @@ export class NovaFollowupService {
         // 🔒 Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
         const lastSent = ignoredFollowupSent.get(userId) || 0;
         if (Date.now() - lastSent < 3 * 60 * 1000) continue;
+
+        // 🛑 DB-persistent suppression check: if we hit Level 3 escalation, give space for 4 hours
+        const { data: suppressionData } = await supabaseAdmin
+          .from('working_memory')
+          .select('value')
+          .eq('user_id', userId)
+          .eq('key', 'followup_suppressed_until')
+          .maybeSingle();
+        if (suppressionData?.value) {
+          const suppressedUntil = new Date(suppressionData.value).getTime();
+          if (Date.now() < suppressedUntil) {
+            logger.info('[NovaFollowup] Skipping — follow-ups suppressed until ' + suppressionData.value, { userId });
+            continue;
+          }
+        }
 
         // Skip if user is currently typing (don't interrupt them!)
         const { data: presence } = await supabaseAdmin
@@ -511,9 +533,21 @@ export class NovaFollowupService {
           logger.warn('[NovaFollowup] LLM escalation gen failed, using fallback', { escalation });
         }
 
-        // Level 3: stop escalating after giving space
+        // Level 3: Give space — write a PERSISTENT DB suppression so it survives restarts.
+        // Suppress all further follow-ups for this user for 4 hours OR until they reply.
         if (escalation >= 3) {
-          ignoreEscalationCount.delete(userId); // Reset so NACE takes over
+          ignoreEscalationCount.delete(userId);
+          try {
+            await supabaseAdmin.from('working_memory').upsert({
+              user_id: userId,
+              key: 'followup_suppressed_until',
+              value: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(), // 4 hours
+              expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+            }, { onConflict: 'user_id,key' });
+            logger.info('[NovaFollowup] Level 3 reached — suppressed follow-ups for 4 hours', { userId });
+          } catch (e) {
+            logger.warn('[NovaFollowup] Failed to write suppression to DB (non-critical)', { error: e instanceof Error ? e.message : String(e) });
+          }
         }
 
         await this.queueFollowup(userId, novaMsg.conversation_id, followUpMsg, 0);

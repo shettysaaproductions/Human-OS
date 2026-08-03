@@ -45,6 +45,7 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 - Never-stuck message guarantee (DB write before 202 response)
 - OTA update popup system (targets `production` branch for APK builds)
 - **Auto Upgrade (July 2026)**: Fixed OTA checking (`checkAutomatically: ON_LOAD`), fixed push token freshness on new APK installs, added `fetch_recent_chats.ts`, added 3 new behavioral patches (Schedule pre-check, Same-session amnesia, Proactive depth).
+- **Auto Upgrade (Aug 2026)**: Fixed **Infinite Follow-Up Spam** (P0 bug) — `NovaFollowupService` now writes a persistent DB suppression key after Level 3 escalation (survives restarts). Fixed `fetch_recent_chats.ts` wrong table. Added 2 new anti-robot rules: SILENCE RESPECT + FOLLOW-UP VARIETY. Added migration `023_add_source_log_to_patches.sql`. New services: `NovaTriggerEngine`, `NovaRealtimeLearningService`, `VisionService`, `WeatherWatcherService`, `WebSearchService`, `presenceService`.
 
 ### 🔜 Next Sprint (Planned)
 1. Fix `reminders.status` column bug (P1 blocker — spams logs every 10s)

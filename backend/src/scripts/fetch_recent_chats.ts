@@ -30,11 +30,11 @@ async function getTargetUserId(providedId: string | null): Promise<string> {
 
   // Find the user who sent the most recent message
   const { data, error } = await supabase
-    .from('messages')
+    .from('chat_history')
     .select('user_id')
     .order('created_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (error || !data) {
     throw new Error('Could not find any recent users. Database might be empty or connection failed.');
@@ -73,7 +73,7 @@ async function fetchTelemetry() {
     // 3. Fetch recent messages
     console.log('\n=== RECENT MESSAGES ===');
     const { data: messages, error } = await supabase
-      .from('messages')
+      .from('chat_history')
       .select('role, content, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
@@ -90,7 +90,8 @@ async function fetchTelemetry() {
     messages.reverse().forEach((msg: any) => {
       const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const sender = msg.role === 'user' ? `[${name}]` : '[Nova]';
-      const color = msg.role === 'nova' ? '\x1b[35m' : '\x1b[36m'; // Magenta for Nova, Cyan for User
+      // Nova uses 'assistant' role in chat_history
+      const color = msg.role === 'assistant' ? '\x1b[35m' : '\x1b[36m'; // Magenta for Nova, Cyan for User
       const reset = '\x1b[0m';
       
       console.log(`${color}${time} ${sender}: ${msg.content}${reset}`);

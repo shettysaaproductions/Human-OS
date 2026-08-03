@@ -83,6 +83,8 @@ Every 7 days, the founder reviews:
    - Added ANTI-ROBOT RULE (SCHEDULE PRE-CHECK) to cross-reference known events before asking activity questions
    - Added ANTI-ROBOT RULE (SAME-SESSION AMNESIA) to strictly enforce zero-tolerance for forgetting current context
    - Added ANTI-ROBOT RULE (PROACTIVE DEPTH) to ban generic 'Sab theek?' NACE messages and enforce specific reference
+   - Added ANTI-ROBOT RULE (SILENCE RESPECT) to stop follow-up spam after 3+ ignored messages — give space like a real friend
+   - Added ANTI-ROBOT RULE (FOLLOW-UP VARIETY) to ensure no identical follow-up message is ever sent twice
 4. **User Experience Wins:** Features that made the app feel alive
 5. **Stuck/Error Events:** Any message delivery failures, ghost duplicates, or errors
 6. **Next Auto Upgrade Focus:** What flaws to target manually

@@ -41,6 +41,7 @@ This document tracks upcoming features queued for development, ordered by priori
 | Feature | Completed |
 |---|---|
 | Auto Upgrade Protocol execution & patches | July 2026 |
+| Push Notification Bug Fix (`ExpoPushToken[`) | July 2026 |
 | `reminders.status` Bug Fix (Migration) | July 2026 |
 | Dual NVIDIA Key Routing | July 2026 |
 | `NovaSelfImprovementService` — Autonomous Self-Repair | July 2026 |
