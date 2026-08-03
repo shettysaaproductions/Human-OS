@@ -408,7 +408,12 @@ chatRouter.post(
       if (image_base64) {
         const imageDesc = await visionService.describeSharedImage(image_base64);
         if (imageDesc) {
-          effectiveMessage = `[User attached an image showing: ${imageDesc}]\n\n${effectiveMessage}`;
+          // Check if vision was degraded (no Gemini key)
+          if (imageDesc.includes('vision analysis unavailable')) {
+            effectiveMessage = `[User just shared an image but vision analysis is unavailable. You MUST ask them what is in it — e.g., "Dikha na kya hai isme!" or "Kya bheja hai bhai?"]\n\n${effectiveMessage}`;
+          } else {
+            effectiveMessage = `[User attached an image showing: ${imageDesc}]\n\n${effectiveMessage}`;
+          }
         }
       }
 
@@ -716,20 +721,23 @@ chatRouter.post(
       const dbDuration = Date.now() - dbStartTime;
       logger.info('[Chat] Context fetch completed', { userId, durationMs: dbDuration });
 
-      // If a web search is needed, execute it immediately (before LLM generation)
-      let webSearchContext = '';
+      // If a web search is needed, execute it and PREPEND to effectiveMessage
+      // CRITICAL: Previously was added to memoryContext (buried) — LLM ignored it.
+      // Now injected directly into the message the LLM is replying to.
       if (searchNeedResult) {
         try {
           const { webSearchService } = await import('../services/WebSearchService');
           const searchData = await webSearchService.executeSearch(searchNeedResult);
           if (searchData) {
-            webSearchContext = searchData;
-            logger.info('[Chat] Web Search Injected', { query: searchNeedResult });
+            // Prepend search results DIRECTLY to the message the LLM will reply to
+            effectiveMessage = `${searchData}\n\nUser's question: ${effectiveMessage}`;
+            logger.info('[Chat] Web Search prepended to effectiveMessage', { query: searchNeedResult });
           }
         } catch (e) {
           logger.warn('[Chat] Failed to execute web search', { error: e });
         }
       }
+      const webSearchContext = ''; // No longer used — search results now go into effectiveMessage
 
       // ── Unpack results ─────────────────────────────────────────────────────────
       // 1. Profile
