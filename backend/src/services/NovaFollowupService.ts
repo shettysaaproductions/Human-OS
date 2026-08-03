@@ -43,6 +43,61 @@ export class NovaFollowupService {
     delayHours: number
   ): Promise<void> {
     try {
+      // ── SLEEP & UNAVAILABILITY GUARD ─────────────────────────────────────────
+      // Before queuing ANY follow-up, check if the user recently said they are
+      // sleeping, going somewhere, or explicitly said they're busy/unavailable.
+      // If so, suppress all follow-ups for the appropriate duration.
+      const SLEEP_SIGNALS = [
+        'soone ja', 'so ja', 'so raha hoon', 'so rahi hoon', 'neend aa', 'raat ko so',
+        'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
+        'gn ', 'gn\n', 'bye', 'byee', 'byebye', 'chalta hoon', 'chalti hoon',
+        'chalte hai', 'nikal raha', 'nikal rahi', 'baad mein baat', 'baad mein reply',
+        'call aaya', 'meeting me hoon', 'busy hoon', 'baad mein baat karta', 'abhi baad me',
+        'so jaunga', 'so jaungi', 'sone wala hoon', 'nap le raha', 'nap le rahi'
+      ];
+
+      // Peek at the last user message (lightweight, single-row query)
+      const { data: lastUserMsg } = await supabaseAdmin
+        .from('chat_history')
+        .select('content, created_at')
+        .eq('user_id', userId)
+        .eq('role', 'user')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastUserMsg?.content) {
+        const lowerContent = lastUserMsg.content.toLowerCase();
+        const sleepMatch = SLEEP_SIGNALS.find(s => lowerContent.includes(s));
+        
+        if (sleepMatch) {
+          // Determine suppression duration based on signal type
+          const isTrulySleeping = ['soone ja', 'so ja', 'so raha', 'so rahi', 'neend aa',
+            'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
+            'gn ', 'so jaunga', 'so jaungi', 'sone wala', 'nap le'].some(s => lowerContent.includes(s));
+          const suppressHours = isTrulySleeping ? 8 : 2; // Sleep = 8h, Busy/Bye = 2h
+          
+          logger.info(`[NovaFollowup] 🛑 Sleep/unavailability signal detected ("${sleepMatch}") — suppressing follow-ups for ${suppressHours}h`, { userId });
+          
+          // Write persistent suppression to DB (survives restarts)
+          await supabaseAdmin.from('working_memory').upsert({
+            user_id: userId,
+            key: 'followup_suppressed_until',
+            value: new Date(Date.now() + suppressHours * 60 * 60 * 1000).toISOString(),
+            expires_at: new Date(Date.now() + suppressHours * 60 * 60 * 1000).toISOString()
+          }, { onConflict: 'user_id,key' });
+          
+          // Also cancel any already-queued follow-ups
+          await supabaseAdmin
+            .from('nova_followups')
+            .update({ status: 'cancelled' })
+            .eq('user_id', userId)
+            .eq('status', 'pending');
+          
+          return; // Do NOT queue a follow-up
+        }
+      }
+
       // Cancel any existing pending follow-up for this user
       await supabaseAdmin
         .from('nova_followups')

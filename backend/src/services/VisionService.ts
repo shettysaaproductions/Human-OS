@@ -11,7 +11,7 @@ export class VisionService {
   async analyzeContextImage(userId: string, frontImageBase64?: string, rearImageBase64?: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
     const key = geminiPool.getNextKey();
     if (!key) {
-      logger.warn('[VisionService] No Gemini API keys available for vision analysis.');
+      logger.warn('[VisionService] ❌ GEMINI_API_KEY not set! Vision analysis disabled. Add GEMINI_API_KEY to your .env and Render environment variables.');
       return null;
     }
     if (!frontImageBase64 && !rearImageBase64) {
@@ -67,8 +67,9 @@ export class VisionService {
   async describeSharedImage(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
     const key = geminiPool.getNextKey();
     if (!key) {
-      logger.warn('[VisionService] No Gemini API keys available for chat image analysis.');
-      return null;
+      logger.warn('[VisionService] ❌ GEMINI_API_KEY not set — returning fallback description so Nova knows an image was shared.');
+      // Return a fallback so Nova at least knows an image was attached
+      return '[image shared by user — vision analysis unavailable, ask them to describe it]';
     }
 
     try {

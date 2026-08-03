@@ -10,6 +10,46 @@ export class WebSearchService {
    * Returns a search query if needed, or null if not.
    */
   async evaluateSearchNeed(message: string): Promise<string | null> {
+    const lower = message.toLowerCase().trim();
+    
+    // ── Fast-path keyword detection (no LLM call needed) ─────────────────
+    // Covers English + Hinglish search intents without burning NVIDIA tokens.
+    const SEARCH_TRIGGERS = [
+      // English
+      'search', 'google', 'look up', 'find out', 'what is', 'who is', 'where is',
+      'how to', 'latest news', 'current', 'today\'s', 'right now', 'live score',
+      'stock price', 'weather', 'temperature', 'cricket score', 'ipl', 'icc',
+      'news', 'headline', 'breaking', 'trending', 'what happened',
+      // Hinglish / Hindi
+      'aaj ka mausam', 'mausam kaisa', 'weather kya', 'news kya', 'kya hua',
+      'kaisa chal raha', 'live score', 'score kya hai', 'kitna hua',
+      'search kar', 'dhundh', 'pata karo', 'batao kya hai', 'latest kya',
+      'abhi kya ho raha', 'aaj ka news', 'kal ki news', 'rate kya hai',
+      'price kya hai', 'kab hua', 'kahan hua', 'kaun hai',
+    ];
+    
+    const EXCLUDED_PATTERNS = [
+      // These look like search but are personal/conversational
+      'what is your', 'what are you', 'who are you', 'what do you think',
+      'mujhe lagta', 'kya lagta', 'tera kya', 'tumhara kya', 'mera kya',
+    ];
+    
+    const isExcluded = EXCLUDED_PATTERNS.some(p => lower.includes(p));
+    if (isExcluded) return null;
+    
+    const fastMatch = SEARCH_TRIGGERS.find(t => lower.includes(t));
+    if (fastMatch) {
+      // Generate a clean search query from the user's message
+      // Strip Hinglish filler words to get a clean query
+      const cleanQuery = message
+        .replace(/^(bhai|yaar|na|toh|karo|kar|please|plz|batao)\s+/i, '')
+        .replace(/\s+(kar|bhai|yaar|na|please)$/i, '')
+        .trim();
+      logger.info('[WebSearch] Fast-path match triggered', { trigger: fastMatch, query: cleanQuery });
+      return cleanQuery;
+    }
+    
+    // ── Slow-path: LLM for ambiguous queries (only if no fast-path match) ──
     const prompt = `You are a Search Intent Analyzer for an AI assistant. 
 Does this user message require searching the LIVE internet to answer correctly or provide source links?
 (E.g., current news, weather, stock prices, recent sports scores, general factual questions, or anything outside of personal chat).
