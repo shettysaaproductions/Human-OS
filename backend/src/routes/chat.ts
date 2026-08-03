@@ -1064,11 +1064,16 @@ chatRouter.post(
         if (memories.length || shortTermMemories.length || workingMemories.length) {
           memoryContext += `\n\n## 🧠 WHAT YOU REMEMBER ABOUT THIS USER\n`;
           
+          // ── Working Memory: show ALL keys, not just 2 hardcoded ones ─────────
+          // CRITICAL FIX: Previously only current_focus + active_goals were shown.
+          // Nova could not see: current_activity, feeling, conversation_partner, etc.
           if (workingMemories.length) {
-            const currentFocus = workingMemories.find(w => w.key === 'current_focus')?.value;
-            const activeGoals = workingMemories.find(w => w.key === 'active_goals')?.value;
-            if (currentFocus) memoryContext += `Current focus: ${currentFocus}\n`;
-            if (activeGoals) memoryContext += `Active goals: ${activeGoals}\n`;
+            memoryContext += `\nWorking Memory (what the user JUST told you — treat as current facts):\n`;
+            workingMemories.forEach(w => {
+              // Format key as readable label
+              const label = w.key.replace(/_/g, ' ');
+              memoryContext += `- ${label}: ${w.value}\n`;
+            });
           }
           
           if (memories.length) {
