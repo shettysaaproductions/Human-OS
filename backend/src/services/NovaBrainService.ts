@@ -3,8 +3,38 @@ import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 
 /**
+ * Builds the message list sent to the LLM.
+ *
+ * The caller (chat route) persists the user's message to chat_history BEFORE invoking
+ * us, so `recentMessages` already ends with the current user turn. Appending `message`
+ * again would send the same user message TWICE as two consecutive `user` roles — which
+ * made Nova echo the user or act confused. The effective `message` may be the raw text
+ * or it may be wrapped with image/reply/search context (always a superset ending in the
+ * raw text), so the trailing history entry is detected by exact match OR by being a
+ * strict suffix of the effective message.
+ */
+function buildMessages(
+  fullPrompt: string,
+  recentMessages: any[] | undefined,
+  message: string
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  const history = (recentMessages || []).map((m: any) => ({ role: m.role, content: m.content }));
+  const last = history[history.length - 1];
+  const lastIsSameTurn =
+    !!last &&
+    last.role === 'user' &&
+    (last.content === message ||
+      (message.length > last.content.length && message.endsWith(last.content)));
+  return [
+    { role: 'system' as const, content: fullPrompt },
+    ...history,
+    ...(lastIsSameTurn ? [] : [{ role: 'user' as const, content: message }]),
+  ];
+}
+
+/**
  * NovaBrainService — The Centralized Cognition Engine (Subconscious Architecture)
- * 
+ *
  * In a hyperrealistic architecture, Nova responds instantly to the user while
  * processing side-effects (memories, reminders, reflections) in the background.
  * The Brain outputs both the conversational reply and a list of subconscious actions.
@@ -78,11 +108,7 @@ Available Tools for Subconscious Actions:
 If no tools need to be called, leave the JSON array empty: []
 `;
 
-    const messages = [
-      { role: 'system' as const, content: fullPrompt },
-      ...(context.recentMessages || []).map((m: any) => ({ role: m.role, content: m.content })),
-      { role: 'user' as const, content: message }
-    ];
+    const messages = buildMessages(fullPrompt, context.recentMessages, message);
 
     try {
       const rawRes = await chatCompletion(messages, {
@@ -198,11 +224,7 @@ Available Tools for Subconscious Actions:
 If no tools need to be called, leave the JSON array empty: []
 `;
 
-    const messages = [
-      { role: 'system' as const, content: fullPrompt },
-      ...(context.recentMessages || []).map((m: any) => ({ role: m.role, content: m.content })),
-      { role: 'user' as const, content: message }
-    ];
+    const messages = buildMessages(fullPrompt, context.recentMessages, message);
 
     const { chatCompletionStream } = await import('../lib/nvidia');
     const stream = chatCompletionStream(messages, {
@@ -211,40 +233,35 @@ If no tools need to be called, leave the JSON array empty: []
     });
 
     let fullText = '';
-    let isInsideReply = false;
-    let hasSeenReplyTag = false;
     let replyStreamed = '';
+    let replyClosed = false;
 
     for await (const chunk of stream) {
       fullText += chunk;
+      if (replyClosed) continue;
 
-      // Start streaming once we see the open tag
-      if (!hasSeenReplyTag && fullText.includes('<reply>')) {
-        isInsideReply = true;
-        hasSeenReplyTag = true;
-        // Output whatever came after <reply>
-        const afterTag = fullText.split('<reply>')[1];
-        if (afterTag) {
-          replyStreamed += afterTag;
-          yield afterTag;
-        }
-        continue;
+      // Locate the reply region inside the FULL accumulated text. This is robust to
+      // `<reply>` and `</reply>` arriving in the same chunk (very short replies) or
+      // being split across chunks — the old per-chunk slicing leaked the raw close tag
+      // and the <subconscious_actions> JSON into the streamed reply.
+      const openIdx = fullText.indexOf('<reply>');
+      if (openIdx === -1) continue; // open tag not seen yet
+
+      const closeIdx = fullText.indexOf('</reply>');
+      // If the close tag hasn't arrived, stop the reply at the subconscious_actions
+      // tag (safety: never stream the actions JSON as part of the reply).
+      const subIdx = fullText.indexOf('<subconscious_actions>');
+      const replyEnd = closeIdx === -1 ? (subIdx === -1 ? fullText.length : subIdx) : closeIdx;
+
+      const currentReply = fullText.slice(openIdx + '<reply>'.length, replyEnd);
+      // Emit only the delta not yet emitted
+      if (currentReply.length > replyStreamed.length) {
+        const delta = currentReply.slice(replyStreamed.length);
+        replyStreamed = currentReply;
+        yield delta;
       }
 
-      if (isInsideReply) {
-        // Stop streaming once we see the close tag
-        if (fullText.includes('</reply>')) {
-          const newContent = chunk.split('</reply>')[0];
-          if (newContent) {
-            replyStreamed += newContent;
-            yield newContent;
-          }
-          isInsideReply = false;
-        } else {
-          replyStreamed += chunk;
-          yield chunk;
-        }
-      }
+      if (closeIdx !== -1) replyClosed = true;
     }
 
     let subconscious_actions: any[] = [];

@@ -39,11 +39,18 @@ jest.mock('../../lib/logger', () => ({
   }
 }));
 
-jest.mock('../NovaTriggerEngine', () => ({
-  NovaTriggerEngine: jest.fn().mockImplementation(() => ({
-    shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 5000 })
-  }))
-}));
+jest.mock('../NovaTriggerEngine', () => {
+  const sharedTriggerEngine = {
+    shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 5000 }),
+    scheduleMessage: jest.fn().mockResolvedValue(true)
+  };
+  return {
+    NovaTriggerEngine: jest.fn().mockImplementation(() => ({
+      shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 5000 })
+    })),
+    novaTriggerEngine: sharedTriggerEngine
+  };
+});
 
 jest.mock('../NovaBrainService', () => ({
   novaBrain: {
@@ -107,12 +114,13 @@ describe('NovaFollowupService', () => {
     });
 
     it('should extend delay to 15 min when rate limited', async () => {
-      const mockTriggerEngine = require('../NovaTriggerEngine').NovaTriggerEngine;
-      mockTriggerEngine.mockImplementationOnce(() => ({
-        shouldTrigger: jest.fn().mockResolvedValue({ shouldSend: false, reason: 'rate_limited', delayMs: 0 })
-      }));
+      // The service uses the shared singleton, so drive its shouldTrigger directly.
+      const { novaTriggerEngine } = require('../NovaTriggerEngine');
+      (novaTriggerEngine.shouldTrigger as jest.Mock).mockResolvedValueOnce({
+        shouldSend: false, reason: 'rate_limited', delayMs: 0
+      });
       await service.queueFollowup('u1', 'c1', 'Hello', 0.001);
-      
+
       const inserted = mockChain.insert.mock.calls[0][0];
       const fireAtTime = new Date(inserted.fire_at).getTime();
       expect(fireAtTime).toBeGreaterThanOrEqual(Date.now() + 15 * 60 * 1000 - 5000);

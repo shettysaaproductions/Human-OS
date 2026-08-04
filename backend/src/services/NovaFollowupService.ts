@@ -70,33 +70,37 @@ export class NovaFollowupService {
         .limit(5);
 
       if (recentUserMsgs && recentUserMsgs.length > 0) {
-        // Check ALL 5 recent messages for sleep signals
-        for (const recentMsg of recentUserMsgs) {
-          if (!recentMsg?.content) continue;
-          const lowerContent = recentMsg.content.toLowerCase();
+        // Only the MOST RECENT user message counts for the sleep guard. Scanning all 5
+        // messages within 12h suppressed follow-ups even after the user woke up and resumed
+        // chatting (e.g. "good night" at 11pm then "good morning" at 8am was still suppressing
+        // until 7pm). If the user has sent anything since the sleep signal, they are clearly
+        // awake and active again.
+        const newestMsg = recentUserMsgs[0];
+        if (newestMsg?.content) {
+          const lowerContent = newestMsg.content.toLowerCase();
           const sleepMatch = SLEEP_SIGNALS.find(s => lowerContent.includes(s));
-          
+
           if (sleepMatch) {
             const isTrulySleeping = ['soone ja', 'so ja', 'so raha', 'so rahi', 'neend aa',
               'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
               'gn ', 'so jaunga', 'so jaungi', 'sone wala', 'nap le'].some(s => lowerContent.includes(s));
             const suppressHours = isTrulySleeping ? 8 : 2;
-            
-            logger.info(`[NovaFollowup] 🛑 Sleep/unavailability detected in recent messages ("${sleepMatch}") — suppressing for ${suppressHours}h`, { userId });
-            
+
+            logger.info(`[NovaFollowup] 🛑 Sleep/unavailability detected in most recent message ("${sleepMatch}") — suppressing for ${suppressHours}h`, { userId });
+
             await supabaseAdmin.from('working_memory').upsert({
               user_id: userId,
               key: 'followup_suppressed_until',
               value: new Date(Date.now() + suppressHours * 60 * 60 * 1000).toISOString(),
               expires_at: new Date(Date.now() + suppressHours * 60 * 60 * 1000).toISOString()
             }, { onConflict: 'user_id,key' });
-            
+
             await supabaseAdmin
               .from('nova_followups')
               .update({ status: 'cancelled' })
               .eq('user_id', userId)
               .eq('status', 'pending');
-            
+
             return; // Do NOT queue a follow-up
           }
         }
@@ -112,12 +116,18 @@ export class NovaFollowupService {
       // MINIMUM 15 MINUTES for any follow-up. Never follow up in seconds.
       // The old 0.25 min (15s) minimum caused the 36-message spam. Real friends don't text every 4 minutes.
       const MINIMUM_FOLLOWUP_MINUTES = 15;
-      const baseDelayMinutes = Math.min(Math.max(Math.floor(delayHours * 60), MINIMUM_FOLLOWUP_MINUTES), 24 * 60);
+      // Guard against a missing/invalid delay from the LLM: Math.floor(undefined * 60) is
+      // NaN, which would make fireAt an Invalid Date and .toISOString() throw, silently
+      // dropping the follow-up (caught by the non-critical handler below).
+      const safeDelayHours = Number.isFinite(delayHours) ? delayHours : 0.5;
+      const baseDelayMinutes = Math.min(Math.max(Math.floor(safeDelayHours * 60), MINIMUM_FOLLOWUP_MINUTES), 24 * 60);
       let delayMinutes = baseDelayMinutes;
 
-      // Inject TriggerEngine for realistic timing adjustments
-      const { NovaTriggerEngine } = await import('./NovaTriggerEngine');
-      const triggerEngine = new NovaTriggerEngine();
+      // Inject TriggerEngine for realistic timing adjustments.
+      // Use the shared singleton so the 30 req/min rate limit is actually tracked —
+      // a fresh `new NovaTriggerEngine()` has an empty requestTimestamps every call,
+      // so the rate limit could never fire.
+      const { novaTriggerEngine } = await import('./NovaTriggerEngine');
       
       const { data: presenceData } = await supabaseAdmin
         .from('user_presence')
@@ -127,7 +137,7 @@ export class NovaFollowupService {
 
       const userPresence = presenceData?.status || 'offline';
       
-      const trigger = await triggerEngine.shouldTrigger({
+      const trigger = await novaTriggerEngine.shouldTrigger({
         userPresence,
         lastUserMessageAt: Date.now(),
         lastNovaReplyAt: Date.now(),
@@ -243,7 +253,21 @@ export class NovaFollowupService {
   }
 
   private async _fireFollowup(followup: any): Promise<void> {
-    // Mark as sent immediately (prevent double-fire on slow DB)
+    // Dedup check BEFORE claiming, so a duplicate doesn't consume the claim.
+    const normalizedNew = followup.message.toLowerCase().trim();
+    const cached = dedupCache.get(followup.user_id);
+
+    // Check if same message sent within last 3 minutes (was 10 — blocked all follow-ups too long)
+    if (cached &&
+        Date.now() - cached.lastSentAt < 3 * 60 * 1000 &&
+        (cached.lastContent === normalizedNew ||
+         (normalizedNew.length > 20 && cached.lastContent.includes(normalizedNew.substring(0, 20))) ||
+         (cached.lastContent.length > 20 && normalizedNew.includes(cached.lastContent.substring(0, 20))))) {
+      logger.warn('[NovaFollowup] Prevented firing duplicate followup', { id: followup.id, userId: followup.user_id });
+      return;
+    }
+
+    // Atomic claim — only one concurrent 10s poll wins (prevents double-fire).
     const { error: updateErr } = await supabaseAdmin
       .from('nova_followups')
       .update({ status: 'sent' })
@@ -255,63 +279,67 @@ export class NovaFollowupService {
       return;
     }
 
-    // Dedup check before inserting using cache
-    const normalizedNew = followup.message.toLowerCase().trim();
-    const cached = dedupCache.get(followup.user_id);
-    
-    // Check if same message sent within last 3 minutes (was 10 — blocked all follow-ups too long)
-    if (cached && 
-        Date.now() - cached.lastSentAt < 3 * 60 * 1000 && 
-        (cached.lastContent === normalizedNew || 
-         (normalizedNew.length > 20 && cached.lastContent.includes(normalizedNew.substring(0, 20))) ||
-         (cached.lastContent.length > 20 && normalizedNew.includes(cached.lastContent.substring(0, 20))))) {
-       logger.warn('[NovaFollowup] Prevented firing duplicate followup', { id: followup.id, userId: followup.user_id });
-       return;
+    try {
+      // Deliver FIRST — insert as Nova's message in chat history. If this fails the
+      // follow-up must be retried, not silently dropped (the old code marked it 'sent'
+      // before delivery, so any failure permanently lost the message).
+      const { error: insertErr } = await supabaseAdmin.from('chat_history').insert({
+        user_id: followup.user_id,
+        conversation_id: followup.conversation_id,
+        role: 'assistant',
+        content: followup.message,
+      });
+      if (insertErr) throw new Error(`chat_history insert failed: ${insertErr.message}`);
+
+      // Fetch push token and send notification
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('push_token, preferred_name')
+        .eq('id', followup.user_id)
+        .maybeSingle();
+
+      if (profile?.push_token) {
+        await sendPushNotification([{
+          to: profile.push_token,
+          title: 'Nova',
+          body: followup.message.length > 100
+            ? followup.message.substring(0, 97) + '...'
+            : followup.message,
+          sound: 'default',
+          channelId: 'nova_messages',
+          priority: 'high',
+          data: {
+            type: 'nova_followup',
+            conversationId: followup.conversation_id,
+            message: followup.message.length > 500 ? followup.message.substring(0, 497) + '...' : followup.message
+          },
+        }]);
+
+        logger.info('[NovaFollowup] Push notification sent', { userId: followup.user_id });
+      } else {
+        logger.warn('[NovaFollowup] No push token for user', { userId: followup.user_id });
+      }
+    } catch (err) {
+      // Delivery failed — revert the claim so the next poll retries, and clear the
+      // dedup cache so the retry isn't blocked by the recent-sent check.
+      logger.error('[NovaFollowup] Delivery failed, reverting followup to pending for retry', {
+        id: followup.id,
+        error: err instanceof Error ? err.message : String(err)
+      });
+      dedupCache.delete(followup.user_id);
+      await supabaseAdmin
+        .from('nova_followups')
+        .update({ status: 'pending' })
+        .eq('id', followup.id)
+        .eq('status', 'sent');
+      throw err;
     }
 
-    // Update cache
+    // Delivery succeeded — now it's safe to remember the message for dedup.
     dedupCache.set(followup.user_id, {
       lastContent: normalizedNew,
       lastSentAt: Date.now()
     });
-
-
-    // Insert as Nova's message in chat history
-    await supabaseAdmin.from('chat_history').insert({
-      user_id: followup.user_id,
-      conversation_id: followup.conversation_id,
-      role: 'assistant',
-      content: followup.message,
-    });
-
-    // Fetch push token and send notification
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('push_token, preferred_name')
-      .eq('id', followup.user_id)
-      .maybeSingle();
-
-    if (profile?.push_token) {
-      await sendPushNotification([{
-        to: profile.push_token,
-        title: 'Nova',
-        body: followup.message.length > 100
-          ? followup.message.substring(0, 97) + '...'
-          : followup.message,
-        sound: 'default',
-        channelId: 'nova_messages',
-        priority: 'high',
-        data: {
-          type: 'nova_followup',
-          conversationId: followup.conversation_id,
-          message: followup.message.length > 500 ? followup.message.substring(0, 497) + '...' : followup.message
-        },
-      }]);
-
-      logger.info('[NovaFollowup] Push notification sent', { userId: followup.user_id });
-    } else {
-      logger.warn('[NovaFollowup] No push token for user', { userId: followup.user_id });
-    }
   }
   /**
    * Scan for conversations where the last message was from the user (unanswered)
@@ -404,17 +432,34 @@ export class NovaFollowupService {
            continue; // Reply already sent recently
         }
 
-        // It is stuck! Check if a follow-up is already queued OR recently sent (cooldown)
-        const { data: recentFollowups } = await supabaseAdmin
-          .from('nova_followups')
-          .select('id')
-          .eq('user_id', userMsg.user_id)
-          .in('status', ['pending', 'sent'])
-          .gte('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString()) // 5 min cooldown
-          .limit(1);
-          
-        if (recentFollowups && recentFollowups.length > 0) {
-          continue; // Already has a pending or recently sent follow-up
+        // It is stuck! Check if a follow-up is already queued (fire_at in the future)
+        // OR recently sent (cooldown). The "queued with a future fire_at" check is what
+        // prevents the re-queue loop: this poll runs every 10s, but a queued follow-up's
+        // fire_at is ~15 min out — the old 5-minute created_at window expired before it
+        // fired, so every poll cancelled it and queued a NEW one (+15 min each time),
+        // postponing delivery to ~75 min and churning DB rows.
+        const nowIso = new Date().toISOString();
+        const fiveMinAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const [pendingFuture, recentSent] = await Promise.all([
+          supabaseAdmin
+            .from('nova_followups')
+            .select('id')
+            .eq('user_id', userMsg.user_id)
+            .eq('status', 'pending')
+            .gt('fire_at', nowIso)
+            .limit(1),
+          supabaseAdmin
+            .from('nova_followups')
+            .select('id')
+            .eq('user_id', userMsg.user_id)
+            .eq('status', 'sent')
+            .gte('created_at', fiveMinAgoIso)
+            .limit(1),
+        ]);
+
+        if ((pendingFuture.data && pendingFuture.data.length > 0) ||
+            (recentSent.data && recentSent.data.length > 0)) {
+          continue; // A follow-up is already scheduled to fire, or one was just sent
         }
 
         // Schedule a follow-up right now using an LLM-generated context-aware message

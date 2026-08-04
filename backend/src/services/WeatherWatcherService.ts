@@ -72,12 +72,14 @@ Write a very short, casual text message warning them or checking in. (e.g., "hey
 
       const alertMessage = await chatCompletion([{ role: 'system', content: prompt }], { maxTokens: 50 });
 
-      // 4. Send the alert using the Trigger Engine
-      const { NovaTriggerEngine } = await import('./NovaTriggerEngine');
-      const triggerEngine = new NovaTriggerEngine();
-      
+      // 4. Send the alert using the Trigger Engine.
+      // Use the shared singleton so the 30 req/min rate limit is actually tracked —
+      // `new NovaTriggerEngine()` starts with an empty requestTimestamps every time,
+      // so the rate limit could never fire.
+      const { novaTriggerEngine } = await import('./NovaTriggerEngine');
+
       // We pass a dummy context, ensuring 'shouldSend' passes if not in DND
-      await triggerEngine.scheduleMessage(userId, {
+      await novaTriggerEngine.scheduleMessage(userId, {
         userPresence: 'offline', // We don't care, it's a proactive alert
         lastUserMessageAt: 0,
         lastNovaReplyAt: Date.now() - 3600000, // Pretend we haven't spoken in an hour
