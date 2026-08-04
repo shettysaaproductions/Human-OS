@@ -1136,6 +1136,7 @@ chatRouter.post(
           res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
           res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
         }
+      } else {
         try {
           const llmStartTime = Date.now();
           logger.info('[Chat] Calling LLM', { userId });
