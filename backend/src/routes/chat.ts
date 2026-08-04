@@ -791,7 +791,7 @@ chatRouter.post(
         FALLBACK_PREFIXES.some(p => content.includes(p));
 
       let recentMessages = ((historyResult.data || []) as any[])
-        .filter(msg => !isFallback(msg.content))  // ← strip fallback messages from LLM context
+        .filter(msg => msg.role !== 'assistant' || !isFallback(msg.content))
         .reverse()
         .map(msg => ({
           role: msg.role as 'user' | 'assistant' | 'system',
@@ -1632,7 +1632,7 @@ chatRouter.get(
           .select('created_at')
           .eq('id', beforeId)
           .eq('user_id', userId)
-          .single();
+          .maybeSingle();
         if (cursorRow?.created_at) {
           query = (query as any).lt('created_at', cursorRow.created_at);
         }
