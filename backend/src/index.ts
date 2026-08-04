@@ -154,19 +154,34 @@ async function main(): Promise<void> {
         logger.info('Scheduler: Triggering daily reflections...');
         await reflectionScheduler.runDailyForAllUsers();
         await shortTermMemoryCleanupService.run();
-
-        // Nightly chat history pruning and self-improvement — only run between 2AM-3AM server time
-        const hour = new Date().getHours();
-        if (hour === 2) {
-          logger.info('Scheduler: Triggering nightly chat history pruning and autonomous self-improvement...');
-          await chatHistoryPruningService.runAll();
-          await selfImprovementService.runReview();
-        }
       } catch (err) {
         logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });
       }
     }, 24 * 60 * 60 * 1000); // 24 hours
     if (dailyReflectionInterval.unref) dailyReflectionInterval.unref();
+
+    // Nightly chat history pruning + self-improvement — guaranteed to run ONCE per
+    // day when the clock is in the 2–4am window. A separate hourly check (instead of
+    // gating on the 24h interval) is required because the 24h interval fires relative
+    // to boot time: if the server booted at, say, 14:00, `new Date().getHours() === 2`
+    // would never be true and the maintenance would silently never run.
+    let lastNightlyMaintenanceDate: string | null = null;
+    const nightlyMaintenanceInterval = setInterval(async () => {
+      const now = new Date();
+      const hour = now.getHours();
+      const today = now.toISOString().split('T')[0];
+      if (hour >= 2 && hour < 4 && lastNightlyMaintenanceDate !== today) {
+        lastNightlyMaintenanceDate = today;
+        try {
+          logger.info('Scheduler: Triggering nightly chat history pruning and autonomous self-improvement...');
+          await chatHistoryPruningService.runAll();
+          await selfImprovementService.runReview();
+        } catch (err) {
+          logger.error('Error in nightly maintenance run', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }, 60 * 60 * 1000); // check every hour
+    if (nightlyMaintenanceInterval.unref) nightlyMaintenanceInterval.unref();
 
     // Weekly Reflection Scheduler (runs on Sundays)
     const weeklyReflectionInterval = setInterval(async () => {

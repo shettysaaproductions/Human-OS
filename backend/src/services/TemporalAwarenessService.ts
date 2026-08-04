@@ -26,7 +26,12 @@ export class TemporalAwarenessService {
   async getContext(userId: string, tzOffset: number = 5.5): Promise<TemporalContext> {
     const nowLocal = new Date(Date.now() + tzOffset * 3600000);
     const hour = nowLocal.getUTCHours();
-    const dayOfWeek = nowLocal.toLocaleDateString('en-US', { weekday: 'long' });
+    // Derive the weekday from the shifted clock's UTC fields, NOT
+    // toLocaleDateString() — the latter formats in the server's own timezone, so a
+    // non-UTC server would report the wrong weekday for users near midnight (and
+    // disagree with the `hour` above, which is correctly read from UTC fields).
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = DAY_NAMES[nowLocal.getUTCDay()] ?? '';
     const isWeekend = ['Saturday', 'Sunday'].includes(dayOfWeek);
     
     let timeOfDayLabel = 'night';

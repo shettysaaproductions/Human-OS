@@ -40,14 +40,23 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
 
     if (error || !data || data.length === 0) return false;
 
-    // Basic similarity check (exact match or very high substring overlap)
+    // Duplicate detection: exact match catches true double-texts (race conditions).
+    // For longer messages, require ~85% word-overlap before treating them as the same
+    // reply — a shared opening phrase must NOT swallow a legitimate follow-up message
+    // (that would make the reply vanish from history on refresh, the "amnesia" bug).
     const normalizedNew = content.toLowerCase().trim();
+    const newWords = new Set(normalizedNew.split(/\s+/).filter(Boolean));
     for (const msg of data) {
       const normalizedOld = msg.content.toLowerCase().trim();
       if (normalizedOld === normalizedNew) return true;
-      // High overlap check for generated variations
-      if (normalizedNew.length > 20 && normalizedOld.includes(normalizedNew.substring(0, 20))) return true;
-      if (normalizedOld.length > 20 && normalizedNew.includes(normalizedOld.substring(0, 20))) return true;
+      if (normalizedNew.length > 20 && normalizedOld.length > 20) {
+        const oldWords = new Set(normalizedOld.split(/\s+/).filter(Boolean));
+        if (newWords.size === 0 || oldWords.size === 0) continue;
+        let overlap = 0;
+        for (const w of newWords) if (oldWords.has(w)) overlap++;
+        const union = new Set([...newWords, ...oldWords]).size;
+        if (union > 0 && overlap / union >= 0.85) return true;
+      }
     }
     return false;
   } catch (err) {
@@ -1376,13 +1385,19 @@ chatRouter.post(
         // Create separate DB rows for each bubble
         for (let idx = 0; idx < finalBubbles.length; idx++) {
           const msgText = finalBubbles[idx];
+          // Proactive triggers have no real user message — never reference the fake
+          // 'proactive_<ts>' id (it is not a uuid and the reply_to_id column is uuid),
+          // which otherwise makes every insert fail and fall into the emergency path.
+          const replyTargetId = is_proactive ? null : userMessageId;
+          const replyTargetContent = is_proactive ? null : message.substring(0, 100);
+
           const rowData = {
             user_id: userId,
             conversation_id: activeConversationId,
             role: 'assistant',
             content: msgText,
-            reply_to_id: idx === 0 ? userMessageId : null,
-            reply_to_content: idx === 0 ? message.substring(0, 100) : null,
+            reply_to_id: idx === 0 ? replyTargetId : null,
+            reply_to_content: idx === 0 ? replyTargetContent : null,
             meta: idx === finalBubbles.length - 1 ? {
               situationBrief: situationBrief || null,
               subconsciousActions: extractedActions,

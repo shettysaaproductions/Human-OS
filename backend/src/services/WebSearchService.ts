@@ -93,9 +93,11 @@ If NO, output exactly "NO_SEARCH".`;
         const prompt = `Search the live web for the following query and provide a detailed, factual summary of the current results. IMPORTANT: You MUST include the source links/URLs (e.g. https://...) for the information you find so the user can verify it. Query: "${query}"`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        
-        if (!text || text.trim().length === 0) return null;
-        
+
+        // Empty response = failed search — fall through to Wikipedia (the catch below
+        // is not reached on a successful-but-empty call, so we signal it explicitly).
+        if (!text || text.trim().length === 0) throw new Error('Gemini returned empty response');
+
         return `\n\n## LIVE WEB SEARCH RESULTS (Omniscience Protocol)\nYou automatically searched the web using Google Search for "${query}" and found this:\n\n${text}\n\nCRITICAL RULE: When answering the user, you MUST include the source links/URLs provided above so the user can click them (just like ChatGPT does).`;
       } catch (e) {
         logger.warn('[WebSearch] Gemini Search failed, falling back to Wikipedia', { error: e instanceof Error ? e.message : String(e) });
