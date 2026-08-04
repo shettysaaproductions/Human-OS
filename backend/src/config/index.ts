@@ -29,7 +29,7 @@ export const config = {
     apiKey3: optionalEnv('NVIDIA_API_KEY_3', ''),  // Key 3: Self-Improvement + Realtime Learning
     apiKey4: optionalEnv('NVIDIA_API_KEY_4', ''),  // Key 4: Memory extraction + Background
     baseUrl: optionalEnv('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
-    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'nvidia/llama-3.1-nemotron-70b-instruct'),
+    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.3-70b-instruct'),
   },
 
   // Optional in Phase 1 — Supabase is not yet used.

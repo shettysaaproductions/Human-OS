@@ -146,12 +146,9 @@ export class NovaFollowupService {
         delayMinutes += (trigger.delayMs / 60000);
       }
 
-      // Fast path: if user is online, delay by 1-2 mins to feel natural. 
-      // CRITICAL: If user is TYPING, DO NOT send it in 1 minute. Wait at least 10 minutes to avoid interrupting them!
+      // Fast path: if user is typing, give them plenty of time.
       if (userPresence === 'typing') {
         delayMinutes = Math.max(delayMinutes, 10);
-      } else if (userPresence === 'online') {
-        delayMinutes = Math.min(delayMinutes, 2); // 2 minutes max if they are just staring at the screen
       }
 
       const fireAt = new Date(Date.now() + delayMinutes * 60 * 1000);
@@ -424,7 +421,7 @@ export class NovaFollowupService {
         logger.info('[NovaFollowup] Detected stuck conversation, scheduling double-text', { userId: userMsg.user_id, convId });
         
         // Generate a context-aware follow-up rather than a generic hard-coded one
-        let doubleTextMsg = "Hey?";
+        let doubleTextMsg = "Busy lag raha hai, take your time!";
         try {
           const { novaBrain } = await import('./NovaBrainService');
           const lastContent = userMsg.content?.substring(0, 200) || '';
@@ -541,18 +538,19 @@ export class NovaFollowupService {
           .gt('created_at', novaMsg.created_at)
           .order('created_at', { ascending: false })
           .limit(1);
+        // Skip if Nova already sent ANY message after this one within last 2 hours (120 min)
         if (newerNova && newerNova.length > 0) {
-          const newerNovaAge = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 1000;
-          if (newerNovaAge < 180) continue; // Nova sent something < 3 min ago
+          const newerNovaAgeMin = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 60000;
+          if (newerNovaAgeMin < 120) continue; // Nova sent something < 2 hours ago — give user space!
         }
 
-        // Skip if a follow-up is already queued in the next minute
+        // Skip if a follow-up is already queued in the last 2 hours
         const { data: recentFollowups } = await supabaseAdmin
           .from('nova_followups')
           .select('id')
           .eq('user_id', userId)
           .eq('status', 'pending')
-          .gte('created_at', new Date(Date.now() - 60 * 1000).toISOString())
+          .gte('created_at', new Date(Date.now() - 120 * 60 * 1000).toISOString())
           .limit(1);
         if (recentFollowups && recentFollowups.length > 0) continue;
 
@@ -563,15 +561,15 @@ export class NovaFollowupService {
 
         // Generate escalation-appropriate prompt based on age and count
         let escalationPrompt = '';
+        let fallbackMsg = '';
         if (escalation === 1) {
-          // Level 1: First check-in after 15-30 mins
-          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User hasn't replied. Send ONE short, professional yet caring nudge to check if they are busy or working. Examples: "Looks like you're busy, everything good?", "Are you in the middle of something?", "Ping me when you are free."`;
-        } else if (escalation === 2) {
-          // Level 2: Second check-in
-          escalationPrompt = `User has ignored you twice over ${Math.round(ageMinutes)} minutes. Send a very brief, supportive note assuming they are focused on work/goals. E.g., "Must be deep in work, keep it up!", "No rush to reply, focus on your tasks."`;
+          // Level 1: First check-in after 30-60 mins
+          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User hasn't replied. Send ONE short, casual nudge. E.g., "Arey, busy ho kya?", "Kaam me phasa hai kya?";`;
+          fallbackMsg = 'Arey, busy hai kya? Jab time mile tab batana!';
         } else {
-          // Level 3: Give space gracefully
-          escalationPrompt = `User has gone silent for ${Math.round(ageMinutes)} minutes. Give them space — send one super short low-pressure note like "Take your time, let's catch up later!" and then stop trying.`;
+          // Level 2+: Second and FINAL check-in, then stop
+          escalationPrompt = `User has ignored you over ${Math.round(ageMinutes)} minutes. Send a very brief, low-pressure closing note and stop trying. E.g., "No rush to reply, focus on your work!", "Catch up later!";`;
+          fallbackMsg = 'Koi na, kaam pe focus kar. Phir baat karte hain!';
         }
 
         logger.info('[NovaFollowup] Ignored message detected, generating escalation follow-up', { 
@@ -581,23 +579,21 @@ export class NovaFollowupService {
         // Mark cooldown BEFORE LLM call
         ignoredFollowupSent.set(userId, Date.now());
 
-        let followUpMsg = 'Bol na yaar 👀';
+        let followUpMsg = fallbackMsg;
         try {
           const { novaBrain } = await import('./NovaBrainService');
           const generated = await novaBrain.evaluateConsciousnessTier2(
             `Name: yaar\nSituation: ${escalationPrompt}\nOutput ONE short Hinglish message only. Max 1 sentence.`
           );
-          if (generated?.message && generated.message.length < 150) {
+          if (generated?.message && generated.message.length < 150 && !generated.message.includes('Bol na')) {
             followUpMsg = generated.message;
           }
         } catch (e) {
           logger.warn('[NovaFollowup] LLM escalation gen failed, using fallback', { escalation });
         }
 
-        // Level 3+: Give space for 24 hours (was 4 hours — not enough).
-        // CRITICAL: After 3 messages with zero reply, this user does NOT want to be texted.
-        // Suppress HARD for 24 hours or until they reply. This matches real human behavior.
-        if (escalation >= 3) {
+        // Level 2+: Give space for 24 hours (HARD STOP after 2 check-ins max)
+        if (escalation >= 2) {
           ignoreEscalationCount.delete(userId);
           try {
             await supabaseAdmin.from('working_memory').upsert({
@@ -606,7 +602,7 @@ export class NovaFollowupService {
               value: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
               expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
             }, { onConflict: 'user_id,key' });
-            logger.info('[NovaFollowup] Level 3 reached — suppressed follow-ups for 24 hours', { userId });
+            logger.info('[NovaFollowup] Max escalation reached — suppressed follow-ups for 24 hours', { userId });
           } catch (e) {
             logger.warn('[NovaFollowup] Failed to write suppression to DB (non-critical)', { error: e instanceof Error ? e.message : String(e) });
           }
