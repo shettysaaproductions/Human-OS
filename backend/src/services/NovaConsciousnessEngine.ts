@@ -140,16 +140,6 @@ export class NovaConsciousnessEngine {
       .maybeSingle();
 
     const gapMinutes = lastUserMsg ? (Date.now() - new Date(lastUserMsg.created_at).getTime()) / 60000 : 0;
-
-    // ── ACTIVE USER GUARD ────────────────────────────────────────────────────
-    // If the user sent a message in the last 10 minutes, they are clearly active.
-    // Don't interrupt an active conversation with NACE proactive messages.
-    // The user-sent "Hi" bug (Nova replied "Busy lag raha hai") was partly caused by
-    // NACE firing while user was actively online.
-    if (gapMinutes < 10 && userPresence !== 'offline') {
-      logger.info('[NACE] Skipping — user is actively engaged (gap < 10 min)', { userId, gapMinutes: Math.round(gapMinutes) });
-      return;
-    }
     
     // Fetch user presence to calculate dynamic gap
     const { data: presenceData } = await supabaseAdmin
@@ -166,6 +156,14 @@ export class NovaConsciousnessEngine {
       if (presenceAgeMinutes > 10) {
         userPresence = 'away';
       }
+    }
+
+    // ── ACTIVE USER GUARD ────────────────────────────────────────────────────
+    // If the user sent a message in the last 10 minutes, they are clearly active.
+    // Don't interrupt an active conversation with NACE proactive messages.
+    if (gapMinutes < 10 && userPresence !== 'offline') {
+      logger.info('[NACE] Skipping — user is actively engaged (gap < 10 min)', { userId, gapMinutes: Math.round(gapMinutes) });
+      return;
     }
 
     const getEffectiveMinGap = (presence: string): number => {
