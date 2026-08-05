@@ -82,7 +82,11 @@ Available Tools for Subconscious Actions:
 1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder ONLY IF EXPLICITLY ASKED.
-   - data: { "time_phrase": "tomorrow at 10am", "description": "what to remind" }
+   - data: any of these formats (use whichever fits the user's words):
+     * { "time_phrase": "in 15 minutes", "description": "what to remind" }  ← natural language
+     * { "title": "what to remind", "relative_value": 15, "relative_unit": "minutes" }
+     * { "title": "what to remind", "time_of_day": "19:00" }  or  { "date": "2027-08-10" }
+   - CRITICAL HONESTY RULE: If the user asks to be reminded, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown ("5 minute countdown shuru!"). Only ever tell the user a reminder is set when you are actually scheduling it in this list.
 3. "NovaFollowupService" -> "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged. 
    - data: { "question": "the follow-up text", "delay_hours": 0.5 }
    - DELAY RULES (CRITICAL — Real friends don't spam):
@@ -212,7 +216,11 @@ Available Tools for Subconscious Actions:
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder for the user OR to follow up with them. 
    - ALWAYS use this if the user says "talk to you in 10 mins", "be back in 1 hour", "brb", or sets any timeframe.
-   - data: { "time_phrase": "in 10 minutes", "description": "Check if user is back from being busy" }
+   - data: any of these formats (use whichever fits the user's words):
+     * { "time_phrase": "in 10 minutes", "description": "Check if user is back from being busy" }
+     * { "title": "Check if user is back", "relative_value": 10, "relative_unit": "minutes" }
+     * { "title": "Check if user is back", "time_of_day": "19:00" }  or  { "date": "2027-08-10" }
+   - CRITICAL HONESTY RULE: If the user asks to be reminded, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown ("5 minute countdown shuru!"). Only ever tell the user a reminder is set when you are actually scheduling it in this list.
 3. "NovaFollowupService" -> "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged. 
    - data: { "question": "the follow-up text", "delay_hours": 0.5 }
    - DELAY RULES (CRITICAL — Real friends don't spam):

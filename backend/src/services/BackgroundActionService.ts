@@ -21,6 +21,85 @@ export class BackgroundActionService {
           let specs = action.data.reminders || [action.data];
           if (!Array.isArray(specs)) specs = [specs];
 
+          // ── NLP time_phrase → ReminderSpec converter ─────────────────────────
+          // Nova outputs: { time_phrase: "in 5 minutes", description: "remind me" }
+          // ReminderEngine.parse() needs: { relative_value: 5, relative_unit: "minutes" }
+          // This bridge converts the natural language phrase to structured fields.
+          specs = specs.map((spec: any) => {
+            if (!spec.time_phrase) return spec; // already structured
+
+            const phrase = String(spec.time_phrase).toLowerCase().trim();
+            const title = spec.description || spec.title || spec.text || 'Reminder';
+            const base: any = { title, notes: spec.notes };
+
+            // Pattern: "every X minutes/hours/days/weeks/months" → RECURRING reminder
+            const everyMatch = phrase.match(/every\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
+            if (everyMatch) {
+              base.relative_value = parseFloat(everyMatch[1]); // first fire in X units
+              base.relative_unit = everyMatch[2];
+              base.recurrence_interval_value = parseFloat(everyMatch[1]);
+              base.recurrence_interval_unit = everyMatch[2];
+              return base;
+            }
+
+            // Pattern: "in X minutes/hours/days/weeks/months" or "X mins later" → one-shot
+            const relMatch = phrase.match(/(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
+            if (relMatch) {
+              base.relative_value = parseFloat(relMatch[1]);
+              base.relative_unit = relMatch[2];
+              return base;
+            }
+
+            // Pattern: "at HH:MM" or "at 7am" or "at 10:30pm"
+            const atTimeMatch = phrase.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+            if (atTimeMatch) {
+              let hh = parseInt(atTimeMatch[1]);
+              const mm = atTimeMatch[2] ? parseInt(atTimeMatch[2]) : 0;
+              const meridiem = atTimeMatch[3]?.toLowerCase();
+              if (meridiem === 'pm' && hh < 12) hh += 12;
+              if (meridiem === 'am' && hh === 12) hh = 0;
+              base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+              // If "tomorrow" or specific day mentioned, add date
+              if (phrase.includes('tomorrow')) {
+                const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
+                base.date = d.toISOString().split('T')[0];
+              }
+              return base;
+            }
+
+            // Pattern: "tomorrow" (no time → 9am default)
+            if (phrase.includes('tomorrow')) {
+              const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
+              base.date = d.toISOString().split('T')[0];
+              base.time_of_day = '09:00';
+              return base;
+            }
+
+            // Pattern: time-of-day keywords
+            if (phrase.includes('tonight') || phrase.includes('evening')) {
+              base.time_of_day = '20:00';
+              return base;
+            }
+            if (phrase.includes('morning')) {
+              base.time_of_day = '08:00';
+              return base;
+            }
+            if (phrase.includes('noon') || phrase.includes('lunch')) {
+              base.time_of_day = '12:00';
+              return base;
+            }
+            if (phrase.includes('night')) {
+              base.time_of_day = '22:00';
+              return base;
+            }
+
+            // Fallback: 1 hour from now
+            logger.warn('[BackgroundAction] Could not parse time_phrase, defaulting to 1h', { phrase });
+            base.relative_value = 1;
+            base.relative_unit = 'hours';
+            return base;
+          });
+
           const allScheduled: any[] = [];
           for (const spec of specs) {
             const parsedList = engine.parse(spec);
