@@ -85,6 +85,10 @@ Every 7 days, the founder reviews:
    - Added ANTI-ROBOT RULE (PROACTIVE DEPTH) to ban generic 'Sab theek?' NACE messages and enforce specific reference
    - Added ANTI-ROBOT RULE (SILENCE RESPECT) to stop follow-up spam after 3+ ignored messages — give space like a real friend
    - Added ANTI-ROBOT RULE (FOLLOW-UP VARIETY) to ensure no identical follow-up message is ever sent twice
+   - Strengthened ANTI-ROBOT RULE (MEMORY ACCOUNTABILITY / SAME-SESSION AMNESIA / SAME-SESSION CONTEXT) to ZERO-TOLERANCE for forgetting life facts (5-month-old son) and same-session context (metro) — verified from chat telemetry
+   - Strengthened ANTI-ROBOT RULE (FABRICATION) to force ASK-what-it-means for unknown terms like "RNR" — ban guessing "Ram Nawami"
+   - Strengthened ANTI-ROBOT RULE (DAY AWARENESS) to always cross-reference the Situation Brief's time/day before responding
+   - Added ANTI-ROBOT RULE (NO CAPABILITY PITCHING) to ban explaining internal architecture ("7/8 engines", "long-term memory") — a friend just helps, doesn't pitch
 4. **User Experience Wins:** Features that made the app feel alive
 5. **Stuck/Error Events:** Any message delivery failures, ghost duplicates, or errors
 6. **Next Auto Upgrade Focus:** What flaws to target manually

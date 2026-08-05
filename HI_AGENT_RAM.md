@@ -80,6 +80,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **Token Freshness (Aug 1, 2026):** Fixed FCM `DeviceNotRegistered` stale token bug by forcing `getDevicePushTokenAsync` before `getExpoPushTokenAsync`. Also fixed the `VALIDATION_ERROR: Invalid enum type` bug by passing the **full `deviceToken` object** (not the `.data` string) into Expo's fetcher so FCM types aren't stripped.
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
 - ✅ **Database Bug Resolved (Aug 1, 2026):** `reminders.status` column successfully added to Supabase.
+- ✅ **Behavioral Patches — Anti-Hallucination & Anti-Amnesia (Aug 5, 2026):** Strengthened 5 existing ANTI-ROBOT rules in `promptBuilder.ts` (FABRICATION, SAME-SESSION CONTEXT, DAY AWARENESS, MEMORY ACCOUNTABILITY, SAME-SESSION AMNESIA) to ZERO-TOLERANCE and added new ANTI-ROBOT RULE (NO CAPABILITY PITCHING). Fixes: memory/context amnesia (forgot 5-month-old son, same-session metro), fabrication of "RNR" → "Ram Nawami", time/day hallucination, and self-narration of internal architecture ("7/8 engines", "long-term memory").
 
 ---
 
