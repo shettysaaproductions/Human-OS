@@ -347,7 +347,26 @@ function sanitizeTableCell(cell: string): string {
  * per-cell garbage cannot survive regardless of row structure.
  */
 function sanitizeMarkdown(raw: string): string {
-  const lines = raw.split('\n');
+  // ── Strip robotic LLM label prefixes (common 8B model artifact) ────────────────
+  // The smaller model sometimes outputs instruction labels verbatim.
+  // E.g. "Follow-up question: Kaunsa kaam..." or standalone "Topic" / "Option" lines.
+  const ROBOTIC_LABEL_PATTERNS = [
+    /^follow[\s-]?up\s+question\s*:\s*/im,
+    /^follow[\s-]?up\s*:\s*/im,
+    /^option\s*:\s*/im,
+    /^answer\s*:\s*/im,
+    /^response\s*:\s*/im,
+  ];
+  // Lines that are ONLY a robotic header word with nothing else
+  const ROBOTIC_STANDALONE_LINE = /^(Topic|Question|Option|Answer|Response)\s*$/im;
+
+  let processed = raw;
+  for (const pattern of ROBOTIC_LABEL_PATTERNS) {
+    processed = processed.replace(pattern, '');
+  }
+  processed = processed.replace(ROBOTIC_STANDALONE_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
+
+  const lines = processed.split('\n');
   const cleaned = lines.map(line => {
     const trimmed = line.trim();
     // ANY line starting with | is treated as a table row
