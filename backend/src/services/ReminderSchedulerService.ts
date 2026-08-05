@@ -79,6 +79,8 @@ export class ReminderSchedulerService {
 
     const now = new Date();
     const triggerTime = new Date(reminder.trigger_at);
+    // Generate a warm, Nova-style reminder message (natural Hinglish, not "🔔 Reminder: x")
+    const message = await this.generateReminderMessage(reminder);
     
     // Safety check: if trigger time is in the future, do not fire yet
     if (triggerTime > now) {
@@ -111,7 +113,7 @@ export class ReminderSchedulerService {
       user_id: reminder.user_id,
       conversation_id: conversationId,
       role: 'assistant',
-      content: `🔔 Reminder: ${reminder.text}`
+      content: message
     });
 
     // 3. Handle recurrence or mark completed
@@ -161,6 +163,28 @@ export class ReminderSchedulerService {
         .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('id', reminderId);
       logger.info('Reminder fired and completed', { reminderId });
+
+      // Completion tracking: queue a Nova agenda item so NACE checks in on how it went.
+      // Only for finished reminders (one-shots or recurring that hit their limit) —
+      // ongoing recurring reminders don't spam the agenda with a "done?" follow-up.
+      try {
+        const followUpAfter = new Date(Date.now() + 45 * 60 * 1000);
+        await supabaseAdmin.from('nova_agenda').insert({
+          user_id: reminder.user_id,
+          event_description: reminder.text.substring(0, 500),
+          expected_time: now.toISOString(),
+          follow_up_question: `"${reminder.text}" ho gaya? Batao kaise gaya!`,
+          follow_up_after: followUpAfter.toISOString(),
+          source_message: 'Reminder fired',
+          status: 'pending',
+          next_retry_at: followUpAfter.toISOString(),
+          urgency: 'medium',
+          is_recurring: false,
+        });
+        logger.info('[Reminder] Completion follow-up queued in agenda', { reminderId });
+      } catch (agendaErr) {
+        logger.warn('[Reminder] Failed to queue completion follow-up', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
+      }
     }
 
     // 4. Send push notification to the user
@@ -174,7 +198,7 @@ export class ReminderSchedulerService {
         await sendPushNotification([{
           to: profile.push_token,
           title: '🔔 Nova Reminder',
-          body: reminder.text.length > 100 ? reminder.text.substring(0, 97) + '...' : reminder.text,
+          body: message.length > 100 ? message.substring(0, 97) + '...' : message,
           sound: 'default',
           channelId: 'nova_reminders',
           priority: 'high',
@@ -187,6 +211,30 @@ export class ReminderSchedulerService {
         error: pushErr instanceof Error ? pushErr.message : String(pushErr)
       });
     }
+  }
+
+  /**
+   * Generate a warm, Nova-style reminder message via a short background LLM call
+   * (with a 6s timeout). Falls back to a natural template if the LLM fails.
+   */
+  private async generateReminderMessage(reminder: any): Promise<string> {
+    const fallback = `⏰ ${reminder.text} — ho gaya?`;
+    try {
+      const { novaBrain } = await import('./NovaBrainService');
+      const result: any = await Promise.race([
+        novaBrain.evaluateConsciousnessTier2(
+          `Name: yaar\nSituation: It is time for a reminder the user set earlier: "${reminder.text}".\nGenerate ONE short WhatsApp-style reminder message (1 sentence, casual Hinglish/English mix, warm best-friend tone, max 1 emoji). Make it feel like a friend reminding them, and end with a light nudge to confirm once done (e.g. "done kar ke batana"). Do NOT start with "Reminder:" and do NOT use a bell emoji.`
+        ),
+        new Promise<string>((resolve) => setTimeout(() => resolve(''), 6000))
+      ]);
+      const candidate = result?.message;
+      if (typeof candidate === 'string' && candidate.trim().length > 3 && candidate.trim().length <= 200) {
+        return candidate.trim();
+      }
+    } catch (err) {
+      logger.warn('[Reminder] LLM reminder message generation failed, using fallback', { error: err instanceof Error ? err.message : String(err) });
+    }
+    return fallback;
   }
 
   private calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {

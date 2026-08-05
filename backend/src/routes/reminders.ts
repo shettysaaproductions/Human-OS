@@ -9,7 +9,7 @@ export const remindersRouter: import('express').Router = Router();
 const CreateReminderSchema = z.object({
   text: z.string().min(1).max(1000),
   trigger_at: z.string().datetime(),
-  recurrence_type: z.enum(['hours', 'days']).optional().nullable(),
+  recurrence_type: z.enum(['minutes', 'hours', 'days', 'weeks', 'months']).optional().nullable(),
   recurrence_interval: z.number().int().positive().optional().nullable()
 });
 
