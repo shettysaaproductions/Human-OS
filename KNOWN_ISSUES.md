@@ -67,3 +67,5 @@ This document tracks identified bugs, limitations, and workarounds.
 | **Web search broken for Hinglish queries** | Fast-path keyword matching added to `evaluateSearchNeed()` | Aug 2026 |
 | **Vision confused when no GEMINI key** | Fallback description returned so Nova asks user to describe image | Aug 2026 |
 | **Image ACKNOWLEDGEMENT rule missing** | 3 new ANTI-ROBOT rules: IMAGE ACKNOWLEDGEMENT, SLEEP RESPECT, WORKING MEMORY IS GROUND TRUTH | Aug 2026 |
+| **Fabrication of abbreviation meaning (RNR → "Ram Nawami")** | Strengthened ANTI-ROBOT FABRICATION rule — must ASK what an unknown term means, never guess | Aug 2026 |
+| **Memory Amnesia (forgot 5-month-old son; forgot same-session metro context)** | Strengthened ANTI-ROBOT MEMORY ACCOUNTABILITY + SAME-SESSION AMNESIA / CONTEXT rules (zero tolerance) | Aug 2026 |
