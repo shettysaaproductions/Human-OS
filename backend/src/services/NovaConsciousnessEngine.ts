@@ -140,6 +140,16 @@ export class NovaConsciousnessEngine {
       .maybeSingle();
 
     const gapMinutes = lastUserMsg ? (Date.now() - new Date(lastUserMsg.created_at).getTime()) / 60000 : 0;
+
+    // ── ACTIVE USER GUARD ────────────────────────────────────────────────────
+    // If the user sent a message in the last 10 minutes, they are clearly active.
+    // Don't interrupt an active conversation with NACE proactive messages.
+    // The user-sent "Hi" bug (Nova replied "Busy lag raha hai") was partly caused by
+    // NACE firing while user was actively online.
+    if (gapMinutes < 10 && userPresence !== 'offline') {
+      logger.info('[NACE] Skipping — user is actively engaged (gap < 10 min)', { userId, gapMinutes: Math.round(gapMinutes) });
+      return;
+    }
     
     // Fetch user presence to calculate dynamic gap
     const { data: presenceData } = await supabaseAdmin
@@ -230,13 +240,19 @@ export class NovaConsciousnessEngine {
       .join('\n');
 
     // Fetch recent outreach to pass to Tier 2 (to prevent repetitive messages)
+    // Fetch 10 recent messages (up from 3) for better variety context
     const { data: recentOutreaches } = await supabaseAdmin
       .from('nova_outreach_log')
-      .select('message')
+      .select('message, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(3);
+      .limit(10);
     const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
+
+    // ── EXACT-MATCH DEDUP: Never send the same proactive message twice ──────
+    // This prevents the bug where "Arey, busy hai kya?" was sent at 12:01 AM and again at 2:10 AM
+    // Check last 5 outreach messages for exact or near-exact match against what Tier 2 might generate
+    // (We store outreach messages; the check happens AFTER Tier 2 generates, see below)
 
     // --- TIER 1: The Subconscious Decision (Fast, Cheap) ---
     let abandonmentNote = '';
@@ -310,6 +326,30 @@ ${spontaneousThoughtNote}`;
       
       if (!generated.message) {
         logger.warn('[NACE] Tier 2 returned empty message', { userId });
+        return;
+      }
+
+      // ── EXACT-MATCH DEDUP CHECK ──────────────────────────────────────────────
+      // Prevent sending the same message twice (e.g. "Arey, busy hai kya?" repeated).
+      // Normalize both strings: lowercase, strip punctuation, collapse whitespace.
+      const normalize = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+      const normalizedNew = normalize(generated.message);
+      const recentOutreachMessages = (recentOutreaches || []).map(o => normalize(o.message));
+      
+      const isDuplicateOutreach = recentOutreachMessages.some(prev => {
+        if (prev === normalizedNew) return true;
+        // Near-duplicate: if word overlap is > 75%, treat as duplicate
+        const prevWords = new Set(prev.split(' ').filter(Boolean));
+        const newWords = new Set(normalizedNew.split(' ').filter(Boolean));
+        if (prevWords.size === 0 || newWords.size === 0) return false;
+        let overlap = 0;
+        for (const w of newWords) if (prevWords.has(w)) overlap++;
+        const union = new Set([...prevWords, ...newWords]).size;
+        return union > 0 && overlap / union >= 0.75;
+      });
+      
+      if (isDuplicateOutreach) {
+        logger.warn('[NACE] 🚫 Duplicate outreach detected — skipping to avoid repeating the same message', { userId, message: generated.message.substring(0, 60) });
         return;
       }
 
