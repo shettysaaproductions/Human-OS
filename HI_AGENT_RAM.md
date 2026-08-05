@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-01 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-06 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -36,26 +36,28 @@
 ---
 
 ## ⚙️ Core Architecture (7 Engines)
-Backend: Node.js / TypeScript on **Render** | DB: **Supabase (PostgreSQL)** | Models: **NVIDIA 70B**
+Backend: Node.js / TypeScript on **Render** | DB: **Supabase (PostgreSQL)** | Models: **NVIDIA Nemotron 49B** (`nvidia/llama-3.3-nemotron-super-49b-v1`)
 1. **NovaBrain (`NovaBrainService.ts`)** — Main LLM response generator.
 2. **NACE Consciousness (`NovaConsciousnessEngine.ts`)** — 15-min pulse for proactive check-ins & double-texts.
 3. **Situational Awareness (`SituationalAwareness.ts`)** — Time, session, mood & phase contextualizer.
 4. **Moment Engine (`MomentEngineService.ts`)** — Daily memory moment generator.
 5. **Reflection Scheduler (`ReflectionSchedulerService.ts`)** — Daily/weekly memory synthesis.
-6. **Model Router (`ModelRouterService.ts`)** — Dual key router (Key 1: Chat, Key 2: Background).
-7. **Prompt Builder (`promptBuilder.ts`)** — Identity & anti-robot rules.
+6. **Reminder Engine (`ReminderEngine.ts` + `ReminderSchedulerService.ts`)** — Smart reminder scheduling, NLP parsing, firing with warm Nova message + completion tracking.
+7. **Prompt Builder (`promptBuilder.ts`)** — Identity & anti-robot rules (24 ANTI-ROBOT rules active).
 
 ---
 
 ## 🛠️ Critical Developer Commands & Locations
 ```
-BACKEND DIR:   d:\Software\Human Os\Human-OS\backend
-MOBILE DIR:    d:\Software\Human Os\Human-OS\mobile
-ROOT DIR:      d:\Software\Human Os\Human-OS
+BACKEND DIR:   c:\Users\Laptop 6\Documents\Human Os\backend
+MOBILE DIR:    c:\Users\Laptop 6\Documents\Human Os\mobile
+ROOT DIR:      c:\Users\Laptop 6\Documents\Human Os
 
 BUILD CHECK:   cd backend && npm run build (Run before git push — 0 errors required!)
 OTA COMMAND:   cd mobile && npx eas update --branch production --environment production --message "..."
 GIT PUSH:      git add . && git commit -m "..." && git push origin main
+NVIDIA MODEL:  Set NVIDIA_CHAT_MODEL in Render env vars (current: nvidia/llama-3.3-nemotron-super-49b-v1)
+NVIDIA TIMEOUT: 55 seconds (nvidia.ts line 49) — needed for 49B model on free tier
 TRAIN COMMAND: Type "train agent" or "train" to compress and refresh this RAM snapshot.
 INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM snapshot.
 ```
@@ -81,6 +83,20 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
 - ✅ **Database Bug Resolved (Aug 1, 2026):** `reminders.status` column successfully added to Supabase.
 - ✅ **Behavioral Patches — Anti-Hallucination & Anti-Amnesia (Aug 5, 2026):** Strengthened 5 existing ANTI-ROBOT rules in `promptBuilder.ts` (FABRICATION, SAME-SESSION CONTEXT, DAY AWARENESS, MEMORY ACCOUNTABILITY, SAME-SESSION AMNESIA) to ZERO-TOLERANCE and added new ANTI-ROBOT RULE (NO CAPABILITY PITCHING). Fixes: memory/context amnesia (forgot 5-month-old son, same-session metro), fabrication of "RNR" → "Ram Nawami", time/day hallucination, and self-narration of internal architecture ("7/8 engines", "long-term memory").
+- ✅ **Aug 6 Session — Full Nova Response Restoration (commits 5b77caf, 34343f7, 15b08ac, 889d5f5):**
+  - **Trust Proxy Fix** (`app.ts`): Added `app.set('trust proxy', 1)` — was silently blocking ALL POST /api/chat requests on Render (rate-limit middleware rejected them).
+  - **Model Switch**: Changed `NVIDIA_CHAT_MODEL` from `meta/llama-3.3-70b-instruct` (30s timeout → always failing) to `nvidia/llama-3.3-nemotron-super-49b-v1` via Render env var. Timeout increased to 55s in `nvidia.ts`.
+  - **Table Trigger Fix** (`ResponseIntelligence.ts`): Short messages like "Supp" were incorrectly triggering LONG_CONTEXT table mode because `len < 10` matched any short message. Now requires explicit agreement word + short length.
+  - **LLM Label Stripping** (`chat.ts` sanitizeMarkdown): Added stripping of "Follow-up question:", "Topic", "Option" etc. that 8B model outputs verbatim.
+  - **Nemotron XML Bleed Fix** (`NovaBrainService.ts`): Nemotron outputs `**Response**` / `**Subconscious Actions**` markdown instead of XML tags. Added fallback parser to extract conversational text from between these headers.
+  - **Reminder Engine Overhaul** (`BackgroundActionService.ts`, `ReminderSchedulerService.ts`, `ReminderEngine.ts`, `reminders.ts`, `NovaBrainService.ts`): Fixed 4 bugs: (1) `time_phrase` NLP parser so Nova's natural language schedules real reminders, (2) warm Nova-style fire message instead of robotic `🔔 Reminder: text`, (3) completion tracking via nova_agenda after firing, (4) extended recurrence schema to include minutes/weeks/months.
+  - **Nemotron Bold Header Stripping** (`chat.ts`): `sanitizeMarkdown` now strips standalone `**Header**` lines. Added rule #21 NO BOLD HEADERS IN CHAT to prompt.
+  - **Options Prose Bleed Fix** (`promptBuilder.ts`): CLOSE-ENDED OPTIONS block now strictly mandates `<OPTIONS>[...]</OPTIONS>` format only. Added sanitize strips for "Awaiting Your Selection", "Default Response if No Option Selected" meta-text.
+  - **Pronoun Zero Tolerance** (`promptBuilder.ts`): Added rule #0 PRONOUN ZERO TOLERANCE as FIRST rule in CRITICAL FINAL INSTRUCTIONS (highest model salience). NEVER use Aap/Aapka/Aapko.
+  - **Real Reminders Only** (`promptBuilder.ts`): Added rule #20 — NEVER say "imaginary timer". If user asks for reminder, MUST emit ReminderEngine.schedule tool action.
+  - **NACE Active-User Guard** (`NovaConsciousnessEngine.ts`): NACE won't fire proactive messages when user is actively chatting (gap < 10 min). Exact-match dedup prevents duplicate outreach.
+  - **Stuck Conversation Timing** (`NovaFollowupService.ts`): Detection cutoff 1min→10min; bad fallback message replaced.
+
 
 ---
 
