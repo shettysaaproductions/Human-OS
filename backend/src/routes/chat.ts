@@ -372,7 +372,10 @@ function sanitizeMarkdown(raw: string): string {
 }
 
 // ── User-level Mutex to prevent race conditions on rapid messages ───────────
-const userLocks = new Map<string, Promise<void>>();
+// Each entry carries a unique token so a request only ever removes its OWN lock.
+// Without this, a request that timed out waiting (or finished late after a timeout)
+// would delete a NEWER request's lock entry, letting concurrent replies slip through.
+const userLocks = new Map<string, { promise: Promise<void>; token: string }>();
 
 chatRouter.post(
   '/',
@@ -584,24 +587,27 @@ chatRouter.post(
       // ── Mutex with Timeout ───────────────────────────────────────────────────
       const MUTEX_TIMEOUT_MS = 30_000;
 
-      const previousLock = userLocks.get(userId);
+      const previousEntry = userLocks.get(userId);
+      const lockToken = crypto.randomUUID();
       const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
 
-      if (previousLock) {
+      if (previousEntry) {
         // Wait for previous request with timeout
         let mutexTimeoutId: NodeJS.Timeout | null = null;
         const timeoutPromise = new Promise<void>((_, reject) => {
           mutexTimeoutId = setTimeout(() => reject(new Error('MUTEX_TIMEOUT')), MUTEX_TIMEOUT_MS);
         });
-        
+
         try {
-          await Promise.race([previousLock, timeoutPromise]);
+          await Promise.race([previousEntry.promise, timeoutPromise]);
           logger.info('[Chat] Previous lock resolved normally', { userId });
         } catch (err: any) {
           if (err.message === 'MUTEX_TIMEOUT') {
+            // Do NOT delete the stale entry here. The previous owner may still be
+            // running; it will only remove its own lock (matching token) when it
+            // finishes. We just stop waiting and proceed — the entry we set below
+            // becomes the active lock, so later requests queue behind THIS one.
             logger.warn('[Chat] Mutex timeout — previous request hung, continuing', { userId });
-            // Force-clear the stale lock
-            userLocks.delete(userId);
           } else {
             throw err;
           }
@@ -611,7 +617,7 @@ chatRouter.post(
       }
 
       // Set the new lock ONLY after previous is done or timed out
-      userLocks.set(userId, newLock);
+      userLocks.set(userId, { promise: newLock, token: lockToken });
       logger.info('[Chat] Mutex acquired', { userId });
       
       try {
@@ -1077,41 +1083,11 @@ chatRouter.post(
       if (webSearchContext) {
         memoryContext += webSearchContext;
       }
-      try {
-        if (memories.length || shortTermMemories.length || workingMemories.length) {
-          memoryContext += `\n\n## 🧠 WHAT YOU REMEMBER ABOUT THIS USER\n`;
-          
-          // ── Working Memory: show ALL keys, not just 2 hardcoded ones ─────────
-          // CRITICAL FIX: Previously only current_focus + active_goals were shown.
-          // Nova could not see: current_activity, feeling, conversation_partner, etc.
-          if (workingMemories.length) {
-            memoryContext += `\nWorking Memory (what the user JUST told you — treat as current facts):\n`;
-            workingMemories.forEach(w => {
-              // Format key as readable label
-              const label = w.key.replace(/_/g, ' ');
-              memoryContext += `- ${label}: ${w.value}\n`;
-            });
-          }
-          
-          if (memories.length) {
-            memoryContext += `\nLong-term memories:\n`;
-            memories.forEach(m => {
-              memoryContext += `- ${m.content || m.memory || m.key + ': ' + m.value} (${m.category || m.memory_type || 'general'})\n`;
-            });
-          }
-          
-          if (shortTermMemories.length) {
-            memoryContext += `\nRecent short-term memories:\n`;
-            shortTermMemories.forEach(e => {
-              memoryContext += `- ${e.memory || e.content || e.key + ': ' + e.value}\n`;
-            });
-          }
-          
-          memoryContext += `\nCRITICAL: When asked "what do you remember" or "what are my goals", LIST THESE SPECIFIC MEMORIES. Never give generic answers like "motivation and life satisfaction". Use actual names, dates, and facts from above.\n`;
-        }
-      } catch (e) {
-        logger.warn('[Memory] Context building failed:', e);
-      }
+      // NOTE: workingMemories / shortTermMemories / memories are intentionally NOT
+      // re-listed here — promptBuilder.buildSystemPrompt already injects all three
+      // (WORKING MEMORY, SHORT-TERM MEMORY, LONG-TERM MEMORY sections). Duplicating
+      // them in memoryContext made Nova see every fact twice and treat the repeats as
+      // filler. Memory rendering/emphasis now lives in ONE place (promptBuilder).
 
       const brainContext = {
         memories,
@@ -1347,12 +1323,21 @@ chatRouter.post(
       // Split each parsed message further if it's too long
       let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m)).filter(b => b.trim().length > 0);
       
-      // If no valid bubbles were generated (e.g. LLM returned blank), safely abort
+      // If no valid bubbles were generated (e.g. LLM returned blank), safely abort.
+      // Streaming: the 'done' event was already flushed above — writing again after
+      // res.end() would throw. Non-streaming: send an empty 200 so the client never
+      // hangs waiting for a reply that will never arrive.
       if (finalBubbles.length === 0) {
         logger.info('[Chat] LLM returned a blank reply (likely Subconscious only). No bubbles generated.');
-        if (isStreaming) {
-          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-          res.end();
+        if (!isStreaming) {
+          res.status(200).json({
+            reply: '',
+            messages: [],
+            chunks: [],
+            conversation_id: activeConversationId,
+            user_message_id: userMessageId,
+            meta: { blank_reply: true, degraded: false }
+          });
         }
         return;
       }
@@ -1573,7 +1558,10 @@ chatRouter.post(
         });
         try {
           const userId = (req as any).user?.id;
-          const activeConversationId = (req.body?.conversation_id) || '';
+          // Use the request's active conversation id (a valid UUID). Do NOT fall back
+          // to req.body.conversation_id here — the client may omit it, and inserting
+          // '' into the uuid column makes the fallback insert fail silently, so the
+          // user never gets their "glitch" recovery message.
           if (userId) {
             await supabaseAdmin.from('chat_history').insert({
               user_id: userId,
@@ -1609,8 +1597,13 @@ chatRouter.post(
         releaseLock();
         logger.info('[Chat] Mutex released', { userId });
       }
-      // Always clean up — even if the lock was replaced due to timeout
-      userLocks.delete(userId);
+      // Remove the lock entry ONLY if this request still owns it. A newer request
+      // may have replaced the entry (e.g., after a mutex timeout) — deleting it
+      // here would drop a live lock and let concurrent replies race.
+      const currentEntry = userLocks.get(userId);
+      if (currentEntry && currentEntry.token === lockToken) {
+        userLocks.delete(userId);
+      }
     }
   } catch (outerErr) {
     next(outerErr);

@@ -111,11 +111,27 @@ describe('NovaBrainService', () => {
       (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
       const context = { memoryContext: 'Some memory context', lengthInstruction: 'Be very brief' };
       await service.processInteraction('u1', 'hi', context);
-      
+
       const args = (chatCompletion as jest.Mock).mock.calls[0][0];
       const systemMsg = args.find((m: any) => m.role === 'system').content;
       expect(systemMsg).toContain('Some memory context');
       expect(systemMsg).toContain('Be very brief');
+    });
+
+    it('should include temporalContextBlock and remindersContext in the prompt', async () => {
+      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      const context = {
+        memoryContext: 'mem',
+        temporalContextBlock: '## WHAT WAS SAID RECENTLY\n[Today] You: told you about the trip',
+        remindersContext: '## ACTIVE REMINDERS (SOURCE OF TRUTH)\n- take medicine at 10am'
+      };
+      await service.processInteraction('u1', 'hi', context);
+
+      const args = (chatCompletion as jest.Mock).mock.calls[0][0];
+      const systemMsg = args.find((m: any) => m.role === 'system').content;
+      expect(systemMsg).toContain('## WHAT WAS SAID RECENTLY');
+      expect(systemMsg).toContain('told you about the trip');
+      expect(systemMsg).toContain('take medicine at 10am');
     });
 
     it('should handle empty/null memory arrays gracefully', async () => {
