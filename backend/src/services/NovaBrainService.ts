@@ -123,14 +123,28 @@ If no tools need to be called, leave the JSON array empty: []
       if (replyMatch) {
         reply = replyMatch[1].trim();
       } else {
-        // Fallback: If tags are missing, assume the whole response is the reply
-        reply = rawRes.replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '').trim();
+        // Fallback A: Nemotron/some models output markdown headers instead of XML tags:
+        // "**Response**\nActual reply text\n\n**Subconscious Actions**\n[{...}]"
+        // Extract just the text between **Response** and **Subconscious Actions**.
+        const mdResponseMatch = rawRes.match(/\*\*Response\*\*[:\s]*([\s\S]*?)(?:\*\*Subconscious Actions\*\*|$)/i);
+        if (mdResponseMatch) {
+          reply = mdResponseMatch[1].trim();
+        } else {
+          // Fallback B: no tags at all — strip known sections and use the rest
+          reply = rawRes
+            .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '') // strip markdown section
+            .replace(/\*\*Response\*\*[:\s]*/gi, '')              // strip "**Response**" prefix
+            .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
+            .trim();
+        }
       }
 
-      // Safety strip: Remove any XML or JSON bleed from the reply
+      // Safety strip: Remove any XML, JSON, or markdown bleed from the reply
       reply = reply
         .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
         .replace(/<subconscious_actions>[\s\S]*/g, '') // unclosed tag
+        .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '') // Nemotron markdown section
+        .replace(/\*\*Response\*\*[:\s]*/gi, '') // Nemotron "**Response**" prefix
         .replace(/\[\s*\{.*"tool".*\}.*\]/gs, '') // JSON array bleed
         .trim();
 

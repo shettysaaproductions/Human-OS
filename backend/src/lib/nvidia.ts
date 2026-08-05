@@ -46,7 +46,8 @@ export class NvidiaTimeoutError extends Error {
   }
 }
 
-const NVIDIA_TIMEOUT_MS = 30_000; // 30 seconds hard deadline
+const NVIDIA_TIMEOUT_MS = 55_000; // 55 seconds — accommodates Nemotron 49B / larger models on free tier
+                                   // async_mode returns 202 immediately, so user isn't blocked by this wait
 
 /**
  * Races an NVIDIA SDK call against a 30-second AbortSignal.
