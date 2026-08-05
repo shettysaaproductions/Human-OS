@@ -401,7 +401,11 @@ export class NovaFollowupService {
         const isPersonal = PERSONAL_SIGNALS.some(s => content.includes(s));
 
         // Determine the cutoff based on seriousness:
-        const cutoffMinutes = isSerious ? 1 : isPersonal ? 2 : 3; // was 2/4/6
+        // CRITICAL FIX: Old values (1/2/3 min) were firing BEFORE the LLM (30s timeout)
+        // had time to respond, creating a cascade: Nova times out → stuck detector fires
+        // immediately → queues fallback → user sees "Busy lag raha hai" instead of a reply.
+        // New values give the LLM + async pipeline enough time to complete.
+        const cutoffMinutes = isSerious ? 5 : isPersonal ? 7 : 10;
 
         // Not old enough yet — skip for now
         if (ageMinutes < cutoffMinutes) continue;
@@ -466,12 +470,14 @@ export class NovaFollowupService {
         logger.info('[NovaFollowup] Detected stuck conversation, scheduling double-text', { userId: userMsg.user_id, convId });
         
         // Generate a context-aware follow-up rather than a generic hard-coded one
-        let doubleTextMsg = "Busy lag raha hai, take your time!";
+        // FALLBACK: Use a neutral "I missed your message" tone — NOT "busy lag raha hai"
+        // because saying the user is busy when Nova is the one who didn't reply is wrong.
+        let doubleTextMsg = "Arre yaar, lagta hai mera message pehunch nahi gaya — phir se baat karte hain!";
         try {
           const { novaBrain } = await import('./NovaBrainService');
           const lastContent = userMsg.content?.substring(0, 200) || '';
           const generated = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a very short (1 sentence max) casual Hinglish follow-up message as if you just noticed you haven't replied. Warm, not pushy. Like a friend who genuinely just noticed.`
+            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a very short (1 sentence max) casual Hinglish follow-up message as if you just noticed you haven't replied. Warm, not pushy. Like a friend who genuinely just noticed. Do NOT say the user is busy. Say YOU missed it.`
           );
           if (generated?.message && generated.message.length < 200) {
             doubleTextMsg = generated.message;

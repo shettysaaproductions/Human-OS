@@ -39,6 +39,12 @@ import { logger } from './lib/logger';
 export function createApp(): express.Application {
   const app = express();
 
+  // ── Trust Proxy ──────────────────────────────────────────────────────────────
+  // Render (and most cloud platforms) sit behind a load balancer that sets the
+  // X-Forwarded-For header. Without trust proxy = 1, express-rate-limit throws a
+  // ValidationError on every request and may block all incoming traffic.
+  app.set('trust proxy', 1);
+
   // ── Security headers (Helmet) ────────────────────────────────────────────────
   // Sets X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.
   app.use(helmet());
