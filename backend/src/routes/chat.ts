@@ -366,6 +366,25 @@ function sanitizeMarkdown(raw: string): string {
   }
   processed = processed.replace(ROBOTIC_STANDALONE_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
 
+  // ── Strip Nemotron bold-header-only lines ──────────────────────────────────
+  // Nemotron wraps conversational text in bold section headers like
+  // "**Kaam ki Baat Chalayein...**" or "**Office Hours (11am-8:30pm)**:".
+  // Strip lines that are ENTIRELY a bold header. Inline bold like "**very**"
+  // inside a sentence is preserved (this only matches whole-line headers).
+  processed = processed.replace(/^\*\*[^*\n]{1,80}\*\*\s*:?\s*$/gim, '');
+
+  // ── Strip option meta-text phrases ─────────────────────────────────────────
+  // When Nemotron can't follow the <OPTIONS> tag format, it outputs the option
+  // framework labels as prose. Remove those known labels.
+  const OPTION_META_PHRASES = [
+    /Awaiting Your Selection\.*/gi,
+    /Default Response if No Option Selected[^.\n]*/gi,
+    /\(for continuity\)/gi,
+  ];
+  for (const p of OPTION_META_PHRASES) {
+    processed = processed.replace(p, '');
+  }
+
   const lines = processed.split('\n');
   const cleaned = lines.map(line => {
     const trimmed = line.trim();
