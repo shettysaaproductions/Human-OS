@@ -19,7 +19,11 @@ export function classifyIntent(message: string, recentHistory: string[] = []): R
   const aiOfferedTable = (lastAiMessage && lastAiMessage.includes('table format')) || 
                          (secondLastAiMessage && secondLastAiMessage.includes('table format'));
   
-  const userAgreed = /\b(sure|yes|ha|haan|dikha|bata|ok|okay|karo|give|please|yep|yeah)\b/i.test(lower) || len < 10;
+  // FIXED: userAgreed must have an EXPLICIT yes word — 'len < 10' alone was triggering
+  // LONG_CONTEXT mode for ANY short message ("Hi", "Supp", "ok") after Nova ever said
+  // "table format" in any previous message, producing irrelevant structured tables.
+  const hasExplicitAgreement = /\b(sure|yes|ha|haan|dikha|bata|karo|give|please|yep|yeah|show|dikh|ok|okay)\b/i.test(lower);
+  const userAgreed = hasExplicitAgreement && len < 30; // Short AND explicit — not just short
   
   if (aiOfferedTable && userAgreed) {
     return { mode: 'LONG_CONTEXT', maxTokens: 1500, temperature: 0.5, shouldOfferTable: false };
