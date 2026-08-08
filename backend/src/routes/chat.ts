@@ -566,17 +566,26 @@ chatRouter.post(
       }
       const userMessageId = userMsgResult.data?.id || 'msg_' + Date.now();
 
-      // Cancel any pending follow-ups since the user replied
+      // If the user signalled sleep/unavailability, write the DB lock IMMEDIATELY so
+      // NACE + follow-up engines stay silent — don't wait for the reactive sleep-guard.
+      // Otherwise cancel any pending follow-ups since the user replied.
       if (!is_proactive) {
-        import('../services/NovaFollowupService').then(({ novaFollowupService }) => {
-          novaFollowupService.cancelFollowups(userId).catch(e => logger.warn('Failed to cancel follow-ups', { error: e }));
+        import('../services/NovaFollowupService').then(({ novaFollowupService, classifyUnavailability }) => {
+          const unavailability = classifyUnavailability(message);
+          if (unavailability) {
+            novaFollowupService.recordUnavailability(userId, unavailability.hours)
+              .catch(e => logger.warn('Failed to write unavailability lock', { error: e }));
+          } else {
+            novaFollowupService.cancelFollowups(userId).catch(e => logger.warn('Failed to cancel follow-ups', { error: e }));
+          }
         });
 
         // 1.5 Auto-update user presence since they just sent a message (they are online)
+        // NOTE: use updated_at (not last_seen — that column doesn't exist in user_presence)
         supabaseAdmin.from('user_presence').upsert({
           user_id: userId,
           status: 'online',
-          last_seen: new Date().toISOString()
+          updated_at: new Date().toISOString()
         }).then(({ error }) => {
           if (error) logger.warn('Failed to update presence', { error });
         });

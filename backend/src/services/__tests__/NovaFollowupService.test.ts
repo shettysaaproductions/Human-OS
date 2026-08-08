@@ -1,4 +1,4 @@
-import { NovaFollowupService } from '../NovaFollowupService';
+import { NovaFollowupService, classifyUnavailability } from '../NovaFollowupService';
 import { supabaseAdmin } from '../../lib/supabase';
 import { sendPushNotification } from '../../lib/pushNotifications';
 import { logger } from '../../lib/logger';
@@ -11,6 +11,7 @@ jest.mock('../../lib/supabase', () => {
     select: jest.fn().mockReturnThis(),
     update: jest.fn().mockReturnThis(),
     insert: jest.fn().mockReturnThis(),
+    upsert: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
     gte: jest.fn().mockReturnThis(),
     lte: jest.fn().mockReturnThis(),
@@ -64,10 +65,28 @@ describe('NovaFollowupService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Re-pin supabaseAdmin.from to a FRESH chainable each test. Some tests
+    // (3.5) override from via mockImplementation, which persists across
+    // clearAllMocks — a fresh chainable prevents cross-test leakage.
+    (supabaseAdmin.from as jest.Mock).mockReset();
+    mockChain = {
+      select: jest.fn().mockReturnThis(),
+      update: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockReturnThis(),
+      upsert: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      gte: jest.fn().mockReturnThis(),
+      lte: jest.fn().mockReturnThis(),
+      gt: jest.fn().mockReturnThis(),
+      in: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      maybeSingle: jest.fn().mockResolvedValue({ data: null })
+    };
+    (supabaseAdmin.from as jest.Mock).mockImplementation(() => mockChain);
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-08-01T00:00:00Z'));
     service = new NovaFollowupService();
-    mockChain = (supabaseAdmin.from as jest.Mock)();
   });
 
   afterEach(() => {
@@ -152,6 +171,7 @@ describe('NovaFollowupService', () => {
     it('should fire due follow-ups and mark them sent', async () => {
       mockChain.lte.mockResolvedValueOnce({ data: [{ id: 'fup-1', user_id: 'u1', conversation_id: 'c1', message: 'Hey' }] });
       mockChain.update.mockReturnValueOnce({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) }) });
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: null }); // suppression check (no lock)
       mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } });
       mockChain.insert.mockResolvedValueOnce({});
 
@@ -283,6 +303,110 @@ describe('NovaFollowupService', () => {
 
       await service.checkUnansweredConversations();
       expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('Detected stuck conversation'), expect.any(Object));
+    });
+  });
+
+  describe('3.6 classifyUnavailability', () => {
+    it('classifies sleep signals as 8h', () => {
+      expect(classifyUnavailability('Good night')).toEqual({ type: 'sleep', hours: 8 });
+      expect(classifyUnavailability('so ja')).toEqual({ type: 'sleep', hours: 8 });
+      expect(classifyUnavailability('Soone ja raha hoon')).toEqual({ type: 'sleep', hours: 8 });
+      expect(classifyUnavailability('Goodnight')).toEqual({ type: 'sleep', hours: 8 });
+      expect(classifyUnavailability('gn bhai')).toEqual({ type: 'sleep', hours: 8 });
+    });
+
+    it('classifies busy signals as 2h', () => {
+      expect(classifyUnavailability('meeting me hoon')).toEqual({ type: 'busy', hours: 2 });
+      expect(classifyUnavailability('baad mein baat karta')).toEqual({ type: 'busy', hours: 2 });
+      expect(classifyUnavailability('busy hoon')).toEqual({ type: 'busy', hours: 2 });
+    });
+
+    it('returns null for normal messages', () => {
+      expect(classifyUnavailability('kaise ho')).toBeNull();
+      expect(classifyUnavailability('Good morning!')).toBeNull();
+      expect(classifyUnavailability('')).toBeNull();
+    });
+  });
+
+  describe('3.7 recordUnavailability', () => {
+    it('writes the lock and cancels pending follow-ups', async () => {
+      const ok = await service.recordUnavailability('u1', 8);
+      expect(ok).toBe(true);
+      expect(mockChain.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: 'u1', key: 'followup_suppressed_until' }),
+        { onConflict: 'user_id,key' }
+      );
+      expect(mockChain.update).toHaveBeenCalledWith({ status: 'cancelled' });
+    });
+
+    it('returns false on DB error', async () => {
+      mockChain.upsert.mockImplementationOnce(() => { throw new Error('DB down'); });
+      const ok = await service.recordUnavailability('u1', 2);
+      expect(ok).toBe(false);
+      expect(logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  describe('3.8 checkIgnoredNovaMessages seen/unseen', () => {
+    // Each test uses a UNIQUE userId because the per-user LLM cooldown (ignoredFollowupSent)
+    // and escalation counter are module-level and persist across tests in this file.
+    const novaMsg30 = (userId: string) => ({
+      id: 'nm-1',
+      user_id: userId,
+      conversation_id: 'c1',
+      content: 'Hello?',
+      created_at: new Date(Date.now() - 30 * 60000).toISOString(),
+      meta: {}
+    });
+
+    it('SEEN: user actively in-app → queues a quick nudge', async () => {
+      mockChain.order.mockResolvedValueOnce({ data: [novaMsg30('u1-seen')] }); // initial scan
+      mockChain.limit.mockResolvedValue({ data: [] });                        // userReply / newerNova / recentPending / detectUnavailability
+      // presence: actively online with a fresh heartbeat
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { status: 'online', updated_at: new Date(Date.now() - 60 * 1000).toISOString() } });
+      // suppression + counter + queueFollowup internal reads → default {data:null}
+
+      await service.checkIgnoredNovaMessages();
+
+      const inserted = mockChain.insert.mock.calls.map(c => c[0]).find(c => c.user_id === 'u1-seen');
+      expect(inserted).toBeDefined();
+      expect(inserted.status).toBe('pending');
+      const fireDelayMs = new Date(inserted.fire_at).getTime() - Date.now();
+      expect(fireDelayMs).toBeLessThan(60 * 60 * 1000); // a nudge, not a 3.5h check-in
+    });
+
+    it('UNSEEN: user offline → books a deferred ~3.5h check-in', async () => {
+      mockChain.order.mockResolvedValueOnce({ data: [novaMsg30('u1-unseen')] });
+      mockChain.limit.mockResolvedValue({ data: [] });
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { status: 'offline', updated_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString() } });
+
+      await service.checkIgnoredNovaMessages();
+
+      const inserted = mockChain.insert.mock.calls.map(c => c[0]).find(c => c.user_id === 'u1-unseen');
+      expect(inserted).toBeDefined();
+      const fireDelayMs = new Date(inserted.fire_at).getTime() - Date.now();
+      // msg was 30min old when booked; check-in fires ~3h from now (30min + 3.5h)
+      expect(fireDelayMs).toBeGreaterThanOrEqual(2.5 * 3600 * 1000);
+      expect(fireDelayMs).toBeLessThanOrEqual(3.5 * 3600 * 1000 + 60000);
+    });
+
+    it('SUPPRESSED: lock active → no follow-up queued', async () => {
+      mockChain.order.mockResolvedValueOnce({ data: [novaMsg30('u1-suppressed')] });
+      mockChain.limit.mockResolvedValue({ data: [] });
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { status: 'offline', updated_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString() } }); // presence
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { value: new Date(Date.now() + 8 * 3600 * 1000).toISOString() } }); // suppression → future lock
+
+      await service.checkIgnoredNovaMessages();
+
+      expect(mockChain.insert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('3.9 queueFollowup cancelExisting opt', () => {
+    it('does NOT cancel existing follow-ups when cancelExisting:false', async () => {
+      await service.queueFollowup('u1', 'c1', 'Check-in', 3.5, { cancelExisting: false });
+      expect(mockChain.update).not.toHaveBeenCalledWith({ status: 'cancelled' });
+      expect(mockChain.insert).toHaveBeenCalledWith(expect.objectContaining({ status: 'pending' }));
     });
   });
 });

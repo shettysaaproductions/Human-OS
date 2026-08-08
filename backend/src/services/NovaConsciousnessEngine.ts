@@ -94,6 +94,30 @@ export class NovaConsciousnessEngine {
 
     if (!profile?.push_token) return;
 
+    // Sleep/busy lock respect: if the user said "good night" / is suppressed, stay
+    // silent — UNLESS a high-urgency agenda item (e.g. medical/exam reminder Nova
+    // was asked to track) is due right now and can break through.
+    const { data: suppression } = await supabaseAdmin
+      .from('working_memory')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'followup_suppressed_until')
+      .maybeSingle();
+    if (suppression?.value && Date.now() < new Date(suppression.value).getTime()) {
+      const { data: urgentAgenda } = await supabaseAdmin
+        .from('nova_agenda')
+        .select('id')
+        .eq('user_id', userId)
+        .in('status', ['pending', 'active'])
+        .eq('urgency', 'high')
+        .lte('next_retry_at', new Date().toISOString())
+        .limit(1);
+      if (!urgentAgenda || urgentAgenda.length === 0) {
+        logger.info('[NACE] Skipping outreach — user is suppressed (sleep/busy lock)', { userId });
+        return;
+      }
+    }
+
     const tContext = await temporalAwarenessService.getContext(userId, profile.timezone_offset);
 
     // 2. Fetch Recent Outreach to enforce MIN_GAP
