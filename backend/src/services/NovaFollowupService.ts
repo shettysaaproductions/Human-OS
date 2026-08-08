@@ -31,6 +31,43 @@ const ignoredFollowupSent = new Map<string, number>();
 // Key: userId → count. Resets when user replies.
 const ignoreEscalationCount = new Map<string, number>();
 
+// ── Sleep / unavailability signal classification ──────────────────────────────
+// Shared by queueFollowup's guard, chat.ts's immediate lock (recordUnavailability),
+// and the unseen-check-in path in checkIgnoredNovaMessages.
+const SLEEP_SIGNALS = [
+  'soone ja', 'so ja', 'so raha hoon', 'so rahi hoon', 'neend aa', 'raat ko so',
+  'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
+  'gn ', 'gn\n', 'bye', 'byee', 'byebye', 'chalta hoon', 'chalti hoon',
+  'chalte hai', 'nikal raha', 'nikal rahi', 'baad mein baat', 'baad mein reply',
+  'call aaya', 'meeting me hoon', 'busy hoon', 'baad mein baat karta', 'abhi baad me',
+  'so jaunga', 'so jaungi', 'sone wala hoon', 'nap le raha', 'nap le rahi'
+];
+// Subset that means the user is genuinely asleep → long (8h) lock. Everything else in
+// SLEEP_SIGNALS is "busy / stepping away" → short (2h) lock.
+const TRULY_SLEEP_SIGNALS = [
+  'soone ja', 'so ja', 'so raha', 'so rahi', 'neend aa',
+  'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
+  'gn ', 'so jaunga', 'so jaungi', 'sone wala', 'nap le'
+];
+const SLEEP_LOCK_HOURS = 8;
+const BUSY_LOCK_HOURS = 2;
+
+// ── Seen/unseen classification for checkIgnoredNovaMessages ───────────────────
+// A user counts as "seen / left on read" only if they are ACTIVELY in the app right
+// now (status online + a heartbeat within the last few minutes). A stale 'online'
+// (app killed) or a backgrounded 'away' must NOT trigger the quick nudge.
+const SEEN_RECENCY_MS = 5 * 60 * 1000;  // heartbeat must be within 5 min
+const UNSEEN_CHECK_IN_HOURS = 3.5;      // 3–4h deferred check-in after an unseen Nova message
+const UNSEEN_MAX_CHECK_INS = 3;         // up to 3 check-ins, then give space (user's choice)
+const UNSEEN_COUNTER_KEY = 'nova_ignored_deferred_count';
+
+export function classifyUnavailability(text: string): { type: 'sleep' | 'busy'; hours: number } | null {
+  const lower = text.toLowerCase();
+  if (TRULY_SLEEP_SIGNALS.some(s => lower.includes(s))) return { type: 'sleep', hours: SLEEP_LOCK_HOURS };
+  if (SLEEP_SIGNALS.some(s => lower.includes(s))) return { type: 'busy', hours: BUSY_LOCK_HOURS };
+  return null;
+}
+
 export class NovaFollowupService {
 
   /**
@@ -40,78 +77,28 @@ export class NovaFollowupService {
     userId: string,
     conversationId: string,
     message: string,
-    delayHours: number
+    delayHours: number,
+    opts?: { cancelExisting?: boolean }
   ): Promise<void> {
     try {
       // ── SLEEP & UNAVAILABILITY GUARD ─────────────────────────────────────────
       // Before queuing ANY follow-up, check if the user recently said they are
       // sleeping, going somewhere, or explicitly said they're busy/unavailable.
       // If so, suppress all follow-ups for the appropriate duration.
-      const SLEEP_SIGNALS = [
-        'soone ja', 'so ja', 'so raha hoon', 'so rahi hoon', 'neend aa', 'raat ko so',
-        'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
-        'gn ', 'gn\n', 'bye', 'byee', 'byebye', 'chalta hoon', 'chalti hoon',
-        'chalte hai', 'nikal raha', 'nikal rahi', 'baad mein baat', 'baad mein reply',
-        'call aaya', 'meeting me hoon', 'busy hoon', 'baad mein baat karta', 'abhi baad me',
-        'so jaunga', 'so jaungi', 'sone wala hoon', 'nap le raha', 'nap le rahi'
-      ];
-
-      // ── Sleep/Unavailability Guard: scan LAST 5 user messages within 12 hours ──
-      // Previously only checked last 1 message — this missed sleep signals if user
-      // later sent a different message (e.g. "Bola toh tha soone ja raha hu, abhi utha")
-      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
-      const { data: recentUserMsgs } = await supabaseAdmin
-        .from('chat_history')
-        .select('content, created_at')
-        .eq('user_id', userId)
-        .eq('role', 'user')
-        .gte('created_at', twelveHoursAgo)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (recentUserMsgs && recentUserMsgs.length > 0) {
-        // Only the MOST RECENT user message counts for the sleep guard. Scanning all 5
-        // messages within 12h suppressed follow-ups even after the user woke up and resumed
-        // chatting (e.g. "good night" at 11pm then "good morning" at 8am was still suppressing
-        // until 7pm). If the user has sent anything since the sleep signal, they are clearly
-        // awake and active again.
-        const newestMsg = recentUserMsgs[0];
-        if (newestMsg?.content) {
-          const lowerContent = newestMsg.content.toLowerCase();
-          const sleepMatch = SLEEP_SIGNALS.find(s => lowerContent.includes(s));
-
-          if (sleepMatch) {
-            const isTrulySleeping = ['soone ja', 'so ja', 'so raha', 'so rahi', 'neend aa',
-              'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
-              'gn ', 'so jaunga', 'so jaungi', 'sone wala', 'nap le'].some(s => lowerContent.includes(s));
-            const suppressHours = isTrulySleeping ? 8 : 2;
-
-            logger.info(`[NovaFollowup] 🛑 Sleep/unavailability detected in most recent message ("${sleepMatch}") — suppressing for ${suppressHours}h`, { userId });
-
-            await supabaseAdmin.from('working_memory').upsert({
-              user_id: userId,
-              key: 'followup_suppressed_until',
-              value: new Date(Date.now() + suppressHours * 60 * 60 * 1000).toISOString(),
-              expires_at: new Date(Date.now() + suppressHours * 60 * 60 * 1000).toISOString()
-            }, { onConflict: 'user_id,key' });
-
-            await supabaseAdmin
-              .from('nova_followups')
-              .update({ status: 'cancelled' })
-              .eq('user_id', userId)
-              .eq('status', 'pending');
-
-            return; // Do NOT queue a follow-up
-          }
-        }
+      // (Only the MOST RECENT user message counts — if the user has sent anything
+      // since the sleep signal, they are clearly awake and active again.)
+      const unavailability = await this._detectUnavailability(userId);
+      if (unavailability) {
+        logger.info(`[NovaFollowup] 🛑 Sleep/unavailability detected — suppressing for ${unavailability.hours}h`, { userId });
+        await this._writeSuppression(userId, unavailability.hours);
+        await this._cancelPendingFollowups(userId);
+        return; // Do NOT queue a follow-up
       }
 
-      // Cancel any existing pending follow-up for this user
-      await supabaseAdmin
-        .from('nova_followups')
-        .update({ status: 'cancelled' })
-        .eq('user_id', userId)
-        .eq('status', 'pending');
+      const cancelExisting = opts?.cancelExisting ?? true;
+      if (cancelExisting) {
+        await this._cancelPendingFollowups(userId);
+      }
 
       // MINIMUM 15 MINUTES for any follow-up. Never follow up in seconds.
       // The old 0.25 min (15s) minimum caused the 36-message spam. Real friends don't text every 4 minutes.
@@ -200,12 +187,13 @@ export class NovaFollowupService {
       ignoredFollowupSent.delete(userId);
       ignoreEscalationCount.delete(userId);
 
-      // Clear DB suppression — user replied, so Nova can re-engage in future sessions
+      // Clear DB suppression — user replied, so Nova can re-engage in future sessions.
+      // Also clear the unseen check-in counter (DB-persisted so it survives restarts).
       await supabaseAdmin
         .from('working_memory')
         .delete()
         .eq('user_id', userId)
-        .eq('key', 'followup_suppressed_until');
+        .in('key', ['followup_suppressed_until', UNSEEN_COUNTER_KEY]);
     } catch (err) {
       logger.warn('[NovaFollowup] Error cancelling follow-ups', {
         error: err instanceof Error ? err.message : String(err)
@@ -253,6 +241,26 @@ export class NovaFollowupService {
   }
 
   private async _fireFollowup(followup: any): Promise<void> {
+    // Sleep-lock respect: never fire a pre-queued follow-up while the user is
+    // suppressed (e.g. they said "good night"). Leave it pending so it fires after
+    // the suppression clears, or gets cancelled by the sleep-guard.
+    try {
+      const { data: suppression } = await supabaseAdmin
+        .from('working_memory')
+        .select('value')
+        .eq('user_id', followup.user_id)
+        .eq('key', 'followup_suppressed_until')
+        .maybeSingle();
+      if (suppression?.value && new Date(suppression.value).getTime() > Date.now()) {
+        logger.info('[NovaFollowup] Deferred follow-up: user is suppressed (sleep/busy)', { id: followup.id, userId: followup.user_id });
+        return; // leave pending — fires after suppression clears
+      }
+    } catch (err) {
+      logger.warn('[NovaFollowup] Suppression check failed during fire — proceeding', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+
     // Dedup check BEFORE claiming, so a duplicate doesn't consume the claim.
     const normalizedNew = followup.message.toLowerCase().trim();
     const cached = dedupCache.get(followup.user_id);
@@ -532,39 +540,9 @@ export class NovaFollowupService {
       }
 
       for (const [userId, novaMsg] of userMap.entries()) {
-        // 🔒 Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
+        // Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
         const lastSent = ignoredFollowupSent.get(userId) || 0;
         if (Date.now() - lastSent < 3 * 60 * 1000) continue;
-
-        // 🛑 DB-persistent suppression check: if we hit Level 3 escalation, give space for 4 hours
-        const { data: suppressionData } = await supabaseAdmin
-          .from('working_memory')
-          .select('value')
-          .eq('user_id', userId)
-          .eq('key', 'followup_suppressed_until')
-          .maybeSingle();
-        if (suppressionData?.value) {
-          const suppressedUntil = new Date(suppressionData.value).getTime();
-          if (Date.now() < suppressedUntil) {
-            logger.info('[NovaFollowup] Skipping — follow-ups suppressed until ' + suppressionData.value, { userId });
-            continue;
-          }
-        }
-
-        // Skip if user is currently typing (don't interrupt them!)
-        const { data: presence } = await supabaseAdmin
-          .from('user_presence')
-          .select('status')
-          .eq('user_id', userId)
-          .maybeSingle();
-        if (presence?.status === 'typing') {
-          continue;
-        }
-
-        // Skip if Nova's last message evaluated the user as BUSY (e.g. user said "bye" or "10 mins")
-        if (novaMsg.meta?.situationBrief?.includes('USER AVAILABILITY: User signalled they are BUSY')) {
-          continue;
-        }
 
         // Skip if user replied after Nova's message
         const { data: userReply } = await supabaseAdmin
@@ -575,12 +553,11 @@ export class NovaFollowupService {
           .gt('created_at', novaMsg.created_at)
           .limit(1);
         if (userReply && userReply.length > 0) {
-          // User replied — reset escalation
           ignoreEscalationCount.delete(userId);
           continue;
         }
 
-        // Skip if Nova already sent ANOTHER message after this one (within last 3 min)
+        // Skip if Nova already sent another message after this one (within last 2h)
         const { data: newerNova } = await supabaseAdmin
           .from('chat_history')
           .select('id, created_at')
@@ -589,82 +566,201 @@ export class NovaFollowupService {
           .gt('created_at', novaMsg.created_at)
           .order('created_at', { ascending: false })
           .limit(1);
-        // Skip if Nova already sent ANY message after this one within last 2 hours (120 min)
         if (newerNova && newerNova.length > 0) {
-          const newerNovaAgeMin = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 60000;
-          if (newerNovaAgeMin < 120) continue; // Nova sent something < 2 hours ago — give user space!
+          const novaAgeMin = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 60000;
+          if (novaAgeMin < 120) continue;
         }
 
-        // Skip if a follow-up is already queued in the last 2 hours
-        const { data: recentFollowups } = await supabaseAdmin
+        // ── SEEN vs UNSEEN classification ──────────────────────────────────────
+        const { data: presence } = await supabaseAdmin
+          .from('user_presence')
+          .select('status, updated_at')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        const presenceAt = presence?.updated_at ? new Date(presence.updated_at).getTime() : 0;
+        const isOnline = presence?.status === 'online' || presence?.status === 'typing';
+        const activelyInApp = isOnline && Date.now() - presenceAt < SEEN_RECENCY_MS;
+
+        // Skip if Nova's last message was marked BUSY
+        if (novaMsg.meta?.situationBrief?.includes('USER AVAILABILITY: User signalled they are BUSY')) {
+          continue;
+        }
+
+        // Suppression lock check (sleep/busy/24h give-space)
+        const { data: suppression } = await supabaseAdmin
+          .from('working_memory')
+          .select('value')
+          .eq('user_id', userId)
+          .eq('key', 'followup_suppressed_until')
+          .maybeSingle();
+        if (suppression?.value && Date.now() < new Date(suppression.value).getTime()) {
+          continue;
+        }
+
+        // Skip if a follow-up is already pending within 2h
+        const { data: recentPending } = await supabaseAdmin
           .from('nova_followups')
           .select('id')
           .eq('user_id', userId)
           .eq('status', 'pending')
           .gte('created_at', new Date(Date.now() - 120 * 60 * 1000).toISOString())
           .limit(1);
-        if (recentFollowups && recentFollowups.length > 0) continue;
+        if (recentPending && recentPending.length > 0) continue;
 
-        // Calculate ignore duration and escalation level
         const ageMinutes = (Date.now() - new Date(novaMsg.created_at).getTime()) / 60000;
-        const escalation = (ignoreEscalationCount.get(userId) || 0) + 1;
-        ignoreEscalationCount.set(userId, escalation);
 
-        // Generate escalation-appropriate prompt based on age and count
-        let escalationPrompt = '';
-        let fallbackMsg = '';
-        if (escalation === 1) {
-          // Level 1: First check-in after 30-60 mins
-          escalationPrompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User hasn't replied. Send ONE short, casual nudge. E.g., "Arey, busy ho kya?", "Kaam me phasa hai kya?";`;
-          fallbackMsg = 'Arey, busy hai kya? Jab time mile tab batana!';
-        } else {
-          // Level 2+: Second and FINAL check-in, then stop
-          escalationPrompt = `User has ignored you over ${Math.round(ageMinutes)} minutes. Send a very brief, low-pressure closing note and stop trying. E.g., "No rush to reply, focus on your work!", "Catch up later!";`;
-          fallbackMsg = 'Koi na, kaam pe focus kar. Phir baat karte hain!';
+        // ── SEEN: user is actively in-app → quick 15-30 min nudge ──────────────
+        if (activelyInApp) {
+          const escalation = (ignoreEscalationCount.get(userId) || 0) + 1;
+          ignoreEscalationCount.set(userId, escalation);
+
+          let prompt = '';
+          let fallback = '';
+          if (escalation === 1) {
+            prompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied yet — left on read. Send ONE short, casual nudge. E.g., "Arey, busy ho kya?", "Kaam me phasa hai kya?";`;
+            fallback = 'Arey, busy hai kya? Jab time mile tab batana!';
+          } else {
+            prompt = `User has ignored you over ${Math.round(ageMinutes)} minutes. Send a brief, low-pressure closing note and stop. E.g., "Catch up later!";`;
+            fallback = 'Koi na, kaam pe focus kar. Phir baat karte hain!';
+          }
+
+          ignoredFollowupSent.set(userId, Date.now());
+
+          let msg = fallback;
+          try {
+            const { novaBrain } = await import('./NovaBrainService');
+            const gen = await novaBrain.evaluateConsciousnessTier2(
+              `Name: yaar\nSituation: ${prompt}\nOutput ONE short Hinglish message only. Max 1 sentence.`
+            );
+            if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) msg = gen.message;
+          } catch (e) {
+            logger.warn('[NovaFollowup] LLM gen failed', { escalation });
+          }
+
+          if (escalation >= 2) {
+            ignoreEscalationCount.delete(userId);
+            await this._writeSuppression(userId, 24);
+          }
+
+          logger.info('[NovaFollowup] Seen (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
+          await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0);
+          continue;
         }
 
-        logger.info('[NovaFollowup] Ignored message detected, generating escalation follow-up', { 
-          userId, ageMinutes: Math.round(ageMinutes), escalation 
-        });
+        // ── UNSEEN: user is offline → deferred 3.5h check-in (up to UNSEEN_MAX_CHECK_INS) ──
+        const { data: countRow } = await supabaseAdmin
+          .from('working_memory')
+          .select('value')
+          .eq('user_id', userId)
+          .eq('key', UNSEEN_COUNTER_KEY)
+          .maybeSingle();
+        const unseenCount = parseInt(countRow?.value || '0', 10) || 0;
 
-        // Mark cooldown BEFORE LLM call
+        if (unseenCount >= UNSEEN_MAX_CHECK_INS) {
+          await this._writeSuppression(userId, 24);
+          logger.info('[NovaFollowup] Unseen cap reached — giving space', { userId, count: unseenCount });
+          continue;
+        }
+
+        let deferredMsg = 'Arre, kaisa chal raha? Bas check kar raha tha — kabhi free ho toh bata dena.';
         ignoredFollowupSent.set(userId, Date.now());
-
-        let followUpMsg = fallbackMsg;
         try {
           const { novaBrain } = await import('./NovaBrainService');
-          const generated = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: ${escalationPrompt}\nOutput ONE short Hinglish message only. Max 1 sentence.`
+          const gen = await novaBrain.evaluateConsciousnessTier2(
+            `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User hasn't been online since. Send ONE short, very low-pressure check-in that does NOT demand a reply. E.g., "No rush, just thinking about you — jab free ho tab baat karte hain.";`
           );
-          if (generated?.message && generated.message.length < 150 && !generated.message.includes('Bol na')) {
-            followUpMsg = generated.message;
-          }
+          if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) deferredMsg = gen.message;
         } catch (e) {
-          logger.warn('[NovaFollowup] LLM escalation gen failed, using fallback', { escalation });
+          logger.warn('[NovaFollowup] Unseen check-in gen failed, using fallback');
         }
 
-        // Level 2+: Give space for 24 hours (HARD STOP after 2 check-ins max)
-        if (escalation >= 2) {
-          ignoreEscalationCount.delete(userId);
-          try {
-            await supabaseAdmin.from('working_memory').upsert({
-              user_id: userId,
-              key: 'followup_suppressed_until',
-              value: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
-              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-            }, { onConflict: 'user_id,key' });
-            logger.info('[NovaFollowup] Max escalation reached — suppressed follow-ups for 24 hours', { userId });
-          } catch (e) {
-            logger.warn('[NovaFollowup] Failed to write suppression to DB (non-critical)', { error: e instanceof Error ? e.message : String(e) });
-          }
-        }
+        const checkInAtMs = new Date(novaMsg.created_at).getTime() + UNSEEN_CHECK_IN_HOURS * 3600e3;
+        await this._writeSuppression(userId, (checkInAtMs - Date.now()) / 3600e3);
+        await this.queueFollowup(userId, novaMsg.conversation_id, deferredMsg, (checkInAtMs - Date.now()) / 3600e3, { cancelExisting: false });
 
-        await this.queueFollowup(userId, novaMsg.conversation_id, followUpMsg, 0);
+        await supabaseAdmin.from('working_memory').upsert({
+          user_id: userId,
+          key: UNSEEN_COUNTER_KEY,
+          value: String(unseenCount + 1),
+          expires_at: new Date(Date.now() + 48 * 3600e3).toISOString()
+        }, { onConflict: 'user_id,key' });
+
+        logger.info('[NovaFollowup] Unseen — deferred check-in booked', {
+          userId, ageMinutes: Math.round(ageMinutes), checkInAt: new Date(checkInAtMs).toISOString(), count: unseenCount + 1
+        });
       }
     } catch (err) {
       logger.warn('[NovaFollowup] checkIgnoredNovaMessages error', {
         error: err instanceof Error ? err.message : String(err)
       });
+    }
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────────
+
+  private async _writeSuppression(userId: string, hours: number): Promise<void> {
+    const until = new Date(Date.now() + Math.max(0, hours) * 60 * 60 * 1000);
+    await supabaseAdmin.from('working_memory').upsert({
+      user_id: userId,
+      key: 'followup_suppressed_until',
+      value: until.toISOString(),
+      expires_at: until.toISOString()
+    }, { onConflict: 'user_id,key' });
+  }
+
+  private async _cancelPendingFollowups(userId: string): Promise<void> {
+    await supabaseAdmin
+      .from('nova_followups')
+      .update({ status: 'cancelled' })
+      .eq('user_id', userId)
+      .eq('status', 'pending');
+  }
+
+  private async _detectUnavailability(userId: string): Promise<{ type: 'sleep' | 'busy'; hours: number } | null> {
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    const { data: recentUserMsgs } = await supabaseAdmin
+      .from('chat_history')
+      .select('content, created_at')
+      .eq('user_id', userId)
+      .eq('role', 'user')
+      .gte('created_at', twelveHoursAgo)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    const newestMsg = recentUserMsgs && recentUserMsgs.length > 0 ? recentUserMsgs[0] : null;
+    if (!newestMsg?.content) return null;
+    return classifyUnavailability(newestMsg.content);
+  }
+
+  /**
+   * Immediately record a sleep/unavailability signal from a user's raw message.
+   * Writes the DB suppression lock (8h sleep / 2h busy) and cancels pending
+   * follow-ups so NACE and the follow-up engines stay silent.
+   * Returns true if a lock was written, false otherwise.
+   * The caller should call cancelFollowups() when this returns false.
+   */
+  async recordUnavailability(userId: string, hours: number): Promise<boolean> {
+    try {
+      logger.info(`[NovaFollowup] 🛑 Immediate unavailability lock — suppressing for ${hours}h`, { userId });
+      const until = new Date(Date.now() + hours * 60 * 60 * 1000);
+      await supabaseAdmin.from('working_memory').upsert({
+        user_id: userId,
+        key: 'followup_suppressed_until',
+        value: until.toISOString(),
+        expires_at: until.toISOString()
+      }, { onConflict: 'user_id,key' });
+      // Cancel all pending follow-ups (same as the sleep-guard in queueFollowup)
+      await supabaseAdmin
+        .from('nova_followups')
+        .update({ status: 'cancelled' })
+        .eq('user_id', userId)
+        .eq('status', 'pending');
+      return true;
+    } catch (err) {
+      logger.warn('[NovaFollowup] Error writing unavailability lock', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+      return false;
     }
   }
 }
