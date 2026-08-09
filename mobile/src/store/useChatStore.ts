@@ -61,6 +61,9 @@ interface ChatState {
 let _isProcessing = false;
 let _lockTimestamp: number = 0;
 const _inFlightIds = new Set<string>();
+// Batch currently being handed to the network. Kept DURABLE until the server ACKs, so an
+// OS kill during the send (or during a retry) can't lose the message. Cleared on success/4xx.
+let _inFlightBatch: { id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string }[] = [];
 
 // ── Proactive check lock — prevents simultaneous duplicate checks ──────────────
 let _proactiveCheckInProgress = false;
@@ -291,6 +294,16 @@ const MOBILE_FALLBACK_FILTER = [
 export const isBadMessage = (content: string) =>
   MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
 
+// Internal/system rows that must NEVER render in the UI: the [HIDDEN_CONTEXT] row written
+// for shared images and the /proactive & /checkin trigger commands.
+export const isInternalContextRow = (content?: string) =>
+  !!content && (
+    content.startsWith('[HIDDEN_CONTEXT]') ||
+    content.startsWith('[SYSTEM]') ||
+    content.startsWith('/proactive') ||
+    content.startsWith('/checkin')
+  );
+
 let _queueTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export const useChatStore = create<ChatState>((set, get) => {
@@ -310,24 +323,30 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const batch = [...queue];
         set({ pendingQueue: [] });
-        // Fire and forget storage writes so we don't block the network request
-        savePendingQueue([]).catch(e => console.warn(e));
+        // Keep the in-flight batch DURABLE until the server ACKs (cleared on success/4xx).
+        // The old code persisted [] here, wiping the durable queue before the request could
+        // leave the device — so an OS kill mid-send lost the message entirely.
+        _inFlightBatch = batch;
+        savePendingQueue([...batch]).catch(e => console.warn(e));
 
         const primaryId = batch[0].id;
 
         // Skip if already being sent
         if (_inFlightIds.has(primaryId)) {
+          _inFlightBatch = [];
           continue;
         }
 
         _inFlightIds.add(primaryId);
         set({ isTyping: true });
 
-        // Check delivered status — skip if already processed, but DON'T remove from store
+        // Check delivered status — skip if already delivered, but DON'T remove from store
         // (removing from store mid-render causes the "message deleted" bug the user sees)
         const deliveredIds = await loadDeliveredIds();
         if (deliveredIds.has(primaryId)) {
           _inFlightIds.delete(primaryId);
+          _inFlightBatch = [];
+          savePendingQueue(get().pendingQueue).catch(() => {});
           // Message already sent — just start polling for the reply
           startReplyPolling(get().checkProactiveMessages);
           continue;
@@ -379,6 +398,11 @@ export const useChatStore = create<ChatState>((set, get) => {
             // fires checkProactiveMessages directly via notificationService callback.
             startReplyPolling(get().checkProactiveMessages);
 
+            // Batch delivered — drop it from the durable queue (any newer pending items,
+            // re-persisted by sendMessage while this send was in flight, remain durable).
+            _inFlightBatch = [];
+            savePendingQueue(get().pendingQueue).catch(() => {});
+
             succeeded = true;
             console.log('[QUEUE] async send success for batch starting with:', primaryId);
           } catch (err: any) {
@@ -393,6 +417,9 @@ export const useChatStore = create<ChatState>((set, get) => {
                     : m
                 )
               }));
+              // Permanent 4xx — drop from durable so a restart doesn't resubmit it forever.
+              _inFlightBatch = [];
+              savePendingQueue(get().pendingQueue).catch(() => {});
               succeeded = true;
             } else {
               console.log('[QUEUE] network error, retrying in', retryDelay, 'ms');
@@ -479,7 +506,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (history && history.length > 0) {
         const formattedHistory: Message[] = [];
           for (const msg of history) {
-            // Skip bad messages entirely — don't show in UI
+            // Skip internal/system + bad messages entirely — never show them in the UI
+            if (isInternalContextRow(msg.content)) continue;
             if (msg.role === 'assistant' && isBadMessage(msg.content)) continue;
             const role = msg.role === 'nova' ? 'assistant' : msg.role;
             const timestamp = msg.created_at || new Date().toISOString();
@@ -637,7 +665,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         const formattedOlder: Message[] = [];
         for (const msg of older) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
-          
+
+          // Skip internal/system (HIDDEN_CONTEXT, /proactive, /checkin) + bad messages
+          if (isInternalContextRow(msg.content)) continue;
           if (role === 'assistant' && isBadMessage(msg.content)) continue;
 
           const timestamp = msg.created_at || new Date().toISOString();
@@ -706,7 +736,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       }));
 
       // Fire and forget, don't block the network request!
-      savePendingQueue(newQueue).catch(e => console.warn(e));
+      // Persist the in-flight batch + the new item together so the in-flight message
+      // survives an OS kill even if a newer send re-persists the queue at the same moment.
+      savePendingQueue([..._inFlightBatch, ...newQueue]).catch(e => console.warn(e));
 
       // Start the watchdog so stuck messages self-heal without restarting the app
       startQueueWatchdog(processQueue);

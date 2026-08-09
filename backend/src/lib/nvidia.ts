@@ -392,8 +392,12 @@ export async function* chatCompletionStream(
     if (options.tool_choice) payload.tool_choice = options.tool_choice;
   }
 
+  // Hard timeout for the streaming call. Without an AbortSignal, a stalled upstream leaves
+  // the `for await` hanging forever (the default OpenAI SDK timeout never aborts the socket).
+  const controller = new AbortController();
+  const streamTimeout = setTimeout(() => controller.abort(), NVIDIA_TIMEOUT_MS);
   try {
-    const stream = await nvidiaClient.chat.completions.create(payload) as any;
+    const stream = await nvidiaClient.chat.completions.create(payload, { signal: controller.signal }) as any;
     let toolCallBuffer = '';
     let toolCallName = '';
     let isToolCall = false;
@@ -419,5 +423,7 @@ export async function* chatCompletionStream(
       name: err.name,
     });
     throw err;
+  } finally {
+    clearTimeout(streamTimeout);
   }
 }

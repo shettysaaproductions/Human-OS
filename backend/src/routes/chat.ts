@@ -54,23 +54,17 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
 
     if (error || !data || data.length === 0) return false;
 
-    // Duplicate detection: exact match catches true double-texts (race conditions).
-    // For longer messages, require ~85% word-overlap before treating them as the same
-    // reply — a shared opening phrase must NOT swallow a legitimate follow-up message
-    // (that would make the reply vanish from history on refresh, the "amnesia" bug).
-    const normalizedNew = content.toLowerCase().trim();
-    const newWords = new Set(normalizedNew.split(/\s+/).filter(Boolean));
+    // Duplicate detection: a true double-text race re-emits the SAME reply. The two rows
+    // differ only by the RANDOM emoji MessageFormatter.addEmoji appends, so strip a trailing
+    // emoji, then compare EXACTLY. A deliberate follow-up is its own distinct reply and must
+    // NEVER be swallowed (that was the "amnesia" bug — a shared opening phrase or a superset
+    // like "...ho" vs "...ho kya" wrongly matched the old 85% unique-word-set Jaccard).
+    const stripTrailingEmoji = (s: string) =>
+      s.replace(/\s*[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]+\s*$/u, '');
+    const normalizedNew = stripTrailingEmoji(content.toLowerCase().trim());
     for (const msg of data) {
-      const normalizedOld = msg.content.toLowerCase().trim();
+      const normalizedOld = stripTrailingEmoji(msg.content.toLowerCase().trim());
       if (normalizedOld === normalizedNew) return true;
-      if (normalizedNew.length > 20 && normalizedOld.length > 20) {
-        const oldWords = new Set(normalizedOld.split(/\s+/).filter(Boolean));
-        if (newWords.size === 0 || oldWords.size === 0) continue;
-        let overlap = 0;
-        for (const w of newWords) if (oldWords.has(w)) overlap++;
-        const union = new Set([...newWords, ...oldWords]).size;
-        if (union > 0 && overlap / union >= 0.85) return true;
-      }
     }
     return false;
   } catch (err) {
@@ -602,7 +596,7 @@ chatRouter.post(
           updated_at: new Date().toISOString()
         }).then(({ error }) => {
           if (error) logger.warn('Failed to update presence', { error });
-        });
+        }, e => logger.warn('[Chat] presence upsert threw', { error: e }));
       }
 
       // Real-time correction detection: If user replied to a specific Nova message,
@@ -693,17 +687,27 @@ chatRouter.post(
             .eq('user_id', userId)
             .eq('conversation_id', activeConversationId)
             .eq('role', 'user')
+            // Exclude internal/system rows so they can never self-debounce a real reply.
+            // Without this, the [HIDDEN_CONTEXT] row written for an attached image is the
+            // 'newest user row' and wrongly aborts the LLM generation for the image message.
+            .not('content', 'like', '[HIDDEN_CONTEXT]%')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
-          
+
           if (latestUserMsg && latestUserMsg.id !== userMessageId) {
             logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId });
             if (isStreaming) {
               res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
               res.end();
-            } else {
+            } else if (!async_mode) {
+              // Only send a body in sync mode. In async mode the 202 was already flushed;
+              // writing again here throws ERR_HTTP_HEADERS_SENT and triggers a spurious
+              // FALLBACK_REPLY save. The newer message's own request will generate the reply.
               res.status(200).json({ skipped: true, reason: 'debounced' });
+            }
+            if (asyncDeadlineTimer) {
+              clearTimeout(asyncDeadlineTimer);
             }
             return; // Abort LLM generation, the newer message's request will handle it
           }
@@ -932,7 +936,7 @@ chatRouter.post(
         supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
           .then(({ count }) => {
             if (count !== null) logger.info('Total Memories For User:', { count });
-          });
+          }, e => logger.warn('[Chat] total memories count threw', { error: e }));
       } else {
         logger.info('[DEBUG] DISABLE_MEMORY=true — skipping all memory fetches');
       }
@@ -1020,7 +1024,21 @@ chatRouter.post(
           if (gapMinutes > 1440) { // 24 hours
             logger.info('[SituationalAwareness] Gap > 24h. Truncating context and rotating conversation_id.', { gapMinutes });
             // Rotate conversation ID so future DB fetches are clean
+            const oldConversationId = activeConversationId;
             activeConversationId = crypto.randomUUID();
+            // The user message was already inserted under the OLD id (line 542). Move it to
+            // the new id, otherwise Nova's reply (inserted under the NEW id below) is torn
+            // into a different conversation and the active thread shows a reply with no user
+            // bubble, while the old conversation keeps a permanently unanswered user row.
+            if (!is_proactive && userMessageId && !userMessageId.startsWith('msg_')) {
+              supabaseAdmin.from('chat_history')
+                .update({ conversation_id: activeConversationId })
+                .eq('id', userMessageId)
+                .then(({ error }) => { if (error) logger.warn('[Chat] Gap-rotation: failed to move user message', { error }); },
+                  e => logger.warn('[Chat] Gap-rotation: move user message threw', { error: e }));
+            } else if (userMessageId && oldConversationId) {
+              logger.warn('[Chat] Gap-rotation: could not relocate proactive/msg_ user id', { userMessageId, oldConversationId });
+            }
             // Keep ONLY the latest user message
             if (recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user') {
               recentMessages = [recentMessages[recentMessages.length - 1]];
@@ -1397,7 +1415,7 @@ chatRouter.post(
       // hangs waiting for a reply that will never arrive.
       if (finalBubbles.length === 0) {
         logger.info('[Chat] LLM returned a blank reply (likely Subconscious only). No bubbles generated.');
-        if (!isStreaming) {
+        if (!isStreaming && !async_mode) {
           res.status(200).json({
             reply: '',
             messages: [],
@@ -1407,9 +1425,38 @@ chatRouter.post(
             meta: { blank_reply: true, degraded: false }
           });
         }
+        // In async mode the 202 is already sent — writing again would throw
+        // ERR_HTTP_HEADERS_SENT and trigger a spurious FALLBACK_REPLY save.
+        if (asyncDeadlineTimer) {
+          clearTimeout(asyncDeadlineTimer);
+        }
         return;
       }
       const reply = finalBubbles.join('\n\n');
+
+      // ── TOCTOU re-check: a NEWER real user message may have arrived while this (25-60s)
+      // LLM call was in flight. The debounce above only guards the moment of lock acquisition;
+      // if B lands after join(point) while A is still generating, saving A's reply now would
+      // give the user a stale double-reply. Re-check and drop A if a newer user row exists.
+      if (async_mode && !is_proactive) {
+        const { data: newerUserMsg } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('conversation_id', activeConversationId)
+          .eq('role', 'user')
+          .not('content', 'like', '[HIDDEN_CONTEXT]%')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (newerUserMsg && newerUserMsg.id && newerUserMsg.id !== userMessageId) {
+          logger.warn('[Chat] Superseded reply dropped — a newer user message arrived during the LLM call', { userId, userMessageId, supersededBy: newerUserMsg.id });
+          if (asyncDeadlineTimer) {
+            clearTimeout(asyncDeadlineTimer);
+          }
+          return;
+        }
+      }
 
       // 7. Save AI response ONCE (with telemetry meta)
       // Check for duplicates due to race conditions
@@ -1420,8 +1467,10 @@ chatRouter.post(
         'Yaar, thoda technical glitch',
         'kuch technical issue aa gaya',
         'Yaar, thoda slow chal raha hai server',
-        'Thodi der mein phir try karo',
-        'Acha, is topic par main jyada bol nahi sakti'
+        'Thodi der mein phir try karo'
+        // NOTE: the content-policy reply ('Acha, is topic par main jyada bol nahi sakti...')
+        // is intentionally NOT in this list — it is a legitimate user-facing reply and
+        // must be SAVED+pushed in async mode so the user always gets a bubble (zero-drop).
       ];
       const isFallbackReply = REJECT_PREFIXES.some(p => rawReply.includes(p));
 
@@ -1661,6 +1710,11 @@ chatRouter.post(
         }
       }
     } finally {
+      // Always disarm the deadline watchdog on this path (covers the async error catch and
+      // any other unguarded return) so a stale timer can't fire a misleading log 90s later.
+      if (asyncDeadlineTimer) {
+        clearTimeout(asyncDeadlineTimer);
+      }
       if (releaseLock) {
         releaseLock();
         logger.info('[Chat] Mutex released', { userId });

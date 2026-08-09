@@ -146,6 +146,11 @@ api.interceptors.response.use(
       // Update the default header so subsequent requests use the new token
       api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
 
+      // CRITICAL: also update the zustand store token. The request interceptor reads
+      // the STORE (not axios defaults) and would otherwise re-stamp every retried request
+      // with the stale token, causing an endless 401->refresh->401 loop.
+      require('../store/useAuthStore').useAuthStore.setState({ accessToken: newAccessToken });
+
       drainQueue(null, newAccessToken);
 
       // Retry the original failed request with the new token.

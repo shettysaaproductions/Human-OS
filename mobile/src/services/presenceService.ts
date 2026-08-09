@@ -86,7 +86,13 @@ class PresenceService {
 
   // Call this when user scrolls or interacts
   onUserActivity() {
-    this.updateState({ lastActiveAt: Date.now() });
+    // A user who is actively scrolling/interacting is NOT away. Restore 'away'/'offline'
+    // to 'online' (but don't clobber 'typing' if they're mid-keystroke).
+    const { status } = this.state;
+    this.updateState({
+      status: (status === 'away' || status === 'offline') ? 'online' : status,
+      lastActiveAt: Date.now(),
+    });
     this.resetAwayTimer();
   }
 

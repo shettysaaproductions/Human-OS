@@ -275,14 +275,17 @@ export class NovaFollowupService {
       return;
     }
 
-    // Atomic claim — only one concurrent 10s poll wins (prevents double-fire).
-    const { error: updateErr } = await supabaseAdmin
+    // Atomic claim — only one concurrent poll wins (prevents double-fire). `.select('id')`
+    // is REQUIRED: without it supabase-js returns { data: null } whether 0 or 1 rows matched,
+    // so a losing poll could not distinguish "I won" from "I lost" and would fire anyway.
+    const { data: locked, error: updateErr } = await supabaseAdmin
       .from('nova_followups')
       .update({ status: 'sent' })
       .eq('id', followup.id)
-      .eq('status', 'pending'); // optimistic lock
+      .eq('status', 'pending') // optimistic lock
+      .select('id');
 
-    if (updateErr) {
+    if (updateErr || !locked || locked.length === 0) {
       logger.warn('[NovaFollowup] Could not lock followup for firing (may be racing)', { id: followup.id });
       return;
     }
