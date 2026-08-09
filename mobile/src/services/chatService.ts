@@ -20,6 +20,17 @@ export const chatService = {
     return response.data;
   },
 
+  // Read receipt: called when the user opens/foregrounds the chat. Tells the backend
+  // "Nova's pending messages are now SEEN", which feeds `unreadNovaMessages` into the
+  // situation brief so Nova can distinguish "left on read" from "never saw it".
+  markMessagesRead: async (): Promise<void> => {
+    try {
+      await api.post('/chat/read', {});
+    } catch (e) {
+      // Non-fatal — if this fails, Nova simply won't get the seen signal this time.
+    }
+  },
+
   sendMessage: async (message: string, conversationId?: string) => {
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;

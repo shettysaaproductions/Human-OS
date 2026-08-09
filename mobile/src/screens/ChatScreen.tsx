@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
+import { chatService } from '../services/chatService';
 import { notificationService, setChatScreenActive } from '../services/notificationService';
 import { presenceService } from '../services/presenceService';
 import * as Notifications from 'expo-notifications';
@@ -552,6 +553,10 @@ export function ChatScreen() {
     logEvent('COMPONENT_MOUNT');
     hydrateMessages();
 
+    // Read receipt: opening the chat means Nova's pending messages are now seen.
+    // Fires the seen-signal so Nova's situation brief reflects "read" (not left-on-read).
+    chatService.markMessagesRead();
+
     // Suppress push notification banners while user is on chat screen (WhatsApp-style)
     setChatScreenActive(true);
 
@@ -580,6 +585,8 @@ export function ChatScreen() {
       if (nextState === 'active') {
         clearNotifications(); // Clear tray every time user comes back to chat
         checkProactiveMessages();
+        // Read receipt: user came back and is viewing the chat — mark Nova's messages seen
+        chatService.markMessagesRead();
         // Kick queue in case it got stuck while app was backgrounded
         useChatStore.getState().processQueue();
       }

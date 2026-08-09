@@ -166,6 +166,11 @@ async function main(): Promise<void> {
     // to boot time: if the server booted at, say, 14:00, `new Date().getHours() === 2`
     // would never be true and the maintenance would silently never run.
     let lastNightlyMaintenanceDate: string | null = null;
+    // Weekly long-term memory decay (low-importance memories auto-archived). Tracked
+    // separately so it runs during a nightly window but only ONCE per week — decaying
+    // on every single night would over-archive memories that simply weren't accessed
+    // in a 7-day stretch.
+    let lastMemoryDecayDate: string | null = null;
     const nightlyMaintenanceInterval = setInterval(async () => {
       const now = new Date();
       const hour = now.getHours();
@@ -176,6 +181,16 @@ async function main(): Promise<void> {
           logger.info('Scheduler: Triggering nightly chat history pruning and autonomous self-improvement...');
           await chatHistoryPruningService.runAll();
           await selfImprovementService.runReview();
+
+          // Weekly memory decay — free-tier hygiene: never let unimportant long-term
+          // memories pile up forever. Runs at most once per 7 days (guarded by date).
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          if (!lastMemoryDecayDate || lastMemoryDecayDate <= sevenDaysAgo) {
+            lastMemoryDecayDate = today;
+            const { memoryDecayService } = await import('./services/MemoryDecayService');
+            const archived = await memoryDecayService.processWeeklyDecay();
+            logger.info('Scheduler: Weekly memory decay complete', { archived });
+          }
         } catch (err) {
           logger.error('Error in nightly maintenance run', { error: err instanceof Error ? err.message : String(err) });
         }
