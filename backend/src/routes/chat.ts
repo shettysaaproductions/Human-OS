@@ -72,6 +72,25 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
   }
 }
 
+/**
+ * Persist an assistant row (typically FALLBACK_REPLY) into chat_history so a reply that
+ * was shown live but whose request returned early (streaming error paths) still survives a
+ * refresh — otherwise the user message stays orphaned/unanswered on the next getHistory.
+ */
+async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string): Promise<void> {
+  try {
+    await supabaseAdmin.from('chat_history').insert({
+      user_id: userId,
+      conversation_id: conversationId,
+      role: 'assistant',
+      content,
+      ...(replyToId ? { reply_to_id: replyToId } : {}),
+    });
+  } catch (err) {
+    logger.warn('[Chat] Failed to persist fallback reply', { error: err });
+  }
+}
+
 export const MAX_CHUNKS = 5;
 export const MAX_CHARS_PER_CHUNK = 500; // Updated from 1500 to 500 to match user spec
 export const MAX_TOTAL_RESPONSE_CHARS = 7500;
@@ -1234,14 +1253,18 @@ chatRouter.post(
               } catch (err: any) {
                 if (err.message === 'STREAM_TIMEOUT') {
                   logger.error('[Chat] Streaming LLM chunk timed out', { userId });
+                  // Persist the fallback so the reply survives a refresh (the stream already
+                  // returned early — the normal save block below is skipped on this path).
+                  await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
                   res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                   res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
                   res.end();
                   return;
                 }
-                
+
                 // Handle actual API errors (e.g. Nvidia 500/401) without crashing the server
                 logger.error('[Chat] LLM stream iteration failed', { error: err.message || err, userId });
+                await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
                 res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
                 res.end();
@@ -1327,7 +1350,10 @@ chatRouter.post(
           const isContentPolicy = errStr.toLowerCase().includes('policy') || errStr.toLowerCase().includes('moderation') || nvidiaError?.status === 400 || nvidiaError?.status === 422 || errStr.includes('400') || errStr.includes('422');
           logger.error('[NVIDIA] LLM call failed', { error: errStr, async_mode });
           if (isStreaming) {
-            res.write(`data: ${JSON.stringify({ type: 'error', error: errStr })}\n\n`);
+            // Persist the fallback (the raw errStr shown live must NOT be stored — it would
+            // render as a broken bubble in history). The user message stays orphaned otherwise.
+            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
+            res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
             if (typeof (res as any).flush === 'function') (res as any).flush();
             res.end();
             return;

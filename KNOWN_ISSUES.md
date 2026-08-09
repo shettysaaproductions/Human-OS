@@ -89,6 +89,14 @@ This document tracks identified bugs, limitations, and workarounds.
 | **Reminder double-fire from overlapping polls** | `checkAndFireReminders` self-overlap guard | Aug 9 2026 |
 | **NVIDIA stream call could hang forever** | `chatCompletionStream` now has AbortSignal + timeout | Aug 9 2026 |
 | **`working_memory` upsert threw (no unique key)** | Migration `025_working_memory_unique.sql` adds `UNIQUE(user_id,key)` | Aug 9 2026 |
+| **Streaming fallback reply shown but never saved** | `chat.ts` persists `FALLBACK_REPLY` to `chat_history` on all streaming error paths (STREAM_TIMEOUT, iteration error, LLM API error) | Aug 9 2026 |
+| **NACE outreach_log insert always failed** | Insert used `type`/`sent_at`; schema has `outreach_type`/`created_at` → anti-spam ledger now fills so MIN_GAP can throttle | Aug 9 2026 |
+| **NACE double-outreach from overlapping pulses** | `pulse()` re-entrancy guard | Aug 9 2026 |
+| **Mobile: message sent during history fetch dropped** | Hydrate Step-2 merges local `sending`/`sent` messages instead of wholesale-replacing | Aug 9 2026 |
+| **Mobile: proactive replies duplicated on fetch** | Assistant dedup now matches any non-UUID (local) id, not just `msg_` | Aug 9 2026 |
+| **Mobile: reply poller torn down by newer message's reply** | Poller stops only when the last user message has an assistant reply after it | Aug 9 2026 |
+| **KG Explorer d3 sim leaked after unmount** | Simulation stored in a ref, stopped on unmount / re-fetch | Aug 9 2026 |
+| **Migration 020 aborted fresh applies** | `RENAME COLUMN` now guarded (idempotent) in `020_sync_reminders_schema.sql` | Aug 9 2026 |
 
 ## Known Limitations
 

@@ -294,6 +294,11 @@ const MOBILE_FALLBACK_FILTER = [
 export const isBadMessage = (content: string) =>
   MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
 
+// DB rows carry UUID ids; locally-generated messages (SSE `msg_…`, proactive
+// `${ts}_proactive_…`, optimistic sends) never do. Used to distinguish them for dedup.
+export const isUuidLike = (id: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
 // Internal/system rows that must NEVER render in the UI: the [HIDDEN_CONTEXT] row written
 // for shared images and the /proactive & /checkin trigger commands.
 export const isInternalContextRow = (content?: string) =>
@@ -569,9 +574,19 @@ export const useChatStore = create<ChatState>((set, get) => {
 
           const oldestRawId = history[0]?.id || null;
           const freshMessages = [...formattedHistory, ...restoredMessages];
-          
-          set({ 
-            messages: freshMessages,
+
+          // Race guard: a message the user sent WHILE this fetch was in flight exists only
+          // in the local store (status 'sending'/'sent' — not yet in the fetched history).
+          // The wholesale set() below would silently drop it; keep any local message the
+          // fetch did not return. (Queue items are already covered by restoredMessages.)
+          const fetchedIds = new Set(freshMessages.map(m => m.id));
+          const localExtra = get().messages.filter(m =>
+            !fetchedIds.has(m.id) && (m.status === 'sending' || m.status === 'sent' || m.status === 'error')
+          );
+          const mergedMessages = [...freshMessages, ...localExtra];
+
+          set({
+            messages: mergedMessages,
             conversationId: history[0].conversation_id,
             pendingQueue: pendingToRestore,
             isHydrated: true,
@@ -831,10 +846,13 @@ export const useChatStore = create<ChatState>((set, get) => {
           // Skip user messages if the exact same content is already in the local store.
           if (role === 'user' && existingUserContent.has(msg.content.trim())) continue;
 
-          // For assistant messages, avoid duplicates from SSE streams by checking if 
-          // we already have a message with the EXACT same content that was generated locally (starts with msg_)
+          // For assistant messages, avoid duplicates from SSE streams / proactive injection by
+          // checking if we already have a message with the EXACT same content that was generated
+          // locally (any NON-UUID id: SSE `msg_…`, proactive `${ts}_proactive_…`).
           if (role === 'assistant') {
-            const hasLocalDuplicate = currentMessages.some(m => m.role === 'assistant' && m.content.trim() === msg.content.trim() && m.id.startsWith('msg_'));
+            const hasLocalDuplicate = currentMessages.some(m =>
+              m.role === 'assistant' && m.content.trim() === msg.content.trim() && !isUuidLike(m.id)
+            );
             if (hasLocalDuplicate) continue;
           }
 
@@ -885,9 +903,22 @@ export const useChatStore = create<ChatState>((set, get) => {
               isTyping: delayedChunks.length > 0,
             };
           });
-          // Reply arrived — stop the poller and clear the persistent awaiting flag
-          stopReplyPolling();
-          clearAwaitingReply();
+          // Reply arrived — but only stop the poller when EVERY user message has been
+          // answered. If the LAST user message still has no assistant reply after it (e.g.
+          // a reply to a NEWER message B arrived while message A's reply is still pending),
+          // keep polling — otherwise the poller for A is torn down by B's reply.
+          const msgsNow = get().messages;
+          let lastUserIdx = -1;
+          for (let i = msgsNow.length - 1; i >= 0; i--) {
+            if (msgsNow[i].role === 'user') { lastUserIdx = i; break; }
+          }
+          const assistantAfterLastUser = lastUserIdx >= 0
+            ? msgsNow.slice(lastUserIdx + 1).some(m => m.role === 'assistant')
+            : true;
+          if (assistantAfterLastUser) {
+            stopReplyPolling();
+            clearAwaitingReply();
+          }
           saveMessageCache([...get().messages], get().conversationId);
 
           if (delayedChunks.length > 0) {
