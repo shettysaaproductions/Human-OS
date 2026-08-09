@@ -4,6 +4,11 @@ import { sendPushNotification } from '../lib/pushNotifications';
 import crypto from 'crypto';
 
 export class ReminderSchedulerService {
+  // Overlap guard: fireReminder generates a warm LLM message per reminder, which can exceed
+  // the 10s poll interval. Without this guard two overlapping polls fetch the SAME due
+  // reminders and fire them twice (double chat insert + push). Only one poll runs at a time.
+  private _isChecking = false;
+
   /**
    * Schedule a reminder by creating a database record
    */
@@ -30,6 +35,11 @@ export class ReminderSchedulerService {
    * Check and fire any active reminders that are due
    */
   async checkAndFireReminders(): Promise<void> {
+    if (this._isChecking) {
+      logger.warn('[Reminder] checkAndFireReminders skipped — previous poll still running');
+      return;
+    }
+    this._isChecking = true;
     try {
       const now = new Date();
       const { data: dueReminders, error } = await supabaseAdmin
@@ -55,6 +65,8 @@ export class ReminderSchedulerService {
       }
     } catch (err) {
       logger.error('Error during checkAndFireReminders execution', { error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      this._isChecking = false;
     }
   }
 

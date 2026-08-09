@@ -6,7 +6,7 @@ import {
   Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions, Image, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
 import { notificationService, setChatScreenActive } from '../services/notificationService';
@@ -452,13 +452,8 @@ export function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
-  const [presence, setPresence] = useState(presenceService.getState());
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = presenceService.subscribe(setPresence);
-    return () => { unsubscribe(); };
-  }, []);
+  const isFocused = useIsFocused();
 
 
   const isSelectionMode = selectedMessageIds.length > 0;
@@ -598,6 +593,14 @@ export function ChatScreen() {
       notificationService.setOnNovaReplyCallback(() => {});
     };
   }, []);
+
+  // ── Focus tracking: set the banner-suppress flag from the actual screen focus.
+  // Without this, pushing a stack screen (Settings/Brain/...) kept ChatScreen mounted
+  // and _isChatScreenActive true, so every notification banner/sound was suppressed
+  // on those screens. Now pushing a screen re-enables banners, popping back re-suppresses.
+  useEffect(() => {
+    setChatScreenActive(isFocused);
+  }, [isFocused]);
 
   const handleSend = useCallback(() => {
     if (!inputText.trim() && !selectedImage) return;
@@ -958,19 +961,11 @@ export function ChatScreen() {
                 <Text style={[s.headerTitle, { color: colors.textPrimary }]}>Nova</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                   <Text style={[s.headerSubtitle, { color: colors.textSecondary, marginRight: 6 }]}>Your AI companion</Text>
-                  {presence.status === 'typing' ? (
-                    <Text style={{ fontSize: 10, color: '#8B5CF6', fontStyle: 'italic' }}>typing...</Text>
-                  ) : presence.status === 'online' ? (
-                    <>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E', marginRight: 4 }} />
-                      <Text style={{ fontSize: 10, color: colors.textSecondary }}>online</Text>
-                    </>
-                  ) : presence.status === 'away' ? (
-                    <>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#F59E0B', marginRight: 4 }} />
-                      <Text style={{ fontSize: 10, color: colors.textSecondary }}>away</Text>
-                    </>
-                  ) : null}
+                  {/* Nova's presence is the SERVER's availability. `presenceService` only tracks
+                      the user's own local app state — the old code rendered the user's own
+                      typing/online/away as Nova's, which was always wrong. Show static 'online'. */}
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E', marginRight: 4 }} />
+                  <Text style={{ fontSize: 10, color: colors.textSecondary }}>online</Text>
                 </View>
               </View>
             </View>

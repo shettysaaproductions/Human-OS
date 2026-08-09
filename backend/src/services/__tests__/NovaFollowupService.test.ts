@@ -170,7 +170,7 @@ describe('NovaFollowupService', () => {
   describe('3.3 checkAndFireFollowups', () => {
     it('should fire due follow-ups and mark them sent', async () => {
       mockChain.lte.mockResolvedValueOnce({ data: [{ id: 'fup-1', user_id: 'u1', conversation_id: 'c1', message: 'Hey' }] });
-      mockChain.update.mockReturnValueOnce({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) }) });
+      mockChain.update.mockReturnValueOnce({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ data: [{ id: 'fup-1' }], error: null }) }) }) });
       mockChain.maybeSingle.mockResolvedValueOnce({ data: null }); // suppression check (no lock)
       mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } });
       mockChain.insert.mockResolvedValueOnce({});
@@ -190,6 +190,18 @@ describe('NovaFollowupService', () => {
   });
 
   describe('3.4 Deduplication in _fireFollowup', () => {
+    // The atomic claim (update().eq().eq().select('id')) must SUCCEED here so these tests
+    // actually exercise deduplication. Without it the claim guard blocks the first insert
+    // and the dedup assertions would pass vacuously.
+    beforeEach(() => {
+      mockChain.update.mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ data: [{ id: 'claim-success' }], error: null })
+          })
+        })
+      });
+    });
     const followup = { id: 'fup-1', user_id: 'u1', conversation_id: 'c1', message: 'hey yaar kya chal raha hai bata na' };
 
     it('should block exact duplicate within 10 minutes', async () => {

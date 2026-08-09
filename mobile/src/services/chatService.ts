@@ -1,5 +1,6 @@
 import { api } from './api';
 import * as SecureStore from 'expo-secure-store';
+import { useAuthStore } from '../store/useAuthStore';
 
 export const chatService = {
   getHistory: async (conversationId?: string, limit: number = 50, beforeId?: string) => {
@@ -9,8 +10,8 @@ export const chatService = {
     const response = await api.get(url);
     const data = response.data;
     console.log('API messages received:', data?.length);
-    console.log('First message:', data[0]?.created_at);
-    console.log('Last message:', data[data?.length - 1]?.created_at);
+    console.log('First message:', data?.[0]?.created_at);
+    console.log('Last message:', data?.[data?.length - 1]?.created_at);
     return data;
   },
 
@@ -35,35 +36,55 @@ export const chatService = {
 
     // We use the native fetch API with keepalive: true so that the OS
     // completes the HTTP request even if the JS thread is suspended immediately after.
-    const token = await SecureStore.getItemAsync('accessToken');
     const url = `${api.defaults.baseURL}/chat`;
-    
+
     // 30-second hard timeout — on Android, battery optimization can suspend the JS
     // thread mid-await, causing it to hang indefinitely with no error.
     // We race the request against a timer so the retry loop always gets control back.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    const doSend = async (authToken: string | null): Promise<Response> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      try {
+        return await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+          // Let the OS complete the HTTP request even if the JS thread is suspended right
+          // after — without keepalive the fetch is aborted the moment the app backgrounds.
+          keepalive: true,
+        });
+      } finally {
+        clearTimeout(timeoutId);
       }
+    };
 
-      const data = await response.json();
-      return data;
-    } finally {
-      clearTimeout(timeoutId);
+    let token = await SecureStore.getItemAsync('accessToken');
+    let response = await doSend(token);
+
+    // Expired token (401) — silently refresh once, then retry once. Without this the
+    // request would keep 401ing (or loop forever, see the 4xx branch below).
+    if (response.status === 401) {
+      const fresh = await useAuthStore.getState().refreshSession();
+      if (fresh) {
+        token = fresh;
+        response = await doSend(fresh);
+      }
     }
+
+    if (!response.ok) {
+      // Attach status so the caller can distinguish a real 4xx (permanent) from a
+      // transient network error instead of retrying a doomed request forever.
+      const err: any = new Error(`HTTP ${response.status}`);
+      err.status = response.status;
+      err.response = { status: response.status };
+      throw err;
+    }
+
+    return await response.json();
   },
 
   streamMessage: (

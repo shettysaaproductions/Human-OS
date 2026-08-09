@@ -26,7 +26,7 @@ export class QueueService {
   private isProcessing: boolean = false;
   private maxAttempts = 3;
 
-  constructor(queueName: string) {
+  constructor(queueName: string, private jobTypes?: string[]) {
     this.queueName = queueName;
   }
 
@@ -47,9 +47,12 @@ export class QueueService {
         .single();
 
       if (error) throw error;
-      
-      // Kick off processing in the background (fire-and-forget)
-      this.startProcessing();
+
+      // Kick off processing in the background (fire-and-forget). A DB network failure here
+      // must NOT become an unhandled rejection — that kills the whole server.
+      this.startProcessing().catch(err =>
+        logger.error(`Queue ${this.queueName} startProcessing failed`, { error: err instanceof Error ? err.message : String(err) })
+      );
 
       return job as Job;
     } catch (err) {
@@ -64,7 +67,9 @@ export class QueueService {
   process(processor: JobProcessor) {
     this.processor = processor;
     // Start processing any pending jobs
-    this.startProcessing();
+    this.startProcessing().catch(err =>
+      logger.error(`Queue ${this.queueName} startProcessing failed (process)`, { error: err instanceof Error ? err.message : String(err) })
+    );
   }
 
   private async startProcessing() {
@@ -72,14 +77,28 @@ export class QueueService {
     this.isProcessing = true;
 
     try {
+      // Crash-safety: requeue jobs left 'running' by a process that died mid-job. A fresh
+      // poll cycle (this process just started) is the right time to reclaim them.
+      const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      await supabaseAdmin
+        .from('background_jobs')
+        .update({ status: 'pending' })
+        .eq('status', 'running')
+        .lt('started_at', staleCutoff);
+
       while (true) {
         const start = Date.now();
-        const { data: jobs, error } = await supabaseAdmin
+        // IMPORTANT: claim only THIS queue's job types. Without the filter, the first queue
+        // to poll claims ANY pending job — memoryQueue's processor default branch silently
+        // 'completed' stolen daily_reflection jobs, dropping real reflection work.
+        let q = supabaseAdmin
           .from('background_jobs')
           .select('id, job_type, payload, attempts, status, created_at')
-          .eq('status', 'pending')
-          .order('created_at', { ascending: true })
-          .limit(1);
+          .eq('status', 'pending');
+        if (this.jobTypes && this.jobTypes.length) {
+          q = q.in('job_type', this.jobTypes);
+        }
+        const { data: jobs, error } = await q.order('created_at', { ascending: true }).limit(1);
 
         qt.record('poll_pending_job', 'background_jobs', Date.now() - start, jobs?.length ?? 0);
 
@@ -152,5 +171,8 @@ export class QueueService {
 }
 
 // Global Exported Queues
-export const memoryQueue = new QueueService('memoryQueue');
-export const reflectionQueue = new QueueService('reflectionQueue');
+export const memoryQueue = new QueueService('memoryQueue', [
+  'extract_semantic', 'extract_working_memory', 'extract_episodic',
+  'extract_kg', 'extract_emotional', 'extract_milestone', 'extract_short_term'
+]);
+export const reflectionQueue = new QueueService('reflectionQueue', ['daily_reflection']);

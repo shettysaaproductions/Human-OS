@@ -71,6 +71,24 @@ This document tracks identified bugs, limitations, and workarounds.
 | **Memory Amnesia (forgot 5-month-old son; forgot same-session metro context)** | Strengthened ANTI-ROBOT MEMORY ACCOUNTABILITY + SAME-SESSION AMNESIA / CONTEXT rules (zero tolerance) | Aug 2026 |
 | **Event-triggered reminders invisible to Nova** | `getUpcomingReminders` + chat.ts awareness block now include `trigger_at IS NULL` (event reminders) | Aug 2026 |
 | **JARVIS reminder mode read nonexistent `scheduled_at` column** | Fixed `SituationalAwareness` → `trigger_at`; event reminders excluded from 2h preview | Aug 2026 |
+| **Image messages got no reply (self-debounce)** | `chat.ts` debounce now excludes `[HIDDEN_CONTEXT]` rows + never writes a 2nd response after async 202 | Aug 9 2026 |
+| **Async content-policy reply dropped** | Content-policy reply released from `REJECT_PREFIXES` → saved+pushed (zero-drop) | Aug 9 2026 |
+| **>24h gap split user msg + reply across conversations** | Gap-rotation now backpatches the user message into the new conversation_id | Aug 9 2026 |
+| **Duplicate-detection amnesia (85% word-set Jaccard)** | `isDuplicateAssistantMessage` → exact-match after trailing-emoji strip (no more swallowed follow-ups) | Aug 9 2026 |
+| **Superseded double-reply (TOCTOU)** | `chat.ts` re-checks for a newer user message before saving the reply | Aug 9 2026 |
+| **Deadline timer leak / spurious logs** | `asyncDeadlineTimer` cleared on debounce, blank-reply, error-catch + finally | Aug 9 2026 |
+| **Unhandled Supabase rejections crash server** | `.catch`/then(success, failure) on presence upsert, STM count, queue startProcessing | Aug 9 2026 |
+| **Mobile: 4xx messages retried forever** | `sendMessageAsync` attaches status → `processQueue` marks 4xx as error (no infinite retry); 401 → refresh+retry once | Aug 9 2026 |
+| **Mobile: pending message lost on kill mid-send** | In-flight batch kept durable until ack; `keepalive: true` actually set | Aug 9 2026 |
+| **Mobile: 401-refresh never updated auth store** | `api.ts` now sets `useAuthStore` token after refresh (kills endless 401 loop) | Aug 9 2026 |
+| **Mobile: `[HIDDEN_CONTEXT]` leaked into UI** | `isInternalContextRow` filter added to hydrate + loadOlderMessages | Aug 9 2026 |
+| **Mobile: user's own presence shown as Nova's** | Chat header shows static Nova "online"; away→online restore in `onUserActivity` | Aug 9 2026 |
+| **Mobile: banners suppressed on pushed screens** | `setChatScreenActive` now driven by screen focus | Aug 9 2026 |
+| **Cross-queue job theft (reflection dropped)** | `QueueService` claims by `job_type`; stale `running` jobs reclaimed; unhandled rejection fixed | Aug 9 2026 |
+| **Follow-up double-fire (optimistic lock ignored rowcount)** | `NovaFollowupService` claim verifies `.select('id')` returned a row | Aug 9 2026 |
+| **Reminder double-fire from overlapping polls** | `checkAndFireReminders` self-overlap guard | Aug 9 2026 |
+| **NVIDIA stream call could hang forever** | `chatCompletionStream` now has AbortSignal + timeout | Aug 9 2026 |
+| **`working_memory` upsert threw (no unique key)** | Migration `025_working_memory_unique.sql` adds `UNIQUE(user_id,key)` | Aug 9 2026 |
 
 ## Known Limitations
 
