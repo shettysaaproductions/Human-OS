@@ -12,6 +12,7 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
+import { logger } from '../lib/logger';
 
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 const MONTH_NAMES = ['january','february','march','april','may','june','july','august','september','october','november','december'];
@@ -35,6 +36,12 @@ export interface ReminderSpec {
   // Batch
   batch_count?: number;
   batch_interval_minutes?: number;
+  // Event trigger (remind me WHEN a life event happens — no fixed time)
+  event_trigger?: string;     // free-text: 'wake_up', 'left_the_office', ...
+  // Purpose / urgency / end semantics (informational + awareness)
+  purpose?: string;           // why this reminder matters
+  urgency?: 'low' | 'medium' | 'high';
+  end_condition?: 'until_cancelled' | 'until_date' | 'until_count';
   // Misc
   notes?: string;
   is_auto?: boolean;
@@ -42,7 +49,7 @@ export interface ReminderSpec {
 
 export interface ParsedReminder {
   text: string;
-  trigger_at: Date;
+  trigger_at: Date | null;    // null = event-triggered reminder (fires on event only)
   recurrence_type?: string;
   recurrence_interval?: number;
   recurrence_limit?: number;
@@ -50,6 +57,10 @@ export interface ParsedReminder {
   active_months?: string[];
   active_year?: number;
   end_at?: Date;
+  event_trigger?: string;
+  purpose?: string;
+  urgency?: 'low' | 'medium' | 'high';
+  end_condition?: 'until_cancelled' | 'until_date' | 'until_count';
   is_auto: boolean;
   notes?: string;
 }
@@ -80,6 +91,21 @@ export class ReminderEngine {
    * Returns an array because batch specs expand into multiple reminders.
    */
   parse(spec: ReminderSpec): ParsedReminder[] {
+    // Event-triggered reminders have NO fixed time — they fire when the event is
+    // signalled (e.g. "remind me when I wake up"). trigger_at stays null.
+    if (spec.event_trigger) {
+      return [{
+        text: spec.title || 'Reminder',
+        trigger_at: null,
+        is_auto: spec.is_auto || false,
+        notes: spec.notes,
+        event_trigger: spec.event_trigger,
+        purpose: spec.purpose,
+        urgency: spec.urgency,
+        end_condition: spec.end_condition,
+      }];
+    }
+
     const localNow = this.localNow;
     let baseTriggerLocal: Date;
 
@@ -140,6 +166,9 @@ export class ReminderEngine {
           active_days: spec.active_days,
           active_months: spec.active_months,
           active_year: spec.active_year,
+          purpose: spec.purpose,
+          urgency: spec.urgency,
+          end_condition: spec.end_condition,
         });
       }
       return results;
@@ -151,6 +180,9 @@ export class ReminderEngine {
       trigger_at: this.localToUtc(baseTriggerLocal),
       is_auto: spec.is_auto || false,
       notes: spec.notes,
+      purpose: spec.purpose,
+      urgency: spec.urgency,
+      end_condition: spec.end_condition,
     };
 
     if (spec.active_days && spec.active_days.length > 0) {
@@ -191,7 +223,7 @@ export class ReminderEngine {
       .map(r => ({
       user_id: userId,
       text: r.text || 'Reminder',
-      trigger_at: r.trigger_at.toISOString(),
+      trigger_at: r.trigger_at ? r.trigger_at.toISOString() : null, // null = event-triggered
       recurrence_type: r.recurrence_type || null,
       recurrence_interval: r.recurrence_interval || null,
       recurrence_limit: r.recurrence_limit || null,
@@ -203,6 +235,10 @@ export class ReminderEngine {
       is_auto: r.is_auto,
       notes: r.notes || null,
       status: 'active',
+      purpose: r.purpose || null,
+      urgency: r.urgency || 'medium',
+      event_trigger: r.event_trigger || null,
+      end_condition: r.end_condition || 'until_cancelled',
     }));
 
     const { data, error } = await supabaseAdmin
@@ -223,15 +259,39 @@ export class ReminderEngine {
   }
 
   /**
+   * Cancel an active reminder (soft delete → status 'cancelled').
+   * Scoped to the user for ownership. Returns true if a row was cancelled.
+   */
+  async delete(userId: string, id: string): Promise<boolean> {
+    const { data, error } = await supabaseAdmin
+      .from('reminders')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .select('id');
+    if (error) {
+      logger.error('[ReminderEngine] Failed to cancel reminder', { id, error: error.message });
+      return false;
+    }
+    return !!(data && data.length > 0);
+  }
+
+  /**
    * Format trigger date(s) for human-readable confirmation
    */
   formatConfirmation(parsedReminders: ParsedReminder[]): string {
+    // Event-triggered reminder — no fixed time.
+    if (parsedReminders.length === 1 && !parsedReminders[0].trigger_at) {
+      const r = parsedReminders[0];
+      return `"${r.text}" — jab aap "${r.event_trigger || 'ye event'}" karo tab yaad dilaaunga!`;
+    }
     if (parsedReminders.length === 1) {
       const r = parsedReminders[0];
-      const localTime = r.trigger_at.toLocaleTimeString('en-IN', {
+      const localTime = r.trigger_at!.toLocaleTimeString('en-IN', {
         hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
       });
-      const localDate = r.trigger_at.toLocaleDateString('en-IN', {
+      const localDate = r.trigger_at!.toLocaleDateString('en-IN', {
         day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
       });
       let msg = `"${r.text}" at ${localTime} on ${localDate}`;
@@ -248,7 +308,7 @@ export class ReminderEngine {
     }
 
     const times = parsedReminders.map(r =>
-      r.trigger_at.toLocaleTimeString('en-IN', {
+      r.trigger_at!.toLocaleTimeString('en-IN', {
         hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
       })
     );

@@ -21,12 +21,15 @@ export interface Reminder {
 
 export class ReminderService {
   async getUpcomingReminders(userId: string, limit: number = 10): Promise<any[]> {
+    const now = new Date().toISOString();
     const { data, error } = await supabaseAdmin
       .from('reminders')
       .select('*')
       .eq('user_id', userId)
       .eq('status', 'active')
-      .gte('trigger_at', new Date().toISOString())
+      // Include event-triggered reminders (trigger_at IS NULL) — they have no fixed
+      // time but ARE active and must be visible for awareness + deletion.
+      .or(`trigger_at.is.null,trigger_at.gte.${now}`)
       .order('trigger_at', { ascending: true })
       .limit(limit);
 

@@ -82,11 +82,13 @@ Available Tools for Subconscious Actions:
 1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder ONLY IF EXPLICITLY ASKED.
-   - data: any of these formats (use whichever fits the user's words):
-     * { "time_phrase": "in 15 minutes", "description": "what to remind" }  ← natural language
-     * { "title": "what to remind", "relative_value": 15, "relative_unit": "minutes" }
-     * { "title": "what to remind", "time_of_day": "19:00" }  or  { "date": "2027-08-10" }
-   - CRITICAL HONESTY RULE: If the user asks to be reminded, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown ("5 minute countdown shuru!"). Only ever tell the user a reminder is set when you are actually scheduling it in this list.
+   - data (structured JSON — preferred):
+     * TIME: { "title": "what to remind", "purpose": "why it matters (optional)", "urgency": "high|medium|low", "trigger_date": "2027-08-10", "trigger_time": "19:00", "recurrence_interval": 1, "recurrence_unit": "minutes|hours|days|weeks|months", "end_condition": "until_cancelled|until_date", "end_date": "2027-12-31" }
+     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up", "urgency": "high" }   ← "remind me when I wake up"
+     * RELATIVE: { "title": "call mom", "relative_value": 30, "relative_unit": "minutes" }
+     * SIMPLE TIME: { "title": "pay bill", "trigger_time": "19:00" }
+   - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
+   - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.
 3. "NovaFollowupService" -> "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged. 
    - data: { "question": "the follow-up text", "delay_hours": 0.5 }
    - DELAY RULES (CRITICAL — Real friends don't spam):
@@ -108,6 +110,11 @@ Available Tools for Subconscious Actions:
    - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
 8. "ExternalApiEngine" -> "webhook": Trigger a real-world webhook or external action IF the user asks you to control something (like lights, notion, etc).
    - data: { "url": "the webhook url", "method": "POST|GET", "body": { "any": "data" } }
+9. "ReminderEngine" -> "delete": Cancel an active reminder when the user says "stop", "cancel", "hata de", "band kar do", etc.
+   - data: { "id": "the EXACT id string from the ACTIVE REMINDERS (SOURCE OF TRUTH) block, e.g. <uuid>" }
+   - Only delete a reminder actually listed there. If unclear which one, ask.
+10. "EventDetector" -> "fire": When the user signals a life event that has an ACTIVE event-triggered reminder (listed in your ACTIVE REMINDERS block as: on event "..."), fire it now. E.g. user says "I'm awake" → fire reminders with event_trigger "wake_up"; "office se nikal gaya" → "left_the_office".
+    - data: { "event": "the event string exactly as listed (e.g. wake_up, left_the_office)" }
 
 If no tools need to be called, leave the JSON array empty: []
 `;

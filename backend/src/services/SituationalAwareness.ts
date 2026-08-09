@@ -19,7 +19,7 @@ export interface SituationContext {
   dateStr: string;
   timeStr: string;
   lastUserMessage?: string; // The most recent user message text (for availability detection)
-  upcomingReminders?: { title: string; scheduled_at: string }[]; // Jarvis mode
+  upcomingReminders?: { id?: string; title: string; trigger_at?: string | null; event_trigger?: string }[]; // Jarvis mode
   replyToContent?: string | null; // Swipe-to-reply content
   last5Messages?: { role: string; content: string; created_at: string }[]; // For phase detection
   last3UserEmotions?: { mood: string; intensity: number }[]; // For momentum tracking
@@ -155,7 +155,8 @@ export class SituationalAwareness {
       const nowMs = ctx.nowLocal.getTime();
       const twoHoursMs = 2 * 60 * 60 * 1000;
       const soonReminders = ctx.upcomingReminders.filter(r => {
-        const remMs = new Date(r.scheduled_at).getTime();
+        if (!r.trigger_at) return false; // event-triggered — no fixed time to preview
+        const remMs = new Date(r.trigger_at).getTime();
         return remMs > nowMs && remMs - nowMs < twoHoursMs;
       });
       if (soonReminders.length > 0) {
