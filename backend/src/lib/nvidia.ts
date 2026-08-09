@@ -222,10 +222,14 @@ export async function chatCompletion(
       if (primaryErr.status === 429 || primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') {
         logger.warn('NVIDIA primary key failed/rate-limited, falling back to secondary', { error: primaryErr.message });
         
-        // If it's a timeout/503 on the 70B model, fallback to 8B model to ensure a response
-        if ((primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') && payload.model.includes('70b')) {
+        // If it's a timeout/503 on a big model (70B or 49B), fallback to the fast 8B
+        // model so the user still gets a real reply instead of the zero-drop fallback.
+        // NOTE: the chat model was switched 70b → 49b (Aug 6); the old '70b' check alone
+        // silently disabled this resilience path for the 49B Nemotron model.
+        const isBigModel = /70b|49b/i.test(payload.model);
+        if ((primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') && isBigModel) {
           payload.model = EXTRACTION_MODEL;
-          logger.info('Falling back to 8B extraction model to avoid 70B timeout', { model: payload.model });
+          logger.info('Falling back to 8B extraction model to avoid big-model timeout', { model: payload.model });
         }
 
         const responseSecondary = await withNvidiaTimeout((signal) =>

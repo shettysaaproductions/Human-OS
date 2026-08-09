@@ -14,6 +14,7 @@
     "db:backup": "ts-node scripts/db_backup.ts",
     "doctor": "ts-node scripts/doctor.ts",
     "boot": "ts-node scripts/session_boot.ts",
+    "boot:prodtest": "ts-node scripts/prod_test_nova.ts",
     "test": "jest --coverage",
     "test:watch": "jest --watch"
   },
