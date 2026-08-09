@@ -991,9 +991,11 @@ chatRouter.post(
       let recentEpisodes: { summary: string; emotion: string | null; created_at: string }[] = [];
       let latestReflection: { summary: string; key_takeaways: any } | null = null;
       let gapMinutes: number | null = null;
+      let userPresence: { status: string; last_active_at?: string | null; last_typing_at?: string | null } | null = null;
+      let unreadNovaMessages = 0;
 
       try {
-        const [emotionResult, episodicResult, reflectionResult, lastMsgResult] = await Promise.all([
+        const [emotionResult, episodicResult, reflectionResult, lastMsgResult, presenceResult, unreadResult] = await Promise.all([
           // Latest emotional state
           qt.track('get_latest_emotion', 'emotional_states', () =>
             supabaseAdmin.from('emotional_states')
@@ -1028,6 +1030,21 @@ chatRouter.post(
               .order('created_at', { ascending: false })
               .limit(1)
               .maybeSingle()
+          ),
+          // User presence — lets Nova "see" online/away/offline + last-seen when replying
+          qt.track('get_user_presence', 'user_presence', () =>
+            supabaseAdmin.from('user_presence')
+              .select('status, last_active_at, last_typing_at')
+              .eq('user_id', userId)
+              .maybeSingle()
+          ),
+          // Read receipts — how many of Nova's messages the user has NOT opened/read yet
+          qt.track('get_unread_nova', 'chat_history', () =>
+            supabaseAdmin.from('chat_history')
+              .select('id', { count: 'exact', head: true })
+              .eq('user_id', userId)
+              .eq('role', 'assistant')
+              .eq('is_read', false)
           )
         ]);
 
@@ -1036,6 +1053,16 @@ chatRouter.post(
         if (reflectionResult.data) latestReflection = reflectionResult.data;
         if (lastMsgResult.data?.created_at) {
           gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;
+        }
+        if (presenceResult.data) {
+          userPresence = {
+            status: presenceResult.data.status || 'offline',
+            last_active_at: presenceResult.data.last_active_at,
+            last_typing_at: presenceResult.data.last_typing_at,
+          };
+        }
+        if (typeof unreadResult.count === 'number') {
+          unreadNovaMessages = unreadResult.count;
         }
 
         // Apply Gap Truncation logic to recentMessages
@@ -1104,7 +1131,9 @@ chatRouter.post(
         timeStr,
         lastUserMessage: effectiveMessage, // For availability/mood signal detection
         upcomingReminders,
-        currentVisualContext: profile?.current_visual_context
+        currentVisualContext: profile?.current_visual_context,
+        userPresence,
+        unreadNovaMessages,
       };
       const situationBrief = situationalAwareness.buildBrief(situationCtx);
 
@@ -1800,6 +1829,30 @@ chatRouter.get(
 
       // Return in ascending order (oldest first) so the client can prepend correctly
       res.status(200).json((data || []).reverse());
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── Mark all Nova messages as READ (read receipt) ─────────────────────────────
+// The mobile app calls this when the user opens the chat / foregrounds the app,
+// so Nova knows which of her messages have actually been seen. This is the "seen"
+// signal that feeds `unreadNovaMessages` into the situation brief — letting Nova
+// tell "user hasn't seen my message yet" apart from "user left me on read".
+chatRouter.post(
+  '/read',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user!.id;
+      const { error } = await supabaseAdmin
+        .from('chat_history')
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .eq('role', 'assistant')
+        .eq('is_read', false);
+      if (error) throw new Error(error.message);
+      res.status(200).json({ success: true });
     } catch (err) {
       next(err);
     }

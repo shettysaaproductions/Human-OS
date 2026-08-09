@@ -24,6 +24,14 @@ export interface SituationContext {
   last5Messages?: { role: string; content: string; created_at: string }[]; // For phase detection
   last3UserEmotions?: { mood: string; intensity: number }[]; // For momentum tracking
   currentVisualContext?: string | null; // For Autonomous Eyes (Phase 8)
+  // Read-receipt / presence awareness — lets Nova "see" whether the user is online,
+  // was last seen X ago, and whether Nova's own last messages have been read.
+  userPresence?: {
+    status: string;              // 'online' | 'away' | 'offline' | 'typing'
+    last_active_at?: string | null;
+    last_typing_at?: string | null;
+  } | null;
+  unreadNovaMessages?: number;   // assistant messages the user has not opened/read yet
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -89,6 +97,39 @@ export class SituationalAwareness {
       }
     } else {
       lines.push(`- Last contact: First message ever. Greet warmly, introduce yourself naturally.`);
+    }
+
+    // ── User Presence / Last-Seen (read-receipt awareness) ──
+    // Lets Nova "see" whether the user is on the app right now and how to pace the reply.
+    if (ctx.userPresence && ctx.userPresence.status) {
+      const p = ctx.userPresence;
+      const status = p.status;
+      const lastActiveStr = p.last_active_at ? this.describeLastActive(p.last_active_at, ctx.nowLocal) : null;
+
+      const statusLabel = status === 'typing'
+        ? 'TYPING right now'
+        : status === 'online'
+        ? 'ONLINE right now'
+        : status === 'away'
+        ? 'AWAY (stepped away, checked recently)'
+        : 'OFFLINE';
+
+      lines.push(`- 👁️ USER PRESENCE: ${statusLabel}${lastActiveStr ? ` (last active ${lastActiveStr})` : ''}.`);
+
+      if (status === 'typing') {
+        lines.push(`- The user is mid-keystroke — they are writing a follow-up RIGHT NOW. Do NOT fire another question or close the conversation. Let them finish; your job is to be ready for their next bubble.`);
+      } else if (status === 'online') {
+        lines.push(`- The user is ONLINE and will see your reply immediately. Keep it snappy, match their pace — this is live back-and-forth. Don't over-explain; they're here.`);
+      } else if (status === 'away') {
+        lines.push(`- The user is AWAY (was active recently). Reply normally, but don't expect an instant response and don't read silence as rejection — they'll pick it up when they're back.`);
+      } else {
+        lines.push(`- The user is OFFLINE and will read this later. Do NOT ask "kya ho gaya?" or expect an immediate reply. Keep it light and self-contained — they'll respond when free.`);
+      }
+    }
+
+    // ── Read state of Nova's own messages (seen vs unseen) ──
+    if (typeof ctx.unreadNovaMessages === 'number' && ctx.unreadNovaMessages > 0) {
+      lines.push(`- 📬 READ STATE: The user has NOT yet seen ${ctx.unreadNovaMessages} of your recent message(s). Don't assume they read your last message — if you're reconnecting, briefly ground them in context instead of continuing a thread they never saw.`);
     }
 
     // ── User Availability Signal ──
@@ -212,6 +253,20 @@ export class SituationalAwareness {
     if (hour >= 17 && hour < 20) return `Evening — winding down from the day. ${isWeekend ? 'Evening plans likely.' : 'After work/college. Most open to chatting now.'}`;
     if (hour >= 20 && hour < 23) return 'Night — prime conversation time. User is relaxed. Best time to have deeper conversations.';
     return 'Late night — likely tired. Keep it light.';
+  }
+
+  /**
+   * Human-readable "last active X ago" from a user_presence.last_active_at timestamp.
+   */
+  private describeLastActive(lastActiveAt: string, now: Date): string {
+    const diffMs = now.getTime() - new Date(lastActiveAt).getTime();
+    if (isNaN(diffMs) || diffMs < 0) return 'just now';
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
   }
 
   private describeGap(gapMinutes: number): string {
