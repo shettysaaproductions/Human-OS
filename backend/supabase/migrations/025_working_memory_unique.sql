@@ -7,11 +7,16 @@
 
 -- 1. Dedupe existing rows: keep only the newest created_at per (user_id, key).
 --    (The same key can't meaningfully hold two values; drops stale older rows.)
-DELETE FROM public.working_memory a
-  USING public.working_memory b
-  WHERE a.user_id = b.user_id
-    AND a.key = b.key
-    AND a.created_at < b.created_at;
+DELETE FROM public.working_memory
+WHERE id IN (
+  SELECT id
+  FROM (
+    SELECT id,
+           ROW_NUMBER() OVER( PARTITION BY user_id, key ORDER BY created_at DESC, id DESC ) as row_num
+    FROM public.working_memory
+  ) t
+  WHERE t.row_num > 1
+);
 
 -- 2. Now safe to enforce uniqueness.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_working_memory_user_key
