@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Canvas, Circle, Line, Group, Text as SkiaText, useFont, matchFont } from '@shopify/react-native-skia';
@@ -38,9 +38,18 @@ export function KgExplorerScreen() {
 
   const fontStyle = { fontFamily: 'System', fontSize: 12, fontWeight: 'bold' };
   const font = matchFont(fontStyle as any);
+  // The d3 force simulation must be stopped on unmount / re-fetch, otherwise its tick
+  // handler keeps calling setState after unmount (leak + React warning).
+  const simulationRef = useRef<any>(null);
 
   useEffect(() => {
     fetchGraph();
+    return () => {
+      if (simulationRef.current) {
+        simulationRef.current.stop();
+        simulationRef.current = null;
+      }
+    };
   }, []);
 
   const fetchGraph = async () => {
@@ -56,11 +65,14 @@ export function KgExplorerScreen() {
         ...e
       })).filter((e: any) => d3Nodes.some(n => n.id === e.source) && d3Nodes.some(n => n.id === e.target));
 
+      // Stop any prior simulation before replacing it (re-fetch / remount).
+      if (simulationRef.current) simulationRef.current.stop();
       const simulation = d3.forceSimulation<GraphNode>(d3Nodes)
         .force('link', d3.forceLink<GraphNode, GraphEdge>(d3Edges).id(d => d.id).distance(80))
         .force('charge', d3.forceManyBody().strength(-200))
         .force('center', d3.forceCenter(width / 2, height / 3))
         .force('collide', d3.forceCollide().radius(30));
+      simulationRef.current = simulation;
 
       simulation.on('tick', () => {
         setNodes([...d3Nodes]);

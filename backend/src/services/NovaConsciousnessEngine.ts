@@ -13,6 +13,9 @@ import { temporalAwarenessService } from './TemporalAwarenessService';
 const MIN_GAP_MINUTES = 3; // Reduced from 10 — more frequent for active friend experience
 const SERVER_BOOT_COOLDOWN_MS = 30 * 1000; // 30s cooldown after boot (was 5 min — caused 5-8min dead zones on Render restarts)
 let serverBootTime = Date.now();
+// Re-entrancy guard: a pulse that takes longer than the 15-min scheduler interval would
+// otherwise run concurrently and double-outreach (and double-increment agenda retries).
+let _pulseInProgress = false;
 
 // Human-like response timing (in seconds)
 
@@ -51,6 +54,11 @@ export class NovaConsciousnessEngine {
   }
 
   async pulse(): Promise<void> {
+    if (_pulseInProgress) {
+      logger.warn('[NACE] Pulse skipped — previous pulse still running (re-entrancy guard)');
+      return;
+    }
+    _pulseInProgress = true;
     try {
       // Find active users (last 7 days)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -75,6 +83,8 @@ export class NovaConsciousnessEngine {
       logger.info('[NACE] Pulse completed');
     } catch (err) {
       logger.error('[NACE] Pulse failed', { error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      _pulseInProgress = false;
     }
   }
 
@@ -407,12 +417,14 @@ ${spontaneousThoughtNote}`;
         content: message,
       });
 
-      // Log to outreach log so MIN_GAP check works correctly
+      // Log to outreach log so MIN_GAP check works correctly.
+      // NOTE: schema columns are outreach_type + created_at (NOT type/sent_at — the old
+      // insert failed every time, so the anti-spam ledger never filled and MIN_GAP could not
+      // throttle outreach).
       await supabaseAdmin.from('nova_outreach_log').insert({
         user_id: userId,
         message,
-        type: 'proactive',
-        sent_at: new Date().toISOString(),
+        outreach_type: agendaItem ? 'agenda_followup' : 'engagement_checkin',
       });
 
       // Send push notification
