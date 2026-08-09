@@ -59,6 +59,51 @@ export class ReminderSchedulerService {
   }
 
   /**
+   * Fire all active reminders tied to a life event (EventDetector).
+   * "I just left the office" → EventDetector.fire({event: "left_the_office"})
+   * → any reminder with event_trigger = "left_the_office" fires now.
+   * Reuses fireReminder: event reminders have trigger_at = NULL (epoch) so the
+   * future-check passes, and no recurrence so they complete after firing.
+   * Returns how many reminders were fired.
+   */
+  async fireEvent(userId: string, event: string): Promise<number> {
+    try {
+      if (!event) return 0;
+      const { data: reminders, error } = await supabaseAdmin
+        .from('reminders')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .ilike('event_trigger', event); // case-insensitive — Nova echoes the stored string
+
+      if (error) {
+        logger.error('[ReminderScheduler] Failed to query event reminders', { userId, event, error: error.message });
+        return 0;
+      }
+      if (!reminders || reminders.length === 0) return 0;
+
+      logger.info(`[ReminderScheduler] Event "${event}" fired — ${reminders.length} reminder(s)`, { userId });
+      let fired = 0;
+      for (const r of reminders) {
+        try {
+          await this.fireReminder(r.id);
+          fired++;
+        } catch (err) {
+          logger.error('[ReminderScheduler] Failed to fire event reminder', {
+            id: r.id, error: err instanceof Error ? err.message : String(err)
+          });
+        }
+      }
+      return fired;
+    } catch (err) {
+      logger.error('[ReminderScheduler] fireEvent error', {
+        userId, event, error: err instanceof Error ? err.message : String(err)
+      });
+      return 0;
+    }
+  }
+
+  /**
    * Fires the reminder:
    * 1. Inserts a Moment entry.
    * 2. Inserts an assistant message into the user's latest conversation history.

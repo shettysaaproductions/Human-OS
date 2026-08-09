@@ -574,7 +574,10 @@ export function ChatScreen() {
 
     // ── Push notification → immediate message fetch ──────────────────────────
     notificationService.setOnNovaReplyCallback(() => {
-      checkProactiveMessages();
+      // Small delay so the DB connection can re-hydrate if the OS fully closed the app
+      setTimeout(() => {
+        checkProactiveMessages();
+      }, 500);
     });
 
     // ── AppState listener: fallback refresh + queue rescue when app returns to foreground ──

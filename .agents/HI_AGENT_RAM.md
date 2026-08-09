@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-01 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-09 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -36,26 +36,28 @@
 ---
 
 ## ⚙️ Core Architecture (7 Engines)
-Backend: Node.js / TypeScript on **Render** | DB: **Supabase (PostgreSQL)** | Models: **NVIDIA 70B**
+Backend: Node.js / TypeScript on **Render** | DB: **Supabase (PostgreSQL)** | Models: **NVIDIA Nemotron 49B** (`nvidia/llama-3.3-nemotron-super-49b-v1`)
 1. **NovaBrain (`NovaBrainService.ts`)** — Main LLM response generator.
 2. **NACE Consciousness (`NovaConsciousnessEngine.ts`)** — 15-min pulse for proactive check-ins & double-texts.
 3. **Situational Awareness (`SituationalAwareness.ts`)** — Time, session, mood & phase contextualizer.
 4. **Moment Engine (`MomentEngineService.ts`)** — Daily memory moment generator.
 5. **Reflection Scheduler (`ReflectionSchedulerService.ts`)** — Daily/weekly memory synthesis.
-6. **Model Router (`ModelRouterService.ts`)** — Dual key router (Key 1: Chat, Key 2: Background).
-7. **Prompt Builder (`promptBuilder.ts`)** — Identity & anti-robot rules.
+6. **Reminder Engine (`ReminderEngine.ts` + `ReminderSchedulerService.ts`)** — Smart reminder scheduling, NLP parsing, firing with warm Nova message + completion tracking.
+7. **Prompt Builder (`promptBuilder.ts`)** — Identity & anti-robot rules (24 ANTI-ROBOT rules active).
 
 ---
 
 ## 🛠️ Critical Developer Commands & Locations
 ```
-BACKEND DIR:   d:\Software\Human Os\Human-OS\backend
-MOBILE DIR:    d:\Software\Human Os\Human-OS\mobile
-ROOT DIR:      d:\Software\Human Os\Human-OS
+BACKEND DIR:   c:\Users\Laptop 6\Documents\Human Os\backend
+MOBILE DIR:    c:\Users\Laptop 6\Documents\Human Os\mobile
+ROOT DIR:      c:\Users\Laptop 6\Documents\Human Os
 
 BUILD CHECK:   cd backend && npm run build (Run before git push — 0 errors required!)
 OTA COMMAND:   cd mobile && npx eas update --branch production --environment production --message "..."
 GIT PUSH:      git add . && git commit -m "..." && git push origin main
+NVIDIA MODEL:  Set NVIDIA_CHAT_MODEL in Render env vars (current: nvidia/llama-3.3-nemotron-super-49b-v1)
+NVIDIA TIMEOUT: 55 seconds (nvidia.ts line 49) — needed for 49B model on free tier
 TRAIN COMMAND: Type "train agent" or "train" to compress and refresh this RAM snapshot.
 INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM snapshot.
 ```
@@ -63,13 +65,6 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
-- ✅ **CRITICAL: Full Proactive Messaging Fix (Aug 2, 2026):** Found & fixed 7 bugs causing Nova to go silent after first message. **Key fixes:** (1) Removed `status: 'sent'` from `NovaTriggerEngine.scheduleMessage` chat_history insert — was causing 100% of NACE proactive messages to fail silently. (2) Reduced boot cooldown from 5min to 30s — Render restarts every 15min of inactivity, so 5min cooldown was blocking all outreach. (3) Replaced `NovaTriggerEngine.scheduleMessage` wrapper in NACE with direct fire — was adding 5-120s (online) to 5-15min (offline) unnecessary delays. (4) Reduced follow-up cooldown from 5min to 1min. (5) Fixed sync-mode subconscious prompt delay values. (6) Added 30s boot pulse so NACE fires within 30s of server start (not up to 3min). Nova should now message continuously every 1-3min when user is active.
-- ✅ **Proactive Messaging v3 (Aug 2, 2026):** Reduced NACE MIN_GAP from 10min to 3min, online gap from 2min to 1min, away gap from 8min to 4min. Follow-up cutoffs reduced from 3-6min to 1-3min. Brain subconscious defaults reduced to 36s-5min. Added proactive engagement rules to system prompt so Nova nudges users who are online but not replying.
-- ✅ **Defensive DB Error Handling (Aug 2, 2026):** Added explicit error checking after every `chat_history` insert. If the primary insert fails (e.g., invalid column), an emergency fallback insert is attempted. Push notifications are sent even if DB save fails. All DB errors now log the full error code and message to Render logs for immediate debugging.
-- ✅ **Mutex Deadlock Fix v2 (Aug 2, 2026):** Replaced broken chained mutex (which created never-resolving promise chains) with a simple timeout lock. Previous lock is waited on with 30s timeout; if it hangs, it's deleted and the new request proceeds. Lock is unconditionally cleaned up in finally block.
-- ✅ **Critical Latency & Deadlock Fix (Aug 2, 2026):** Fixed Render build by excluding test files from tsconfig. Added 30s mutex timeout with stale lock cleanup to prevent deadlocks from hung LLM calls. Added 25s LLM timeout for sync requests and 30s for streaming. Fixed broken async deadline (was racing against empty function, now uses actual setTimeout).
-- ✅ **Messaging Latency Fix (Aug 2, 2026):** Reduced NACE pulse interval from 15min to 3min, removed unnecessary TriggerEngine check from chat.ts (saved 1 DB query per request), removed duplicate memory fetches (saved 3 DB queries), added response time logging to identify bottlenecks.
-- ✅ **Messaging Frequency Fix (Aug 2, 2026):** Reduced NACE MIN_GAP from 45min to 10min, dynamic gaps from 20-90min to 8-25min, follow-up delays from 6-15min to 1-3min, and unanswered conversation cutoff from 12min to 6min. Nova now messages 3-5x more frequently during active hours.
 - ✅ **Master Production Fix (Aug 1, 2026):** 
   - NACE (Nova Autonomous Consciousness Engine) now gathers all 7 engines' context (Memories, Conversations, Temporal, Agenda) and feeds them into Tier 1 subconscious decision-making.
   - Added `MessageFormatter` for WhatsApp-style multi-bubble output with contextual emojis.
@@ -88,6 +83,25 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **WhatsApp Async Response:** 202 Accepted returned instantly; DB write before response.
 - ✅ **Database Bug Resolved (Aug 1, 2026):** `reminders.status` column successfully added to Supabase.
 - ✅ **Behavioral Patches — Anti-Hallucination & Anti-Amnesia (Aug 5, 2026):** Strengthened 5 existing ANTI-ROBOT rules in `promptBuilder.ts` (FABRICATION, SAME-SESSION CONTEXT, DAY AWARENESS, MEMORY ACCOUNTABILITY, SAME-SESSION AMNESIA) to ZERO-TOLERANCE and added new ANTI-ROBOT RULE (NO CAPABILITY PITCHING). Fixes: memory/context amnesia (forgot 5-month-old son, same-session metro), fabrication of "RNR" → "Ram Nawami", time/day hallucination, and self-narration of internal architecture ("7/8 engines", "long-term memory").
+- ✅ **Aug 6 Session — Full Nova Response Restoration (commits 5b77caf, 34343f7, 15b08ac, 889d5f5):**
+  - **Trust Proxy Fix** (`app.ts`): Added `app.set('trust proxy', 1)` — was silently blocking ALL POST /api/chat requests on Render (rate-limit middleware rejected them).
+  - **Model Switch**: Changed `NVIDIA_CHAT_MODEL` from `meta/llama-3.3-70b-instruct` (30s timeout → always failing) to `nvidia/llama-3.3-nemotron-super-49b-v1` via Render env var. Timeout increased to 55s in `nvidia.ts`.
+  - **Table Trigger Fix** (`ResponseIntelligence.ts`): Short messages like "Supp" were incorrectly triggering LONG_CONTEXT table mode because `len < 10` matched any short message. Now requires explicit agreement word + short length.
+  - **LLM Label Stripping** (`chat.ts` sanitizeMarkdown): Added stripping of "Follow-up question:", "Topic", "Option" etc. that 8B model outputs verbatim.
+  - **Nemotron XML Bleed Fix** (`NovaBrainService.ts`): Nemotron outputs `**Response**` / `**Subconscious Actions**` markdown instead of XML tags. Added fallback parser to extract conversational text from between these headers.
+  - **Reminder Engine Overhaul** (`BackgroundActionService.ts`, `ReminderSchedulerService.ts`, `ReminderEngine.ts`, `reminders.ts`, `NovaBrainService.ts`): Fixed 4 bugs: (1) `time_phrase` NLP parser so Nova's natural language schedules real reminders, (2) warm Nova-style fire message instead of robotic `🔔 Reminder: text`, (3) completion tracking via nova_agenda after firing, (4) extended recurrence schema to include minutes/weeks/months.
+  - **Nemotron Bold Header Stripping** (`chat.ts`): `sanitizeMarkdown` now strips standalone `**Header**` lines. Added rule #21 NO BOLD HEADERS IN CHAT to prompt.
+  - **Options Prose Bleed Fix** (`promptBuilder.ts`): CLOSE-ENDED OPTIONS block now strictly mandates `<OPTIONS>[...]</OPTIONS>` format only. Added sanitize strips for "Awaiting Your Selection", "Default Response if No Option Selected" meta-text.
+  - **Pronoun Zero Tolerance** (`promptBuilder.ts`): Added rule #0 PRONOUN ZERO TOLERANCE as FIRST rule in CRITICAL FINAL INSTRUCTIONS (highest model salience). NEVER use Aap/Aapka/Aapko.
+  - **Real Reminders Only** (`promptBuilder.ts`): Added rule #20 — NEVER say "imaginary timer". If user asks for reminder, MUST emit ReminderEngine.schedule tool action.
+  - **NACE Active-User Guard** (`NovaConsciousnessEngine.ts`): NACE won't fire proactive messages when user is actively chatting (gap < 10 min). Exact-match dedup prevents duplicate outreach.
+  - **Stuck Conversation Timing** (`NovaFollowupService.ts`): Detection cutoff 1min→10min; bad fallback message replaced.
+- ✅ **Aug 9 Session — Zero-Drop Messaging Guarantee + Reminder Hardening:**
+  - **100% Reply Guarantee** (`chat.ts`): Added `FALLBACK_REPLY` = `"Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?"`. Now saved + pushed in ALL failure paths (async LLM timeout, async LLM error, outer crash catch, 3 streaming/SSE error events). Deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a bubble (clears typing) instead of being silently dropped.
+  - **Resume-safe Polling** (`useChatStore.ts`): Poll timeout does ONE final `checkProactiveMessages()` fetch before clearing typing — fixes "reply invisible until restart" when app was backgrounded. `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20; typing-rhythm guard for multi-bubble replies.
+  - **Push Re-hydration** (`ChatScreen.tsx`): 500ms delay before history fetch on notification tap.
+  - **Reminder Upgrade** (migration `024_upgrade_reminders.sql`, `ReminderEngine.ts`, `SituationalAwareness.ts`): `purpose`/`urgency`/`event_trigger`/`end_condition` columns; event reminders (`trigger_at IS NULL`) visible to Nova; JARVIS `scheduled_at`→`trigger_at` fix; `ReminderEngine.test.ts` added.
+
 
 ---
 

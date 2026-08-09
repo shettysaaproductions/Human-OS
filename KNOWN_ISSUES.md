@@ -69,3 +69,11 @@ This document tracks identified bugs, limitations, and workarounds.
 | **Image ACKNOWLEDGEMENT rule missing** | 3 new ANTI-ROBOT rules: IMAGE ACKNOWLEDGEMENT, SLEEP RESPECT, WORKING MEMORY IS GROUND TRUTH | Aug 2026 |
 | **Fabrication of abbreviation meaning (RNR → "Ram Nawami")** | Strengthened ANTI-ROBOT FABRICATION rule — must ASK what an unknown term means, never guess | Aug 2026 |
 | **Memory Amnesia (forgot 5-month-old son; forgot same-session metro context)** | Strengthened ANTI-ROBOT MEMORY ACCOUNTABILITY + SAME-SESSION AMNESIA / CONTEXT rules (zero tolerance) | Aug 2026 |
+| **Event-triggered reminders invisible to Nova** | `getUpcomingReminders` + chat.ts awareness block now include `trigger_at IS NULL` (event reminders) | Aug 2026 |
+| **JARVIS reminder mode read nonexistent `scheduled_at` column** | Fixed `SituationalAwareness` → `trigger_at`; event reminders excluded from 2h preview | Aug 2026 |
+
+## Known Limitations
+
+| Issue | Note |
+|---|---|
+| Recurring reminder day-drift (29–31st) | `calculateNextTrigger` uses `setMonth` → Jan 31 + 1 month = Mar 3. "Every 28th" is safe; 29th–31st drift. Fix: preserve day-of-month clamp |

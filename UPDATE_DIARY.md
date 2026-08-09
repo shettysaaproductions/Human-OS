@@ -4,6 +4,22 @@ Chronological log of all agent-executed changes. Maintained by `update agent` co
 
 ---
 
+## [2026-08-09] Zero-Drop Messaging Guarantee + Reminder Engine Hardening
+
+### Trigger
+User reported Nova's replies being generated but not displayed until app restart. Plan approved to guarantee every user message receives a visible response.
+
+### Changes Made
+- **Backend 100% reply guarantee** (`backend/src/routes/chat.ts`): Added `FALLBACK_REPLY` constant ("Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?") now saved + pushed in ALL failure paths — async LLM timeout, async LLM error, outer crash catch, and 3 streaming/SSE error events. Message deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a chat bubble (clears typing) instead of being silently dropped. Fixed the previously-misleading "skipping DB save" deadline log.
+- **Resume-safe polling** (`mobile/src/store/useChatStore.ts`): Poll timeout now performs ONE final `checkProactiveMessages()` fetch before clearing typing (fixes reply-not-visible-until-restart when app was backgrounded); `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20. Guard added so multi-bubble typing rhythm is preserved.
+- **Push re-hydration** (`mobile/src/screens/ChatScreen.tsx`): 500ms delay before fetching history on notification tap.
+- **Reminder Engine upgrade** (migration `024_upgrade_reminders.sql` + `ReminderEngine.ts` + `SituationalAwareness.ts`): added `purpose`/`urgency`/`event_trigger`/`end_condition` columns; event-triggered reminders (`trigger_at IS NULL`) now visible to Nova; fixed JARVIS reading non-existent `scheduled_at` → `trigger_at`; added `ReminderEngine.test.ts`.
+
+### Status
+Backend + mobile typechecks pass (`tsc --noEmit`). Changes committed and pushed to `main` via `update agent`. Deploy: backend auto-deploys on Render; mobile JS requires manual OTA (`npx eas update --branch production`).
+
+---
+
 ## [2026-07-30] Push Notification Bug Fix & Root Cause
 
 ### Trigger

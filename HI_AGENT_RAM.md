@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-06 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-09 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -96,6 +96,11 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
   - **Real Reminders Only** (`promptBuilder.ts`): Added rule #20 — NEVER say "imaginary timer". If user asks for reminder, MUST emit ReminderEngine.schedule tool action.
   - **NACE Active-User Guard** (`NovaConsciousnessEngine.ts`): NACE won't fire proactive messages when user is actively chatting (gap < 10 min). Exact-match dedup prevents duplicate outreach.
   - **Stuck Conversation Timing** (`NovaFollowupService.ts`): Detection cutoff 1min→10min; bad fallback message replaced.
+- ✅ **Aug 9 Session — Zero-Drop Messaging Guarantee + Reminder Hardening:**
+  - **100% Reply Guarantee** (`chat.ts`): Added `FALLBACK_REPLY` = `"Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?"`. Now saved + pushed in ALL failure paths (async LLM timeout, async LLM error, outer crash catch, 3 streaming/SSE error events). Deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a bubble (clears typing) instead of being silently dropped.
+  - **Resume-safe Polling** (`useChatStore.ts`): Poll timeout does ONE final `checkProactiveMessages()` fetch before clearing typing — fixes "reply invisible until restart" when app was backgrounded. `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20; typing-rhythm guard for multi-bubble replies.
+  - **Push Re-hydration** (`ChatScreen.tsx`): 500ms delay before history fetch on notification tap.
+  - **Reminder Upgrade** (migration `024_upgrade_reminders.sql`, `ReminderEngine.ts`, `SituationalAwareness.ts`): `purpose`/`urgency`/`event_trigger`/`end_condition` columns; event reminders (`trigger_at IS NULL`) visible to Nova; JARVIS `scheduled_at`→`trigger_at` fix; `ReminderEngine.test.ts` added.
 
 
 ---

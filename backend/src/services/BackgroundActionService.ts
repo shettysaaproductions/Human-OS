@@ -21,12 +21,13 @@ export class BackgroundActionService {
           let specs = action.data.reminders || [action.data];
           if (!Array.isArray(specs)) specs = [specs];
 
-          // ── NLP time_phrase → ReminderSpec converter ─────────────────────────
-          // Nova outputs: { time_phrase: "in 5 minutes", description: "remind me" }
-          // ReminderEngine.parse() needs: { relative_value: 5, relative_unit: "minutes" }
-          // This bridge converts the natural language phrase to structured fields.
+          // ── Spec normalisation ──────────────────────────────────────────────
+          // Primary path: Nova emits structured JSON (trigger_date, trigger_time,
+          // recurrence_interval/unit, purpose, urgency, event_trigger, ...).
+          // Fallback: older/legacy `time_phrase` (regex bridge) still converts
+          // natural language → structured fields, kept for safety.
           specs = specs.map((spec: any) => {
-            if (!spec.time_phrase) return spec; // already structured
+            if (!spec.time_phrase) return this.normalizeStructuredSpec(spec);
 
             const phrase = String(spec.time_phrase).toLowerCase().trim();
             const title = spec.description || spec.title || spec.text || 'Reminder';
@@ -107,6 +108,27 @@ export class BackgroundActionService {
             allScheduled.push(...inserted);
           }
           logger.info('[BackgroundAction] Scheduled reminders', { userId, count: allScheduled.length });
+        }
+        else if (action.tool === 'ReminderEngine' && action.action === 'delete') {
+          const id = action.data?.id;
+          if (!id) {
+            logger.warn('[BackgroundAction] ReminderEngine.delete missing id', { userId });
+            continue;
+          }
+          const { ReminderEngine } = await import('./ReminderEngine');
+          const engine = new ReminderEngine();
+          const cancelled = await engine.delete(userId, String(id));
+          logger.info('[BackgroundAction] ReminderEngine.delete', { userId, id, cancelled });
+        }
+        else if (action.tool === 'EventDetector' && action.action === 'fire') {
+          const event = String(action.data?.event || '').toLowerCase().trim();
+          if (!event) {
+            logger.warn('[BackgroundAction] EventDetector.fire missing event', { userId });
+            continue;
+          }
+          const { reminderSchedulerService } = await import('./ReminderSchedulerService');
+          const fired = await reminderSchedulerService.fireEvent(userId, event);
+          logger.info('[BackgroundAction] EventDetector.fire', { userId, event, fired });
         }
         else if (action.tool === 'MomentEngine' && action.action === 'extract') {
            // Save to short_term_memories with deduplication
@@ -266,6 +288,62 @@ export class BackgroundActionService {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });
       }
     }
+  }
+
+  /**
+   * Map the structured LLM JSON (primary reminder path) onto a ReminderSpec that
+   * ReminderEngine.parse() understands. Supports both the newer camelCase keys
+   * (trigger_date, trigger_time, recurrence_interval/unit) and the legacy
+   * ReminderSpec keys (date, time_of_day, recurrence_interval_value/unit).
+   */
+  private normalizeStructuredSpec(spec: any): any {
+    const out: any = {
+      title: spec.title || spec.description || spec.text || 'Reminder',
+      notes: spec.notes,
+    };
+
+    // New fields pass straight through
+    if (spec.purpose) out.purpose = spec.purpose;
+    if (spec.urgency) out.urgency = spec.urgency;
+    if (spec.event_trigger) out.event_trigger = spec.event_trigger;
+    if (spec.end_condition) out.end_condition = spec.end_condition;
+
+    // Time fields (new + legacy keys)
+    if (spec.trigger_date) out.date = spec.trigger_date;
+    if (spec.date) out.date = spec.date;
+    if (spec.trigger_time) out.time_of_day = this.normalizeTimeOfDay(spec.trigger_time);
+    if (spec.time_of_day) out.time_of_day = this.normalizeTimeOfDay(spec.time_of_day);
+    if (spec.relative_value !== undefined && spec.relative_value !== null) out.relative_value = Number(spec.relative_value);
+    if (spec.relative_unit) out.relative_unit = spec.relative_unit;
+
+    // Recurrence
+    if (spec.recurrence_interval !== undefined && spec.recurrence_interval !== null) {
+      out.recurrence_interval_value = Number(spec.recurrence_interval);
+    }
+    if (spec.recurrence_unit) out.recurrence_interval_unit = spec.recurrence_unit;
+    if (spec.recurrence_limit !== undefined && spec.recurrence_limit !== null) {
+      out.recurrence_limit = Number(spec.recurrence_limit);
+    }
+
+    // End date → end_at
+    if (spec.end_at) out.end_at = spec.end_at;
+    if (spec.end_date && !spec.end_at) out.end_at = spec.end_date;
+
+    return out;
+  }
+
+  /**
+   * Normalize an LLM-supplied time to "HH:MM" 24-hour. Accepts "19:00", "7pm", "7:30am".
+   */
+  private normalizeTimeOfDay(time: any): string {
+    const s = String(time).trim().toLowerCase();
+    const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+    if (!m) return s; // leave as-is; ReminderEngine will surface any issue
+    let hh = parseInt(m[1], 10);
+    const mm = m[2] ? parseInt(m[2], 10) : 0;
+    if (m[3] === 'pm' && hh < 12) hh += 12;
+    if (m[3] === 'am' && hh === 12) hh = 0;
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
 }
 

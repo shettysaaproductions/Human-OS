@@ -22,6 +22,20 @@ import crypto from 'crypto';
 export const MAX_OUTPUT_TOKENS = 2048;
 
 /**
+ * FALLBACK_REPLY — Nova's safety-net reply when the AI provider completely fails
+ * (LLM timeout, LLM error, or an unhandled async crash).
+ *
+ * It is deliberately NOT matched by REJECT_PREFIXES / MOBILE_FALLBACK_FILTER:
+ *  - It gets saved to chat_history AND shown in the app, so the user always gets
+ *    a bubble and the frontend's typing state clears — instead of hanging forever.
+ *  - It is also NOT added to those filters — adding it would re-hide it and recreate
+ *    the "reply generated but never shown" bug this fixes.
+ *  - The "mera network slow" framing keeps Nova in-voice (a friend blaming their own
+ *    network) instead of exposing server/tech details.
+ */
+export const FALLBACK_REPLY = 'Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?';
+
+/**
  * Checks if a highly similar assistant message was recently sent.
  * Prevents identical double-texts during race conditions.
  */
@@ -619,13 +633,15 @@ chatRouter.post(
       // by sending async_mode: false in the request body.
       
       // Async mode: hard deadline — if processing takes >90s, attempt a short-context retry.
-      // NEVER save server error messages to DB — that shows broken UX and confuses follow-up engines.
+      // Raw error messages are NOT saved to DB (they'd show broken UX). But when the LLM
+      // fails entirely, FALLBACK_REPLY — a natural, voice-matched message — IS saved so the
+      // user always gets a bubble and the frontend's typing state clears.
       const ASYNC_HARD_DEADLINE_MS = 90_000;
       let asyncDeadlineTimer: any = null;
 
       if (async_mode) {
         asyncDeadlineTimer = setTimeout(async () => {
-          logger.error('[ASYNC] Hard 90s deadline exceeded — skipping DB save. The background follow-up engine will detect this as an unanswered user message and follow up naturally.', { userId });
+          logger.warn('[ASYNC] Request exceeded 90s deadline. This is a log-only watchdog — a reply that completes despite the delay is still saved and pushed.', { userId });
         }, ASYNC_HARD_DEADLINE_MS);
       }
 
@@ -1107,19 +1123,24 @@ chatRouter.post(
         .select('*')
         .eq('user_id', userId)
         .eq('status', 'active')
-        .gte('trigger_at', new Date().toISOString())
+        // Include event-triggered reminders (trigger_at IS NULL) so Nova sees them.
+        .or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`)
         .order('trigger_at', { ascending: true })
         .limit(10);
       
       let remindersContext = '';
       if (upcoming && upcoming.length > 0) {
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has these reminders active:\n' + upcoming.map(r => {
-          const timeStr = new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+          const when = r.trigger_at
+            ? `at ${new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+            : `on event "${r.event_trigger || 'unknown event'}"`;
           const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
           const dayFilter = r.active_days?.length ? ` [only on: ${r.active_days.join(', ')}]` : '';
           const monthFilter = r.active_months?.length ? ` [only in: ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''}]` : '';
+          const urgency = r.urgency && r.urgency !== 'medium' ? ` [${r.urgency} urgency]` : '';
+          const purpose = r.purpose ? ` — ${r.purpose}` : '';
           const autoTag = r.is_auto ? ' [auto-detected]' : '';
-          return `- [ID: "${r.id}"] ${r.text || r.title} at ${timeStr}${recurrence}${dayFilter}${monthFilter}${autoTag}`;
+          return `- [ID: "${r.id}"] ${r.text || r.title} ${when}${recurrence}${dayFilter}${monthFilter}${urgency}${purpose}${autoTag}`;
         }).join('\n') + '\n\nCRITICAL: This list is the absolute source of truth. If past chat history says a reminder was cancelled but it appears here, it is STILL ACTIVE. Do not contradict this list.';
       } else {
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has NO active reminders. CRITICAL: This is the absolute source of truth. If past chat history says a reminder was set, but this list is empty, it means there are NO active reminders. Do not contradict this fact.';
@@ -1195,7 +1216,7 @@ chatRouter.post(
               } catch (err: any) {
                 if (err.message === 'STREAM_TIMEOUT') {
                   logger.error('[Chat] Streaming LLM chunk timed out', { userId });
-                  res.write(`data: ${JSON.stringify({ type: 'error', error: 'Yaar, thoda slow chal raha hai server. Ek minute mein phir try kar! 🙏' })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                   res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
                   res.end();
                   return;
@@ -1203,7 +1224,7 @@ chatRouter.post(
                 
                 // Handle actual API errors (e.g. Nvidia 500/401) without crashing the server
                 logger.error('[Chat] LLM stream iteration failed', { error: err.message || err, userId });
-                res.write(`data: ${JSON.stringify({ type: 'error', error: 'Yaar, thoda technical glitch ho gaya. Ek second mein phir try kar!' })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
                 res.end();
                 return;
@@ -1246,8 +1267,8 @@ chatRouter.post(
             } catch (llmErr: any) {
               if (llmErr.message === 'LLM_TIMEOUT') {
                 logger.error('[Chat] LLM call timed out', { userId, messageLength: effectiveMessage.length });
-                result = { 
-                  reply: 'Yaar, thoda slow chal raha hai server. Ek minute mein phir try kar! 🙏',
+                result = {
+                  reply: FALLBACK_REPLY,
                   subconscious_actions: []
                 };
               } else {
@@ -1296,7 +1317,7 @@ chatRouter.post(
             if (isContentPolicy) {
               rawReply = 'Acha, is topic par main jyada bol nahi sakti yaar 😂 kuch aur baat karte hain?';
             } else {
-              rawReply = 'Yaar, kuch technical issue aa gaya abhi. Thodi der mein phir try karo!';
+              rawReply = FALLBACK_REPLY;
             }
             logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId, isContentPolicy });
           } else {
@@ -1614,12 +1635,12 @@ chatRouter.post(
               user_id: userId,
               conversation_id: activeConversationId,
               role: 'assistant',
-              content: 'Yaar, thoda technical glitch ho gaya. Ek second mein phir try kar!',
+              content: FALLBACK_REPLY,
             });
             // Try to push a notification so user knows to check
             const ptResult = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
             if (ptResult.data?.push_token) {
-              sendNovaReplyNotification(ptResult.data.push_token, 'Yaar, thoda glitch hua. Dekh lo!').catch(() => {});
+              sendNovaReplyNotification(ptResult.data.push_token, FALLBACK_REPLY).catch(() => {});
             }
           }
         } catch (fallbackErr) {
@@ -1631,7 +1652,7 @@ chatRouter.post(
         if (res.headersSent) {
           logger.error('[Chat] Unhandled error during streaming', { error: err instanceof Error ? err.message : String(err) });
           try {
-            res.write(`data: ${JSON.stringify({ type: 'error', error: 'Yaar, thoda technical glitch ho gaya. Ek second mein phir try kar!' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
             res.end();
           } catch (e) {}

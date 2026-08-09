@@ -121,13 +121,13 @@ Joyful episodic memories are tagged with a `surface_on` date (typically 1 year i
 | Phase 1 | ✅ COMPLETE | All 7 engines live in production |
 | Phase 2 | ✅ COMPLETE | Anti-robot prompt rules (Echoing, Formality, Interrogation, Time-skip) |
 | Phase 3 | ✅ COMPLETE | Swipe-to-reply (reply intent context in backend) |
-| Phase 4 | ✅ COMPLETE | Message reliability (never-stuck guarantee) |
-| Phase 5 | 🔜 PLANNED | Dual NVIDIA key routing |
-| Phase 6 | 🔜 PLANNED | NovaSelfImprovementService (autonomous weekly self-repair) |
-| Phase 7 | 🔜 PLANNED | Enhanced SituationalAwareness (conversation phases + emotional momentum) |
-| Phase 8 | 🔜 PLANNED | NovaCognitionOrchestrator (all 7 engines fire on every message) |
-| Phase 9 | 🔜 PLANNED | NACE Agenda Builder (Nova plans her outreach intelligently) |
-| Phase 10 | 🔜 PLANNED | Memory Time Capsule system |
+| Phase 4 | ✅ COMPLETE | Message reliability (zero-drop guarantee — `FALLBACK_REPLY` saved + pushed in every failure path so the user always gets a bubble) |
+| Phase 5 | ✅ COMPLETE | Quad NVIDIA key routing (`ModelRouterService.ts` — 4 key pool, 429 failover) |
+| Phase 6 | ✅ COMPLETE | NovaSelfImprovementService (autonomous self-repair + Auto Upgrade protocol, `NovaSelfImprovementService.ts`) |
+| Phase 7 | ✅ COMPLETE | Enhanced SituationalAwareness (conversation phases + emotional momentum, `SituationalAwareness.ts`) |
+| Phase 8 | ✅ COMPLETE | NovaCognitionOrchestrator (all 7 engines fire on every message — see cognition pipeline §4) |
+| Phase 9 | ✅ COMPLETE | NACE Agenda Builder (Nova gathers all 7 engines' context + plans outreach, `NovaConsciousnessEngine.ts`) |
+| Phase 10 | ✅ COMPLETE | Memory Time Capsule system (`MomentEngineService.checkTimeCapsules()` daily) |
 
 ---
 

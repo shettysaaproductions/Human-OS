@@ -68,7 +68,7 @@ let _proactiveCheckInProgress = false;
 // ── Reply-wait polling — unified poller that covers both foreground and post-restart ──
 let _replyPollTimer: ReturnType<typeof setInterval> | null = null;
 let _replyPollStartTime = 0;
-const MAX_REPLY_WAIT_MS = 90_000; // 90 seconds max absolute wait time
+const MAX_REPLY_WAIT_MS = 120_000; // 120 seconds max absolute wait time (Nemotron 49B generation)
 
 function startReplyPolling(checkFn: () => Promise<void>) {
   if (_replyPollTimer) return; // already running
@@ -86,15 +86,26 @@ function startReplyPolling(checkFn: () => Promise<void>) {
     // By using absolute time (Date.now()), we correctly handle when the app is
     // backgrounded/locked (setInterval pauses in background).
     if (Date.now() - _replyPollStartTime > MAX_REPLY_WAIT_MS) {
-      console.warn('[REPLY_POLL] Absolute max wait time (90s) reached. Stopping.');
+      console.warn('[REPLY_POLL] Absolute max wait time (120s) reached. One final fetch before giving up.');
       stopReplyPolling();
-      useChatStore.getState().set_isTyping(false);
+      // The reply may have arrived while the app was suspended (setInterval pauses in
+      // background). Do ONE final fetch so a reply that landed while we were gone is not
+      // lost — this also triggers the self-heal at the end of checkProactiveMessages,
+      // which clears isTyping if the last message is already an assistant reply.
+      await checkFn().catch(() => {});
+      // Only force-clear typing if the fetch found nothing. If it DID find a reply,
+      // checkProactiveMessages has already set isTyping correctly (false for a single
+      // bubble, true while multi-bubble chunks are still dropping in) — don't override it.
+      const lastMsg = useChatStore.getState().messages[useChatStore.getState().messages.length - 1];
+      if (!lastMsg || lastMsg.role !== 'assistant') {
+        useChatStore.getState().set_isTyping(false);
+      }
       return;
     }
 
     await checkFn();
   }, 3000);
-  console.log('[REPLY_POLL] Started (3s interval, 90s max wait)');
+  console.log('[REPLY_POLL] Started (3s interval, 120s max wait)');
 }
 
 function stopReplyPolling() {
@@ -750,7 +761,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           ? currentMessages[currentMessages.length - 1].timestamp
           : null;
 
-        const history = await chatService.getHistory(convId, 10);
+        // Fetch 20 so a fast conversation can't bury the reply just past the last batch.
+        const history = await chatService.getHistory(convId, 20);
         if (!history || history.length === 0) return;
 
         // Build a comprehensive set of IDs already in store:

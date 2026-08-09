@@ -29,6 +29,25 @@ That is the product. Everything else is scaffolding. Every feature decision must
 
 ---
 
+## 🚀 Current Implementation Status (Updated Aug 9, 2026)
+
+**Status: All core MVP features are live in production** — Render backend + Expo APK (`com.humanos.mobile` v1.1.0, SDK 56).
+
+| Area | Status | Notes |
+|---|---|---|
+| Chat (async + streaming) | ✅ LIVE | 202-accepted background replies. **Zero-drop guarantee** — every user message now receives a visible reply; `FALLBACK_REPLY` ("Arre yaar, mera network…") saved + pushed on total provider failure |
+| Long-term / working / short-term memory | ✅ LIVE | Semantic, episodic, emotional, KG extraction; working memory injected into prompt |
+| Persistent persona | ✅ LIVE | Nova system prompt + 24 ANTI-ROBOT rules (`promptBuilder.ts`) |
+| Onboarding | ✅ LIVE | Guided onboarding → initial memories |
+| Conversation history | ✅ LIVE | Cached + paginated, swipe-to-reply |
+| Proactive outreach (NACE) | ✅ LIVE | Autonomous check-ins, follow-ups, double-texts |
+| Reminders | ✅ LIVE | NLP scheduling, event-triggered reminders (`trigger_at IS NULL`), warm Nova-style firing, purpose/urgency/end-condition (migration 024) |
+| Vision | ⚠️ PARTIAL | Works, but needs `GEMINI_API_KEY` in Render for full image understanding |
+
+Live model: **NVIDIA Nemotron 49B** (`nvidia/llama-3.3-nemotron-super-49b-v1`, env `NVIDIA_CHAT_MODEL`), 8B fallback on timeout.
+
+---
+
 ### 1. Chat Interface
 
 **Classification**: 🔴 Must Have
