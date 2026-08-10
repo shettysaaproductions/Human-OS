@@ -46,7 +46,7 @@ Backend + mobile typechecks pass. All changes committed and pushed to `main`. Re
 
 ---
 
-
+## [2026-08-09] Zero-Drop Messaging Guarantee + Reminder Engine Hardening
 
 ### Trigger
 User reported Nova's replies being generated but not displayed until app restart. Plan approved to guarantee every user message receives a visible response.
