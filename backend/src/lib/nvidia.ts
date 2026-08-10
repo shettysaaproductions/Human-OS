@@ -207,7 +207,7 @@ export async function chatCompletion(
   }
 
   try {
-    // Race the SDK call against a 30-second hard deadline.
+    // Race the SDK call against a hard deadline.
     try {
       const response = await withNvidiaTimeout((signal) =>
         nvidiaClient.chat.completions.create(payload, { signal })
@@ -219,19 +219,18 @@ export async function chatCompletion(
       if (!message?.content) throw new Error('NVIDIA API returned an empty response');
       return message.content;
     } catch (primaryErr: any) {
-      if (primaryErr.status === 429 || primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') {
-        logger.warn('NVIDIA primary key failed/rate-limited, falling back to secondary', { error: primaryErr.message });
-        
-        // If it's a timeout/503 on a big model (70B or 49B), fallback to the fast 8B
-        // model so the user still gets a real reply instead of the zero-drop fallback.
-        // NOTE: the chat model was switched 70b → 49b (Aug 6); the old '70b' check alone
-        // silently disabled this resilience path for the 49B Nemotron model.
-        const isBigModel = /70b|49b/i.test(payload.model);
-        if ((primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') && isBigModel) {
-          payload.model = EXTRACTION_MODEL;
-          logger.info('Falling back to 8B extraction model to avoid big-model timeout', { model: payload.model });
-        }
+      const isRetryable = primaryErr.status === 429 || primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError';
+      if (!isRetryable) throw primaryErr;
+      logger.warn('NVIDIA primary key failed/rate-limited, falling back to secondary', { error: primaryErr.message });
 
+      // If it's a timeout/503 on a big model (70B or 49B), downgrade to the fast 8B model.
+      const isBigModel = /70b|49b/i.test(payload.model);
+      if ((primaryErr.status >= 500 || primaryErr.name === 'NvidiaTimeoutError') && isBigModel) {
+        payload.model = EXTRACTION_MODEL;
+        logger.info('Falling back to 8B extraction model to avoid big-model timeout', { model: payload.model });
+      }
+
+      try {
         const responseSecondary = await withNvidiaTimeout((signal) =>
           nvidiaClientSecondary.chat.completions.create(payload, { signal })
         );
@@ -241,8 +240,29 @@ export async function chatCompletion(
         }
         if (!messageSec?.content) throw new Error('NVIDIA API returned an empty response');
         return messageSec.content;
+      } catch (secondaryErr: any) {
+        // Both chat keys failed on the big model — almost always the per-model free-tier
+        // rate cap (the 8B extraction agents keep succeeding on the SAME key1). Last
+        // resort: answer with the fast 8B extraction model instead of the zero-drop
+        // fallback text, so the user always gets a real reply under free-tier pressure.
+        const secRetryable = secondaryErr.status === 429 || secondaryErr.status >= 500 || secondaryErr.name === 'NvidiaTimeoutError';
+        if (!secRetryable) throw secondaryErr;
+        try {
+          payload.model = EXTRACTION_MODEL;
+          logger.warn('NVIDIA secondary also failed — last-resort 8B extraction model', { error: secondaryErr.message });
+          const responseTertiary = await withNvidiaTimeout((signal) =>
+            nvidiaClient.chat.completions.create(payload, { signal })
+          );
+          const messageTer = responseTertiary.choices[0]?.message;
+          if (messageTer?.tool_calls?.length) {
+            return JSON.stringify({ tool_calls: messageTer.tool_calls });
+          }
+          if (!messageTer?.content) throw new Error('NVIDIA API returned an empty response');
+          return messageTer.content;
+        } catch (tertiaryErr) {
+          throw tertiaryErr;
+        }
       }
-      throw primaryErr;
     }
   } catch (err: any) {
     const isDev = process.env.NODE_ENV === 'development';
