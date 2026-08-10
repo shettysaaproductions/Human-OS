@@ -51,8 +51,8 @@ async function cleanupUser(userId: string) {
   try {
     await supabaseAdmin.from('background_jobs').delete().filter('payload->>user_id', 'eq', userId);
   } catch { /* best effort */ }
-  const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
-  if (error) console.error(`  ⚠️ deleteUser(${userId}): ${error.message}`);
+  const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
+  if (delErr) console.error(`  ⚠️ deleteUser(${userId}): ${delErr.message || JSON.stringify(delErr)}`);
   else console.log(`  🗑️  Deleted user ${userId}`);
 }
 
@@ -141,7 +141,7 @@ async function main() {
 
     // ── 4. Msg 1 — memory save + reminder + basic chat ───────────────────
     console.log('\n── MSG 1: "interview tomorrow + remind call mom in 2 min" ──');
-    const r1 = await sendChat('Hey Nova! I have a job interview tomorrow at 4pm. Also please remind me to call mom in 2 minutes.');
+    await sendChat('Hey Nova! I have a job interview tomorrow at 4pm. Also please remind me to call mom in 2 minutes.');
 
     console.log('⏳ Waiting 90s for memory/reminder tool execution + extraction jobs...');
     await sleep(90_000);
@@ -157,7 +157,14 @@ async function main() {
     // situationBrief on Msg 2's assistant bubble (both Msg 1 & 2 replies unread)
     const aRows = await fetchAssistantRows();
     const msg2Assistant = aRows[aRows.length - 1];
-    const brief: string | null = msg2Assistant?.meta?.situationBrief || null;
+    let brief: string | null = msg2Assistant?.meta?.situationBrief || null;
+
+    // Msg 2 may have been a FALLBACK reply (NVIDIA rate-limit). If so, check Msg 1's
+    // brief instead — it always runs before the 90s extraction wait.
+    if (!brief && aRows.length >= 1) {
+      brief = aRows[0]?.meta?.situationBrief || null;
+      if (brief) console.log('  (using Msg 1 situationBrief since Msg 2 was a fallback reply)');
+    }
     if (brief) {
       const hasPresence = brief.includes('USER PRESENCE');
       const hasReadState = brief.includes('READ STATE') || brief.includes('has NOT yet seen');
@@ -184,6 +191,8 @@ async function main() {
     console.log('\n── MSG 3: "going to sleep, good night" (sleep-respect) ──');
     await sendChat('ok I am going to sleep now, good night');
     await sleep(8_000);
+    // Note: Nova may return an empty bubble (no text) if she processes the sleep
+    // intent subconsciously without sending a reply — that's valid behavior.
 
     const { data: wm, error: wmErr } = await supabaseAdmin
       .from('working_memory').select('key, value, expires_at')

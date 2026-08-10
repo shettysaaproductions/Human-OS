@@ -1,7 +1,7 @@
 # Known Issues List (Active)
 
 This document tracks identified bugs, limitations, and workarounds.
-**Last Updated: August 2026**
+**Last Updated: Aug 10, 2026**
 
 ---
 
@@ -103,3 +103,17 @@ This document tracks identified bugs, limitations, and workarounds.
 | Issue | Note |
 |---|---|
 | Recurring reminder day-drift (29–31st) | `calculateNextTrigger` uses `setMonth` → Jan 31 + 1 month = Mar 3. "Every 28th" is safe; 29th–31st drift. Fix: preserve day-of-month clamp |
+| NVIDIA free-tier recall failure under load | On free-tier, the 49B model may be rate-limited mid-test. The 3-tier fallback (49B key1 → 49B key2 → 8B key1) greatly reduces this but doesn't eliminate it. Upgrade API plan or space calls >60s apart to avoid. |
+| Nova may send blank bubble for sleep/bye | If Nova processes sleep intent purely subconsciously (no text reply), `reply: ''` is returned. Sleep lock IS written correctly. Non-breaking — client shows nothing, not a crash. |
+| Supabase `deleteUser` returns empty `{}` error | Occasionally `auth.admin.deleteUser` returns `{}` instead of an error message. The user's table data is deleted successfully; only the auth record deletion is affected. Manual cleanup via Supabase Dashboard if needed. |
+
+## Recently Resolved (Aug 10, 2026)
+
+| Issue | Resolution |
+|---|---|
+| Nova didn't see user's online/offline/typing status | Fix 1: `SituationalAwareness.buildBrief()` now includes `👁️ USER PRESENCE` block with behavior guidance |
+| Nova couldn't tell if user had seen her messages | Fix 2: `POST /api/chat/read` marks assistant rows `is_read=true`; mobile calls on mount + foreground |
+| Long-term memory decay never ran automatically | Fix 3: `MemoryDecayService.processWeeklyDecay()` now runs in nightly maintenance 2–4am weekly |
+| Expo SDK 57 packages broken against SDK 56 runtime | Fix 4: All packages realigned to SDK 56; `expo-doctor` 21/21 |
+| NVIDIA fallback only tried 2 keys, then crashed | Fix 5: 3-tier fallback: primary 49B key1 → secondary 49B key2 → 8B key1 last-resort |
+| Emergency FALLBACK_REPLY save had no `situationBrief` in meta | `situationBrief` hoisted to outer scope; outer catch now attaches it to emergency save's meta |

@@ -695,7 +695,10 @@ chatRouter.post(
       // Set the new lock ONLY after previous is done or timed out
       userLocks.set(userId, { promise: newLock, token: lockToken });
       logger.info('[Chat] Mutex acquired', { userId });
-      
+      // Hoisted so the outer-catch emergency FALLBACK_REPLY save can also attach
+      // the situation brief to meta (enabling presence/read-state even on failure).
+      let situationBrief: string | null = null;
+
       try {
 
         // DEBOUNCE CHECK: Are there any NEWER user messages in this conversation?
@@ -1135,7 +1138,7 @@ chatRouter.post(
         userPresence,
         unreadNovaMessages,
       };
-      const situationBrief = situationalAwareness.buildBrief(situationCtx);
+      situationBrief = situationalAwareness.buildBrief(situationCtx);
 
       // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
       let temporalContextBlock = '';
@@ -1740,6 +1743,9 @@ chatRouter.post(
               conversation_id: activeConversationId,
               role: 'assistant',
               content: FALLBACK_REPLY,
+              // Include situationBrief in meta even for fallback replies so Nova
+              // retains presence/read-state awareness on the next reply.
+              meta: situationBrief ? { situationBrief } : null,
             });
             // Try to push a notification so user knows to check
             const ptResult = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();

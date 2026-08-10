@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-09 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-10 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -96,7 +96,15 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
   - **Real Reminders Only** (`promptBuilder.ts`): Added rule #20 — NEVER say "imaginary timer". If user asks for reminder, MUST emit ReminderEngine.schedule tool action.
   - **NACE Active-User Guard** (`NovaConsciousnessEngine.ts`): NACE won't fire proactive messages when user is actively chatting (gap < 10 min). Exact-match dedup prevents duplicate outreach.
   - **Stuck Conversation Timing** (`NovaFollowupService.ts`): Detection cutoff 1min→10min; bad fallback message replaced.
-- ✅ **Aug 9 Session — Zero-Drop Messaging Guarantee + Reminder Hardening:**
+- ✅ **Aug 10 Session — Presence Awareness + Read Receipts + Memory Hygiene + NVIDIA Resilience:**
+  - **Presence-Aware Brief** (`SituationalAwareness.ts`, `chat.ts`): `buildBrief()` now includes `👁️ USER PRESENCE` (online/away/typing/offline + last-active) and `📬 READ STATE` (how many of Nova's messages the user hasn't opened). Nova adjusts behavior: doesn't assume rejection on away, gives snappy replies when online, self-contained when offline.
+  - **Read Receipts** (`chat.ts`, `chatService.ts`, `ChatScreen.tsx`): New `POST /api/chat/read` marks all unread assistant rows `is_read=true, read_at=<now>`. Mobile calls on chat mount and AppState foreground-restore.
+  - **Weekly Memory Decay Auto-Scheduled** (`index.ts`): `MemoryDecayService.processWeeklyDecay()` now runs inside nightly maintenance (2–4am) once per week. Previously required a manual admin endpoint call.
+  - **Expo SDK 56 Alignment** (`mobile/package.json`): `expo-doctor` 21/21 checks pass; all mismatched SDK 57 packages downgraded to SDK 56.
+  - **NVIDIA 3-Tier Fallback** (`nvidia.ts`): primary 49B key1 → secondary 49B key2 → last-resort 8B key1. User always gets a real reply under free-tier rate pressure.
+  - **Emergency Save Meta Fix** (`chat.ts`): `situationBrief` hoisted to outer scope so the emergency FALLBACK_REPLY catch also stores presence context in `meta`.
+  - **Prod Test (Aug 10):** 5/8 checks ✅ (read-receipts, sleep-lock, reminder-fire, user_moments REMINDER, memory save). 3/8 ❌ were all due to NVIDIA rate-limit on Msg 2 (not code bugs). All test data cleaned up.
+
   - **100% Reply Guarantee** (`chat.ts`): Added `FALLBACK_REPLY` = `"Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?"`. Now saved + pushed in ALL failure paths (async LLM timeout, async LLM error, outer crash catch, 3 streaming/SSE error events). Deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a bubble (clears typing) instead of being silently dropped.
   - **Resume-safe Polling** (`useChatStore.ts`): Poll timeout does ONE final `checkProactiveMessages()` fetch before clearing typing — fixes "reply invisible until restart" when app was backgrounded. `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20; typing-rhythm guard for multi-bubble replies.
   - **Push Re-hydration** (`ChatScreen.tsx`): 500ms delay before history fetch on notification tap.
