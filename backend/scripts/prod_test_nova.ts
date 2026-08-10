@@ -1,21 +1,26 @@
 /**
- * PRODUCTION TEST — Nova end-to-end smoke test (v2).
+ * PRODUCTION TEST — Nova end-to-end smoke test (v3).
  *
  * Runs against the LIVE Render backend + production Supabase using a throwaway
  * user, with the MINIMUM number of NVIDIA calls:
- *   - 2 user messages (2 main chat calls + ~7 background extraction jobs on key4)
- *   - spaced ~90s apart so background memory extraction completes first.
+ *   - 3 user messages (3 main chat calls + background extraction jobs)
+ *   - spaced so background memory extraction completes first.
  *
  * Coverage per message:
- *   Msg 1 "interview tomorrow + remind call mom" → chat reply, memory save,
- *         reminder scheduling, presence in brief.
- *   Msg 2 "do you remember my interview?"        → memory recall + situation
- *         brief with ONLINE presence + unread READ STATE.
- * Then POST /chat/read marks Nova's messages seen.
+ *   Msg 1 "interview tomorrow + remind call mom in 2 min" → chat reply, memory
+ *         save, reminder scheduling.
+ *   Msg 2 "do you remember my interview?"                  → memory recall +
+ *         situation brief with ONLINE presence + unread READ STATE.
+ *   Then POST /chat/read marks Nova's messages seen (read receipts).
+ *   Msg 3 "good night"                                     → sleep/busy lock
+ *         written to working_memory (NACE + follow-up suppression).
+ *   Wait for the "call mom" reminder to FIRE → status 'completed' + a
+ *         user_moments REMINDER entry (reminder engine precision).
  *
  * Verifies DB effects directly (chat_history, memories, reminders,
- * user_presence, situationBrief meta), then ALWAYS DELETES the test user + data
- * (try/finally) — plus any leftover novatest_* users from earlier runs.
+ * user_presence, working_memory, user_moments, situationBrief meta), then
+ * ALWAYS DELETES the test user + data (try/finally) — plus any leftover
+ * novatest_* users from earlier runs.
  *
  * Run: npm run boot:prodtest
  */
@@ -34,7 +39,7 @@ async function cleanupUser(userId: string) {
     'chat_history', 'memories', 'reminders', 'user_presence', 'short_term_memories',
     'working_memory', 'episodic_memories', 'emotional_states', 'reflections',
     'knowledge_graph', 'nova_agenda_items', 'nova_outreach_log', 'sleep_schedule',
-    'nudges', 'goals', 'habits', 'proactive_triggers',
+    'nudges', 'goals', 'habits', 'proactive_triggers', 'user_moments', 'nova_followups',
   ];
   for (const table of tables) {
     try {
@@ -62,7 +67,7 @@ async function cleanupLeftovers() {
 }
 
 async function main() {
-  console.log('=== NOVA PRODUCTION TEST v2 ===');
+  console.log('=== NOVA PRODUCTION TEST v3 ===');
   await cleanupLeftovers();
 
   // ── 1. Create throwaway user ────────────────────────────────────────────
@@ -126,41 +131,33 @@ async function main() {
       return body;
     };
 
-    // ── 4. Msg 1 — memory save + reminder + basic chat ───────────────────
-    console.log('\n── MSG 1: "interview tomorrow + remind call mom" ──');
-    await sendChat('Hey Nova! I have a job interview tomorrow at 4pm. Also please remind me to call mom in 5 minutes.');
+    const fetchAssistantRows = async () => {
+      const { data, error } = await supabaseAdmin
+        .from('chat_history').select('role, content, is_read, meta')
+        .eq('user_id', userId!).order('created_at', { ascending: true });
+      if (error) throw new Error(`chat_history: ${error.message}`);
+      return data.filter((r: any) => r.role === 'assistant');
+    };
 
-    console.log('⏳ Waiting 90s for memory/reminder extraction jobs...');
+    // ── 4. Msg 1 — memory save + reminder + basic chat ───────────────────
+    console.log('\n── MSG 1: "interview tomorrow + remind call mom in 2 min" ──');
+    const r1 = await sendChat('Hey Nova! I have a job interview tomorrow at 4pm. Also please remind me to call mom in 2 minutes.');
+
+    console.log('⏳ Waiting 90s for memory/reminder tool execution + extraction jobs...');
     await sleep(90_000);
 
     // ── 5. Msg 2 — memory recall + presence + read state in brief ────────
     console.log('\n── MSG 2: "do you remember my interview?" ──');
-    await sendChat('Do you remember what I told you about my job interview?');
+    const r2 = await sendChat('Do you remember what I told you about my job interview?');
     await sleep(15_000);
 
-    // ── 6. Mark Nova\'s messages as read via the new endpoint ─────────────
-    const readRes = await fetch(`${BASE_URL}/chat/read`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    });
-    console.log(`✅ POST /chat/read -> HTTP ${readRes.status}`);
+    const recalled = /interview/i.test(String(r2.reply || ''));
+    console.log(`  memory recall in reply: ${recalled ? '✅' : '❌'}`);
 
-    // ── 7. Verify DB effects ──────────────────────────────────────────────
-    console.log('\n── DB VERIFICATION ──');
-    const { data: chatRows, error: chatErr } = await supabaseAdmin
-      .from('chat_history').select('role, content, is_read, meta')
-      .eq('user_id', userId).order('created_at', { ascending: true });
-    if (chatErr) throw new Error(`chat_history: ${chatErr.message}`);
-    const userRows = chatRows.filter((r: any) => r.role === 'user');
-    const assistantRows = chatRows.filter((r: any) => r.role === 'assistant');
-    console.log(`chat_history: ${userRows.length} user rows, ${assistantRows.length} assistant rows`);
-    if (assistantRows.length > 0) {
-      const allRead = assistantRows.every((r: any) => r.is_read === true);
-      console.log(`  is_read after POST /chat/read → all assistant messages read: ${allRead}`);
-    }
-
-    // situationBrief meta on the LAST assistant bubble
-    const lastAssistant = assistantRows[assistantRows.length - 1];
-    const brief: string | null = lastAssistant?.meta?.situationBrief || null;
+    // situationBrief on Msg 2's assistant bubble (both Msg 1 & 2 replies unread)
+    const aRows = await fetchAssistantRows();
+    const msg2Assistant = aRows[aRows.length - 1];
+    const brief: string | null = msg2Assistant?.meta?.situationBrief || null;
     if (brief) {
       const hasPresence = brief.includes('USER PRESENCE');
       const hasReadState = brief.includes('READ STATE') || brief.includes('has NOT yet seen');
@@ -170,12 +167,54 @@ async function main() {
       console.log(`    ${presLine}`);
       console.log(`    ${readLine}`);
     } else {
-      console.log('  ⚠️ no situationBrief in last assistant meta');
+      console.log('  ⚠️ no situationBrief in Msg 2 assistant meta');
     }
 
-    // Memories (key/value)
+    // ── 6. Mark Nova's messages as read via the new endpoint ─────────────
+    const readRes = await fetch(`${BASE_URL}/chat/read`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    });
+    console.log(`✅ POST /chat/read -> HTTP ${readRes.status}`);
+
+    const afterRead = await fetchAssistantRows();
+    const allRead = afterRead.length > 0 && afterRead.every((r: any) => r.is_read === true);
+    console.log(`  is_read after POST /chat/read → all assistant messages read: ${allRead}`);
+
+    // ── 7. Msg 3 — sleep/unavailability lock ─────────────────────────────
+    console.log('\n── MSG 3: "going to sleep, good night" (sleep-respect) ──');
+    await sendChat('ok I am going to sleep now, good night');
+    await sleep(8_000);
+
+    const { data: wm, error: wmErr } = await supabaseAdmin
+      .from('working_memory').select('key, value, expires_at')
+      .eq('user_id', userId!).eq('key', 'followup_suppressed_until').maybeSingle();
+    if (wmErr) throw new Error(`working_memory: ${wmErr.message}`);
+    const lockFuture = wm && new Date(wm.expires_at).getTime() > Date.now();
+    console.log(`  followup_suppressed_until lock: ${wm ? `✅ written (expires ${wm.expires_at}) future=${lockFuture}` : '❌ MISSING'}`);
+
+    // ── 8. Wait for the "call mom" reminder to fire ──────────────────────
+    console.log('\n⏳ Waiting ~3.5 min for the "call mom" reminder to FIRE...');
+    await sleep(210_000);
+
+    const { data: reminders, error: remErr } = await supabaseAdmin
+      .from('reminders').select('text, trigger_at, status').eq('user_id', userId!);
+    if (remErr) throw new Error(`reminders: ${remErr.message}`);
+    const momReminder = (reminders || []).find((r: any) => /mom/i.test(r.text || ''));
+    console.log(`reminders: ${reminders?.length ?? 0} rows`);
+    (reminders || []).forEach((r: any) =>
+      console.log(`  • [${r.status}] ${String(r.text).slice(0, 60)} @ ${r.trigger_at}`));
+    const reminderFired = momReminder?.status === 'completed';
+    console.log(`  "call mom" reminder fired (status=completed): ${reminderFired ? '✅' : '❌'}`);
+
+    const { data: moments, error: momErr } = await supabaseAdmin
+      .from('user_moments').select('moment_type, title').eq('user_id', userId!);
+    if (momErr) console.warn('  ⚠️ user_moments fetch (non-fatal):', momErr.message);
+    const hasReminderMoment = (moments || []).some((m: any) => m.moment_type === 'REMINDER');
+    console.log(`  user_moments REMINDER entry: ${hasReminderMoment ? '✅' : '❌'}`);
+
+    // ── 9. Final memory check ─────────────────────────────────────────────
     const { data: memories, error: memErr } = await supabaseAdmin
-      .from('memories').select('key, value, importance').eq('user_id', userId)
+      .from('memories').select('key, value, importance').eq('user_id', userId!)
       .order('created_at', { ascending: false }).limit(5);
     if (memErr) throw new Error(`memories: ${memErr.message}`);
     console.log(`\nmemories: ${memories?.length ?? 0} rows`);
@@ -184,23 +223,18 @@ async function main() {
     const hasInterview = (memories ?? []).some((m: any) => /interview/i.test(`${m.key} ${m.value}`));
     console.log(`  interview memory saved: ${hasInterview ? '✅' : '❌'}`);
 
-    // Reminders (text column)
-    const { data: reminders, error: remErr } = await supabaseAdmin
-      .from('reminders').select('text, trigger_at, status').eq('user_id', userId);
-    if (remErr) throw new Error(`reminders: ${remErr.message}`);
-    console.log(`\nreminders: ${reminders?.length ?? 0} rows`);
-    (reminders ?? []).forEach((r: any) =>
-      console.log(`  • [${r.status}] ${String(r.text).slice(0, 60)} @ ${r.trigger_at}`));
-    const hasMomReminder = (reminders ?? []).some((r: any) => /mom/i.test(r.text || ''));
-    console.log(`  "call mom" reminder scheduled: ${hasMomReminder ? '✅' : '❌'}`);
-
     // Presence row
     const { data: presence, error: presErr } = await supabaseAdmin
-      .from('user_presence').select('status, last_active_at').eq('user_id', userId).maybeSingle();
+      .from('user_presence').select('status, last_active_at').eq('user_id', userId!).maybeSingle();
     if (presErr) throw new Error(`presence: ${presErr.message}`);
     console.log(`\nuser_presence: ${presence ? `${presence.status} (last active ${presence.last_active_at})` : 'NO ROW'}`);
+
+    // Summary
+    const checks = { recalled, hasPresence: !!brief?.includes('USER PRESENCE'), hasReadState: !!brief?.includes('READ STATE'), allRead, lockFuture, reminderFired, hasReminderMoment, hasInterview };
+    console.log('\n── SUMMARY ──');
+    (Object.entries(checks) as any[]).forEach(([k, v]) => console.log(`  ${v === true ? '✅' : v === false ? '❌' : '⚠️'} ${k} = ${String(v)}`));
   } finally {
-    // ── 8. ALWAYS clean up ────────────────────────────────────────────────
+    // ── 10. ALWAYS clean up ──────────────────────────────────────────────
     console.log('\n── CLEANUP ──');
     if (userId) await cleanupUser(userId);
     await cleanupLeftovers();
