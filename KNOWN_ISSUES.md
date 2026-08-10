@@ -97,6 +97,9 @@ This document tracks identified bugs, limitations, and workarounds.
 | **Mobile: reply poller torn down by newer message's reply** | Poller stops only when the last user message has an assistant reply after it | Aug 9 2026 |
 | **KG Explorer d3 sim leaked after unmount** | Simulation stored in a ref, stopped on unmount / re-fetch | Aug 9 2026 |
 | **Migration 020 aborted fresh applies** | `RENAME COLUMN` now guarded (idempotent) in `020_sync_reminders_schema.sql` | Aug 9 2026 |
+| **Nova couldn't "see" user presence** | Presence row (`user_presence`) now fetched + rendered in situation brief as `👁️ USER PRESENCE: ONLINE/AWAY/OFFLINE/TYPING (last active X min ago)` with per-state behavior guidance | Aug 10 2026 |
+| **Read receipts (`is_read`) never written or read** | New `POST /api/chat/read` marks assistant messages read; `📬 READ STATE` block in brief shows unread count; mobile `markMessagesRead()` on screen open / foreground | Aug 10 2026 |
+| **Long-term memory decay not scheduled** | `MemoryDecayService.processWeeklyDecay()` now auto-runs in the nightly maintenance window (was manual admin endpoint only). Free-tier hygiene: short-term cleanup daily + chat pruning nightly + decay weekly | Aug 10 2026 |
 
 ## Known Limitations
 

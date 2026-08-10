@@ -104,7 +104,7 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
   - **NVIDIA 3-Tier Fallback** (`nvidia.ts`): primary 49B key1 → secondary 49B key2 → last-resort 8B key1. User always gets a real reply under free-tier rate pressure.
   - **Emergency Save Meta Fix** (`chat.ts`): `situationBrief` hoisted to outer scope so the emergency FALLBACK_REPLY catch also stores presence context in `meta`.
   - **Prod Test (Aug 10):** 5/8 checks ✅ (read-receipts, sleep-lock, reminder-fire, user_moments REMINDER, memory save). 3/8 ❌ were all due to NVIDIA rate-limit on Msg 2 (not code bugs). All test data cleaned up.
-
+- ✅ **Aug 9 Session — Zero-Drop Messaging Guarantee + Reminder Hardening:**
   - **100% Reply Guarantee** (`chat.ts`): Added `FALLBACK_REPLY` = `"Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?"`. Now saved + pushed in ALL failure paths (async LLM timeout, async LLM error, outer crash catch, 3 streaming/SSE error events). Deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a bubble (clears typing) instead of being silently dropped.
   - **Resume-safe Polling** (`useChatStore.ts`): Poll timeout does ONE final `checkProactiveMessages()` fetch before clearing typing — fixes "reply invisible until restart" when app was backgrounded. `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20; typing-rhythm guard for multi-bubble replies.
   - **Push Re-hydration** (`ChatScreen.tsx`): 500ms delay before history fetch on notification tap.
