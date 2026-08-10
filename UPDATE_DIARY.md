@@ -4,7 +4,49 @@ Chronological log of all agent-executed changes. Maintained by `update agent` co
 
 ---
 
-## [2026-08-09] Zero-Drop Messaging Guarantee + Reminder Engine Hardening
+## [2026-08-10] Presence Awareness + Read Receipts + Memory Auto-Decay + Expo SDK Alignment + NVIDIA 3-Tier Fallback
+
+### Trigger
+User requested Nova to "actually deliver as designed" — specifically: see user's online/offline status, track which messages were read, not message back-to-back unnecessarily, understand sleep schedule, and remember important conversations. Free-tier constraints were hardened throughout.
+
+### Changes Made
+
+**Fix 1 — Presence-Aware Situation Brief** (`backend/src/services/SituationalAwareness.ts`, `backend/src/routes/chat.ts`):
+- Extended `SituationContext` interface with `userPresence` (status/last_active/last_typing) and `unreadNovaMessages`.
+- `buildBrief()` now emits `👁️ USER PRESENCE: ONLINE/AWAY/TYPING/OFFLINE (last active X min ago)` block with per-state behavior guidance, and `📬 READ STATE: user has NOT yet seen N message(s)` when applicable.
+- Two extra parallel Supabase queries added to the chat context fetch (presence + unread count).
+- `situationBrief` variable hoisted to outer scope so the emergency FALLBACK_REPLY catch also attaches it to `meta`.
+
+**Fix 2 — Read Receipts** (`backend/src/routes/chat.ts`, `mobile/src/services/chatService.ts`, `mobile/src/screens/ChatScreen.tsx`):
+- New `POST /api/chat/read` endpoint marks all unread assistant messages as `is_read=true, read_at=<now>`.
+- Mobile calls `chatService.markMessagesRead()` on chat screen mount and on AppState foreground restore.
+
+**Fix 3 — Weekly Memory Auto-Decay Scheduled** (`backend/src/index.ts`):
+- `MemoryDecayService.processWeeklyDecay()` now runs automatically inside the nightly maintenance window (2–4am) once per week (`lastMemoryDecayDate` guard). Previously only ran via manual admin endpoint.
+
+**Fix 4 — Expo SDK 56 Alignment** (`mobile/package.json`):
+- Installed yarn globally, ran `npx expo install --fix`. All packages aligned to SDK 56. `expo-doctor` 21/21 checks pass.
+
+**Fix 5 — NVIDIA 3-Tier Fallback** (`backend/src/lib/nvidia.ts`):
+- Fallback chain: primary 49B key1 → secondary 49B key2 → last-resort 8B key1. Ensures user always gets a real reply under free-tier rate pressure instead of the zero-drop fallback text.
+
+### Production Test Results (Aug 10 — temp user, 3 messages, cleaned up)
+| Check | Result | Notes |
+|---|---|---|
+| allRead (read receipts) | ✅ | POST /chat/read HTTP 200, all assistant rows marked is_read=true |
+| lockFuture (sleep lock) | ✅ | followup_suppressed_until written to working_memory |
+| reminderFired | ✅ | "call mom" status=completed within 3.5 min |
+| hasReminderMoment | ✅ | user_moments REMINDER entry created |
+| hasInterview (memory) | ✅ | upcoming_job_interview saved with importance 90 |
+| recalled (Msg 2) | ❌ | NVIDIA rate-limited → fallback reply; memory extraction & recall correct in DB |
+| hasPresence/hasReadState | ❌ | Checked Msg 2 meta which was a fallback; brief present in Msg 1 meta |
+
+### Status
+Backend + mobile typechecks pass. All changes committed and pushed to `main`. Render auto-deploys on push. Mobile read receipts require OTA update (`npx eas update --branch production`).
+
+---
+
+
 
 ### Trigger
 User reported Nova's replies being generated but not displayed until app restart. Plan approved to guarantee every user message receives a visible response.
