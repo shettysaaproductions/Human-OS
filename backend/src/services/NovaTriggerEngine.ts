@@ -76,12 +76,12 @@ export class NovaTriggerEngine {
           content: message,
         });
 
-        // Also save to outreach log
+        // Also save to outreach log (schema columns are outreach_type/created_at,
+        // NOT type/sent_at — the old insert failed every time)
         await supabaseAdmin.from('nova_outreach_log').insert({
           user_id: userId,
           message,
-          type: 'proactive',
-          sent_at: new Date().toISOString(),
+          outreach_type: 'proactive',
         });
       } catch (e) {
         logger.error('[TriggerEngine] Failed to send scheduled message:', e);

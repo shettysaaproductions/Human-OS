@@ -51,13 +51,15 @@ export class WeatherWatcherService {
       }
 
       // Check if we already alerted the user about weather in the last 12 hours
+      // (schema columns are outreach_type/created_at — the old query errored, so the
+      // 12h dedup NEVER worked and severe-weather alerts could repeat every cron tick)
       const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
       const { data: recentAlerts } = await supabaseAdmin
         .from('nova_outreach_log')
         .select('id')
         .eq('user_id', userId)
-        .eq('type', 'proactive_weather')
-        .gte('sent_at', twelveHoursAgo);
+        .eq('outreach_type', 'proactive_weather')
+        .gte('created_at', twelveHoursAgo);
 
       if (recentAlerts && recentAlerts.length > 0) {
         return; // Already alerted
@@ -90,11 +92,11 @@ Write a very short, casual text message warning them or checking in. (e.g., "hey
       }, async () => alertMessage.trim());
 
       // Log the specific weather alert type so we don't spam
+      // ('proactive_weather' is added to the outreach_type CHECK in migration 026)
       await supabaseAdmin.from('nova_outreach_log').insert({
         user_id: userId,
         message: alertMessage.trim(),
-        type: 'proactive_weather',
-        sent_at: new Date().toISOString(),
+        outreach_type: 'proactive_weather',
       });
 
       logger.info(`[WeatherWatcher] Fired proactive weather alert for ${userId} in ${location}`);
