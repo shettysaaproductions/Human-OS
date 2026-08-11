@@ -128,7 +128,10 @@ export class NovaConsciousnessEngine {
       }
     }
 
-    const tContext = await temporalAwarenessService.getContext(userId, profile.timezone_offset);
+    // timezone_offset is stored in MINUTES (e.g. 330 for IST), but getContext expects
+    // HOURS. Passing 330 raw shifted 'now' by 330h (~13.75 days) into the future, which
+    // broke sleep-window + day/night detection for the user.
+    const tContext = await temporalAwarenessService.getContext(userId, (profile.timezone_offset || 0) / 60);
 
     // 2. Fetch Recent Outreach to enforce MIN_GAP
     const { data: recentOutreach } = await supabaseAdmin

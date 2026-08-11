@@ -251,7 +251,7 @@ describe('NovaTriggerEngine', () => {
       expect(mockChain.insert).toHaveBeenCalledWith(expect.objectContaining({
         message: 'Hello integration',
         user_id: 'u-integration',
-        type: 'proactive'
+        outreach_type: 'proactive'
       }));
     });
   });
