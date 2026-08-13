@@ -135,12 +135,17 @@ export class ReminderSchedulerService {
     }
 
     const now = new Date();
-    const triggerTime = new Date(reminder.trigger_at);
+    // Event reminders have trigger_at = NULL — they are ALWAYS eligible to fire
+    // (they are only reached via fireEvent, which does its own active+event_trigger lookup).
+    // Time-based reminders must not have a future trigger_at.
+    const isEventReminder = !reminder.trigger_at;
+    const triggerTime = isEventReminder ? now : new Date(reminder.trigger_at);
+
     // Generate a warm, Nova-style reminder message (natural Hinglish, not "🔔 Reminder: x")
     const message = await this.generateReminderMessage(reminder);
-    
-    // Safety check: if trigger time is in the future, do not fire yet
-    if (triggerTime > now) {
+
+    // Safety check: if trigger time is in the future, do not fire yet (time-based only)
+    if (!isEventReminder && triggerTime > now) {
       logger.info('Reminder scheduled for future, skipping fire', { reminderId });
       return;
     }

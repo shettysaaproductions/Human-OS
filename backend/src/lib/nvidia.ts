@@ -259,7 +259,32 @@ export async function chatCompletion(
           }
           if (!messageTer?.content) throw new Error('NVIDIA API returned an empty response');
           return messageTer.content;
-        } catch (tertiaryErr) {
+        } catch (tertiaryErr: any) {
+          // Final fallback: wait 2s and retry with 8B on the secondary key.
+          // NVIDIA free-tier per-model rate windows often reset in <2s. This
+          // prevents FALLBACK_REPLY from firing on transient spikes — a 2s pause
+          // is far less jarring than killing the conversation with a fake reply.
+          const isFinalRetryable = tertiaryErr.status === 429 || tertiaryErr.status >= 500 || tertiaryErr.name === 'NvidiaTimeoutError';
+          if (isFinalRetryable) {
+            logger.warn('NVIDIA all tiers failed — waiting 2s for rate-limit window reset, then final retry', { error: tertiaryErr.message });
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            try {
+              payload.model = EXTRACTION_MODEL;
+              const responseFinal = await withNvidiaTimeout((signal) =>
+                nvidiaClientSecondary.chat.completions.create(payload, { signal })
+              );
+              const messageFin = responseFinal.choices[0]?.message;
+              if (messageFin?.tool_calls?.length) {
+                return JSON.stringify({ tool_calls: messageFin.tool_calls });
+              }
+              if (!messageFin?.content) throw new Error('Final retry: empty response');
+              logger.info('NVIDIA final retry succeeded after 2s backoff');
+              return messageFin.content;
+            } catch (finalErr) {
+              logger.error('NVIDIA final retry also failed — FALLBACK_REPLY will be sent', { error: finalErr instanceof Error ? finalErr.message : String(finalErr) });
+              throw finalErr;
+            }
+          }
           throw tertiaryErr;
         }
       }
