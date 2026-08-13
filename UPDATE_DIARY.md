@@ -4,6 +4,26 @@ Chronological log of all agent-executed changes. Maintained by `update agent` co
 
 ---
 
+## [2026-08-13] NVIDIA Fallback Fix & Reminder Engine Hardening + Anti-Robot Rules
+
+### Trigger
+User requested fix for 4 production bugs found in the last 20 chat messages: FALLBACK_REPLY firing on NVIDIA rate-limit, robotic list format in Nova's responses, reminder GET endpoint missing active filter, and reminder scheduler crashing on NULL trigger_at.
+
+### Changes Made
+- **NVIDIA Fallback Hardening** (`backend/src/lib/nvidia.ts`): Added a 2s backoff and final retry on the secondary key (key2) with the 8B model when all tiers fail (rate limit). This prevents `FALLBACK_REPLY` from killing the conversation on transient spikes.
+- **Anti-Robot Rules** (`backend/src/services/promptBuilder.ts`): Added rules to strictly forbid numbered lists, bullet points, bold section headers, and KPI-style progress updates. Required conversational `<NOVA_MSG>` bubbles in HUMAN_CHAT mode.
+- **Reminder GET Hardening** (`backend/src/routes/reminders.ts`): GET endpoint now filters `.eq('status', 'active')` to prevent completed/cancelled reminders from polluting Nova's context. Sorted with `nullsFirst: false` so event reminders appear last.
+- **Event Reminder Fix** (`backend/src/services/ReminderSchedulerService.ts`): `fireReminder()` now skips the epoch-date future check for event reminders (`trigger_at = NULL`).
+- **Typo Fixes** (`backend/src/routes/reminders.ts`): Fixed 'canceled' to 'cancelled' to align with Supabase CHECK constraint.
+- **Build Fixes**: Fixed pre-existing build breaks in `memoryDebug.ts` and `health.ts`. Removed broken stub `test_nvidia.ts`.
+
+### Status
+- Build passed (exit 0).
+- Committed and pushed to `main`.
+- OTA update deployed to mobile.
+
+---
+
 ## [2026-08-10] Presence Awareness + Read Receipts + Memory Auto-Decay + Expo SDK Alignment + NVIDIA 3-Tier Fallback
 
 ### Trigger

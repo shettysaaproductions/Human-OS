@@ -13,6 +13,8 @@
 - [ ] Monitor FreeTierGuard logs for any limit warnings
 
 ## ✅ Completed
+- [x] Fix NVIDIA fallback, Reminder bugs and anti-robot rules (Auto Upgrade)
+- [x] Delete `backend/test_nvidia.ts`
 - [x] Fix push notification backend crash (`push_token_updated_at`)
 - [x] Write `ensureTokenFresh()` for mobile token freshness
 - [x] Add 3 new behavioral patches to promptBuilder
