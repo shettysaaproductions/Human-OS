@@ -19,6 +19,8 @@ export interface Message {
   options?: string[];
   user_reaction?: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null;
   image_base64?: string;
+  hasThoughts?: boolean;
+  thoughts?: Array<{ engine: string; type: string; detail: string; data?: any }>;
 }
 
 export interface ChatDiagnostics {
@@ -544,6 +546,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                   options: msg.meta?.options,
                   user_reaction: msg.user_reaction,
                   reply_to_content: msg.reply_to_content,
+                  hasThoughts: msg.meta?.hasThoughts,
                 });
               });
             } else {
@@ -556,6 +559,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
                 reply_to_content: msg.reply_to_content,
+                hasThoughts: msg.meta?.hasThoughts,
               });
             }
           }
@@ -703,10 +707,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 chunkTotal: finalChunks.length > 1 ? finalChunks.length : undefined,
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
+                hasThoughts: msg.meta?.hasThoughts,
               });
             });
           } else {
-            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp, options: msg.meta?.options, user_reaction: msg.user_reaction });
+            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp, options: msg.meta?.options, user_reaction: msg.user_reaction, hasThoughts: msg.meta?.hasThoughts });
           }
         }
 

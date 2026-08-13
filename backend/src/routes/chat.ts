@@ -1551,6 +1551,31 @@ chatRouter.post(
           .maybeSingle();
         const pushToken = pushTokenResult.data?.push_token as string | undefined;
 
+        // Prepare thoughts array
+        const thoughts: any[] = [];
+        if (situationBrief) {
+          thoughts.push({
+            engine: 'SituationalAwareness',
+            type: 'context',
+            detail: 'Analyzed current user context and conversation state'
+          });
+        }
+        if (extractedActions && extractedActions.length > 0) {
+          extractedActions.forEach((action: any) => {
+            thoughts.push({
+              engine: action.tool || 'NovaBrain',
+              type: 'action',
+              detail: `Executed action: ${action.tool}`,
+              data: action.data || {}
+            });
+          });
+        }
+        thoughts.push({
+          engine: 'PromptBuilder',
+          type: 'anti_robot',
+          detail: 'Applied rules: NO_BOLD, CASUAL_HINGLISH'
+        });
+
         // Create separate DB rows for each bubble
         for (let idx = 0; idx < finalBubbles.length; idx++) {
           const msgText = finalBubbles[idx];
@@ -1570,7 +1595,8 @@ chatRouter.post(
             meta: idx === finalBubbles.length - 1 ? {
               situationBrief: situationBrief || null,
               subconsciousActions: extractedActions,
-              options: optionsArray
+              options: optionsArray,
+              hasThoughts: thoughts.length > 0
             } : null
           };
           
@@ -1621,6 +1647,24 @@ chatRouter.post(
             const savedMsg = saveResult.data;
             logger.info('[Chat] AI response saved to DB', { requestId, userId, messageId: savedMsg.id });
             
+            // If this is the last bubble (where meta is attached), save the thoughts
+            if (idx === finalBubbles.length - 1 && thoughts.length > 0) {
+              const thoughtsResult = await supabaseAdmin.from('nova_thoughts').insert({
+                chat_message_id: savedMsg.id,
+                user_id: userId,
+                thoughts: thoughts
+              });
+              
+              if (thoughtsResult.error) {
+                logger.error('[Chat] FAILED to save thoughts to nova_thoughts', {
+                  requestId,
+                  userId,
+                  messageId: savedMsg.id,
+                  error: thoughtsResult.error.message
+                });
+              }
+            }
+
             // Send push for each bubble (with small delay between)
             if (pushToken) {
               await sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)
@@ -1844,6 +1888,32 @@ chatRouter.get(
 
       // Return in ascending order (oldest first) so the client can prepend correctly
       res.status(200).json((data || []).reverse());
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── GET Thoughts (Lazy Load) ──────────────────────────────────────────────────
+chatRouter.get(
+  '/:messageId/thoughts',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user!.id;
+      const { messageId } = req.params;
+
+      const { data, error } = await supabaseAdmin
+        .from('nova_thoughts')
+        .select('thoughts')
+        .eq('chat_message_id', messageId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`Failed to fetch thoughts: ${error.message}`);
+      }
+
+      res.status(200).json({ thoughts: data?.thoughts || [] });
     } catch (err) {
       next(err);
     }
