@@ -14,6 +14,7 @@ import { notificationService, setChatScreenActive } from '../services/notificati
 import { presenceService } from '../services/presenceService';
 import * as Notifications from 'expo-notifications';
 import { ThoughtBubble } from '../components/ThoughtBubble';
+import { LiveThinkingIndicator } from '../components/LiveThinkingIndicator';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
@@ -1148,14 +1149,8 @@ export function ChatScreen() {
           )}
         </View>
 
-        {/* Typing indicator */}
-        {isTyping && (
-          <View style={s.typingContainer}>
-            <View style={s.typingDot} />
-            <View style={[s.typingDot, { opacity: 0.6 }]} />
-            <View style={[s.typingDot, { opacity: 0.3 }]} />
-          </View>
-        )}
+        {/* Live Thinking & Typing indicator */}
+        {isTyping && <LiveThinkingIndicator />}
 
         {/* Reply Preview */}
         {replyingTo && (
