@@ -120,3 +120,4 @@ This document tracks identified bugs, limitations, and workarounds.
 | Expo SDK 57 packages broken against SDK 56 runtime | Fix 4: All packages realigned to SDK 56; `expo-doctor` 21/21 |
 | NVIDIA fallback only tried 2 keys, then crashed | Fix 5: 3-tier fallback: primary 49B key1 → secondary 49B key2 → 8B key1 last-resort |
 | Emergency FALLBACK_REPLY save had no `situationBrief` in meta | `situationBrief` hoisted to outer scope; outer catch now attaches it to emergency save's meta |
+| **Claude/OmniRoute RLHF bias — robotic lists, AI disclaimers, menus** | Added ANTI-ROBOT (CLAUDE/OMNI): NO AI DISCLAIMERS, NO MENUS OR AGENDAS, NO ROBOT CONFIRMATIONS; ReminderEngine tool prompt tells model backend sends pushes | Aug 13 2026 |
