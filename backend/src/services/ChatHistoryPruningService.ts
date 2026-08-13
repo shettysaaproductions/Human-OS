@@ -1,4 +1,4 @@
-﻿import { supabaseAdmin } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
 const CHAR_BUDGET = 150_000;
@@ -6,11 +6,11 @@ const TRIM_TARGET = 120_000;
 const MAX_MESSAGES = 2_000;
 const BATCH_SIZE = 100;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // EMOTION CLASSIFIER
 // Returns the dominant emotion label from the content.
-// Pure keyword heuristics — zero API calls, zero egress impact.
-// ─────────────────────────────────────────────────────────────────────────────
+// Pure keyword heuristics � zero API calls, zero egress impact.
+// -----------------------------------------------------------------------------
 const EMOTION_MAP: { emotion: string; keywords: string[] }[] = [
   { emotion: 'grief',     keywords: ['died', 'death', 'funeral', 'passed away', 'lost him', 'lost her', 'missing you', 'miss them', 'loss'] },
   { emotion: 'crisis',    keywords: ['suicidal', 'want to die', 'kill myself', 'end it all', 'no point', 'hopeless', 'give up on life'] },
@@ -33,30 +33,30 @@ function classifyEmotion(text: string): string {
   return 'neutral';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // IMPORTANCE SCORER
-// Returns a score 0.0–1.0.  Pure local heuristics — no external calls.
+// Returns a score 0.0�1.0.  Pure local heuristics � no external calls.
 //
 // Scoring philosophy:
-//   • High-emotion topics are inherently important (grief, crisis, anxiety)
-//   • Life events (health, family, career, money, goals) matter more than chit-chat
-//   • Longer messages contain more information → slight length boost
-//   • Short filler messages ("ok", "haan", "thanks") → low importance
-// ─────────────────────────────────────────────────────────────────────────────
+//   � High-emotion topics are inherently important (grief, crisis, anxiety)
+//   � Life events (health, family, career, money, goals) matter more than chit-chat
+//   � Longer messages contain more information ? slight length boost
+//   � Short filler messages ("ok", "haan", "thanks") ? low importance
+// -----------------------------------------------------------------------------
 const IMPORTANCE_TOPICS = [
-  // Critical / life events — weight 1.0
+  // Critical / life events � weight 1.0
   { weight: 1.0, keywords: ['suicidal', 'want to die', 'died', 'death', 'cancer', 'diagnosed', 'surgery', 'hospital', 'admitted', 'accident', 'abuse', 'assault'] },
-  // High-importance personal events — weight 0.85
+  // High-importance personal events � weight 0.85
   { weight: 0.85, keywords: ['breakup', 'divorce', 'fired', 'lost my job', 'got the job', 'promoted', 'pregnant', 'baby', 'marriage', 'engaged', 'heartbroken', 'grief', 'panic attack'] },
-  // Health & medical — weight 0.80
+  // Health & medical � weight 0.80
   { weight: 0.80, keywords: ['health', 'sick', 'fever', 'doctor', 'medicine', 'therapy', 'therapist', 'mental health', 'anxiety', 'depression', 'pain', 'blood pressure', 'diabetes'] },
-  // Relationships & family — weight 0.75
+  // Relationships & family � weight 0.75
   { weight: 0.75, keywords: ['wife', 'husband', 'mom', 'dad', 'mother', 'father', 'sister', 'brother', 'family', 'friend', 'relationship', 'argument', 'fight with'] },
-  // Career & money — weight 0.70
+  // Career & money � weight 0.70
   { weight: 0.70, keywords: ['salary', 'money', 'debt', 'loan', 'investment', 'career', 'exam', 'interview', 'college', 'university', 'marks', 'result', 'business'] },
-  // Goals & personal growth — weight 0.65
+  // Goals & personal growth � weight 0.65
   { weight: 0.65, keywords: ['goal', 'habit', 'workout', 'gym', 'meditation', 'learning', 'reading', 'project', 'startup', 'plan', 'schedule', 'routine'] },
-  // Emotions expressed — weight 0.60
+  // Emotions expressed � weight 0.60
   { weight: 0.60, keywords: ['feel', 'feeling', 'emotion', 'mood', 'stressed', 'excited', 'worried', 'scared', 'confused', 'hurt', 'angry', 'happy', 'sad'] },
 ];
 
@@ -65,15 +65,15 @@ const FILLER_PATTERNS = /^(ok|okay|haan|ha|hmm|lol|haha|k|thanks|ty|bye|hi|hello
 function scoreImportance(content: string, emotion: string): number {
   const lower = content.toLowerCase().trim();
 
-  // Filler messages → near-zero importance
+  // Filler messages ? near-zero importance
   if (content.length < 15 && FILLER_PATTERNS.test(lower)) return 0.1;
 
-  // Crisis/grief emotion → always maximum importance
+  // Crisis/grief emotion ? always maximum importance
   if (emotion === 'crisis' || emotion === 'grief') return 1.0;
 
   let score = 0.3; // baseline for any non-filler message
 
-  // Topic matching — take the highest matching weight
+  // Topic matching � take the highest matching weight
   for (const { weight, keywords } of IMPORTANCE_TOPICS) {
     if (keywords.some(kw => lower.includes(kw))) {
       score = Math.max(score, weight);
@@ -87,26 +87,26 @@ function scoreImportance(content: string, emotion: string): number {
   };
   score += (emotionBonus[emotion] || 0);
 
-  // Length bonus — longer messages carry more information
+  // Length bonus � longer messages carry more information
   if (content.length > 200) score += 0.08;
   if (content.length > 100) score += 0.04;
 
   return Math.min(parseFloat(score.toFixed(2)), 1.0);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // EXTRACTION GATE
 // Only extract messages that carry meaningful content worth keeping.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 function shouldExtractMemory(content: string): boolean {
   if (content.trim().length < 10) return false; // too short
   if (FILLER_PATTERNS.test(content.trim())) return false; // pure filler
   return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // EXPORTS
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 export interface PruneResult {
   userId: string;
   skipped: boolean;
@@ -165,7 +165,7 @@ export const chatHistoryPruningService = {
       // Only archive user messages that carry meaningful content
       if (row.role !== 'user' || !shouldExtractMemory(row.content)) continue;
 
-      // Include Nova's response as context — helps understand the full exchange
+      // Include Nova's response as context � helps understand the full exchange
       const next = toDelete[i + 1];
       const novaContext = (next && next.role === 'assistant' && next.content.length > 10)
         ? ` | Nova responded: ${next.content.substring(0, 200)}${next.content.length > 200 ? '...' : ''}`
@@ -185,7 +185,7 @@ export const chatHistoryPruningService = {
         memory: memoryText,
         emotion,
         importance,
-        confidence: importance >= 0.7 ? 0.9 : 0.75, // high-importance → higher confidence
+        confidence: importance >= 0.7 ? 0.9 : 0.75, // high-importance ? higher confidence
       });
       memoriesExtracted++;
     }

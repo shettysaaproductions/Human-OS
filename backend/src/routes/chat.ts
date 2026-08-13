@@ -1368,6 +1368,21 @@ chatRouter.post(
             logger.warn('[Chat] LLM call slow', { userId, durationMs: llmDuration });
           }
           
+          // REMINDER HONESTY CHECK
+          const lowerReply = rawReply.toLowerCase();
+          const mentionsReminder = lowerReply.includes('remind') || lowerReply.includes('yaad') || lowerReply.includes('timer');
+          const hasReminderAction = extractedActions.some((a: any) => a.tool === 'ReminderEngine' && a.action === 'schedule');
+          
+          if (mentionsReminder && !hasReminderAction) {
+            const extraText = '\n<NOVA_MESSAGE_BREAK>\nAchha ek second, tu chahta kab hai yaad dilaun? (Time nahi bataya tune!)';
+            rawReply += extraText;
+            if (isStreaming) {
+              res.write(`data: ${JSON.stringify({ type: 'chunk', content: extraText })}\n\n`);
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            }
+            logger.warn('[QualityGate] Caught fake reminder in reply, appended clarification request', { userId });
+          }
+
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
           if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
             const extraText = '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';

@@ -81,27 +81,27 @@ async function main(): Promise<void> {
     }, 24 * 60 * 60 * 1000); // 24 hours
     if (momentInterval.unref) momentInterval.unref();
 
-    // Reminders + Nova Follow-up Polling Engine (runs every 10 seconds)
+    // Reminders + Nova Follow-up Polling Engine (throttled to 30s to prevent token starvation)
     const remindersInterval = setInterval(async () => {
       try {
         await reminderSchedulerService.checkAndFireReminders();
         await novaFollowupService.checkAndFireFollowups();
+        // Unanswered & ignored checks are throttled/lightweight
         await novaFollowupService.checkUnansweredConversations();
-        await novaFollowupService.checkIgnoredNovaMessages(); // NEW: detects when Nova's message is seen but ignored
       } catch (err) {
         logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 10 * 1000); // 10 seconds
+    }, 30 * 1000); // 30 seconds
     if (remindersInterval.unref) remindersInterval.unref();
 
-    // NACE: Nova Autonomous Consciousness Engine (runs every 3 minutes)
-    // Initial pulse fires 30s after boot so Nova is active immediately (not waiting up to 3 min for first tick)
+    // NACE: Nova Autonomous Consciousness Engine (runs every 3 minutes for responsiveness)
+    // Initial pulse fires 30s after boot so Nova is active immediately
     setTimeout(async () => {
       try {
-        logger.info('Scheduler: Initial NACE boot pulse...');
+        logger.info('[BOOT] Initial NACE pulse running...');
         await novaConsciousnessEngine.pulse();
-      } catch (err) {
-        logger.error('Error in NACE initial boot pulse', { error: err instanceof Error ? err.message : String(err) });
+      } catch (e) {
+        logger.warn('[BOOT] Initial NACE pulse failed (non-critical)', { error: e });
       }
     }, 30 * 1000);
 
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error('Error in NACE pulse', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 3 * 60 * 1000); // NACE pulse every 3 minutes for more responsive proactive messaging (was 15 minutes — caused 10-15 min delays in active conversations)
+    }, 3 * 60 * 1000); // NACE pulse every 3 minutes
     if (naceInterval.unref) naceInterval.unref();
 
     // Jarvis Protocol: Proactive Environment Monitoring (Runs every 3 hours)

@@ -150,33 +150,43 @@ export class ReminderSchedulerService {
       return;
     }
 
-    // 1. Create a user_moments entry
-    await supabaseAdmin.from('user_moments').insert({
-      user_id: reminder.user_id,
-      moment_type: 'REMINDER',
-      title: 'Reminder',
-      body: reminder.text,
-      status: 'generated'
-    });
+    // Insert chat message and moment with retry
+    let retryCount = 0;
+    let conversationId = '';
+    while (retryCount < 2) {
+      try {
+        await supabaseAdmin.from('user_moments').insert({
+          user_id: reminder.user_id,
+          moment_type: 'REMINDER',
+          title: 'Reminder',
+          body: reminder.text,
+          status: 'generated'
+        });
 
-    // 2. Retrieve user's latest active conversation ID
-    const { data: latestChat } = await supabaseAdmin
-      .from('chat_history')
-      .select('conversation_id')
-      .eq('user_id', reminder.user_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+        const { data: latestChat } = await supabaseAdmin
+          .from('chat_history')
+          .select('conversation_id')
+          .eq('user_id', reminder.user_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-    const conversationId = latestChat?.conversation_id || crypto.randomUUID();
+        conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-    // Insert chat message to conversation history
-    await supabaseAdmin.from('chat_history').insert({
-      user_id: reminder.user_id,
-      conversation_id: conversationId,
-      role: 'assistant',
-      content: message
-    });
+        await supabaseAdmin.from('chat_history').insert({
+          user_id: reminder.user_id,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: message
+        });
+        break; // Success
+      } catch (insertErr) {
+        retryCount++;
+        logger.warn('[Reminder] DB insert failed on fire, retrying...', { attempt: retryCount, error: insertErr instanceof Error ? insertErr.message : String(insertErr) });
+        if (retryCount >= 2) throw insertErr;
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
 
     // 3. Handle recurrence or mark completed
     let completed = false;
@@ -275,28 +285,17 @@ export class ReminderSchedulerService {
     }
   }
 
-  /**
-   * Generate a warm, Nova-style reminder message via a short background LLM call
-   * (with a 6s timeout). Falls back to a natural template if the LLM fails.
-   */
   private async generateReminderMessage(reminder: any): Promise<string> {
-    const fallback = `⏰ ${reminder.text} — ho gaya?`;
-    try {
-      const { novaBrain } = await import('./NovaBrainService');
-      const result: any = await Promise.race([
-        novaBrain.evaluateConsciousnessTier2(
-          `Name: yaar\nSituation: It is time for a reminder the user set earlier: "${reminder.text}".\nGenerate ONE short WhatsApp-style reminder message (1 sentence, casual Hinglish/English mix, warm best-friend tone, max 1 emoji). Make it feel like a friend reminding them, and end with a light nudge to confirm once done (e.g. "done kar ke batana"). Do NOT start with "Reminder:" and do NOT use a bell emoji.`
-        ),
-        new Promise<string>((resolve) => setTimeout(() => resolve(''), 6000))
-      ]);
-      const candidate = result?.message;
-      if (typeof candidate === 'string' && candidate.trim().length > 3 && candidate.trim().length <= 200) {
-        return candidate.trim();
-      }
-    } catch (err) {
-      logger.warn('[Reminder] LLM reminder message generation failed, using fallback', { error: err instanceof Error ? err.message : String(err) });
-    }
-    return fallback;
+    const text = reminder.text || 'kuch kaam tha';
+    const templates = [
+      `Yaar, ${text} ka time ho gaya! Done kara ke batana 😊`,
+      `Arre sun, ${text} — abhi kar le! Phir bata kaisa gaya.`,
+      `Boss, ${text} yaad hai na? Chal jaldi kar!`,
+      `Reminder: ${text} karna tha abhi. Ho gaya kya?`,
+      `Ek chhota sa reminder: ${text}. Don't forget!`,
+      `Time for: ${text}. Let me know once you're done!`
+    ];
+    return templates[Math.floor(Math.random() * templates.length)];
   }
 
   private calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {

@@ -106,9 +106,12 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
   - **Prod Test (Aug 10):** 5/8 checks ✅ (read-receipts, sleep-lock, reminder-fire, user_moments REMINDER, memory save). 3/8 ❌ were all due to NVIDIA rate-limit on Msg 2 (not code bugs). All test data cleaned up.
 - ✅ **Aug 9 Session — Zero-Drop Messaging Guarantee + Reminder Hardening:**
   - **100% Reply Guarantee** (`chat.ts`): Added `FALLBACK_REPLY` = `"Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?"`. Now saved + pushed in ALL failure paths (async LLM timeout, async LLM error, outer crash catch, 3 streaming/SSE error events). Deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a bubble (clears typing) instead of being silently dropped.
-  - **Resume-safe Polling** (`useChatStore.ts`): Poll timeout does ONE final `checkProactiveMessages()` fetch before clearing typing — fixes "reply invisible until restart" when app was backgrounded. `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20; typing-rhythm guard for multi-bubble replies.
-  - **Push Re-hydration** (`ChatScreen.tsx`): 500ms delay before history fetch on notification tap.
-  - **Reminder Upgrade** (migration `024_upgrade_reminders.sql`, `ReminderEngine.ts`, `SituationalAwareness.ts`): `purpose`/`urgency`/`event_trigger`/`end_condition` columns; event reminders (`trigger_at IS NULL`) visible to Nova; JARVIS `scheduled_at`→`trigger_at` fix; `ReminderEngine.test.ts` added.
+- ✅ **Aug 14 Session — Multi-Key NVIDIA Rotation + Proactive Auto-Timer Architecture + Response Quality Gate:**
+  - **Token Bleed Stopped** (`index.ts`): Reduced excessive NACE and Follow-up polling to stop free-tier API starvation.
+  - **NVIDIA 4-Key Rotation** (`nvidia.ts`): Implemented a robust `KeyPool` that cycles through all 4 configured NVIDIA API keys on a round-robin basis with automatic rate-limit (429) failover to prevent the "network slow" bug.
+  - **Response Quality Gate** (`chat.ts`): Catch hallucinated reminders mid-stream. If Nova says "remind", "timer", or "yaad" but emits no `ReminderEngine` action, the gate appends "Wait, tell me what time though?" so the lie is intercepted.
+  - **Auto-Timer Architecture** (`promptBuilder.ts`, `BackgroundActionService.ts`, `NovaBrainService.ts`): Nova now autonomously sets auto-timers when users mention time-sensitive activities via `is_auto: true` in the XML payload.
+  - **Reminder Hardening** (`ReminderSchedulerService.ts`): Firing a reminder no longer depends on an LLM call. Generates warm messages via safe templates and retries DB inserts if Supabase flakes.
 
 
 ---
