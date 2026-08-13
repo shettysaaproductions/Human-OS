@@ -85,8 +85,7 @@ healthRouter.get(
         timestamp: new Date().toISOString(),
       });
 
-      // Don't propagate to error handler — we've already responded
-      void next;
+      // Done - we've already sent a response, don't propagate to error handler
     }
   },
 );
@@ -135,8 +134,6 @@ healthRouter.get(
         error: message,
         timestamp: new Date().toISOString(),
       });
-
-      void next;
     }
   },
 );
