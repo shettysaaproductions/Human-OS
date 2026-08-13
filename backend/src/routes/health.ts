@@ -7,7 +7,7 @@
  *                    going through the full chat pipeline.
  */
 
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { config } from '../config';
 import { chatCompletion } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
@@ -30,7 +30,7 @@ healthRouter.get('/', (_req: Request, res: Response) => {
 // This saves hours of debugging connection issues in production.
 healthRouter.get(
   '/llm',
-  async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  async (_req: Request, res: Response): Promise<void> => {
     const start = Date.now();
 
     try {
@@ -94,7 +94,7 @@ healthRouter.get(
 // Pings Supabase to verify database connectivity.
 healthRouter.get(
   '/db',
-  async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  async (_req: Request, res: Response): Promise<void> => {
     const start = Date.now();
 
     try {

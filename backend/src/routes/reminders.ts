@@ -58,7 +58,8 @@ remindersRouter.get(
         .from('reminders')
         .select('*')
         .eq('user_id', userId)
-        .order('trigger_at', { ascending: true });
+        .eq('status', 'active')
+        .order('trigger_at', { ascending: true, nullsFirst: false });
 
       if (error) throw error;
 
@@ -82,7 +83,7 @@ remindersRouter.delete(
 
       const { data, error } = await supabaseAdmin
         .from('reminders')
-        .update({ status: 'canceled', updated_at: new Date().toISOString() })
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
         .eq('id', id)
         .eq('user_id', userId)
         .select('id')

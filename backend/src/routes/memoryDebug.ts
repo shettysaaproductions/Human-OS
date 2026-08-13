@@ -1,10 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { supabaseAdmin } from '../lib/supabase';
-import { logger } from '../lib/logger';
-
-export const memoryDebugRouter: import('express').Router = Router();
-
-import { Router, Request, Response, NextFunction } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
