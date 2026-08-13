@@ -30,6 +30,7 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
   - Dual NVIDIA key routing (Key 1: chat, Key 2: background)
   - `NovaSelfImprovementService` — daily autonomous self-repair loop
   - Enhanced `SituationalAwareness` — reply intent, conversation phase, emotional momentum
+  - **Claude/OmniRoute RLHF guardrails**: Claude-routed models default to "helpful/harmless" output that manifests as structured markdown lists, AI disclaimers ("Since I'm a text-based AI"), menus/agendas, and subservient assistant posture. Model-agnostic anti-robot rules were added: NO AI DISCLAIMERS, NO MENUS OR AGENDAS, NO ROBOT CONFIRMATIONS. The `ReminderEngine` tool prompt now explicitly tells the model the backend sends pushes, so it emits the tool instead of explaining it can't.
 - **In Progress (Planned):**
   - `NovaCognitionOrchestrator` — all 7 engines firing on every message
   - NACE Agenda Builder — Nova plans proactive outreach intelligently

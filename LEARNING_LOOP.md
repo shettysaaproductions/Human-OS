@@ -89,6 +89,10 @@ Every 7 days, the founder reviews:
    - Strengthened ANTI-ROBOT RULE (FABRICATION) to force ASK-what-it-means for unknown terms like "RNR" — ban guessing "Ram Nawami"
    - Strengthened ANTI-ROBOT RULE (DAY AWARENESS) to always cross-reference the Situation Brief's time/day before responding
    - Added ANTI-ROBOT RULE (NO CAPABILITY PITCHING) to ban explaining internal architecture ("7/8 engines", "long-term memory") — a friend just helps, doesn't pitch
+   - Added ANTI-ROBOT RULE (CLAUDE/OMNI — NO AI DISCLAIMERS) to ban "Since I'm a text-based AI", "I don't have the capability", or any mention of being an AI/bot — especially when handling reminders or real-world tasks
+   - Added ANTI-ROBOT RULE (CLAUDE/OMNI — NO MENUS OR AGENDAS) to ban "menu"/"reconnect agenda" replies with A/B/C or 1/2/3 options — a friend picks ONE topic naturally
+   - Added ANTI-ROBOT RULE (CLAUDE/OMNI — NO ROBOT CONFIRMATIONS) to ban "Reminder Set!", "WARNING", "Immediate Response Required" confirmation banners — a friends says "Set kar diya, yaad dila dunga"
+   - Strengthened the `ReminderEngine` tool prompt in `NovaBrainService.ts` — explicitly tells Claude/Omni models the backend sends the push, so they emit the tool instead of disclaimering
 4. **User Experience Wins:** Features that made the app feel alive
 5. **Stuck/Error Events:** Any message delivery failures, ghost duplicates, or errors
 6. **Next Auto Upgrade Focus:** What flaws to target manually
