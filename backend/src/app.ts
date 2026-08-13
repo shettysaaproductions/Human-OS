@@ -107,13 +107,29 @@ export function createApp(): express.Application {
     },
   });
 
+  // ── Rate limit for authentication endpoints ─────────────────────────────────
+  // Protect against brute-force login attempts
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,   // 15 minutes
+    max: 10,                    // 10 auth attempts per IP per 15 minutes
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many authentication attempts. Please wait and try again.',
+      },
+    },
+    skipSuccessfulRequests: true, // Successful login doesn't count against the limit
+  });
+
   // ── Request logger ───────────────────────────────────────────────────────────
   app.use(requestLogger);
 
   const apiRouter = express.Router();
   
   apiRouter.use('/health', healthRouter);
-  apiRouter.use('/auth', authRouter);
+  apiRouter.use('/auth', authLimiter, authRouter);
   apiRouter.use('/onboarding', authenticateUser, onboardingRouter);
   apiRouter.use('/chat', authenticateUser, chatLimiter, chatRouter);
   apiRouter.use('/memory/debug', authenticateUser, memoryDebugRouter);

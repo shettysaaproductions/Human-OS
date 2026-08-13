@@ -4,11 +4,26 @@ import { logger } from '../lib/logger';
 
 export const memoryDebugRouter: import('express').Router = Router();
 
+import { Router, Request, Response, NextFunction } from 'express';
+import { supabaseAdmin } from '../lib/supabase';
+import { logger } from '../lib/logger';
+
+export const memoryDebugRouter: import('express').Router = Router();
+
+// Rate limit: 10 requests per minute per IP
+const memoryDebugLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many debug requests. Please try again later.' } },
+});
+
 /**
  * GET /memory/debug/stats
  * Returns statistics about the stored memories for the hardcoded user.
  */
-memoryDebugRouter.get('/stats', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+memoryDebugRouter.get('/stats', memoryDebugLimiter, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user!.id;
     const { data, error } = await supabaseAdmin
@@ -50,7 +65,7 @@ memoryDebugRouter.get('/stats', async (req: Request, res: Response, next: NextFu
  * GET /memory/debug
  * Returns all memories for the hardcoded user.
  */
-memoryDebugRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+memoryDebugRouter.get('/', memoryDebugLimiter, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user!.id;
     const { data, error } = await supabaseAdmin

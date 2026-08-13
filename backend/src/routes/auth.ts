@@ -33,7 +33,8 @@ authRouter.post('/signup', async (req: Request, res: Response): Promise<void> =>
 
     if (error) {
       logger.error('Supabase auth.signUp returned an error', { error: error.message, status: error.status });
-      res.status(400).json({ error: error.message });
+      // Security: Don't leak internal error details to client
+      res.status(400).json({ error: error.status === 429 ? 'Too many attempts. Please wait a moment.' : error.message });
       return;
     }
 
@@ -43,11 +44,12 @@ authRouter.post('/signup', async (req: Request, res: Response): Promise<void> =>
       refresh_token: data.session?.refresh_token || null,
     });
   } catch (err) {
-    logger.error('Signup completely failed due to an exception', { 
+    logger.error('Signup completely failed due to an exception', {
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined
     });
-    res.status(500).json({ error: `Backend crash: ${err instanceof Error ? err.message : String(err)}` });
+    // Security: Don't leak internal error details
+    res.status(500).json({ error: 'An error occurred during signup. Please try again.' });
   }
 });
 
@@ -75,7 +77,12 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     });
 
     if (error) {
-      res.status(401).json({ error: error.message });
+      logger.error('Supabase auth.signInWithPassword returned an error', { error: error.message, status: error.status });
+      // Security: Return generic message to prevent user enumeration
+      const isRateLimited = error.status === 429;
+      res.status(error.status === 401 ? 401 : 500).json({
+        error: isRateLimited ? 'Too many attempts. Please wait a moment.' : (error.message || 'Authentication failed')
+      });
       return;
     }
 
@@ -94,12 +101,12 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       refresh_token: data.session?.refresh_token || null,
     });
   } catch (err) {
-    logger.error('Login completely failed due to an exception', { 
+    logger.error('Login completely failed due to an exception', {
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined
     });
-    // Return the EXACT error message to the client for debugging
-    res.status(500).json({ error: `Backend crash: ${err instanceof Error ? err.message : String(err)}` });
+    // Security: Don't leak internal error details
+    res.status(500).json({ error: 'An error occurred during login. Please try again.' });
   }
 });
 

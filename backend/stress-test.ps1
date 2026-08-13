@@ -1,10 +1,27 @@
-$baseUrl = "http://localhost:3000/chat/test"
+# ── VULNERABILITY FIX ──────────────────────────────────────────────────────────
+# Removed hardcoded Supabase URL + API key. These were exposed in the repo and
+# granted database write access. Credentials must now come from environment
+# variables (or be passed as parameters) — never committed to source control.
+# ───────────────────────────────────────────────────────────────────────────────
+
+param(
+    [string]$BaseUrl = "http://localhost:3000",
+    [string]$SupabaseUrl = $env:SUPABASE_URL,
+    [string]$SupabaseKey = $env:SUPABASE_SERVICE_ROLE_KEY
+)
+
+if (-not $SupabaseUrl -or -not $SupabaseKey) {
+    Write-Host "[ERROR] SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set." -ForegroundColor Red
+    Write-Host "        Set them as environment variables or pass as -SupabaseUrl / -SupabaseKey." -ForegroundColor Yellow
+    exit 1
+}
+
+$chatBaseUrl = "$BaseUrl/chat/test"
 $headers = @{ "Content-Type" = "application/json" }
-$supabaseUrl = "https://infkwyzomszyxtctewds.supabase.co/rest/v1/memories"
-$apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZmt3eXpvbXN6eXh0Y3Rld2RzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0NjY5ODUsImV4cCI6MjA5ODA0Mjk4NX0.St8FKy28EnxG3DdCnbNxnK1RW3hsByd_C9ZyXDMsagk"
+$supabaseRESTUrl = "$SupabaseUrl/rest/v1/memories"
 $dbHeaders = @{
-    "apikey" = $apiKey
-    "Authorization" = "Bearer $apiKey"
+    "apikey" = $SupabaseKey
+    "Authorization" = "Bearer $SupabaseKey"
     "Content-Type" = "application/json"
     "Prefer" = "return=minimal"
 }
@@ -35,7 +52,7 @@ function Insert-Fake-Memories {
             }
         }
         $json = $payload | ConvertTo-Json -Depth 5
-        Invoke-RestMethod -Uri $supabaseUrl -Method Post -Headers $dbHeaders -Body $json | Out-Null
+        Invoke-RestMethod -Uri $supabaseRESTUrl -Method Post -Headers $dbHeaders -Body $json | Out-Null
         $inserted += $toInsert
         Write-Host "Inserted $inserted / $count"
     }
@@ -54,7 +71,7 @@ function Test-Retrieval {
         importance = 10
         confidence = 1.0
     }
-    Invoke-RestMethod -Uri $supabaseUrl -Method Post -Headers $dbHeaders -Body ($targetMemory | ConvertTo-Json) | Out-Null
+    Invoke-RestMethod -Uri $supabaseRESTUrl -Method Post -Headers $dbHeaders -Body ($targetMemory | ConvertTo-Json) | Out-Null
     Start-Sleep -Seconds 1
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
