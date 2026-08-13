@@ -3,6 +3,35 @@ import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 
 /**
+ * Nova's natural, in-voice safety-net reply when the LLM returns nothing usable.
+ * Kept in-voice ("friend blaming their own network") so a blank model response never
+ * exposes jargon the user shouldn't see. Mirrors FALLBACK_REPLY in routes/chat.ts.
+ */
+export const NOVA_EMPTY_REPLY = 'Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?';
+
+/**
+ * Sanitizes a Nova conversational reply before it reaches the user:
+ * - strips bold markdown (**text**), markdown headings and list bullets
+ * - strips emoji-heavy sequences (packed emoji renderer noise)
+ * - strips LLM label leftovers such as "(subconscious_actions: )" pseudo-tags
+ * Keeps the reply a plain, friend-like message (see test-chat 2026-08-14 failures:
+ * a leaked "(subconscious_actions: )" node plus heavy bold + emoji formatting).
+ */
+export function sanitizeReply(reply: string): string {
+  return reply
+    .replace(/\*\*(.*?)\*\*/gs, '$1')                                   // **bold**
+    .replace(/^\s*#{1,6}\s+/gm, '')                                      // # headings
+    .replace(/^\s*[-•]\s+/gm, '')                                        // bullet markers
+    .replace(/^\s*\d+[.)]\s+/gm, '')                                     // numbered-list markers
+    .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, '') // (subconscious_actions: ) label leak
+    .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, '')
+    .replace(/\s*\((?:subconscious_actions|subconscious_actions|tool)\b[^)]*\)\s*/gi, '') // any inline tool/subconscious paren leak
+    .replace(/(\p{Extended_Pictographic})\s*\1+\s*/gu, '$1 ')            // collapse repeated emoji
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
  * Builds the message list sent to the LLM.
  *
  * The caller (chat route) persists the user's message to chat_history BEFORE invoking
@@ -161,7 +190,7 @@ If no tools need to be called, leave the JSON array empty: []
         .replace(/\[\s*\{.*"tool".*\}.*\]/gs, '') // JSON array bleed
         .trim();
 
-      if (!reply) reply = "Yaar, ek second ruk."; // absolute last resort
+      if (!reply) reply = NOVA_EMPTY_REPLY; // absolute last resort — in-voice, never jargon
 
       const subMatch = rawRes.match(/<subconscious_actions>([\s\S]*?)<\/subconscious_actions>/);
       if (subMatch) {
@@ -171,6 +200,10 @@ If no tools need to be called, leave the JSON array empty: []
           logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e });
         }
       }
+
+      // Sanitize formatting/leak leftovers (bold, menus, "(subconscious_actions: )" labels)
+      // so a model that ignored the anti-robot prompt rules still renders as a friend.
+      reply = sanitizeReply(reply);
 
       logger.info(`[NOVA BRAIN] Generated reply and ${subconscious_actions.length} subconscious actions.`);
       return { reply, subconscious_actions };
@@ -288,11 +321,14 @@ If no tools need to be called, leave the JSON array empty: []
       const subIdx = fullText.indexOf('<subconscious_actions>', openIdx);
       const replyEnd = closeIdx === -1 ? (subIdx === -1 ? fullText.length : subIdx) : closeIdx;
 
-      const currentReply = fullText.slice(openIdx + '<reply>'.length, replyEnd);
-      // Emit only the delta not yet emitted
-      if (currentReply.length > replyStreamed.length) {
-        const delta = currentReply.slice(replyStreamed.length);
-        replyStreamed = currentReply;
+      // Sanitize the WHOLE accumulated reply before computing the delta, so a
+      // mid-reply leak like "(subconscious_actions: )" (seen in the 2026-08-14 test
+      // chat) is stripped even if it arrives split across chunks. `replyStreamed`
+      // tracks the sanitized text, so diffs stay consistent.
+      const sanitizedReply = sanitizeReply(fullText.slice(openIdx + '<reply>'.length, replyEnd));
+      if (sanitizedReply.length > replyStreamed.length) {
+        const delta = sanitizedReply.slice(replyStreamed.length);
+        replyStreamed = sanitizedReply;
         yield delta;
       }
 

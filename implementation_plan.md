@@ -1,264 +1,74 @@
-# Smart Chat History — Updated Implementation Plan v2
+# Test Chat Implementation Plan
 
-## What Changed From v1
-- ❌ Removed fixed 7-day time limit entirely
-- ✅ Replaced with a **character-budget system** (both user + Nova messages counted together)
-- ✅ Added Supabase free-tier safety math
-- ✅ Confirmed both AI and user context is preserved before any deletion
+> Session analyzed: 2026-08-14 03:44–03:52 (13 messages from "Hi")
+> Analyzer run: `npx ts-node backend/scripts/test_chat_analyzer.ts`
 
----
+## Session Timeline
 
-## Supabase Free Tier Safety Math
+| Time | Speaker | Content | Health |
+|------|---------|---------|--------|
+| 03:44 | User | Hi | — |
+| 03:45 | Nova | **`**Hi Again!** 😊…`** — robotic re-greeting + "Simple Check-in" numbered menu with Day's Highlight / Quick Response Format | ❌ Bad |
+| 03:46 | Nova | "Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega? 💫" — **FALLBACK_REPLY** | ❌ Critical |
+| 03:47 | User | Are you fine | — |
+| 03:47 | Nova | "Yaar, ek second ruk." — **last-resort fallback** | ❌ Critical |
+| 03:47 | User | Ok | — |
+| 03:47 | Nova | "Abhi **3:47 AM** hai! 😴…" — bold markdown + emoji blast | ⚠️ Style |
+| 03:48 | User | Abhi kaam kar raha hu software ka, neend nai aa rahi thi so socha tumse bhi thodi baate kar lu | — |
+| 03:48 | Nova | "Arey, software ka kaam itne late? **Deadlines ki Zarurat Hai Kya?** 📆 … Reply with Number(s)" — **robotic menu + leaked `(subconscious_actions: )`** | ❌ Critical |
+| 03:49 | User | b | — |
+| 03:51 | User | ? | — |
+| 03:51 | User | Kya type kar rahe ho kab se? | — |
+| 03:52 | Nova | "Arre yaar, mera network thoda slow chal raha hai…" — **FALLBACK_REPLY again** | ❌ Critical |
 
-> [!IMPORTANT]
-> Before writing any code, here is the exact math proving this plan keeps Supabase safe.
-
-### Supabase Free Tier Limits
-| Resource | Free Tier Limit |
-|---|---|
-| Database Storage | **500 MB** |
-| Egress (bandwidth out) | **5 GB / month** |
-| Database rows | Unlimited (limited by storage) |
-
-### Storage Calculation (After Pruning)
-
-Our character budget per user = **100,000 characters**
-
-```
-100,000 chars ÷ 4 bytes/char  = 25,000 bytes of raw text per user
-+ row overhead (UUID, timestamps, metadata) ≈ 300 bytes/row
-+ average message = 200 chars = 500 bytes/row (text + overhead)
-
-Max messages before pruning = 100,000 ÷ 200 avg chars = ~500 messages
-500 messages × 500 bytes/row = 250,000 bytes = 0.25 MB per user
-
-For 1,000 users:  1,000 × 0.25 MB = 250 MB
-For 2,000 users:  2,000 × 0.25 MB = 500 MB  ← hits storage limit
-```
-
-**Verdict:** Safe up to ~1,800 active users on free tier. When we scale to paid tier ($25/month), this becomes unlimited.
-
-### Egress Calculation (After Pagination)
-
-**Before this fix:** Every app open fetches 1,000 messages × 1,024 bytes = **~1 MB per open**
-- 100 users × 5 opens/day × 1 MB = **500 MB/day = 15 GB/month** ❌ (3× over limit!)
-
-**After this fix:** Every app open fetches 50 messages × 1,024 bytes = **~50 KB per open**
-- 100 users × 5 opens/day × 50 KB = **25 MB/day = 750 MB/month** ✅ (85% under limit!)
-
-> [!NOTE]
-> The existing `QueryTracker` (in `queryTracker.ts`) already tracks egress bytes per query. We will log the pruning job's impact through it so you can monitor savings in your existing metrics dashboard.
+**Score: 5/13 messages are Nova system failures.** The user asked "b" at 03:49 and got **nothing for 3 minutes**, then three messages, then another fallback.
 
 ---
 
-## The Character Budget System (Core Design)
+## Root Causes & Fixes
 
-### How It Works
+### RC-1 — FALLBACK_REPLY fires on normal streaming (top user-facing bug)
+**Root cause:** [chat.ts:1291](backend/src/routes/chat.ts#L1291) and [chat.ts:1299](backend/src/routes/chat.ts#L1299) persist `FALLBACK_REPLY` whenever the streaming *loop iteration* times out (`STREAM_TIMEOUT`) or the *stream iteration* throws. A single slow chunk between `type:'done'` and the final save can trip these even when a real reply is about to arrive — and once saved, the fallback is **deliberately not filtered from history** ([chat.ts:33](backend/src/routes/chat.ts#L33)), so it pollutes the pipeline and reaches the user.
 
-```
-Every message saved to chat_history has:
-  - user message content (e.g., 50 chars)
-  - Nova response content (e.g., 400 chars)
-  - BOTH count toward the budget
+**Fix A (correct, no drop):** Replace the hard save + `res.end()` in both STREAM_TIMEOUT and stream-iteration-error paths with a `logger.warn` + wait for the retry (`timeoutPromise` at [chat.ts:1338](backend/src/routes/chat.ts#L1338) is a second chance the streaming path never takes). Only if the retry also fails should `FALLBACK_REPLY` be saved — and only via the **non-streaming fallback path.**
 
-Running total per user = SUM of chars of ALL chat_history rows
+**Fix B (don't poison future context):** When `FALLBACK_REPLY` *is* genuinely saved (LLM completely down), add it to `FALLBACK_PREFIXES` ([chat.ts:880](backend/src/routes/chat.ts#L880)) so Nova never sees a "network slow" message she herself wrote and starts echoing. There is already a helper `isFallback()` — use it to also filter these in history ([chat.ts:899](backend/src/routes/chat.ts#L899)).
 
-When total > 100,000 chars:
-  → Find the oldest X messages that bring total back to 80,000 chars
-  → Before deleting: scan each for important content
-  → Extract summaries to short_term_memories (both user + Nova context)
-  → Delete the raw rows
-```
+**Fix C (favor later messages):** `data.slice(0, startIndex + 1)` in [test_chat_analyzer.ts:52](backend/scripts/test_chat_analyzer.ts#L52) finds the **most recent "hi"** — if real content exists between two "hi" messages it is dropped. Slice from the **oldest** "hi" instead so no analysis windows get truncated.
 
-### Why 100,000 chars (1 lakh)?
+### RC-2 — Last-resort "Yaar, ek second ruk." leaked to user
+**Root cause:** [NovaBrainService.ts:164](backend/src/services/NovaBrainService.ts#L164) returns `"Yaar, ek second ruk."` (a non-streaming debug string) as the *user-facing* reply when the LLM returns an empty reply — it surfaced unguarded at 03:47:16.
+**Fix:** Send the natural in-voice `FALLBACK_REPLY` (reuse the exported constant from [chat.ts:36](backend/src/routes/chat.ts#L36)) instead, so a blank model response never produces jargon the user shouldn't see.
 
-| User Type | Words/Day | Days Until Limit |
-|---|---|---|
-| Heavy chatter | ~5,000 words/day | ~10 days of raw exact chat |
-| Normal user | ~1,000 words/day | ~50 days of raw exact chat |
-| Light user | ~200 words/day | ~250 days of raw exact chat |
+### RC-3 — Massive markdown/style violations (bold, bullets, emoji, menus)
+**Root cause:** The prompt builder rules at [promptBuilder.ts:141](backend/src/services/promptBuilder.ts#L141), [promptBuilder.ts:167](backend/src/services/promptBuilder.ts#L167) ("NO MENUS OR AGENDAS", "NO ROBOT CONFIRMATIONS") exist but the LLM ignores them because **there is no post-processing defense**, and the *third message* ("Hi Again" menu) shows a stale greeting template still reaching the pipeline.
+**Fixes (layered):**
+- Add a **reply sanitizer** in `NovaBrainService` (both stream and non-stream) that strips `**bold**`, leading `-`/`1.` bullets, and emoji sequences *before* the bubble is streamed/saved, so style violations can never render — mirrors the existing strip at [NovaBrainService.ts:156](backend/src/services/NovaBrainService.ts#L156) but for formatting, not XML bleed.
+- Strengthen the prompt with an explicit hard rule: *"NO numbered lists, NO bold, NO emoji. Max 2 sentences. One topic."*
+- Investigate the 03:45 "re-greeting + menu" source (likely [chat.ts:478](backend/src/routes/chat.ts#L478) proactive-branch or a stale greeting template); ensure a "Just now" last-contact never re-greets.
 
-This means Nova naturally has a longer raw memory for quieter users — exactly like human memory.
+### RC-4 — `(subconscious_actions: )` leak into final reply
+**Root cause:** In `streamInteraction`, [NovaBrainService.ts:288-291](backend/src/services/NovaBrainService.ts#L288-L291) trims the reply at the first `<subconscious_actions>` tag to prevent JSON bleed, but the model placed a literal `(subconscious_actions: )` line *inside* the reply — the LLM wrote the label as plain text. Current strip ([NovaBrainService.ts:156-162](backend/src/services/NovaBrainService.ts#L156-L162)) handles `subconscious_actions>` *tags* and **`Subconscious Actions`** *headers* but not the `(subconscious_actions:` inline label variant.
+**Fix:** Add `/\s*\(subconscious_actions:?\s*\)/g` (and the `**Response**`-style variant) to the safety strip so the model's label leftovers are removed in both stream and non-stream paths.
 
-### Both AI + User Content Counted and Preserved
-
-Every character in both directions is included:
-
-```
-Budget counting:     User message chars + Nova message chars
-Memory extraction:   Both user context + Nova response context preserved
-Pre-delete summary:  "User said X, Nova responded Y" — saved as one memory unit
-```
-
-This is critical because Nova's response provides emotional and intellectual context just as much as the user's message does.
+### RC-5 — User sent "b" and got a 3-minute dead chat (timing engineering)
+**Root cause:** The LLM offered a menu, user picked "b", and Nova took ~3 min (03:49→03:52) to return a **fallback**, not a real answer. Underlying latency: the [MUTEX_TIMEOUT_MS = 30s](backend/src/routes/chat.ts#L664) + per-chunk STREAM_TIMEOUT + up to [ASYNC_HARD_DEADLINE_MS = 90s](backend/src/routes/chat.ts#L652) means a request can queue 2+ minutes before a bubble shows; the frontend typing state likely cleared, so the user perceived complete silence.
+**Fix (first step, no re-arch):** Add an immediate acknowledgment bubble when a request will be slow (e.g. "getting there…") before the mutex wait, so the UI never appears dead. Deeper latency work (model config, keepalive) should be a separate performance phase.
 
 ---
 
-## Architecture Overview
+## Proposed changes (awaiting approval)
 
-```
-PHASE 1: Paginated FlatList  (Mobile only — no backend changes)
-  └─ 50 messages on open → load older on scroll up (like Telegram)
+1. [backend/src/routes/chat.ts](backend/src/routes/chat.ts)
+   - RC-1 Fix A: don't persist FALLBACK_REPLY on streaming timeout/iteration error — wait for the non-streaming retry instead.
+   - RC-1 Fix B: add FALLBACK_REPLY to history filtering so fallbacks never re-enter the prompt context.
+2. [backend/src/services/NovaBrainService.ts](backend/src/services/NovaBrainService.ts)
+   - RC-2: use FALLBACK_REPLY instead of "Yaar, ek second ruk."
+   - RC-3: add reply sanitizer for bold/bullets/emoji.
+   - RC-4: strip `(subconscious_actions: )` label variant.
+3. [backend/src/services/promptBuilder.ts](backend/src/services/promptBuilder.ts)
+   - RC-3: add a hard "no numbered lists / no bold / no emoji / 2-sentence max" prompt rule.
+4. [backend/scripts/test_chat_analyzer.ts](backend/scripts/test_chat_analyzer.ts)
+   - RC-1 Fix C: slice from the oldest "hi" so analysis never truncates real content.
 
-PHASE 2: Character-Budget Pruning Service  (Backend only — purely additive)
-  └─ Nightly job: check total chars per user
-  └─ If > 100,000: extract memories → delete oldest rows
-  └─ Both user + Nova chars counted + both contexts extracted
-
-PHASE 3: Temporal Memory Search  (Backend only — purely additive)
-  └─ Inject timestamped context when user asks time-based questions
-  └─ Nova can answer: day, date, exact time, what was said
-```
-
-> [!IMPORTANT]
-> **Zero breaking changes.** The message queue, chunking, retry, degraded mode, all memory extraction workers — completely untouched.
-
----
-
-## Detailed Changes
-
----
-
-### PHASE 1 — Paginated FlatList
-
-#### [MODIFY] [chatService.ts](file:///c:/Users/HP-3/Documents/Human%20Os/mobile/src/services/chatService.ts)
-- Add `limit?: number` and `before_id?: string` (cursor) params to `getHistory()`
-- Cursor-based pagination: "give me 50 messages older than message ID X"
-- No offset-based pagination — cursors don't break when new messages arrive
-
-#### [MODIFY] [useChatStore.ts](file:///c:/Users/HP-3/Documents/Human%20Os/mobile/src/store/useChatStore.ts)
-- `hydrateMessages()` now fetches only the **last 50 messages** on first load
-- Add `hasMoreMessages: boolean` state (true = there are older messages to load)
-- Add `isLoadingMore: boolean` state (shows spinner at top)
-- Add `loadOlderMessages()` action — fetches next 50, **prepends** to array, **preserves scroll position**
-
-#### [MODIFY] [ChatScreen.tsx](file:///c:/Users/HP-3/Documents/Human%20Os/mobile/src/screens/ChatScreen.tsx)
-- `onEndReached` on the inverted FlatList triggers `loadOlderMessages()` (fires when scrolled to TOP = oldest visible)
-- Show a small `<ActivityIndicator>` at the bottom of the list (visually at top) when `isLoadingMore=true`
-- Scroll position is preserved when older messages are prepended — no jumping
-
----
-
-### PHASE 2 — Character-Budget Pruning Service
-
-#### [NEW] [ChatHistoryPruningService.ts](file:///c:/Users/HP-3/Documents/Human%20Os/backend/src/services/ChatHistoryPruningService.ts)
-
-```typescript
-// Pseudocode of the core logic:
-
-const CHAR_BUDGET = 100_000;      // 1 lakh characters
-const TRIM_TARGET = 80_000;       // Trim back to 80k when limit hit (20k buffer)
-const MAX_MESSAGES = 2_000;       // Hard cap — safety net only
-const BATCH_SIZE = 100;           // Delete in batches to avoid timeouts
-
-async run(userId?: string) {
-  // 1. Get all users (or single user if specified)
-  // 2. For each user:
-  //    a. SELECT id, role, content, created_at FROM chat_history 
-  //       WHERE user_id = X ORDER BY created_at ASC
-  //       (oldest first, so we know what to delete)
-  //    b. Compute runningTotal = SUM of content.length for ALL rows
-  //    c. If runningTotal <= CHAR_BUDGET AND count <= MAX_MESSAGES: skip user
-  //    d. Identify oldest rows to delete (from the front) until 
-  //       remaining total <= TRIM_TARGET
-  //    e. Before deleting each batch:
-  //       - Filter rows where shouldExtractShortTermMemory(content) = true
-  //       - Build a "User said: X | Nova said: Y" summary block
-  //       - Save to short_term_memories (both user + AI context in one record)
-  //    f. DELETE the identified rows in batches of 100
-  //    g. Log: { userId, deletedCount, charsBefore, charsAfter, memoriesExtracted }
-}
-```
-
-**Key guarantee:** The short_term_memories extraction captures **both the user's message AND Nova's response** as a single memory unit before the raw row is deleted. Nothing is permanently lost.
-
-#### [MODIFY] [backend/src/index.ts](file:///c:/Users/HP-3/Documents/Human%20Os/backend/src/index.ts)
-- Register `ChatHistoryPruningService` in the nightly scheduler (runs at 2 AM)
-- Sits alongside existing `ReflectionSchedulerService` and `MemoryDecayService`
-
-#### [MODIFY] [chat.ts — GET handler only](file:///c:/Users/HP-3/Documents/Human%20Os/backend/src/routes/chat.ts)
-**Surgical 2-line change:**
-- Add `limit` param (default: 50, max: 200)
-- Add `before_id` cursor param for load-more pagination
-- The current `.limit(1000)` becomes `.limit(params.limit)`
-
----
-
-### PHASE 3 — Temporal Memory Search
-
-#### [MODIFY] [chat.ts — POST handler](file:///c:/Users/HP-3/Documents/Human%20Os/backend/src/routes/chat.ts)
-If user message contains temporal keywords (`yesterday`, `days ago`, `last week`, `do you remember`, `what time`, `what day`, etc.), automatically:
-1. Query `chat_history` for the relevant timeframe (last 7-30 days with exact timestamps)
-2. Build a **Temporal Context Block** and inject into system prompt:
-
-```
-## WHAT WAS SAID RECENTLY (Exact Archive)
-[Mon, Jul 5 · 2:23 PM IST] You: You remember that shayari I pasted...
-[Mon, Jul 5 · 2:24 PM IST] Nova: Yes, here it is — "..."
-[Tue, Jul 6 · 9:15 PM IST] You: I have fever today
-[Tue, Jul 6 · 9:16 PM IST] Nova: Oh no! Rest up and stay hydrated...
-```
-
-3. Nova sees the exact day, date, time, and full content — and can answer precisely
-
-This is a **read-only** query. No new tables, no schema changes.
-
----
-
-## What We Are NOT Changing
-
-> [!NOTE]
-> These are frozen — zero risk of regressions:
-
-- Message sending queue (`processQueue`)
-- Chunking and chunk delivery logic
-- All memory extraction background jobs (semantic, episodic, working, short-term)
-- The degraded mode system
-- Custom scrollbars
-- Scroll-to-bottom FAB
-- NVIDIA LLM call parameters
-- Retry/refresh token logic in `api.ts`
-- `MemoryDecayService` and `ShortTermMemoryCleanupService`
-- The `short_term_memories` table structure
-- The `memories` (long-term) table
-
----
-
-## Supabase Egress Guard (Extra Safety)
-
-Since we already have `QueryTracker` measuring egress, we will:
-1. The pruning service logs `{ charsBefore, charsAfter, rowsDeleted }` via the existing `logger`
-2. The GET endpoint now returns 50 rows instead of 1,000 — the `QueryTracker` will automatically detect and log the egress savings
-3. If we ever want a manual prune (e.g., before a demo), an admin can call `POST /admin/prune-history`
-
----
-
-## Verification Plan
-
-### TypeScript
-```bash
-cd backend && npm run typecheck
-cd mobile && npx tsc --noEmit
-```
-
-### Manual QA After OTA Push
-1. Close + reopen app → loads fast (50 msgs only)
-2. Scroll up → older messages load without jumping
-3. Send new message while scrolled up → NOT yanked to bottom
-4. Ask Nova "what did I say yesterday?" → gets exact time-aware reply
-5. Check Supabase dashboard → `chat_history` row count stays bounded
-6. Check server logs → pruning job logs appear nightly
-
----
-
-## Resolved Decisions (Based on App Motive & Limits)
-
-✅ **1. Character budget: 150,000 chars (1.5 lakh)**
-*Reasoning:* To get the "most juice" (context) for business strategy and problem-solving without hitting limits, 150,000 characters is optimal.
-- Storage: 150,000 chars is ~0.375 MB per user. We can support ~1,333 active users before hitting the 500 MB Supabase limit.
-- AI Context: Provides ~50% more raw conversational history for Nova to draw from before compressing into short-term memory, leading to more hyper-realistic and accurate responses.
-
-✅ **2. Admin manual prune endpoint: Included**
-*Reasoning:* Adding `POST /admin/prune-history` is essential for the Founder Dashboard. It provides a safety valve to manually clear space if we ever approach the 500 MB limit unexpectedly, without needing to touch the database directly.
-
-I am ready to begin **Phase 1 (Paginated FlatList)** on the mobile app. Do I have your approval to start execution?
+All 4 are small, contained edits to existing files — no schema, service, or route-structure changes. Approve to proceed, and I'll implement + run the chat analyzer again to verify the next session is clean.

@@ -1,5 +1,5 @@
 import { logger } from '../lib/logger';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletionBackground } from '../lib/nvidia';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { geminiPool } from '../lib/geminiPool';
@@ -60,7 +60,7 @@ If YES, output ONLY the exact search query you would use (e.g., "current weather
 If NO, output exactly "NO_SEARCH".`;
 
     try {
-      const result = await chatCompletion([{ role: 'system', content: prompt }], {
+      const result = await chatCompletionBackground([{ role: 'system', content: prompt }], {
         maxTokens: 50,
         temperature: 0.1
       });

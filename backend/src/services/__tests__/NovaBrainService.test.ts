@@ -1,4 +1,4 @@
-import { NovaBrainService } from '../NovaBrainService';
+import { NovaBrainService, sanitizeReply } from '../NovaBrainService';
 import { chatCompletion, chatCompletionBackground, chatCompletionStream } from '../../lib/nvidia';
 import { promptBuilder } from '../promptBuilder';
 import { logger } from '../../lib/logger';
@@ -214,12 +214,12 @@ describe('NovaBrainService', () => {
     it('should use absolute last resort fallback when reply is empty', async () => {
       (chatCompletion as jest.Mock).mockResolvedValue(`<subconscious_actions>[]</subconscious_actions>`);
       const result = await service.processInteraction('u1', 'hi', {});
-      expect(result.reply).toBe('Yaar, ek second ruk.');
+      // NOVA_EMPTY_REPLY — in-voice "friend blaming network", never debug jargon
+      expect(result.reply).toBe('Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?');
     });
   });
 
   describe('4.4 Error Handling', () => {
-    it('should throw on LLM failure', async () => {
       (chatCompletion as jest.Mock).mockRejectedValue(new Error('NVIDIA API timeout'));
       await expect(service.processInteraction('u1', 'hi', {})).rejects.toThrow('NVIDIA API timeout');
       expect(logger.error).toHaveBeenCalled();
@@ -300,6 +300,21 @@ describe('NovaBrainService', () => {
       const userMsg = args.find((m: any) => m.role === 'user').content;
       
       expect(userMsg).toContain('Do NOT make up');
+    });
+  });
+
+  describe('sanitizeReply (anti-robot formatting guard)', () => {
+    it('strips bold markdown', () => {
+      expect(sanitizeReply('**Hi Again!** 😊')).toBe('Hi Again! 😊');
+    });
+    it('strips numbered-list and bullet markers', () => {
+      expect(sanitizeReply('1. Day\'s Highlight\n- Just chatting')).toBe("Day's Highlight\nJust chatting");
+    });
+    it('strips the leaked (subconscious_actions: ) pseudo-label', () => {
+      expect(sanitizeReply('Arey, kaam chal raha hai (subconscious_actions: ) haan.')).toBe('Arey, kaam chal raha hai haan.');
+    });
+    it('collapses repeated emoji sequences', () => {
+      expect(sanitizeReply('Hello 😊😊😊 there')).toBe('Hello 😊 there');
     });
   });
 });

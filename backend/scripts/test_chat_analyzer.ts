@@ -34,21 +34,24 @@ async function analyzeTestChat() {
     return;
   }
 
-  // Find the index of the most recent user message containing "hi" or "hey" or "hello"
-  let startIndex = data.length - 1; // Default to oldest if not found
-  for (let i = 0; i < data.length; i++) {
+  // Find the OLDEST user message containing "hi" / "hey" / "hello" by scanning
+  // from the END (oldest) toward the front (newest). Scanning from the front (newest)
+  // wrongly truncates a session that has a mid-session "hi" — real content between
+  // the oldest and the most-recent "hi" gets dropped (see 2026-08-14 test chat).
+  let startIndex = data.length - 1; // Default to newest if nothing found
+  for (let i = data.length - 1; i >= 0; i--) {
     const msg = data[i];
     if (msg.role === 'user') {
       const lowerContent = msg.content.trim().toLowerCase();
-      // Match exact "hi" or "hey" or "hello" as standalone words, or starting words
+      // Match exact "hi" / "hey" / "hello" as standalone words, or starting words
       if (/^(hi|hey|hello)\b/i.test(lowerContent)) {
         startIndex = i;
-        break; // Found the most recent "hi" (since array is ordered DESC)
+        break; // Found the OLDEST "hi" (since we scan from the end)
       }
     }
   }
 
-  // Slice from the "hi" to the present (index 0)
+  // Slice from the OLDEST "hi" to the present (index 0)
   const sessionChats = data.slice(0, startIndex + 1);
 
   // Reverse to chronological order (oldest to newest)

@@ -1283,19 +1283,53 @@ chatRouter.post(
               try {
                 nextResult = await Promise.race([chunkPromise, timeoutPromise]);
               } catch (err: any) {
-                if (err.message === 'STREAM_TIMEOUT') {
-                  logger.error('[Chat] Streaming LLM chunk timed out', { userId });
-                  // Persist the fallback so the reply survives a refresh (the stream already
-                  // returned early — the normal save block below is skipped on this path).
-                  await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
-                  res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
-                  res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-                  res.end();
-                  return;
+                // A slow/hung stream is NOT a hard failure: retry the same request once
+                // via the non-streaming path so the user gets a real reply instead of
+                // FALLBACK_REPLY. Persisting the fallback on any stream hiccup is what
+                // produced the 2026-08-14 test-chat failures (3 fallbacks in one
+                // session, plus a 3-min dead chat). FALLBACK_REPLY is now reserved for
+                // when the retry ALSO fails.
+                logger.warn('[Chat] LLM stream interrupted — retrying non-streaming', {
+                  userId, reason: err.message === 'STREAM_TIMEOUT' ? 'STREAM_TIMEOUT' : (err.message || err)
+                });
+                let retrySucceeded = false;
+                try {
+                  const retryTimeoutMs = 25_000;
+                  let retryTimer: NodeJS.Timeout | null = null;
+                  const retryTimeoutPromise = new Promise<never>((_, rejectRetry) => {
+                    retryTimer = setTimeout(() => rejectRetry(new Error('RETRY_TIMEOUT')), retryTimeoutMs);
+                  });
+                  try {
+                    const retryResult = await Promise.race([
+                      novaBrain.processInteraction(userId, effectiveMessage, brainContext),
+                      retryTimeoutPromise,
+                    ]);
+                    if (retryResult.reply) {
+                      retrySucceeded = true;
+                      rawReply = retryResult.reply;
+                      res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+                      if (typeof (res as any).flush === 'function') (res as any).flush();
+                      if (retryResult.subconscious_actions?.length) {
+                        extractedActions = retryResult.subconscious_actions;
+                        const { backgroundActions } = await import('../services/BackgroundActionService');
+                        backgroundActions.processActions(userId, activeConversationId, retryResult.subconscious_actions, userCountry).catch((e: any) => {
+                          logger.error('[BackgroundAction] Unhandled failure', { error: e });
+                        });
+                      }
+                    }
+                  } finally {
+                    if (retryTimer) clearTimeout(retryTimer);
+                  }
+                } catch (retryErr: any) {
+                  logger.error('[Chat] Non-streaming retry failed after stream interruption', {
+                    userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr)
+                  });
                 }
 
-                // Handle actual API errors (e.g. Nvidia 500/401) without crashing the server
-                logger.error('[Chat] LLM stream iteration failed', { error: err.message || err, userId });
+                if (retrySucceeded) break; // stream effectively done; drop to the normal save path
+
+                // Both the stream AND the retry failed — now, and only now, save the
+                // in-voice fallback so the user always gets a bubble (never a dead chat).
                 await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
                 res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { chatCompletion } from '../lib/nvidia';
+import { chatCompletionBackground } from '../lib/nvidia';
 import axios from 'axios';
 
 // Interface for Open-Meteo Geocoding
@@ -72,7 +72,7 @@ Notable: ${isRaining ? 'Raining' : ''} ${isThunderstorm ? 'Thunderstorm' : ''} $
 
 Write a very short, casual text message warning them or checking in. (e.g., "hey, looks like it's raining heavily out there, stay dry!" or "40 degrees today, stay hydrated!"). No emojis, no robotic phrasing. Keep it to 1 sentence.`;
 
-      const alertMessage = await chatCompletion([{ role: 'system', content: prompt }], { maxTokens: 50 });
+      const alertMessage = await chatCompletionBackground([{ role: 'system', content: prompt }], { maxTokens: 50 });
 
       // 4. Send the alert using the Trigger Engine.
       // Use the shared singleton so the 30 req/min rate limit is actually tracked —
