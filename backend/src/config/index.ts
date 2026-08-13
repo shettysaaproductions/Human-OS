@@ -27,8 +27,10 @@ export const config = {
   nvidia: {
     apiKey: optionalEnv('NVIDIA_API_KEY', ''),
     apiKey2: optionalEnv('NVIDIA_API_KEY_2', ''),
-    apiKey3: optionalEnv('NVIDIA_API_KEY_3', ''),  // Key 3: Self-Improvement + Realtime Learning
-    apiKey4: optionalEnv('NVIDIA_API_KEY_4', ''),  // Key 4: Memory extraction + Background
+    apiKey3: optionalEnv('NVIDIA_API_KEY_3', ''),  // Key 3: Cerebellum (Background tasks)
+    apiKey4: optionalEnv('NVIDIA_API_KEY_4', ''),  // Key 4: Reserve (Emergency failover)
+    apiKey5: optionalEnv('NVIDIA_API_KEY_5', ''),  // Key 5: Extra reserve capacity
+    apiKey6: optionalEnv('NVIDIA_API_KEY_6', ''),  // Key 6: Extra reserve capacity
     baseUrl: optionalEnv('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
     chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'nvidia/llama-3.3-nemotron-super-49b-v1'),
   },

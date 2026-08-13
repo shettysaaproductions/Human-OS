@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
+import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { KgNode } from '../types/memory';
 import { logger } from '../lib/logger';
@@ -14,7 +14,7 @@ export class KgAgent extends BaseAgent {
   protected async execute(job: Job): Promise<number> {
     const { userId, message } = job.payload;
 
-    const response = await chatCompletion([
+    const response = await chatCompletionMemory([
       {
         role: 'system',
         content: `You are the Knowledge Graph Agent for HumanOS.

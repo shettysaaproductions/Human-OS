@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletion, EXTRACTION_MODEL } from '../lib/nvidia';
+import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
@@ -43,7 +43,7 @@ export class ReflectionAgent extends BaseAgent {
       working.forEach(w => { contextStr += `- ${w.key}: ${w.value}\n`; });
     }
 
-    const response = await chatCompletion([
+    const response = await chatCompletionMemory([
       {
         role: 'system',
         content: `You are Nova's Reflection Engine. 

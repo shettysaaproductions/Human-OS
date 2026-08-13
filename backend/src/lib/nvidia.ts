@@ -1,11 +1,23 @@
 /**
- * NVIDIA API client.
+ * NVIDIA API client — Nova's Brain Architecture
  *
- * NVIDIA exposes their LLM APIs through an OpenAI-compatible endpoint,
- * so we use the official openai SDK pointed at NVIDIA's base URL.
+ * Models Nova's cognition after the human brain. Each NVIDIA API key is assigned
+ * a dedicated "brain region" so that the user-facing reply (Frontal Cortex) is
+ * NEVER starved by background memory extraction or learning jobs.
  *
- * This module implements a robust 4-key round-robin rotation to avoid
- * free-tier rate limits, automatically failing over to the next key.
+ * ┌─────────────────────────────────────────────────────────────────────┐
+ * │  🧠  N O V A ' S   B R A I N   A R C H I T E C T U R E           │
+ * ├───────────────┬─────────────────────────────────────────────────────┤
+ * │ Frontal Cortex│ Key 1 — Real-time chat replies (user-facing)       │
+ * │ Hippocampus   │ Key 2 — Memory agents & learning services          │
+ * │ Cerebellum    │ Key 3 — Background tasks (search, weather, proact) │
+ * │ Reserve       │ Key 4 — Emergency failover for Frontal Cortex      │
+ * └───────────────┴─────────────────────────────────────────────────────┘
+ *
+ * Each region is an isolated OpenAI client so rate limits on one key
+ * never block another region. If the Frontal Cortex key (Key 1) fails,
+ * it automatically falls over to the Reserve key (Key 4), guaranteeing
+ * the user always gets a reply.
  */
 
 import OpenAI from 'openai';
@@ -21,16 +33,16 @@ export class NvidiaTimeoutError extends Error {
   }
 }
 
-function withNvidiaTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: number = NVIDIA_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NVIDIA_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   return fn(controller.signal).then(
     (result) => { clearTimeout(timer); return result; },
     (err) => {
       clearTimeout(timer);
       if (controller.signal.aborted) {
-        throw new NvidiaTimeoutError(NVIDIA_TIMEOUT_MS);
+        throw new NvidiaTimeoutError(timeoutMs);
       }
       throw err;
     }
@@ -73,70 +85,125 @@ function getMockResponse(
   return "Hey! I'm Nova. I wanted to see how you're doing today!";
 }
 
-class KeyPool {
+// ── Brain Region (isolated key pool) ─────────────────────────────────────────
+
+type BrainRegionName = 'frontal' | 'hippocampus' | 'cerebellum' | 'reserve';
+
+class BrainRegion {
+  readonly name: BrainRegionName;
   private clients: OpenAI[] = [];
   private currentIndex: number = 0;
 
-  constructor() {
-    const keys = [
-      config.nvidia.apiKey,
-      config.nvidia.apiKey2,
-      config.nvidia.apiKey3,
-      config.nvidia.apiKey4
-    ].filter(k => k && k.trim() !== '' && k !== 'dummy_key');
-
+  constructor(name: BrainRegionName, keys: string[]) {
+    this.name = name;
     if (keys.length === 0) {
-      // Fallback if no keys provided
       this.clients.push(new OpenAI({ apiKey: 'dummy_key', baseURL: config.nvidia.baseUrl, maxRetries: 0 }));
     } else {
       this.clients = keys.map(apiKey => new OpenAI({
         apiKey,
         baseURL: config.nvidia.baseUrl,
-        maxRetries: 0 // We handle retries manually to switch keys
+        maxRetries: 0
       }));
     }
-    
-    logger.info(`Initialized NVIDIA KeyPool with ${this.clients.length} keys for round-robin rotation.`);
+    logger.info(`[Brain:${name}] Initialized with ${this.clients.length} key(s)`);
   }
 
+  get keyCount(): number { return this.clients.length; }
+
   /**
-   * Executes a function that takes an OpenAI client, automatically rotating
-   * and retrying if a rate-limit (429) or 503 error occurs.
+   * Execute an operation using this region's key(s).
+   * If a key hits 429/5xx/timeout, rotates to the next key in this region.
    */
   async execute<T>(operation: (client: OpenAI, signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
     let lastError: any = null;
     const maxAttempts = this.clients.length;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      // Round-robin selection
       const client = this.clients[this.currentIndex];
       this.currentIndex = (this.currentIndex + 1) % this.clients.length;
 
       try {
-        const result = await withNvidiaTimeout((signal) => operation(client, signal, attempt));
+        const result = await withTimeout((signal) => operation(client, signal, attempt));
         return result;
       } catch (err: any) {
         lastError = err;
-        
-        // Only retry on rate limits or server errors
         const isRetryable = err.status === 429 || err.status >= 500 || err.name === 'NvidiaTimeoutError';
-        if (!isRetryable) {
-          throw err;
-        }
-        
-        logger.warn(`NVIDIA API call failed (Attempt ${attempt + 1}/${maxAttempts}), switching to next key`, { 
-          status: err.status, 
+        if (!isRetryable) throw err;
+
+        logger.warn(`[Brain:${this.name}] Key failed (${attempt + 1}/${maxAttempts}), rotating`, {
+          status: err.status,
           error: err.message,
           name: err.name
         });
       }
     }
-    
     throw lastError;
   }
 }
 
-const keyPool = new KeyPool();
+// ── Brain Key Router ─────────────────────────────────────────────────────────
+
+class BrainKeyRouter {
+  readonly frontal: BrainRegion;      // Key 1 — user-facing replies
+  readonly hippocampus: BrainRegion;  // Key 2 — memory & learning
+  readonly cerebellum: BrainRegion;   // Key 3 — background tasks
+  readonly reserve: BrainRegion;      // Key 4 — emergency failover
+
+  constructor() {
+    // Collect all available keys
+    const allKeys = [
+      config.nvidia.apiKey,
+      config.nvidia.apiKey2,
+      config.nvidia.apiKey3,
+      config.nvidia.apiKey4,
+      (config.nvidia as any).apiKey5 || '',
+      (config.nvidia as any).apiKey6 || '',
+    ].filter(k => k && k.trim() !== '' && k !== 'dummy_key');
+
+    logger.info(`[BrainKeyRouter] ${allKeys.length} NVIDIA API key(s) available`);
+
+    if (allKeys.length >= 4) {
+      // Full brain: each region gets its own dedicated key
+      this.frontal     = new BrainRegion('frontal',     [allKeys[0]]);
+      this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
+      this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[2]]);
+      this.reserve     = new BrainRegion('reserve',     [allKeys[3]]);
+
+      // If extra keys exist (5, 6, ...), add them to the reserve pool for extra resilience
+      if (allKeys.length > 4) {
+        const extraKeys = allKeys.slice(4);
+        logger.info(`[BrainKeyRouter] ${extraKeys.length} extra key(s) added to reserve pool`);
+        // Recreate reserve with all extra keys + key 4
+        (this as any).reserve = new BrainRegion('reserve', [allKeys[3], ...extraKeys]);
+      }
+    } else if (allKeys.length === 3) {
+      // 3 keys: frontal gets dedicated, hippocampus+cerebellum share, reserve = frontal backup
+      this.frontal     = new BrainRegion('frontal',     [allKeys[0]]);
+      this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
+      this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[2]]);
+      this.reserve     = new BrainRegion('reserve',     [allKeys[2]]); // shares with cerebellum
+    } else if (allKeys.length === 2) {
+      // 2 keys: frontal gets dedicated, everything else shares key 2
+      this.frontal     = new BrainRegion('frontal',     [allKeys[0]]);
+      this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
+      this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[1]]);
+      this.reserve     = new BrainRegion('reserve',     [allKeys[1]]);
+    } else {
+      // 1 or 0 keys: everything shares (degraded mode — original behavior)
+      const pool = allKeys.length > 0 ? allKeys : ['dummy_key'];
+      this.frontal     = new BrainRegion('frontal',     pool);
+      this.hippocampus = new BrainRegion('hippocampus', pool);
+      this.cerebellum  = new BrainRegion('cerebellum',  pool);
+      this.reserve     = new BrainRegion('reserve',     pool);
+    }
+
+    logger.info(`[BrainKeyRouter] Architecture: frontal=${this.frontal.keyCount} hippocampus=${this.hippocampus.keyCount} cerebellum=${this.cerebellum.keyCount} reserve=${this.reserve.keyCount}`);
+  }
+}
+
+const brain = new BrainKeyRouter();
+
+// ── Payload Builder ──────────────────────────────────────────────────────────
 
 function buildPayload(messages: any[], options?: ChatOptions, attempt: number = 0) {
   const payload: any = {
@@ -163,12 +230,16 @@ function buildPayload(messages: any[], options?: ChatOptions, attempt: number = 
   return payload;
 }
 
-export async function chatCompletion(
+// ── Internal executor (region + optional failover) ───────────────────────────
+
+async function executeWithFailover(
+  primary: BrainRegion,
+  fallback: BrainRegion | null,
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  try {
-    return await keyPool.execute(async (client, signal, attempt) => {
+  const run = async (region: BrainRegion) => {
+    return region.execute(async (client, signal, attempt) => {
       const payload = buildPayload(messages, options, attempt);
       const response = await client.chat.completions.create(payload, { signal });
       const message = response.choices[0]?.message;
@@ -178,68 +249,129 @@ export async function chatCompletion(
       if (!message?.content) throw new Error('NVIDIA API returned an empty response');
       return message.content;
     });
-  } catch (err: any) {
+  };
+
+  try {
+    return await run(primary);
+  } catch (primaryErr: any) {
+    if (fallback && fallback !== primary) {
+      logger.warn(`[Brain:${primary.name}] All keys exhausted, failing over to [Brain:${fallback.name}]`, {
+        error: primaryErr.message
+      });
+      try {
+        return await run(fallback);
+      } catch (fallbackErr: any) {
+        logger.error(`[Brain:${fallback.name}] Failover also failed`, { error: fallbackErr.message });
+        // Fall through to dev mock or throw
+      }
+    }
+
     const isDev = process.env.NODE_ENV === 'development';
     if (isDev) {
-      logger.warn('NVIDIA API call failed — returning mock response (development only)', { error: err.message });
+      logger.warn('All brain regions failed — returning mock (dev only)', { error: primaryErr.message });
       return getMockResponse(messages, options);
     }
-    logger.error('NVIDIA API call failed all keys', { error: err.message, status: err.status });
-    throw err;
+    throw primaryErr;
   }
 }
 
+// ── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * 🗣️ Frontal Cortex — Real-time user-facing chat reply.
+ * Uses Key 1 with automatic failover to Key 4 (Reserve).
+ * This is the HIGHEST PRIORITY call — the user is waiting for this.
+ */
+export async function chatCompletion(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: ChatOptions,
+): Promise<string> {
+  return executeWithFailover(brain.frontal, brain.reserve, messages, options);
+}
+
+/**
+ * ⚡ Cerebellum — Background processing tasks.
+ * Uses Key 3. No failover — if it fails, background tasks silently skip.
+ * Used by: WebSearchService, WeatherWatcher, ResponseIntelligence, proactive triggers.
+ */
 export async function chatCompletionBackground(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  return chatCompletion(messages, options);
+  return executeWithFailover(brain.cerebellum, null, messages, options);
 }
 
+/**
+ * 💾 Hippocampus — Learning & self-improvement.
+ * Uses Key 2. No failover — learning can retry on the next cycle.
+ * Used by: NovaSelfImprovementService, NovaRealtimeLearningService.
+ */
 export async function chatCompletionLearning(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  return chatCompletion(messages, options);
+  return executeWithFailover(brain.hippocampus, null, messages, options);
 }
 
+/**
+ * 🧩 Hippocampus — Memory extraction & agent work.
+ * Uses Key 2. No failover — memory extraction can retry later.
+ * Used by: All 7 memory agents (Working, ShortTerm, Episodic, Emotional, KG, Semantic, Reflection, Milestone).
+ */
+export async function chatCompletionMemory(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: ChatOptions,
+): Promise<string> {
+  return executeWithFailover(brain.hippocampus, null, messages, options);
+}
+
+/**
+ * 🗣️ Frontal Cortex — Streaming chat reply.
+ * Uses Key 1 with failover to Key 4 (Reserve) for the initial connection.
+ */
 export async function* chatCompletionStream(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): AsyncGenerator<string, void, unknown> {
   
-  // Streaming is tricky with retries because the stream might break halfway.
-  // We'll wrap the initial connection in the key pool, but if it breaks mid-stream, it throws.
-  
   const payload = buildPayload(messages, options, 0);
   payload.stream = true;
 
+  // Try frontal first, then reserve
+  let stream: any;
   try {
-    const stream = await keyPool.execute(async (client, signal) => {
+    stream = await brain.frontal.execute(async (client, signal) => {
       return await client.chat.completions.create(payload, { signal }) as any;
     });
-
-    let toolCallBuffer = '';
-    let toolCallName = '';
-    let isToolCall = false;
-
-    for await (const chunk of stream) {
-      const tc = chunk.choices[0]?.delta?.tool_calls?.[0];
-      if (tc) {
-        isToolCall = true;
-        if (tc.function?.name) toolCallName = tc.function.name;
-        if (tc.function?.arguments) toolCallBuffer += tc.function.arguments;
-        continue;
-      }
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) yield content;
+  } catch (frontalErr: any) {
+    logger.warn(`[Brain:frontal] Streaming failed, falling over to reserve`, { error: frontalErr.message });
+    try {
+      stream = await brain.reserve.execute(async (client, signal) => {
+        return await client.chat.completions.create(payload, { signal }) as any;
+      });
+    } catch (reserveErr: any) {
+      logger.error('[Brain:reserve] Streaming failover also failed', { error: reserveErr.message });
+      throw reserveErr;
     }
+  }
 
-    if (isToolCall) {
-      yield JSON.stringify({ tool_calls: [{ function: { name: toolCallName, arguments: toolCallBuffer } }] });
+  let toolCallBuffer = '';
+  let toolCallName = '';
+  let isToolCall = false;
+
+  for await (const chunk of stream) {
+    const tc = chunk.choices[0]?.delta?.tool_calls?.[0];
+    if (tc) {
+      isToolCall = true;
+      if (tc.function?.name) toolCallName = tc.function.name;
+      if (tc.function?.arguments) toolCallBuffer += tc.function.arguments;
+      continue;
     }
-  } catch (err: any) {
-    logger.error('NVIDIA API streaming call failed', { error: err.message });
-    throw err;
+    const content = chunk.choices[0]?.delta?.content || '';
+    if (content) yield content;
+  }
+
+  if (isToolCall) {
+    yield JSON.stringify({ tool_calls: [{ function: { name: toolCallName, arguments: toolCallBuffer } }] });
   }
 }
