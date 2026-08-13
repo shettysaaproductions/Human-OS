@@ -67,16 +67,16 @@ export class NovaBrainService {
 
 ## 🧠 SUBCONSCIOUS ACTIONS & JSON FORMAT (CRITICAL)
 You are capable of generating a conversational reply AND taking background actions simultaneously.
-You MUST format your EXACT output using these two XML tags:
+You MUST format your EXACT output using these two XML tags IN THIS EXACT ORDER:
 
-<reply>
-Your conversational text response here. Max 1-2 sentences. Use natural Hinglish if that's the user's style.
-</reply>
 <subconscious_actions>
 [
   { "tool": "MomentEngine", "action": "extract", "data": { "moment": "...", "emotion": "..." } }
 ]
 </subconscious_actions>
+<reply>
+Your conversational text response here. Max 1-2 sentences. Use natural Hinglish if that's the user's style.
+</reply>
 
 Available Tools for Subconscious Actions:
 1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
@@ -207,17 +207,17 @@ If no tools need to be called, leave the JSON array empty: []
 
 ## 🧠 SUBCONSCIOUS ACTIONS & STREAMING (CRITICAL FORMAT)
 You are capable of generating a conversational reply AND taking background actions simultaneously.
-You MUST format your EXACT output using these two XML tags:
+You MUST format your EXACT output using these two XML tags IN THIS EXACT ORDER:
 
-<reply>
-Your conversational text response here. Max 1-2 sentences. Use natural Hinglish if that's the user's style.
-</reply>
 <subconscious_actions>
 [
   { "tool": "MomentEngine", "action": "extract", "data": { "moment": "...", "emotion": "..." } },
   { "tool": "ReminderEngine", "action": "schedule", "data": { "time_phrase": "in 10 minutes", "description": "Check if user is back from being busy" } }
 ]
 </subconscious_actions>
+<reply>
+Your conversational text response here. Max 1-2 sentences. Use natural Hinglish if that's the user's style.
+</reply>
 
 Available Tools for Subconscious Actions:
 1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
@@ -275,13 +275,14 @@ If no tools need to be called, leave the JSON array empty: []
       // `<reply>` and `</reply>` arriving in the same chunk (very short replies) or
       // being split across chunks — the old per-chunk slicing leaked the raw close tag
       // and the <subconscious_actions> JSON into the streamed reply.
+      // Locate the reply region inside the FULL accumulated text.
       const openIdx = fullText.indexOf('<reply>');
       if (openIdx === -1) continue; // open tag not seen yet
 
       const closeIdx = fullText.indexOf('</reply>');
       // If the close tag hasn't arrived, stop the reply at the subconscious_actions
-      // tag (safety: never stream the actions JSON as part of the reply).
-      const subIdx = fullText.indexOf('<subconscious_actions>');
+      // tag ONLY IF it appears AFTER the reply tag (handles model hallucination).
+      const subIdx = fullText.indexOf('<subconscious_actions>', openIdx);
       const replyEnd = closeIdx === -1 ? (subIdx === -1 ? fullText.length : subIdx) : closeIdx;
 
       const currentReply = fullText.slice(openIdx + '<reply>'.length, replyEnd);
