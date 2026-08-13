@@ -16,6 +16,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
+import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import crypto from 'crypto';
 
@@ -1119,6 +1120,16 @@ chatRouter.post(
         logger.warn('[SituationalAwareness] Reminders fetch failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
+      let behaviorPattern: string | null = null;
+      try {
+        const { pattern, description } = await presencePatternService.getBehaviorPattern(userId);
+        if (pattern !== 'UNKNOWN') {
+           behaviorPattern = `${pattern} (${description})`;
+        }
+      } catch (err) {
+        logger.warn('[SituationalAwareness] Behavior pattern fetch failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+
       // Build the Situation Brief
       const situationCtx: SituationContext = {
         nowLocal,
@@ -1137,6 +1148,7 @@ chatRouter.post(
         currentVisualContext: profile?.current_visual_context,
         userPresence,
         unreadNovaMessages,
+        behaviorPattern,
       };
       situationBrief = situationalAwareness.buildBrief(situationCtx);
 

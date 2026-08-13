@@ -31,6 +31,7 @@ export interface SituationContext {
     last_active_at?: string | null;
     last_typing_at?: string | null;
   } | null;
+  behaviorPattern?: string | null;
   unreadNovaMessages?: number;   // assistant messages the user has not opened/read yet
 }
 
@@ -124,6 +125,10 @@ export class SituationalAwareness {
         lines.push(`- The user is AWAY (was active recently). Reply normally, but don't expect an instant response and don't read silence as rejection — they'll pick it up when they're back.`);
       } else {
         lines.push(`- The user is OFFLINE and will read this later. Do NOT ask "kya ho gaya?" or expect an immediate reply. Keep it light and self-contained — they'll respond when free.`);
+      }
+
+      if (ctx.behaviorPattern) {
+        lines.push(`- 📊 BEHAVIOR PATTERN: ${ctx.behaviorPattern}`);
       }
     }
 

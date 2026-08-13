@@ -23,9 +23,9 @@ export function sanitizeReply(reply: string): string {
     .replace(/^\s*#{1,6}\s+/gm, '')                                      // # headings
     .replace(/^\s*[-•]\s+/gm, '')                                        // bullet markers
     .replace(/^\s*\d+[.)]\s+/gm, '')                                     // numbered-list markers
-    .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, '') // (subconscious_actions: ) label leak
-    .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, '')
-    .replace(/\s*\((?:subconscious_actions|subconscious_actions|tool)\b[^)]*\)\s*/gi, '') // any inline tool/subconscious paren leak
+    .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, ' ') // (subconscious_actions: ) label leak → join with a space
+    .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, ' ')
+    .replace(/\s*\((?:subconscious_actions|subconscious_actions|tool)\b[^)]*\)\s*/gi, ' ') // any inline tool/subconscious paren leak
     .replace(/(\p{Extended_Pictographic})\s*\1+\s*/gu, '$1 ')            // collapse repeated emoji
     .replace(/\s{2,}/g, ' ')
     .trim();
