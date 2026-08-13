@@ -39,7 +39,8 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
     setLoading(true);
     setError(false);
     try {
-      const response = await api.get(`/chat/${messageId}/thoughts`);
+      const cleanId = messageId.replace(/_part_\d+$/, '');
+      const response = await api.get(`/chat/${cleanId}/thoughts`);
       setThoughts(response.data.thoughts || []);
     } catch (e) {
       console.error('Failed to fetch thoughts:', e);
