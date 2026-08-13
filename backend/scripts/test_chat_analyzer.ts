@@ -75,7 +75,14 @@ async function analyzeTestChat() {
         // Just print a summarized version of the situation brief so it doesn't flood the logs
         const briefHasOffline = msg.meta.situationBrief.includes('OFFLINE');
         const briefHasNotSeen = msg.meta.situationBrief.includes('NOT SEEN');
+        
+        let behaviorPatternMatch = msg.meta.situationBrief.match(/BEHAVIOR PATTERN: (.*?)(?=\n|$)/);
+        let behaviorPattern = behaviorPatternMatch ? behaviorPatternMatch[1] : null;
+
         console.log(`  Situation Flags: ${briefHasOffline ? '[USER OFFLINE]' : ''} ${briefHasNotSeen ? '[MESSAGE UNREAD]' : ''}`);
+        if (behaviorPattern) {
+          console.log(`  📊 Behavior Pattern: ${behaviorPattern}`);
+        }
       }
       
       if (msg.meta.subconsciousActions && msg.meta.subconsciousActions.length > 0) {

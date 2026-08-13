@@ -35,8 +35,17 @@
 
 ---
 
-## ⚙️ Core Architecture (7 Engines)
-Backend: Node.js / TypeScript on **Render** | DB: **Supabase (PostgreSQL)** | Models: **NVIDIA Nemotron 49B** (`nvidia/llama-3.3-nemotron-super-49b-v1`)
+## ⚙️ Core Architecture (7 Engines + 4-Key Brain)
+Backend: Node.js / TypeScript on **Render** | DB: **Supabase (PostgreSQL)**
+
+**🧠 Nova Brain Architecture (Human Brain Model):**
+Uses 4 dedicated NVIDIA API keys (Nemotron 49B) mapped to specialized brain regions so background tasks never starve real-time chat:
+- **Key 1 (Frontal Cortex):** Real-time user replies (`chatCompletion`). Failover to Reserve.
+- **Key 2 (Hippocampus):** 8 memory agents + learning (`chatCompletionMemory`, `chatCompletionLearning`).
+- **Key 3 (Cerebellum):** Background tasks like WebSearch/Weather (`chatCompletionBackground`).
+- **Key 4 (Reserve):** Emergency failover if Frontal Cortex times out + extra key capacity.
+
+**Core Engines:**
 1. **NovaBrain (`NovaBrainService.ts`)** — Main LLM response generator.
 2. **NACE Consciousness (`NovaConsciousnessEngine.ts`)** — 15-min pulse for proactive check-ins & double-texts.
 3. **Situational Awareness (`SituationalAwareness.ts`)** — Time, session, mood & phase contextualizer.

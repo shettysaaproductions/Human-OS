@@ -34,6 +34,36 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
+    // Capture history to understand behavior patterns (online -> offline -> typing etc)
+    const { data: latestHistory } = await supabaseAdmin
+      .from('user_presence_history')
+      .select('status, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let shouldInsertHistory = true;
+    if (latestHistory) {
+      const isSameStatus = latestHistory.status === status;
+      const msSinceLast = Date.now() - new Date(latestHistory.created_at).getTime();
+      const isRecent = msSinceLast < 5 * 60 * 1000; // 5 minutes
+      
+      if (isSameStatus && isRecent) {
+        shouldInsertHistory = false;
+      }
+    }
+
+    if (shouldInsertHistory) {
+      await supabaseAdmin
+        .from('user_presence_history')
+        .insert({
+          user_id: userId,
+          status,
+          created_at: updateData.last_active_at
+        });
+    }
+
     res.status(200).json({ success: true });
   } catch (err) {
     logger.error('Error in POST /presence', { error: err instanceof Error ? err.message : String(err) });

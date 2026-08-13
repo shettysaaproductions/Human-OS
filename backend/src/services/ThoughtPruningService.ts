@@ -10,7 +10,7 @@ export const thoughtPruningService = {
     try {
       const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
       
-      logger.info('[ThoughtPruningService] Starting daily pruning of old thoughts', { olderThan: fiveDaysAgo });
+      logger.info('[ThoughtPruningService] Starting daily pruning of old thoughts and presence history', { olderThan: fiveDaysAgo });
 
       const { data, error } = await supabaseAdmin
         .from('nova_thoughts')
@@ -22,9 +22,19 @@ export const thoughtPruningService = {
         throw error;
       }
 
-      logger.info('[ThoughtPruningService] Pruning complete', { deletedCount: data?.length || 0 });
+      const { data: presenceData, error: presenceError } = await supabaseAdmin
+        .from('user_presence_history')
+        .delete()
+        .lt('created_at', fiveDaysAgo)
+        .select('id');
+
+      if (presenceError) {
+        throw presenceError;
+      }
+
+      logger.info('[ThoughtPruningService] Pruning complete', { deletedThoughtsCount: data?.length || 0, deletedPresenceCount: presenceData?.length || 0 });
     } catch (error) {
-      logger.error('[ThoughtPruningService] Error during thought pruning', { error });
+      logger.error('[ThoughtPruningService] Error during pruning', { error });
     }
   }
 };

@@ -220,6 +220,7 @@ describe('NovaBrainService', () => {
   });
 
   describe('4.4 Error Handling', () => {
+    it('should throw on LLM failure', async () => {
       (chatCompletion as jest.Mock).mockRejectedValue(new Error('NVIDIA API timeout'));
       await expect(service.processInteraction('u1', 'hi', {})).rejects.toThrow('NVIDIA API timeout');
       expect(logger.error).toHaveBeenCalled();
