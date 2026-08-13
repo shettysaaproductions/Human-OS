@@ -89,7 +89,7 @@ memoryDebugRouter.get('/', memoryDebugLimiter, async (req: Request, res: Respons
  * DELETE /memory/debug
  * Deletes all memories for the hardcoded user.
  */
-memoryDebugRouter.delete('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+memoryDebugRouter.delete('/', memoryDebugLimiter, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user!.id;
     const { error } = await supabaseAdmin
