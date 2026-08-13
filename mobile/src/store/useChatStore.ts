@@ -878,6 +878,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 timestamp: msg.created_at,
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
+                hasThoughts: msg.meta?.hasThoughts,
               };
               if (idx === 0) {
                 newMessages.push(newMsg);
@@ -894,6 +895,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               timestamp: msg.created_at,
               options: msg.meta?.options,
               user_reaction: msg.user_reaction,
+              hasThoughts: msg.meta?.hasThoughts,
             });
           }
         }
