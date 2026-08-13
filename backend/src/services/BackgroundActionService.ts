@@ -329,6 +329,8 @@ export class BackgroundActionService {
     if (spec.end_at) out.end_at = spec.end_at;
     if (spec.end_date && !spec.end_at) out.end_at = spec.end_date;
 
+    if (spec.is_auto !== undefined) out.is_auto = spec.is_auto;
+
     return out;
   }
 

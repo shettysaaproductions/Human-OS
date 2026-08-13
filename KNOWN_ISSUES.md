@@ -121,3 +121,6 @@ This document tracks identified bugs, limitations, and workarounds.
 | NVIDIA fallback only tried 2 keys, then crashed | Fix 5: 3-tier fallback: primary 49B key1 → secondary 49B key2 → 8B key1 last-resort |
 | Emergency FALLBACK_REPLY save had no `situationBrief` in meta | `situationBrief` hoisted to outer scope; outer catch now attaches it to emergency save's meta |
 | **Claude/OmniRoute RLHF bias — robotic lists, AI disclaimers, menus** | Added ANTI-ROBOT (CLAUDE/OMNI): NO AI DISCLAIMERS, NO MENUS OR AGENDAS, NO ROBOT CONFIRMATIONS; ReminderEngine tool prompt tells model backend sends pushes | Aug 13 2026 |
+| "Network slow" fallback spam from free-tier rate limits | Implemented 4-key round-robin rotation in `nvidia.ts` to multiply rate limit bounds by 4x; background polling throttled to stop token bleed | Aug 14 2026 |
+| Verbose robotic replies ignoring formatting rules | Enhanced Response Quality Gate in `chat.ts` to enforce XML boundaries and catch hallucinations mid-stream | Aug 14 2026 |
+| Reminders failing silently (Fake reminders) | Response Quality Gate added to chat.ts; ReminderEngine prompt synced; generateReminderMessage moved to templates | Aug 14 2026 |
