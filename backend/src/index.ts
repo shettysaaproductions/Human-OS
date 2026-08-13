@@ -154,6 +154,9 @@ async function main(): Promise<void> {
         logger.info('Scheduler: Triggering daily reflections...');
         await reflectionScheduler.runDailyForAllUsers();
         await shortTermMemoryCleanupService.run();
+        
+        const { thoughtPruningService } = await import('./services/ThoughtPruningService');
+        await thoughtPruningService.pruneOldThoughts();
       } catch (err) {
         logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });
       }

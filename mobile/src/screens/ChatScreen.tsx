@@ -13,6 +13,7 @@ import { chatService } from '../services/chatService';
 import { notificationService, setChatScreenActive } from '../services/notificationService';
 import { presenceService } from '../services/presenceService';
 import * as Notifications from 'expo-notifications';
+import { ThoughtBubble } from '../components/ThoughtBubble';
 import { useTheme } from '../theme/ThemeContext';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
@@ -862,6 +863,11 @@ export function ChatScreen() {
               {isUser && StatusIcon}
             </View>
             </View>
+
+            {/* Nova's Mind - Thoughts Panel */}
+            {!isUser && item.hasThoughts && (
+              <ThoughtBubble messageId={item.id} />
+            )}
 
             {item.user_reaction && (
               <View style={s.reactionBadge}>
