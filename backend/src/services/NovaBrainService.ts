@@ -6,6 +6,7 @@ import { promptBuilder } from './promptBuilder';
  * Nova's natural, in-voice safety-net reply when the LLM returns nothing usable.
  * Kept in-voice ("friend blaming their own network") so a blank model response never
  * exposes jargon the user shouldn't see. Mirrors FALLBACK_REPLY in routes/chat.ts.
+ */
 export const NOVA_EMPTY_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
 
 /**
