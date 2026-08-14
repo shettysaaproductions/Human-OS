@@ -864,20 +864,22 @@ export function ChatScreen() {
               {isUser && StatusIcon}
             </View>
             </View>
-
-            {/* Nova's Mind - Thoughts Panel */}
-            {!isUser && item.hasThoughts && (
-              <ThoughtBubble messageId={item.id} />
-            )}
-
-            {item.user_reaction && (
-              <View style={s.reactionBadge}>
-                <Text style={s.reactionText}>
-                  {item.user_reaction === 'THUMBS_UP' ? '👍' : item.user_reaction === 'THUMBS_DOWN' ? '👎' : '❤️'}
-                </Text>
-              </View>
-            )}
           </View>
+          
+          {/* Nova's Mind - Thoughts Panel */}
+          {!isUser && item.hasThoughts && (
+            <View style={{ marginLeft: 14 }}>
+              <ThoughtBubble messageId={item.id} />
+            </View>
+          )}
+
+          {item.user_reaction && (
+            <View style={[s.reactionBadge, { marginLeft: 14 }]}>
+              <Text style={s.reactionText}>
+                {item.user_reaction === 'THUMBS_UP' ? '👍' : item.user_reaction === 'THUMBS_DOWN' ? '👎' : '❤️'}
+              </Text>
+            </View>
+          )}
           
           {item.options && item.options.length > 0 && !isUser && (
             <View style={s.optionsContainer}>
