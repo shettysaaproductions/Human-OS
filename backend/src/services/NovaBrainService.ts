@@ -25,6 +25,10 @@ export function sanitizeReply(reply: string): string {
     .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, ' ') // (subconscious_actions: ) label leak → join with a space
     .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, ' ')
     .replace(/\s*\((?:subconscious_actions|subconscious_actions|tool)\b[^)]*\)\s*/gi, ' ') // any inline tool/subconscious paren leak
+    .replace(/\s*\[\s*(?:subconscious_actions|subconscious actions)[^\]]*\]\s*/gi, ' ') // any square bracket subconscious leak
+    .replace(/\s*AUTOMATIC[^\]]*\[\s*Subconscious Actions[^\]]*\]\s*/gi, ' ') // specifically catch "AUTOMATIC X-MINUTE WAKE-UP ALERT SET... [Subconscious Actions...]"
+    .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ') // catch code blocks leaking subconscious actions
+    .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ') // catch the unformatted "[subconscious_actions] WAITING FOR YOUR NEXT INPUT..." leak
     .replace(/(\p{Extended_Pictographic})\s*\1+\s*/gu, '$1 ')            // collapse repeated emoji
     .replace(/\s{2,}/g, ' ')
     .trim();
