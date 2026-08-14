@@ -167,6 +167,7 @@ export class BackgroundActionService {
              key: action.data.key,
              value: action.data.value,
              memory_type: 'semantic',
+             last_accessed_at: new Date().toISOString(),
              updated_at: new Date().toISOString()
            });
         }

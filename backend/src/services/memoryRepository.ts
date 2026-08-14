@@ -60,6 +60,7 @@ export class MemoryRepository {
               confidence: memory.confidence,
               emotional_weight: memory.emotional_weight ?? 0,
               source_message: sourceMessage,
+              last_accessed_at: new Date().toISOString(),
             })
         );
 
