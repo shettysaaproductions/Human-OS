@@ -757,7 +757,7 @@ chatRouter.post(
           ? Promise.resolve({ data: cachedProfile, error: null })
           : qt.track('get_profile', 'profiles', () =>
               supabaseAdmin.from('profiles')
-                .select('preferred_name, companion_personality, country, push_token, current_visual_context')
+                .select('preferred_name, companion_personality, country, push_token, current_visual_context, timezone_offset')
                 .eq('id', userId).maybeSingle()
             ),
 
@@ -841,7 +841,7 @@ chatRouter.post(
 
       // ── Unpack results ─────────────────────────────────────────────────────────
       // 1. Profile
-      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string } | null;
+      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string; timezone_offset?: number } | null;
       if (profile && !cachedProfile) {
         cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
       }
@@ -1209,9 +1209,19 @@ chatRouter.post(
       
       let remindersContext = '';
       if (upcoming && upcoming.length > 0) {
+        // Use the user's tzOffset/tzLabel (computed at lines 974/983) instead of
+        // hardcoding Asia/Kolkata. The same shifted-Date pattern as the temporal
+        // archive (lines 1183-1187): add offset in ms, then read via UTC getters.
+        const tzMs = tzOffset * 3600 * 1000;
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has these reminders active:\n' + upcoming.map(r => {
           const when = r.trigger_at
-            ? `at ${new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+            ? (() => {
+                const d = new Date(new Date(r.trigger_at).getTime() + tzMs);
+                return `at ${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')} ${tzLabel}`;
+              })()
             : `on event "${r.event_trigger || 'unknown event'}"`;
           const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
           const dayFilter = r.active_days?.length ? ` [only on: ${r.active_days.join(', ')}]` : '';
