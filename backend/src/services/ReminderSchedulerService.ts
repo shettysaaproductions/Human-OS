@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase';
+import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { sendPushNotification } from '../lib/pushNotifications';
 import crypto from 'crypto';
@@ -173,12 +174,7 @@ export class ReminderSchedulerService {
 
         conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-        await supabaseAdmin.from('chat_history').insert({
-          user_id: reminder.user_id,
-          conversation_id: conversationId,
-          role: 'assistant',
-          content: message
-        });
+        await saveAssistantMessage(reminder.user_id, conversationId, message, 'ReminderSchedulerService');
         break; // Success
       } catch (insertErr) {
         retryCount++;

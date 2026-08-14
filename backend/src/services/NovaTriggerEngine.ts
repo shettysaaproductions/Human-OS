@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase';
+import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
 
@@ -69,12 +70,7 @@ export class NovaTriggerEngine {
 
         const conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-        await supabaseAdmin.from('chat_history').insert({
-          user_id: userId,
-          conversation_id: conversationId,
-          role: 'assistant',
-          content: message,
-        });
+        await saveAssistantMessage(userId, conversationId, message, 'NovaTriggerEngine');
 
         // Also save to outreach log (schema columns are outreach_type/created_at,
         // NOT type/sent_at — the old insert failed every time)
