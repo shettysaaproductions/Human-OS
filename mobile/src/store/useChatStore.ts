@@ -73,7 +73,7 @@ let _proactiveCheckInProgress = false;
 // ── Reply-wait polling — unified poller that covers both foreground and post-restart ──
 let _replyPollTimer: ReturnType<typeof setInterval> | null = null;
 let _replyPollStartTime = 0;
-const MAX_REPLY_WAIT_MS = 120_000; // 120 seconds max absolute wait time (Nemotron 49B generation)
+const MAX_REPLY_WAIT_MS = 600_000; // 10 minutes max wait time to cover backend auto-retry
 
 function startReplyPolling(checkFn: () => Promise<void>) {
   if (_replyPollTimer) return; // already running
@@ -954,8 +954,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           for (let i = msgsNow.length - 1; i >= 0; i--) {
             if (msgsNow[i].role === 'user') { lastUserIdx = i; break; }
           }
+          const assistantMsgsAfter = msgsNow.slice(lastUserIdx + 1).filter(m => m.role === 'assistant');
+          const isOnlyFallback = assistantMsgsAfter.length > 0 && assistantMsgsAfter.every(m => m.content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.');
           const assistantAfterLastUser = lastUserIdx >= 0
-            ? msgsNow.slice(lastUserIdx + 1).some(m => m.role === 'assistant')
+            ? assistantMsgsAfter.length > 0 && !isOnlyFallback
             : true;
           if (assistantAfterLastUser) {
             if (delayedChunks.length === 0) set({ isTyping: false });
@@ -994,7 +996,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (newMessages.length === 0 && get().isTyping) {
           const storeMsgs = get().messages;
           const lastStoreMsg = storeMsgs[storeMsgs.length - 1];
-          if (lastStoreMsg?.role === 'assistant') {
+          if (lastStoreMsg?.role === 'assistant' && lastStoreMsg.content !== 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
             console.log('[PROACTIVE] Self-healing: isTyping stuck true but reply already in store');
             set({ isTyping: false });
             stopReplyPolling();
