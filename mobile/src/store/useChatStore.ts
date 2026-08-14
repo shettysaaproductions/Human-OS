@@ -843,10 +843,37 @@ export const useChatStore = create<ChatState>((set, get) => {
           
           const msgId = msg.id;
 
+          // Track updates to existing messages (cache sync)
+          let updatedExisting = false;
+          const updateLocalMessageIfNeeded = (localId: string) => {
+            const localMsg = currentMessages.find(m => m.id === localId);
+            if (localMsg) {
+              const needsThoughtUpdate = msg.meta?.hasThoughts && !localMsg.hasThoughts;
+              const needsOptionsUpdate = msg.meta?.options && !localMsg.options;
+              if (needsThoughtUpdate || needsOptionsUpdate) {
+                set((s) => ({
+                  messages: s.messages.map(m => m.id === localId ? { 
+                    ...m, 
+                    hasThoughts: m.hasThoughts || msg.meta?.hasThoughts,
+                    options: m.options || msg.meta?.options 
+                  } : m)
+                }));
+                updatedExisting = true;
+              }
+            }
+          };
+
           // Skip if already in store (by raw ID or any _part_N variant)
-          if (existingIds.has(msgId)) continue;
+          if (existingIds.has(msgId)) {
+            updateLocalMessageIfNeeded(msgId);
+            continue;
+          }
           const partId1 = `${msgId}_part_1`;
-          if (existingIds.has(partId1)) continue;
+          if (existingIds.has(partId1)) {
+            // Find all parts and update them
+            currentMessages.filter(m => m.id.startsWith(`${msgId}_part_`)).forEach(m => updateLocalMessageIfNeeded(m.id));
+            continue;
+          }
 
           // Skip user messages if the exact same content is already in the local store.
           if (role === 'user' && existingUserContent.has(msg.content.trim())) continue;
@@ -900,14 +927,18 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
         }
 
-        if (newMessages.length > 0) {
-          console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
+        if (newMessages.length > 0 || updatedExisting) {
+          if (newMessages.length > 0) {
+            console.log('[PROACTIVE] Found', newMessages.length, 'new messages from Nova while backgrounded');
+          } else {
+            console.log('[PROACTIVE] Synced metadata (thoughts/options) for existing messages');
+          }
           set((s) => {
             const combined = [...s.messages, ...newMessages];
             combined.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
             return {
               messages: combined,
-              isTyping: delayedChunks.length > 0,
+              isTyping: delayedChunks.length > 0 ? true : s.isTyping,
             };
           });
           // Reply arrived — but only stop the poller when EVERY user message has been

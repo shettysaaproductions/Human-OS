@@ -27,7 +27,7 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
     Animated.timing(animation, {
       toValue: nextState ? 1 : 0,
       duration: 200,
-      useNativeDriver: false,
+      useNativeDriver: true,
     }).start();
 
     if (nextState && !thoughts && !loading) {
@@ -50,23 +50,17 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
     }
   };
 
-  const getEmojiForType = (type: string) => {
-    switch (type) {
-      case 'context': return '🌐';
-      case 'action': return '⚡';
-      case 'memory_link': return '🧩';
-      case 'anti_robot': return '🛡️';
-      case 'reasoning': return '💭';
-      default: return '⚙️';
-    }
-  };
+  const rotateInterpolate = animation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '90deg']
+  });
 
   const getTitleForType = (type: string) => {
     switch (type) {
       case 'context': return 'Context';
       case 'action': return 'Action';
-      case 'memory_link': return 'Memory Link';
-      case 'anti_robot': return 'Anti-Robot Rules';
+      case 'memory_link': return 'Memory';
+      case 'anti_robot': return 'Filter';
       case 'reasoning': return 'Reasoning';
       default: return 'Process';
     }
@@ -77,32 +71,33 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
       <TouchableOpacity 
         style={styles.header} 
         onPress={toggleExpand}
-        activeOpacity={0.7}
+        activeOpacity={0.6}
       >
-        <Text style={styles.headerText}>🧠 Nova's Mind</Text>
-        <Text style={styles.chevronIcon}>{expanded ? "▲" : "▼"}</Text>
+        <Text style={styles.headerText}>Worked on request</Text>
+        <Animated.View style={{ transform: [{ rotate: rotateInterpolate }] }}>
+          <Text style={styles.chevronIcon}>›</Text>
+        </Animated.View>
       </TouchableOpacity>
 
       {expanded && (
         <View style={styles.content}>
           {loading && (
-            <ActivityIndicator size="small" color="#8b5cf6" style={styles.loader} />
+            <ActivityIndicator size="small" color="#6B7280" style={styles.loader} />
           )}
           
           {error && (
-            <Text style={styles.errorText}>Failed to load thoughts.</Text>
+            <Text style={styles.errorText}>Failed to load process logs.</Text>
           )}
 
           {thoughts && thoughts.length === 0 && (
-            <Text style={styles.emptyText}>No deep thoughts for this message.</Text>
+            <Text style={styles.emptyText}>No internal processing required.</Text>
           )}
 
           {thoughts && thoughts.map((thought, index) => (
             <View key={index} style={styles.thoughtItem}>
               <View style={styles.thoughtHeader}>
-                <Text style={styles.thoughtIcon}>{getEmojiForType(thought.type)}</Text>
                 <Text style={styles.thoughtTitle}>
-                  {getTitleForType(thought.type)} <Text style={styles.engineTag}>({thought.engine})</Text>
+                  {getTitleForType(thought.type)} <Text style={styles.engineTag}>[{thought.engine}]</Text>
                 </Text>
               </View>
               <Text style={styles.thoughtDetail}>{thought.detail}</Text>
@@ -116,72 +111,75 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(139, 92, 246, 0.2)',
-    borderRadius: 12,
+    marginTop: 4,
+    marginBottom: 8,
+    borderRadius: 8,
     overflow: 'hidden',
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
   },
   headerText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#9CA3AF', // subtle gray
+    fontSize: 12,
+    fontWeight: '500',
+    marginRight: 6,
   },
   chevronIcon: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
+    color: '#9CA3AF',
+    fontSize: 16,
+    fontWeight: '400',
+    marginTop: -2,
   },
   content: {
+    marginTop: 4,
     paddingHorizontal: 12,
-    paddingBottom: 12,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)', // very subtle glassmorphic backdrop for logs
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(156, 163, 175, 0.2)',
+    borderRadius: 4,
   },
   loader: {
     marginVertical: 10,
   },
   errorText: {
-    color: '#ff4444',
+    color: '#EF4444',
     fontSize: 12,
-    marginTop: 8,
+    fontFamily: 'monospace',
   },
   emptyText: {
-    color: 'rgba(255,255,255,0.5)',
+    color: '#6B7280',
     fontSize: 12,
-    marginTop: 8,
-    fontStyle: 'italic',
+    fontFamily: 'monospace',
   },
   thoughtItem: {
-    marginTop: 12,
+    marginBottom: 10,
   },
   thoughtHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
-  },
-  thoughtIcon: {
-    fontSize: 14,
+    marginBottom: 2,
   },
   thoughtTitle: {
-    color: '#fff',
-    fontSize: 12,
+    color: '#D1D5DB', // lighter gray for keys
+    fontSize: 11,
     fontWeight: '600',
-    marginLeft: 6,
+    fontFamily: 'monospace',
+    textTransform: 'uppercase',
   },
   engineTag: {
-    color: 'rgba(255,255,255,0.4)',
+    color: '#6B7280',
     fontWeight: '400',
   },
   thoughtDetail: {
-    color: 'rgba(255,255,255,0.6)',
+    color: '#9CA3AF',
     fontSize: 12,
     lineHeight: 18,
-    paddingLeft: 20,
+    fontFamily: 'monospace',
   }
 });
