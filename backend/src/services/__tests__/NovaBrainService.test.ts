@@ -215,7 +215,7 @@ describe('NovaBrainService', () => {
       (chatCompletion as jest.Mock).mockResolvedValue(`<subconscious_actions>[]</subconscious_actions>`);
       const result = await service.processInteraction('u1', 'hi', {});
       // NOVA_EMPTY_REPLY — in-voice "friend blaming network", never debug jargon
-      expect(result.reply).toBe('Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?');
+      expect(result.reply).toBe('Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.');
     });
   });
 

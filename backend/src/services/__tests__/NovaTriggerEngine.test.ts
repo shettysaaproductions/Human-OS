@@ -12,7 +12,8 @@ jest.mock('../../lib/supabase', () => {
     order: jest.fn().mockReturnValue(chainable),
     limit: jest.fn().mockReturnValue(chainable),
     maybeSingle: jest.fn().mockResolvedValue({ data: null }),
-    insert: jest.fn().mockResolvedValue({ data: null })
+    single: jest.fn().mockResolvedValue({ data: { id: 'msg-123' } }),
+    insert: jest.fn().mockReturnValue(chainable)
   });
   return {
     supabaseAdmin: {
@@ -229,30 +230,42 @@ describe('NovaTriggerEngine', () => {
       engine.shouldTrigger = jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 10 });
       const messageGenerator = jest.fn().mockResolvedValue('Hello integration');
       const mockChain = (supabaseAdmin.from as jest.Mock)();
-      
-      mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } }); 
-      mockChain.maybeSingle.mockResolvedValueOnce({ data: { conversation_id: 'conv-1' } }); 
-      mockChain.insert.mockResolvedValue({});
+
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } });
+      mockChain.maybeSingle.mockResolvedValueOnce({ data: { conversation_id: 'conv-1' } });
+      // The chainable mock returns itself on insert, so we need to handle the .select().single() chain
+      mockChain.insert.mockReturnValue(mockChain);
 
       await engine.scheduleMessage('u-integration', getContext(), messageGenerator);
-      
+
       await jest.runAllTimersAsync();
 
       if ((logger.error as jest.Mock).mock.calls.length > 0) {
         console.error('Logger error called:', (logger.error as jest.Mock).mock.calls);
       }
 
-      expect(mockChain.insert).toHaveBeenCalledWith(expect.objectContaining({
-        role: 'assistant',
-        content: 'Hello integration',
-        user_id: 'u-integration'
-      }));
+      // First insert: chat_history via saveAssistantMessage (with role, content, user_id, meta)
+      // Second insert: nova_outreach_log (with message, user_id, outreach_type)
+      const insertCalls = (mockChain.insert as jest.Mock).mock.calls;
+      expect(insertCalls.length).toBeGreaterThanOrEqual(2);
 
-      expect(mockChain.insert).toHaveBeenCalledWith(expect.objectContaining({
-        message: 'Hello integration',
-        user_id: 'u-integration',
-        outreach_type: 'proactive'
-      }));
+      // chat_history insert
+      expect(insertCalls[0]).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'Hello integration',
+          user_id: 'u-integration'
+        })
+      ]));
+
+      // nova_outreach_log insert is the 3rd insert (1st: chat_history, 2nd: nova_thoughts, 3rd: nova_outreach_log)
+      expect(insertCalls[2]).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          message: 'Hello integration',
+          user_id: 'u-integration',
+          outreach_type: 'proactive'
+        })
+      ]));
     });
   });
 });
