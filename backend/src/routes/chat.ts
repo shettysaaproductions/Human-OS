@@ -1627,10 +1627,19 @@ chatRouter.post(
 
         if (extractedActions && extractedActions.length > 0) {
           extractedActions.forEach((action: any) => {
+            let detail = `Executed action: ${action.tool}`;
+            if (action.tool === 'MemoryEngine') {
+              if (action.action === 'save_short_term') detail = `Saved to short-term memory: ${action.data?.summary || 'User context'}`;
+              else if (action.action === 'save_long_term') detail = `Committed to long-term memory: ${action.data?.memory || 'Core detail'}`;
+              else if (action.action === 'delete_memory') detail = `Removed outdated memory to keep context fresh.`;
+              else if (action.action === 'search_memory') detail = `Searched memories for connections regarding: ${action.data?.query || 'context'}`;
+            } else if (action.tool === 'ReminderEngine') {
+              detail = `Scheduled reminder for ${action.data?.trigger_time || 'later'}: ${action.data?.title || action.data?.purpose || 'Follow-up'}`;
+            }
             thoughts.push({
               engine: action.tool || 'NovaBrain',
               type: 'action',
-              detail: `Executed action: ${action.tool}`,
+              detail,
               data: action.data || {}
             });
           });
