@@ -423,28 +423,36 @@ export class NovaFollowupService {
 
         const { data: newerMsgs } = await supabaseAdmin
           .from('chat_history')
-          .select('id')
+          .select('id, content')
           .eq('conversation_id', convId)
           .gt('created_at', userMsg.created_at)
           .limit(1);
 
         if (newerMsgs && newerMsgs.length > 0) {
-          // Nova (or someone) replied after this message. It's not stuck.
-          continue;
+          if (newerMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
+            logger.info('[NovaFollowup] Found fallback reply, treating conversation as stuck', { convId });
+          } else {
+            // Nova (or someone) replied a real message after this message. It's not stuck.
+            continue;
+          }
         }
 
         // Add additional check: was ANY assistant message sent in the last 2 minutes?
         // This handles cases where conversationId rotated or time filtering is slightly off
         const { data: recentAssistantMsgs } = await supabaseAdmin
           .from('chat_history')
-          .select('id')
+          .select('id, content')
           .eq('user_id', userMsg.user_id)
           .eq('role', 'assistant')
           .gte('created_at', new Date(Date.now() - 90 * 1000).toISOString()) // 90s guard (was 2 min)
           .limit(1);
 
         if (recentAssistantMsgs && recentAssistantMsgs.length > 0) {
-           continue; // Reply already sent recently
+           if (recentAssistantMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
+             // Fallback doesn't count as a real reply
+           } else {
+             continue; // Real reply already sent recently
+           }
         }
 
         // It is stuck! Check if a follow-up is already queued (fire_at in the future)
@@ -488,7 +496,7 @@ export class NovaFollowupService {
           const { novaBrain } = await import('./NovaBrainService');
           const lastContent = userMsg.content?.substring(0, 200) || '';
           const generated = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a very short (1 sentence max) casual Hinglish follow-up message as if you just noticed you haven't replied. Warm, not pushy. Like a friend who genuinely just noticed. Do NOT say the user is busy. Say YOU missed it.`
+            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a short casual Hinglish reply directly answering their message. Make it sound natural, as if you just got a chance to respond. Do NOT say the user is busy or apologize heavily, just answer them.`
           );
           if (generated?.message && generated.message.length < 200) {
             doubleTextMsg = generated.message;
