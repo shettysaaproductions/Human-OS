@@ -1176,12 +1176,15 @@ chatRouter.post(
 
           if (temporalData && temporalData.length > 0) {
             const chronologicalData = temporalData.reverse();
-            const istOffset = 5.5 * 60 * 60 * 1000;
+            // Shift each archive timestamp into the USER's local timezone — NOT a hardcoded
+            // IST offset. tzOffset/tzLabel are already computed above (lines 974/983) from the
+            // user's country, so a US/UK/etc. user sees times in their own clock, not +5:30.
+            const tzMs = tzOffset * 3600 * 1000;
             const lines = chronologicalData.map(m => {
-              const d = new Date(new Date(m.created_at).getTime() + istOffset);
+              const d = new Date(new Date(m.created_at).getTime() + tzMs);
               const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
               const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const tStr = `${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')} IST`;
+              const tStr = `${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')} ${tzLabel}`;
               const speaker = m.role === 'assistant' ? 'Nova' : 'You';
               const preview = m.content.substring(0, 300) + (m.content.length > 300 ? '...' : '');
               return `[${tStr}] ${speaker}: ${preview}`;
