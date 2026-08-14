@@ -882,10 +882,14 @@ export const useChatStore = create<ChatState>((set, get) => {
           // checking if we already have a message with the EXACT same content that was generated
           // locally (any NON-UUID id: SSE `msg_…`, proactive `${ts}_proactive_…`).
           if (role === 'assistant') {
-            const hasLocalDuplicate = currentMessages.some(m =>
+            const localDuplicate = currentMessages.find(m =>
               m.role === 'assistant' && m.content.trim() === msg.content.trim() && !isUuidLike(m.id)
             );
-            if (hasLocalDuplicate) continue;
+            if (localDuplicate) {
+              // We found a local stream duplicate. We must sync the backend's metadata into it!
+              updateLocalMessageIfNeeded(localDuplicate.id);
+              continue;
+            }
           }
 
           // NOTE: Timestamp filter intentionally removed — the ID+content dedup above
