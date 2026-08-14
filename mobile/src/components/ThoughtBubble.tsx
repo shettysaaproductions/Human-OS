@@ -85,11 +85,23 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
     }
   };
 
-  const formatDetail = (detail: string) => {
+  const formatDetail = (detail: string, engine?: string) => {
     let text = detail;
+    
+    // Shorten the massive Situation Brief dump
+    if (text.includes('## SITUATION BRIEF') || text.includes('Right now:')) {
+      // Try to extract just a few key summary points, or return a static string
+      return "Analyzing time of day, your current status, and our recent conversation context to tailor my response.";
+    }
+    
     if (text.includes('Analyzed current user context')) return "Taking a quick look at our recent conversation and your current situation.";
     if (text.includes('Applied rules: NO_BOLD, CASUAL_HINGLISH')) return "Setting my tone to be casual and friendly.";
     if (text.includes('Applied rules:')) return "Adjusting my communication style to match the current vibe.";
+    
+    // Fallback: If it's still a massive dump, truncate it just in case
+    if (text.length > 150) {
+      return text.substring(0, 150) + "...";
+    }
     return text;
   };
 
@@ -128,7 +140,7 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
                   {getHumanReadableTitle(thought.type, thought.engine)}
                 </Text>
               </View>
-              <Text style={styles.thoughtDetail}>{formatDetail(thought.detail)}</Text>
+              <Text style={styles.thoughtDetail}>{formatDetail(thought.detail, thought.engine)}</Text>
             </View>
           ))}
         </View>
