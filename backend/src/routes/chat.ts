@@ -1606,10 +1606,11 @@ chatRouter.post(
         // Push accessed working memories if any
         if (workingMemories && workingMemories.length > 0) {
           workingMemories.forEach(wm => {
+            const cleanKey = wm.key.replace(/_/g, ' ').toLowerCase();
             thoughts.push({
               engine: 'MemoryCore',
               type: 'memory_link',
-              detail: `Working memory: ${wm.key} = ${wm.value}`
+              detail: `Recalled that your ${cleanKey} is: ${wm.value}`
             });
           });
         }
@@ -1620,7 +1621,7 @@ chatRouter.post(
             thoughts.push({
               engine: 'MemoryCore',
               type: 'memory_link',
-              detail: `Long-term memory: ${m.memory}`
+              detail: `Remembered: ${m.memory}`
             });
           });
         }
