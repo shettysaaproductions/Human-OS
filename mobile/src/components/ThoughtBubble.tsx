@@ -57,15 +57,40 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
     outputRange: ['0deg', '90deg']
   });
 
-  const getTitleForType = (type: string) => {
-    switch (type) {
-      case 'context': return 'Context';
-      case 'action': return 'Action';
-      case 'memory_link': return 'Memory';
-      case 'anti_robot': return 'Filter';
-      case 'reasoning': return 'Reasoning';
-      default: return 'Process';
+  const getEmojiForType = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'context': return '🌐';
+      case 'action': return '⚡';
+      case 'memory_link': return '🧩';
+      case 'anti_robot': return '🎭';
+      case 'reasoning': return '💭';
+      default: return '⚙️';
     }
+  };
+
+  const getHumanReadableTitle = (type: string, engine: string) => {
+    const e = engine.toUpperCase();
+    if (e.includes('AWARENESS')) return 'Situational Awareness';
+    if (e.includes('PROMPT')) return 'Personality Core';
+    if (e.includes('MEMORY')) return 'Memory Retrieval';
+    if (e.includes('EMOTION')) return 'Emotional Analysis';
+    
+    switch (type.toLowerCase()) {
+      case 'context': return 'Gathering Context';
+      case 'action': return 'Deciding Action';
+      case 'memory_link': return 'Recalling Memory';
+      case 'anti_robot': return 'Formatting Response';
+      case 'reasoning': return 'Reasoning Process';
+      default: return 'Cognitive Process';
+    }
+  };
+
+  const formatDetail = (detail: string) => {
+    let text = detail;
+    if (text.includes('Analyzed current user context')) return "Taking a quick look at our recent conversation and your current situation.";
+    if (text.includes('Applied rules: NO_BOLD, CASUAL_HINGLISH')) return "Setting my tone to be casual and friendly.";
+    if (text.includes('Applied rules:')) return "Adjusting my communication style to match the current vibe.";
+    return text;
   };
 
   return (
@@ -75,9 +100,9 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
         onPress={toggleExpand}
         activeOpacity={0.6}
       >
-        <Text style={[styles.headerText, { color: colors.text, opacity: 0.5 }]}>Worked on request</Text>
+        <Text style={[styles.headerText, { color: colors.text, opacity: 0.7 }]}>🧠 Nova's Subconscious</Text>
         <Animated.View style={{ transform: [{ rotate: rotateInterpolate }] }}>
-          <Text style={[styles.chevronIcon, { color: colors.text, opacity: 0.5 }]}>›</Text>
+          <Text style={[styles.chevronIcon, { color: colors.text, opacity: 0.7 }]}>›</Text>
         </Animated.View>
       </TouchableOpacity>
 
@@ -98,11 +123,12 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
           {thoughts && thoughts.map((thought, index) => (
             <View key={index} style={styles.thoughtItem}>
               <View style={styles.thoughtHeader}>
+                <Text style={styles.thoughtEmoji}>{getEmojiForType(thought.type)}</Text>
                 <Text style={styles.thoughtTitle}>
-                  {getTitleForType(thought.type)} <Text style={styles.engineTag}>[{thought.engine}]</Text>
+                  {getHumanReadableTitle(thought.type, thought.engine)}
                 </Text>
               </View>
-              <Text style={styles.thoughtDetail}>{thought.detail}</Text>
+              <Text style={styles.thoughtDetail}>{formatDetail(thought.detail)}</Text>
             </View>
           ))}
         </View>
@@ -160,28 +186,26 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
   },
   thoughtItem: {
-    marginBottom: 10,
+    marginBottom: 12,
   },
   thoughtHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 2,
+    marginBottom: 4,
+  },
+  thoughtEmoji: {
+    fontSize: 14,
+    marginRight: 6,
   },
   thoughtTitle: {
-    color: '#D1D5DB', // lighter gray for keys
-    fontSize: 11,
+    color: '#E5E7EB',
+    fontSize: 13,
     fontWeight: '600',
-    fontFamily: 'monospace',
-    textTransform: 'uppercase',
-  },
-  engineTag: {
-    color: '#6B7280',
-    fontWeight: '400',
   },
   thoughtDetail: {
     color: '#9CA3AF',
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: 'monospace',
+    fontSize: 13,
+    lineHeight: 20,
+    paddingLeft: 20, // indent to align with text, not emoji
   }
 });
