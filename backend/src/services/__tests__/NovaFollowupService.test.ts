@@ -81,7 +81,8 @@ describe('NovaFollowupService', () => {
       in: jest.fn().mockReturnThis(),
       order: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
-      maybeSingle: jest.fn().mockResolvedValue({ data: null })
+      maybeSingle: jest.fn().mockResolvedValue({ data: null }),
+      single: jest.fn().mockResolvedValue({ data: { id: 'msg-123' } })
     };
     (supabaseAdmin.from as jest.Mock).mockImplementation(() => mockChain);
     jest.useFakeTimers();
@@ -173,7 +174,7 @@ describe('NovaFollowupService', () => {
       mockChain.update.mockReturnValueOnce({ eq: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ data: [{ id: 'fup-1' }], error: null }) }) }) });
       mockChain.maybeSingle.mockResolvedValueOnce({ data: null }); // suppression check (no lock)
       mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } });
-      mockChain.insert.mockResolvedValueOnce({});
+      mockChain.insert.mockReturnValue(mockChain);
 
       await service.checkAndFireFollowups();
 
