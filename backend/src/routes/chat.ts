@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { saveAssistantMessage } from '../services/ChatHistoryHelpers';
 import { classifyIntent } from '../services/ResponseIntelligence';
 import { z } from 'zod';
 import { chatCompletion } from '../lib/nvidia';
@@ -80,13 +81,7 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
  */
 async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string): Promise<void> {
   try {
-    await supabaseAdmin.from('chat_history').insert({
-      user_id: userId,
-      conversation_id: conversationId,
-      role: 'assistant',
-      content,
-      ...(replyToId ? { reply_to_id: replyToId } : {}),
-    });
+    await saveAssistantMessage(userId, conversationId, content, 'SystemFallback', replyToId);
   } catch (err) {
     logger.warn('[Chat] Failed to persist fallback reply', { error: err });
   }
@@ -1689,14 +1684,7 @@ chatRouter.post(
             });
             
             // EMERGENCY: Try to save without the .select().single() — just raw insert
-            const emergencyResult = await supabaseAdmin
-              .from('chat_history')
-              .insert({
-                user_id: userId,
-                conversation_id: activeConversationId,
-                role: 'assistant',
-                content: msgText,
-              });
+            const emergencyResult = await saveAssistantMessage(userId, activeConversationId, msgText, 'EmergencyFallback').then(() => ({ error: null })).catch((e: any) => ({ error: e }));
               
             if (emergencyResult.error) {
               logger.error('[Chat] EMERGENCY insert also failed', { 
@@ -1861,15 +1849,7 @@ chatRouter.post(
           // '' into the uuid column makes the fallback insert fail silently, so the
           // user never gets their "glitch" recovery message.
           if (userId) {
-            await supabaseAdmin.from('chat_history').insert({
-              user_id: userId,
-              conversation_id: activeConversationId,
-              role: 'assistant',
-              content: FALLBACK_REPLY,
-              // Include situationBrief in meta even for fallback replies so Nova
-              // retains presence/read-state awareness on the next reply.
-              meta: situationBrief ? { situationBrief } : null,
-            });
+            await saveAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, 'AsyncFallback');
             // Try to push a notification so user knows to check
             const ptResult = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
             if (ptResult.data?.push_token) {

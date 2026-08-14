@@ -7,6 +7,7 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
+import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
@@ -413,12 +414,7 @@ ${spontaneousThoughtNote}`;
         .maybeSingle();
       const conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-      await supabaseAdmin.from('chat_history').insert({
-        user_id: userId,
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: message,
-      });
+      await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine');
 
       // Log to outreach log so MIN_GAP check works correctly.
       // NOTE: schema columns are outreach_type + created_at (NOT type/sent_at — the old

@@ -17,6 +17,7 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
+import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { sendPushNotification } from '../lib/pushNotifications';
 
@@ -294,12 +295,7 @@ export class NovaFollowupService {
       // Deliver FIRST — insert as Nova's message in chat history. If this fails the
       // follow-up must be retried, not silently dropped (the old code marked it 'sent'
       // before delivery, so any failure permanently lost the message).
-      const { error: insertErr } = await supabaseAdmin.from('chat_history').insert({
-        user_id: followup.user_id,
-        conversation_id: followup.conversation_id,
-        role: 'assistant',
-        content: followup.message,
-      });
+      const insertErr = await saveAssistantMessage(followup.user_id, followup.conversation_id, followup.message, 'NovaFollowupService').then(() => null).catch((e: any) => e);
       if (insertErr) throw new Error(`chat_history insert failed: ${insertErr.message}`);
 
       // Fetch push token and send notification

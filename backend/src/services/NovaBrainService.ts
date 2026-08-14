@@ -585,7 +585,11 @@ Output JSON: {"message": "your reply here", "tone": "emotional | playful | conce
     ], {
       temperature: 0.85, maxTokens: 200, response_format: { type: 'json_object' }
     });
-    return JSON.parse(response);
+    const parsed = JSON.parse(response);
+    if (parsed.message) {
+      parsed.message = sanitizeReply(parsed.message);
+    }
+    return parsed;
   }
 
   async evaluateDailyReflection(memorySummary: string, emotionSummary: string, goalSummary: string): Promise<any> {
