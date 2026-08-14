@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Animated } from 'react-native';
+import { useTheme } from '@react-navigation/native';
 import { api } from '../services/api';
 
 interface ThoughtBubbleProps {
@@ -14,6 +15,7 @@ interface Thought {
 }
 
 export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
+  const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [thoughts, setThoughts] = useState<Thought[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,9 +75,9 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
         onPress={toggleExpand}
         activeOpacity={0.6}
       >
-        <Text style={styles.headerText}>Worked on request</Text>
+        <Text style={[styles.headerText, { color: colors.text, opacity: 0.5 }]}>Worked on request</Text>
         <Animated.View style={{ transform: [{ rotate: rotateInterpolate }] }}>
-          <Text style={styles.chevronIcon}>›</Text>
+          <Text style={[styles.chevronIcon, { color: colors.text, opacity: 0.5 }]}>›</Text>
         </Animated.View>
       </TouchableOpacity>
 
