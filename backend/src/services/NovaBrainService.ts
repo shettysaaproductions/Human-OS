@@ -23,6 +23,12 @@ export function sanitizeReply(reply: string): string {
     .replace(/^\s*#{1,6}\s+/gm, '')                                      // # headings
     .replace(/^\s*[-•]\s+/gm, '')                                        // bullet markers
     .replace(/^\s*\d+[.)]\s+/gm, '')                                     // numbered-list markers
+    .replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, '')           // CJK / Chinese character leak fix
+    .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ') // strip REAL-WORLD ACTION headers & blocks
+    .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')                       // strip YOUR TURN system instructions
+    .replace(/CONFIRMATION FOR YOUR PEACE OF MIND[\s\S]*?(?=\n\n|$)/gi, ' ') // strip template headers
+    .replace(/AUTOMATIC \d+-(?:MINUTE|HOUR) WAKE-UP ALERT SET[\s\S]*?(?=\n\n|$)/gi, ' ')
+    .replace(/\*\[Subconscious Actions[\s\S]*?\*\*/gi, ' ')
     .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, ' ') // (subconscious_actions: ) label leak → join with a space
     .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, ' ')
     .replace(/\s*\((?:subconscious_actions|subconscious_actions|tool)\b[^)]*\)\s*/gi, ' ') // any inline tool/subconscious paren leak
@@ -199,9 +205,33 @@ If no tools need to be called, leave the JSON array empty: []
       const subMatch = rawRes.match(/<subconscious_actions>([\s\S]*?)<\/subconscious_actions>/);
       if (subMatch) {
         try {
-          subconscious_actions = JSON.parse(subMatch[1].trim());
+          let jsonStr = subMatch[1].trim();
+          if (jsonStr.startsWith('```json')) {
+            jsonStr = jsonStr.replace(/^```json/, '').replace(/```$/, '').trim();
+          } else if (jsonStr.startsWith('```')) {
+            jsonStr = jsonStr.replace(/^```/, '').replace(/```$/, '').trim();
+          }
+          const parsed = JSON.parse(jsonStr);
+          subconscious_actions = Array.isArray(parsed) ? parsed : [parsed];
         } catch (e) {
           logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e });
+        }
+      }
+
+      // Fallback: If no subconscious_actions XML tag was parsed, search rawRes for any code block or inline JSON tool call
+      if (subconscious_actions.length === 0) {
+        const fallbackMatch = rawRes.match(/(?:```(?:json)?\s*)?(\[\s*\{\s*"tool"[\s\S]*?\}\s*\]|\{\s*"tool"[\s\S]*?\}\s*\})(?:```)?/i);
+        if (fallbackMatch) {
+          try {
+            const parsed = JSON.parse(fallbackMatch[1].trim());
+            const arr = Array.isArray(parsed) ? parsed : [parsed];
+            if (arr.length > 0 && arr[0].tool) {
+              subconscious_actions = arr;
+              logger.info(`[NOVA BRAIN] Fallback-extracted ${subconscious_actions.length} tool actions from raw response block.`);
+            }
+          } catch (e) {
+            // Ignore fallback parse error
+          }
         }
       }
 
@@ -359,6 +389,22 @@ If no tools need to be called, leave the JSON array empty: []
         subconscious_actions = Array.isArray(parsed) ? parsed : [];
       } catch (e) {
         logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e, rawText: subMatch[1] });
+      }
+    }
+
+    if (subconscious_actions.length === 0) {
+      const fallbackMatch = fullText.match(/(?:```(?:json)?\s*)?(\[\s*\{\s*"tool"[\s\S]*?\}\s*\]|\{\s*"tool"[\s\S]*?\}\s*\})(?:```)?/i);
+      if (fallbackMatch) {
+        try {
+          const parsed = JSON.parse(fallbackMatch[1].trim());
+          const arr = Array.isArray(parsed) ? parsed : [parsed];
+          if (arr.length > 0 && arr[0].tool) {
+            subconscious_actions = arr;
+            logger.info(`[NOVA BRAIN] Stream fallback-extracted ${subconscious_actions.length} tool actions from full text.`);
+          }
+        } catch (e) {
+          // Ignore fallback parse error
+        }
       }
     }
 
