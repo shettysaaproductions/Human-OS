@@ -34,7 +34,7 @@ export const MAX_OUTPUT_TOKENS = 2048;
  *  - The "mera network slow" framing keeps Nova in-voice (a friend blaming their own
  *    network) instead of exposing server/tech details.
  */
-export const FALLBACK_REPLY = 'Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?';
+export const FALLBACK_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
 
 /**
  * Checks if a highly similar assistant message was recently sent.
@@ -1580,7 +1580,8 @@ chatRouter.post(
         'Yaar, thoda technical glitch',
         'kuch technical issue aa gaya',
         'Yaar, thoda slow chal raha hai server',
-        'Thodi der mein phir try karo'
+        'Thodi der mein phir try karo',
+        'Hmm... mujhe thoda sochne de'
         // NOTE: the content-policy reply ('Acha, is topic par main jyada bol nahi sakti...')
         // is intentionally NOT in this list — it is a legitimate user-facing reply and
         // must be SAVED+pushed in async mode so the user always gets a bubble (zero-drop).
