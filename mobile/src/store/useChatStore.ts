@@ -958,6 +958,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             ? msgsNow.slice(lastUserIdx + 1).some(m => m.role === 'assistant')
             : true;
           if (assistantAfterLastUser) {
+            if (delayedChunks.length === 0) set({ isTyping: false });
             stopReplyPolling();
             clearAwaitingReply();
           }
