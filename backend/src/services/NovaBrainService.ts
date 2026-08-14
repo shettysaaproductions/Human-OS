@@ -18,25 +18,50 @@ export const NOVA_EMPTY_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati 
  * a leaked "(subconscious_actions: )" node plus heavy bold + emoji formatting).
  */
 export function sanitizeReply(reply: string): string {
-  return reply
+  let text = reply;
+
+  // --- Nuke entire reply if it is clearly a structured menu/report ---------------
+  // If the reply has 3+ lines that are bullet/numbered/lettered menu items,
+  // it is a structured report, NOT a human text. Kill everything after the first
+  // sentence and force the user to get at most one human line.
+  const menuLineCount = (text.match(/^[\s]*(?:[-•*]|\d+[.)]\s|[A-D][.)]\s)/gm) || []).length;
+  if (menuLineCount >= 3) {
+    // Keep only the first real sentence (before any list starts)
+    const firstSentenceMatch = text.match(/^[^•\n*\-\d\[A-D][^\n]{10,}[.!?]/);
+    text = firstSentenceMatch ? firstSentenceMatch[0] : text.split('\n')[0];
+  }
+
+  return text
     .replace(/\*\*(.*?)\*\*/gs, '$1')                                   // **bold**
-    .replace(/^\s*#{1,6}\s+/gm, '')                                      // # headings
-    .replace(/^\s*[-•]\s+/gm, '')                                        // bullet markers
-    .replace(/^\s*\d+[.)]\s+/gm, '')                                     // numbered-list markers
-    .replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, '')           // CJK / Chinese character leak fix
-    .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ') // strip REAL-WORLD ACTION headers & blocks
-    .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')                       // strip YOUR TURN system instructions
-    .replace(/CONFIRMATION FOR YOUR PEACE OF MIND[\s\S]*?(?=\n\n|$)/gi, ' ') // strip template headers
-    .replace(/AUTOMATIC \d+-(?:MINUTE|HOUR) WAKE-UP ALERT SET[\s\S]*?(?=\n\n|$)/gi, ' ')
+    .replace(/^[\s]*#{1,6}\s+/gm, '')                                   // # headings
+    .replace(/^[\s]*[-•*]\s+/gm, '')                                    // bullet markers (-, •, *)
+    .replace(/^[\s]*\d+[.)]\s+/gm, '')                                  // numbered-list markers
+    .replace(/^[\s]*[A-D][.)]\s+/gm, '')                                // lettered option markers A) B) C) D)
+    // Strip robotic section header lines (e.g. "Nova's Snack Acknowledgement:", "Current Status Update:")
+    .replace(/^[A-Z][A-Za-z &'()\d]+:\s*$/gm, '')
+    // Strip any line that is PURELY a label or header: starts capital, ends with colon
+    .replace(/^[^\n]{3,60}:\s*\n/gm, '')
+    // Strip "Subconscious Actions" leaks of all forms
     .replace(/\*\[Subconscious Actions[\s\S]*?\*\*/gi, ' ')
-    .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, ' ') // (subconscious_actions: ) label leak → join with a space
+    .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, ' ')
     .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, ' ')
-    .replace(/\s*\((?:subconscious_actions|subconscious_actions|tool)\b[^)]*\)\s*/gi, ' ') // any inline tool/subconscious paren leak
-    .replace(/\s*\[\s*(?:subconscious_actions|subconscious actions)[^\]]*\]\s*/gi, ' ') // any square bracket subconscious leak
-    .replace(/\s*AUTOMATIC[^\]]*\[\s*Subconscious Actions[^\]]*\]\s*/gi, ' ') // specifically catch "AUTOMATIC X-MINUTE WAKE-UP ALERT SET... [Subconscious Actions...]"
-    .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ') // catch code blocks leaking subconscious actions
-    .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ') // catch the unformatted "[subconscious_actions] WAITING FOR YOUR NEXT INPUT..." leak
-    .replace(/(\p{Extended_Pictographic})\s*\1+\s*/gu, '$1 ')            // collapse repeated emoji
+    .replace(/\s*\((?:subconscious_actions|tool)\b[^)]*\)\s*/gi, ' ')
+    .replace(/\s*\[\s*(?:subconscious_actions|subconscious actions)[^\]]*\]\s*/gi, ' ')
+    .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ')
+    .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ')
+    // Strip system-text leaks
+    .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ')
+    .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')
+    .replace(/CONFIRMATION FOR YOUR PEACE OF MIND[\s\S]*?(?=\n\n|$)/gi, ' ')
+    .replace(/AUTOMATIC \d+-(?:MINUTE|HOUR) WAKE-UP ALERT SET[\s\S]*?(?=\n\n|$)/gi, ' ')
+    // Strip "Subconscious Actions (Behind the Scenes)" section completely
+    .replace(/Subconscious Actions\s*\(Behind the Scenes\)[\s\S]*/gi, ' ')
+    // CJK leak
+    .replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, '')
+    // Collapse repeated emoji
+    .replace(/(\p{Extended_Pictographic})\s*\1+\s*/gu, '$1 ')
+    // Collapse multiple blank lines and extra whitespace
+    .replace(/\n{3,}/g, '\n')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

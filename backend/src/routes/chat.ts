@@ -432,72 +432,6 @@ function sanitizeMarkdown(raw: string): string {
   return cleaned.join('\n');
 }
 
-/**
- * Aggressively strips all non-conversational formatting from a reply.
- * This is the FINAL gate before text is sent to the user.
- * - Strips bullet points (*, -, •), numbered lists (1. 2.), A/B/C option menus
- * - Strips bold headers (**Header:**)
- * - Strips all markdown bold/italic inline formatting
- * - Strips emojis sequences of 2+ at line start (common in "care package" style)
- * - Joins surviving lines into flowing plain prose
- * - Enforces a hard 350-character limit to prevent walls of text
- */
-function stripToPlainChat(text: string): string {
-  const lines = text.split('\n');
-  const kept: string[] = [];
-
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t) continue;
-
-    // Drop lines that are ONLY an emoji (e.g. "🎉")
-    if (/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+$/u.test(t)) continue;
-
-    // Drop lines that are a standalone bold header: **Something:** or **Something**
-    if (/^\*\*[^*\n]{1,80}\*\*\s*:?\s*$/.test(t)) continue;
-
-    // Drop lines that are bullet list items: "* text", "- text", "• text"
-    if (/^[-*•]\s+/.test(t)) continue;
-
-    // Drop lines that are numbered list items: "1. text", "2) text"
-    if (/^\d+[.)]\s+/.test(t)) continue;
-
-    // Drop lines that are A/B/C option menus: "A) text", "B. text"
-    if (/^[A-Da-d][.)]\s+/.test(t)) continue;
-
-    // Drop "Subconscious Actions" leak lines
-    if (/subconscious\s*actions?/i.test(t)) continue;
-
-    // Drop ``` code fences
-    if (/^```/.test(t)) continue;
-
-    // Strip inline bold/italic: **text** -> text, *text* -> text, _text_ -> text
-    let cleaned = t
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/_([^_]+)_/g, '$1');
-
-    kept.push(cleaned);
-  }
-
-  // Join surviving lines. If there are multiple sentences, keep at most 2.
-  let result = kept.join(' ').replace(/\s{2,}/g, ' ').trim();
-
-  // Hard cap: 350 characters to prevent walls of text
-  if (result.length > 350) {
-    // Cut at sentence boundary
-    const sentenceEnd = result.search(/[.!?]\s/);
-    if (sentenceEnd !== -1 && sentenceEnd < 350) {
-      result = result.substring(0, sentenceEnd + 1).trim();
-    } else {
-      result = result.substring(0, 350).trim();
-    }
-  }
-
-  return result;
-}
-
-
 // ── User-level Mutex to prevent race conditions on rapid messages ───────────
 // Each entry carries a unique token so a request only ever removes its OWN lock.
 // Without this, a request that timed out waiting (or finished late after a timeout)
@@ -581,7 +515,7 @@ chatRouter.post(
           }
         }
 
-        const messages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply))).map(stripToPlainChat).filter(m => m.length > 0);
+        const messages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
         const reply = messages.join('\n\n');
 
         const textChunks = messages.flatMap(m => chunkResponse(m));
@@ -1565,7 +1499,7 @@ chatRouter.post(
         }
       }
 
-      let parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply))).map(stripToPlainChat).filter(m => m.length > 0);
+      let parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
       
       // Append generated images as separate bubbles after stripping so they aren't removed
       if (generatedImages.length > 0) {
