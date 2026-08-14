@@ -18,7 +18,8 @@ export const NOVA_EMPTY_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati 
  * a leaked "(subconscious_actions: )" node plus heavy bold + emoji formatting).
  */
 export function sanitizeReply(reply: string): string {
-  let text = reply;
+  if (!reply) return '';
+  let text = String(reply);
 
   // --- Nuke entire reply if it is clearly a structured menu/report ---------------
   // If the reply has 3+ lines that are bullet/numbered/lettered menu items,

@@ -1606,11 +1606,12 @@ chatRouter.post(
         // Push accessed working memories if any
         if (workingMemories && workingMemories.length > 0) {
           workingMemories.forEach(wm => {
-            const cleanKey = wm.key.replace(/_/g, ' ').toLowerCase();
+            const safeKey = wm.key || 'context';
+            const cleanKey = String(safeKey).replace(/_/g, ' ').toLowerCase();
             thoughts.push({
               engine: 'MemoryCore',
               type: 'memory_link',
-              detail: `Recalled that your ${cleanKey} is: ${wm.value}`
+              detail: `Recalled that your ${cleanKey} is: ${wm.value || ''}`
             });
           });
         }
