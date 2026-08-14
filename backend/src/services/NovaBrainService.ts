@@ -114,7 +114,7 @@ You MUST format your EXACT output using these two XML tags IN THIS EXACT ORDER:
 ]
 </subconscious_actions>
 <reply>
-Your conversational text response here. Max 1-2 sentences. Use natural Hinglish if that's the user's style.
+CRITICAL: STRICTLY 1-2 sentences MAX. OUTCOME ONLY. NO bullet points. NO care packages. NO summaries. Keep it casual like a WhatsApp text.
 </reply>
 
 Available Tools for Subconscious Actions:
@@ -284,7 +284,7 @@ You MUST format your EXACT output using these two XML tags IN THIS EXACT ORDER:
 ]
 </subconscious_actions>
 <reply>
-Your conversational text response here. Max 1-2 sentences. Use natural Hinglish if that's the user's style.
+CRITICAL: STRICTLY 1-2 sentences MAX. OUTCOME ONLY. NO bullet points. NO care packages. NO summaries. Keep it casual like a WhatsApp text.
 </reply>
 
 Available Tools for Subconscious Actions:

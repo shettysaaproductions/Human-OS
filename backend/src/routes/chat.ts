@@ -1628,7 +1628,21 @@ chatRouter.post(
         if (extractedActions && extractedActions.length > 0) {
           extractedActions.forEach((action: any) => {
             let detail = `Executed action: ${action.tool}`;
-            if (action.tool === 'MemoryEngine') {
+            if (action.tool === 'MemoryRepository' && action.action === 'save') {
+              detail = `Saved to short-term memory: ${action.data?.key || ''} = ${action.data?.value || ''}`;
+            } else if (action.tool === 'MomentEngine' && action.action === 'extract') {
+              detail = `Noted an emotional moment: ${action.data?.moment || ''} (${action.data?.emotion || ''})`;
+            } else if (action.tool === 'LifeEventExtractor' && action.action === 'event') {
+              detail = `Logged upcoming event: ${action.data?.description || ''}`;
+            } else if (action.tool === 'LifeEventExtractor' && action.action === 'routine') {
+              detail = `Noted routine/habit: ${action.data?.description || ''}`;
+            } else if (action.tool === 'AgendaManager' && action.action === 'update_status') {
+              detail = `Updated task status: ${action.data?.task_description || ''} is ${action.data?.status || ''}`;
+            } else if (action.tool === 'AgendaManager' && action.action === 'add') {
+              detail = `Added implicitly mentioned task: ${action.data?.task_description || ''}`;
+            } else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
+              detail = `Queued a future check-in: "${action.data?.question || ''}" for ${action.data?.delay_hours || ''} hrs later`;
+            } else if (action.tool === 'MemoryEngine') {
               if (action.action === 'save_short_term') detail = `Saved to short-term memory: ${action.data?.summary || 'User context'}`;
               else if (action.action === 'save_long_term') detail = `Committed to long-term memory: ${action.data?.memory || 'Core detail'}`;
               else if (action.action === 'delete_memory') detail = `Removed outdated memory to keep context fresh.`;
