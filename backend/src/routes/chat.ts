@@ -1603,9 +1603,32 @@ chatRouter.post(
           thoughts.push({
             engine: 'SituationalAwareness',
             type: 'context',
-            detail: 'Analyzed current user context and conversation state'
+            detail: situationBrief
           });
         }
+        
+        // Push accessed working memories if any
+        if (workingMemories && workingMemories.length > 0) {
+          workingMemories.forEach(wm => {
+            thoughts.push({
+              engine: 'MemoryCore',
+              type: 'memory_link',
+              detail: `Working memory: ${wm.key} = ${wm.value}`
+            });
+          });
+        }
+        
+        // Push accessed long term memories if any
+        if (memories && memories.length > 0) {
+          memories.slice(0, 3).forEach(m => {
+            thoughts.push({
+              engine: 'MemoryCore',
+              type: 'memory_link',
+              detail: `Long-term memory: ${m.memory}`
+            });
+          });
+        }
+
         if (extractedActions && extractedActions.length > 0) {
           extractedActions.forEach((action: any) => {
             thoughts.push({
@@ -1619,7 +1642,7 @@ chatRouter.post(
         thoughts.push({
           engine: 'PromptBuilder',
           type: 'anti_robot',
-          detail: 'Applied rules: NO_BOLD, CASUAL_HINGLISH'
+          detail: 'Adjusting personality filters and communication style.'
         });
 
         // Create separate DB rows for each bubble
