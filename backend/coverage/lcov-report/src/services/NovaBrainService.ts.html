@@ -713,7 +713,23 @@
 <a name='L648'></a><a href='#L648'>648</a>
 <a name='L649'></a><a href='#L649'>649</a>
 <a name='L650'></a><a href='#L650'>650</a>
-<a name='L651'></a><a href='#L651'>651</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<a name='L651'></a><a href='#L651'>651</a>
+<a name='L652'></a><a href='#L652'>652</a>
+<a name='L653'></a><a href='#L653'>653</a>
+<a name='L654'></a><a href='#L654'>654</a>
+<a name='L655'></a><a href='#L655'>655</a>
+<a name='L656'></a><a href='#L656'>656</a>
+<a name='L657'></a><a href='#L657'>657</a>
+<a name='L658'></a><a href='#L658'>658</a>
+<a name='L659'></a><a href='#L659'>659</a>
+<a name='L660'></a><a href='#L660'>660</a>
+<a name='L661'></a><a href='#L661'>661</a>
+<a name='L662'></a><a href='#L662'>662</a>
+<a name='L663'></a><a href='#L663'>663</a>
+<a name='L664'></a><a href='#L664'>664</a>
+<a name='L665'></a><a href='#L665'>665</a>
+<a name='L666'></a><a href='#L666'>666</a>
+<a name='L667'></a><a href='#L667'>667</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -899,6 +915,14 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">16x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">16x</span>
@@ -1011,6 +1035,14 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1516,10 +1548,18 @@ Available Tools for Subconscious Actions:
      * TIME: { "title": "what to remind", "time_phrase": "in 10 minutes" | "at 7pm tomorrow" | "every 2 hours", "purpose": "why it matters" }
      * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up" }   ← "remind me when I wake up"
      * AUTO-TIMER: Include "is_auto": true if you are proactively setting a timer for the user without them asking.
+   - MULTIPLE REMINDERS: If the user asks for multiple reminders, emit an array in "reminders":
+     { "reminders": [
+         { "title": "medicine 1", "time_phrase": "in 10 minutes", "purpose": "morning dose" },
+         { "title": "medicine 2", "time_phrase": "in 6 hours", "purpose": "evening dose" }
+       ] }
+   - SPECIFIC DAY: If user says "remind me on Sunday" (no time) → ask "What time on Sunday?" and DO NOT emit schedule yet.
+   - RECURRING: "every 30 minutes" or "every day at 8am" → include in time_phrase naturally.
    - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
    - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.
    - CRITICAL FOR CLAUDE/OMNI MODELS: Do NOT explain that you are an AI or a "text-based" assistant and cannot send push notifications. The backend sends the push. Simply emit this tool and tell the user you set it ("Set kar diya, yaad dila dunga").
-3. "NovaFollowupService" -&gt; "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged. 
+   - 🔴 MANDATORY: If user says "remind me in X minutes/hours" or "remind me at TIME" → YOU MUST EMIT ReminderEngine action. DO NOT just reply "Reminder Set!" without the action.
+3. "NovaFollowupService" -&gt; "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged.
    - data: { "question": "the follow-up text", "delay_hours": 0.5 }
    - DELAY RULES (CRITICAL — Real friends don't spam):
      * 0.5 = 30 min → user just said something personal/emotional (use sparingly)
@@ -1684,10 +1724,18 @@ Available Tools for Subconscious Actions:
      * TIME: { "title": "what to remind", "time_phrase": "in 10 minutes" | "at 7pm tomorrow" | "every 2 hours", "purpose": "why it matters" }
      * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up" }   ← "remind me when I wake up"
      * AUTO-TIMER: Include "is_auto": true if you are proactively setting a timer for the user without them asking.
+   - MULTIPLE REMINDERS: If the user asks for multiple reminders, emit an array in "reminders":
+     { "reminders": [
+         { "title": "medicine 1", "time_phrase": "in 10 minutes", "purpose": "morning dose" },
+         { "title": "medicine 2", "time_phrase": "in 6 hours", "purpose": "evening dose" }
+       ] }
+   - SPECIFIC DAY: If user says "remind me on Sunday" (no time) → ask "What time on Sunday?" and DO NOT emit schedule yet.
+   - RECURRING: "every 30 minutes" or "every day at 8am" → include in time_phrase naturally.
    - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
    - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.
    - CRITICAL FOR CLAUDE/OMNI MODELS: Do NOT explain that you are an AI or a "text-based" assistant and cannot send push notifications. The backend sends the push. Simply emit this tool and tell the user you set it.
-3. "NovaFollowupService" -&gt; "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged. 
+   - 🔴 MANDATORY: If user says "remind me in X minutes/hours" or "remind me at TIME" → YOU MUST EMIT ReminderEngine action. DO NOT just reply "Reminder Set!" without the action.
+3. "NovaFollowupService" -&gt; "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged.
    - data: { "question": "the follow-up text", "delay_hours": 0.5 }
    - DELAY RULES (CRITICAL — Real friends don't spam):
      * 0.5 = 30 min → user just said something personal/emotional (use sparingly)
@@ -1700,7 +1748,7 @@ Available Tools for Subconscious Actions:
    - CRITICAL (CONTEXT BRIDGING): NEVER use generic questions like "kya kar raha hai?". Your follow-up MUST bridge the context of what you were just talking about! Act like a human who got left on read (e.g. "To uska kya hua aage?").
 4. "MemoryRepository" -&gt; "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
-5. "LifeEventExtractor" -&gt; "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
+5. "LifeEventExtractor" -&gt; "event": Log an upcoming event, meeting, or time-specific thing the user mentioned.
    - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
 6. "LifeEventExtractor" -&gt; "routine": Extract a recurring routine or habit the user mentioned.
    - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
@@ -2020,7 +2068,7 @@ export const novaBrain = new NovaBrainService();
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-15T20:03:05.982Z
+                at 2026-08-15T22:07:14.804Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
