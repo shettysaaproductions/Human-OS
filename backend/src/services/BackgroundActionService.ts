@@ -51,6 +51,31 @@ export class BackgroundActionService {
               return base;
             }
 
+            // Pattern: "on <dayname> at HH:MM" or "on Sunday at 10am" — specific day with time
+            const dayAtTimeMatch = phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+            if (dayAtTimeMatch) {
+              const dayName = dayAtTimeMatch[1].toLowerCase();
+              let hh = parseInt(dayAtTimeMatch[2]);
+              const mm = dayAtTimeMatch[3] ? parseInt(dayAtTimeMatch[3]) : 0;
+              const meridiem = dayAtTimeMatch[4]?.toLowerCase();
+              if (meridiem === 'pm' && hh < 12) hh += 12;
+              if (meridiem === 'am' && hh === 12) hh = 0;
+              base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+
+              const dayIndex = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);
+              if (dayIndex !== -1) {
+                const today = new Date(Date.now() + userTzOffset * 3600000);
+                let daysAhead = (dayIndex - today.getDay() + 7) % 7;
+                if (daysAhead === 0) daysAhead = 7;
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + daysAhead);
+                base.date = targetDate.toISOString().split('T')[0];
+                base.active_days = [dayName];
+              }
+              base.needs_time_clarification = false;
+              return base;
+            }
+
             // Pattern: "at HH:MM" or "at 7am" or "at 10:30pm"
             const atTimeMatch = phrase.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
             if (atTimeMatch) {
@@ -60,7 +85,7 @@ export class BackgroundActionService {
               if (meridiem === 'pm' && hh < 12) hh += 12;
               if (meridiem === 'am' && hh === 12) hh = 0;
               base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-              // If "tomorrow" or specific day mentioned, add date
+              // If "tomorrow" mentioned, add date
               if (phrase.includes('tomorrow')) {
                 const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
                 base.date = d.toISOString().split('T')[0];
@@ -73,6 +98,25 @@ export class BackgroundActionService {
               const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
               base.date = d.toISOString().split('T')[0];
               base.time_of_day = '09:00';
+              return base;
+            }
+
+            // Pattern: "on <dayname>" — e.g. "on Sunday", "on Monday" — needs time clarification if no time given
+            const dayMatch = phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+            if (dayMatch) {
+              const dayName = dayMatch[1].toLowerCase();
+              const dayIndex = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);
+              if (dayIndex !== -1) {
+                const today = new Date(Date.now() + userTzOffset * 3600000);
+                let daysAhead = (dayIndex - today.getDay() + 7) % 7;
+                if (daysAhead === 0) daysAhead = 7; // Next week if today
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + daysAhead);
+                base.date = targetDate.toISOString().split('T')[0];
+                // No time provided — will default to 9am in ReminderEngine, but we should flag for clarification
+                base.needs_time_clarification = true;
+                base.active_days = [dayName];
+              }
               return base;
             }
 

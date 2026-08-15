@@ -1421,14 +1421,50 @@ chatRouter.post(
           if (llmDuration > 5000) {
             logger.warn('[Chat] LLM call slow', { userId, durationMs: llmDuration });
           }
-          
-          // REMINDER HONESTY CHECK
+
+          // REMINDER HONESTY CHECK with RETRY
           const lowerReply = rawReply.toLowerCase();
           const mentionsReminder = lowerReply.includes('remind') || lowerReply.includes('yaad') || lowerReply.includes('timer');
           const hasReminderAction = extractedActions.some((a: any) => a.tool === 'ReminderEngine' && a.action === 'schedule');
-          
+
           if (mentionsReminder && !hasReminderAction) {
             logger.warn('[QualityGate] Caught fake reminder in reply (LLM failed to emit action)', { userId });
+
+            // RETRY: Call NovaBrain again with a corrective prompt
+            try {
+              const correctivePrompt = `You just said: "${rawReply}"
+But you DID NOT emit a ReminderEngine action! The user asked for a reminder.
+
+You MUST now emit the correct ReminderEngine action.
+Example:
+<subconscious_actions>
+[
+  { "tool": "ReminderEngine", "action": "schedule", "data": { "title": "take medicine", "time_phrase": "in 10 minutes", "purpose": "medicine reminder" } }
+]
+</subconscious_actions>
+<reply>
+Set kar diya! Yaad dila dunga 10 min mein.
+</reply>`;
+
+              const { novaBrain } = await import('../services/NovaBrainService');
+              const retryResult = await novaBrain.processInteraction(userId, correctivePrompt, brainContext);
+
+              if (retryResult.reply) {
+                rawReply = retryResult.reply;
+              }
+
+              if (retryResult.subconscious_actions && retryResult.subconscious_actions.length > 0) {
+                const reminderActions = retryResult.subconscious_actions.filter(
+                  (a: any) => a.tool === 'ReminderEngine' && a.action === 'schedule'
+                );
+                if (reminderActions.length > 0) {
+                  extractedActions.push(...reminderActions);
+                  logger.info('[QualityGate] Retry succeeded - ReminderEngine action emitted', { userId, count: reminderActions.length });
+                }
+              }
+            } catch (retryErr) {
+              logger.error('[QualityGate] Retry failed', { error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
+            }
           }
 
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
