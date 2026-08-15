@@ -1581,13 +1581,16 @@ Set kar diya! Yaad dila dunga 10 min mein.
             user_message_id: userMessageId,
             meta: { blank_reply: true, degraded: false }
           });
+          return;
         }
-        // In async mode the 202 is already sent — writing again would throw
-        // ERR_HTTP_HEADERS_SENT and trigger a spurious FALLBACK_REPLY save.
-        if (asyncDeadlineTimer) {
-          clearTimeout(asyncDeadlineTimer);
+        
+        if (async_mode) {
+          // Force a fallback reply so the UI doesn't hang waiting forever
+          logger.warn('[Chat] Forcing FALLBACK_REPLY in async_mode because final bubbles were empty', { userId });
+          finalBubbles = [FALLBACK_REPLY];
+        } else {
+          return;
         }
-        return;
       }
       const reply = finalBubbles.join('\n\n');
 
@@ -1632,8 +1635,8 @@ Set kar diya! Yaad dila dunga 10 min mein.
       ];
       const isFallbackReply = REJECT_PREFIXES.some(p => rawReply.includes(p));
 
-      // Only save to DB if it's NOT a fallback/error message
-      if (!isDuplicate && !isFallbackReply) {
+      // Only save to DB if it's NOT a fallback/error message, UNLESS we are in async_mode where we MUST guarantee a reply
+      if (!isDuplicate && (!isFallbackReply || async_mode)) {
         // Fetch push token fresh for the loop
         const pushTokenResult = await supabaseAdmin
           .from('profiles')
