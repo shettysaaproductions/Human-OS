@@ -12,7 +12,7 @@ import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 const MIN_GAP_MINUTES = 3; // Reduced from 10 — more frequent for active friend experience
-const SERVER_BOOT_COOLDOWN_MS = 30 * 1000; // 30s cooldown after boot (was 5 min — caused 5-8min dead zones on Render restarts)
+const SERVER_BOOT_COOLDOWN_MS = 10 * 1000; // 10s cooldown after boot
 let serverBootTime = Date.now();
 // Re-entrancy guard: a pulse that takes longer than the 15-min scheduler interval would
 // otherwise run concurrently and double-outreach (and double-increment agenda retries).
@@ -196,12 +196,31 @@ export class NovaConsciousnessEngine {
       }
     }
 
-    // ── ACTIVE USER GUARD ────────────────────────────────────────────────────
-    // If the user sent a message in the last 10 minutes, they are clearly active.
-    // Don't interrupt an active conversation with NACE proactive messages.
+    // ── ACTIVE USER GUARD (with stuck conversation rescue) ───────────────────
+    // If the user sent a message recently, check if they actually GOT a reply.
+    // If Nova never replied (stuck conversation), NACE must rescue.
     if (gapMinutes < 10 && userPresence !== 'offline') {
-      logger.info('[NACE] Skipping — user is actively engaged (gap < 10 min)', { userId, gapMinutes: Math.round(gapMinutes) });
-      return;
+      // Check: did Nova actually reply to the user's last message?
+      const { data: lastAssistantMsg } = await supabaseAdmin
+        .from('chat_history')
+        .select('created_at, content')
+        .eq('user_id', userId)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const lastUserMsgTime = lastUserMsg ? new Date(lastUserMsg.created_at).getTime() : 0;
+      const lastAssistantTime = lastAssistantMsg ? new Date(lastAssistantMsg.created_at).getTime() : 0;
+      const isFallbackReply = lastAssistantMsg?.content?.includes('mujhe thoda sochne de');
+
+      // Only skip if Nova genuinely replied AFTER the user's last message (and it wasn't a fallback)
+      if (lastAssistantTime > lastUserMsgTime && !isFallbackReply) {
+        logger.info('[NACE] Skipping — user is actively engaged and Nova replied', { userId, gapMinutes: Math.round(gapMinutes) });
+        return;
+      }
+      // If we reach here, the user is active but Nova didn't reply → allow rescue
+      logger.warn('[NACE] User active but Nova has NOT replied — allowing rescue outreach', { userId, gapMinutes: Math.round(gapMinutes) });
     }
 
     const getEffectiveMinGap = (presence: string): number => {
@@ -246,9 +265,13 @@ export class NovaConsciousnessEngine {
       }
     }
 
-    // Do not disturb during sleep, unless it's a high urgency agenda
-    if (tContext.isSleepWindow) {
+    // Do not disturb during sleep, UNLESS:
+    // 1. High urgency agenda item exists
+    // 2. User is actively chatting (sent a message in last 5 minutes — clearly not sleeping)
+    const userIsActivelyChatting = gapMinutes < 5;
+    if (tContext.isSleepWindow && !userIsActivelyChatting) {
       if (!agendaItem || agendaItem.urgency !== 'high') {
+        logger.info('[NACE] Skipping — sleep window and user is not active', { userId });
         return;
       }
     }
