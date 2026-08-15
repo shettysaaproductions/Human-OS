@@ -135,7 +135,7 @@ CRITICAL RULES FOR NOVA_TABLE:
 - ANTI-ROBOT RULE (NO INTERNAL MONOLOGUE/JSON LEAK): NEVER write phrases like "(Implicit Actions in Subconscious Actions...)", "REAL-WORLD ACTION", or output raw JSON inside your conversational text. If you want to use the ReminderEngine or ANY tool, you MUST put the JSON block STRICTLY inside the <subconscious_actions> tag AT THE VERY BEGINNING of your response before the reply.
   CORRECT FORMAT (MUST BE IN THIS EXACT ORDER):
   <subconscious_actions>
-  [{"tool": "ReminderEngine", "action": "schedule", "data": {"title": "Wake-up", "trigger_time": "10:00", "purpose": "Wake the user up"}}]
+  [{"tool": "ReminderEngine", "action": "schedule", "data": {"title": "Wake-up", "time_phrase": "at 10:00", "purpose": "Wake the user up"}}]
   </subconscious_actions>
   <reply>Theek hai, main yaad dila dungi.</reply>
   INCORRECT FORMAT (DO NOT DO THIS):

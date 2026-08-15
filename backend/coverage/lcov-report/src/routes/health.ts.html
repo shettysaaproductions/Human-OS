@@ -25,7 +25,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/36</span>
+                <span class='fraction'>0/34</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/36</span>
+                <span class='fraction'>0/34</span>
             </div>
         
             
@@ -202,10 +202,7 @@
 <a name='L137'></a><a href='#L137'>137</a>
 <a name='L138'></a><a href='#L138'>138</a>
 <a name='L139'></a><a href='#L139'>139</a>
-<a name='L140'></a><a href='#L140'>140</a>
-<a name='L141'></a><a href='#L141'>141</a>
-<a name='L142'></a><a href='#L142'>142</a>
-<a name='L143'></a><a href='#L143'>143</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L140'></a><a href='#L140'>140</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -293,7 +290,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -342,8 +338,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -356,7 +350,7 @@
  *                    going through the full chat pipeline.
  */
 &nbsp;
-<span class="cstat-no" title="statement not covered" >import { Router, Request, Response, NextFunction } from 'express';</span>
+<span class="cstat-no" title="statement not covered" >import { Router, Request, Response } from 'express';</span>
 <span class="cstat-no" title="statement not covered" >import { config } from '../config';</span>
 <span class="cstat-no" title="statement not covered" >import { chatCompletion } from '../lib/nvidia';</span>
 <span class="cstat-no" title="statement not covered" >import { supabaseAdmin } from '../lib/supabase';</span>
@@ -379,7 +373,7 @@ export const <span class="cstat-no" title="statement not covered" >healthRouter:
 // This saves hours of debugging connection issues in production.
 <span class="cstat-no" title="statement not covered" >healthRouter.get(</span>
   '/llm',
-<span class="fstat-no" title="function not covered" >  async </span>(_req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {
+<span class="fstat-no" title="function not covered" >  async </span>(_req: Request, res: Response): Promise&lt;void&gt; =&gt; {
     const start = <span class="cstat-no" title="statement not covered" >Date.now();</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    try {</span>
@@ -434,8 +428,7 @@ export const <span class="cstat-no" title="statement not covered" >healthRouter:
         timestamp: new Date().toISOString(),
       });
 &nbsp;
-      // Don't propagate to error handler — we've already responded
-<span class="cstat-no" title="statement not covered" >      void next;</span>
+      // Done - we've already sent a response, don't propagate to error handler
     }
   },
 );
@@ -444,7 +437,7 @@ export const <span class="cstat-no" title="statement not covered" >healthRouter:
 // Pings Supabase to verify database connectivity.
 <span class="cstat-no" title="statement not covered" >healthRouter.get(</span>
   '/db',
-<span class="fstat-no" title="function not covered" >  async </span>(_req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {
+<span class="fstat-no" title="function not covered" >  async </span>(_req: Request, res: Response): Promise&lt;void&gt; =&gt; {
     const start = <span class="cstat-no" title="statement not covered" >Date.now();</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    try {</span>
@@ -484,8 +477,6 @@ export const <span class="cstat-no" title="statement not covered" >healthRouter:
         error: message,
         timestamp: new Date().toISOString(),
       });
-&nbsp;
-<span class="cstat-no" title="statement not covered" >      void next;</span>
     }
   },
 );
@@ -496,7 +487,7 @@ export const <span class="cstat-no" title="statement not covered" >healthRouter:
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-09T21:04:34.529Z
+                at 2026-08-15T20:03:05.982Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
