@@ -25,7 +25,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/36</span>
+                <span class='fraction'>0/38</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/36</span>
+                <span class='fraction'>0/38</span>
             </div>
         
             
@@ -157,11 +157,31 @@
 <a name='L92'></a><a href='#L92'>92</a>
 <a name='L93'></a><a href='#L93'>93</a>
 <a name='L94'></a><a href='#L94'>94</a>
-<a name='L95'></a><a href='#L95'>95</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -252,16 +272,26 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js"><span class="cstat-no" title="statement not covered" >import { Router, Request, Response, NextFunction } from 'express';</span>
+<span class="cstat-no" title="statement not covered" >import { rateLimit } from 'express-rate-limit';</span>
 <span class="cstat-no" title="statement not covered" >import { supabaseAdmin } from '../lib/supabase';</span>
 <span class="cstat-no" title="statement not covered" >import { logger } from '../lib/logger';</span>
 &nbsp;
 export const <span class="cstat-no" title="statement not covered" >memoryDebugRouter: import('express').Router = Router();</span>
 &nbsp;
+// Rate limit: 10 requests per minute per IP
+const memoryDebugLimiter = <span class="cstat-no" title="statement not covered" >rateLimit({</span>
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many debug requests. Please try again later.' } },
+});
+&nbsp;
 /**
  * GET /memory/debug/stats
  * Returns statistics about the stored memories for the hardcoded user.
  */
-<span class="cstat-no" title="statement not covered" >memoryDebugRouter.get('/stats', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >memoryDebugRouter.get('/stats', memoryDebugLimiter, <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = (<span class="cstat-no" title="statement not covered" >req as any).user!.id;</span>
     const { data, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -303,7 +333,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryDebugRo
  * GET /memory/debug
  * Returns all memories for the hardcoded user.
  */
-<span class="cstat-no" title="statement not covered" >memoryDebugRouter.get('/', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >memoryDebugRouter.get('/', memoryDebugLimiter, <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = (<span class="cstat-no" title="statement not covered" >req as any).user!.id;</span>
     const { data, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -327,7 +357,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryDebugRo
  * DELETE /memory/debug
  * Deletes all memories for the hardcoded user.
  */
-<span class="cstat-no" title="statement not covered" >memoryDebugRouter.delete('/', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >memoryDebugRouter.delete('/', memoryDebugLimiter, <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = (<span class="cstat-no" title="statement not covered" >req as any).user!.id;</span>
     const { error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -352,7 +382,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryDebugRo
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-09T21:04:34.529Z
+                at 2026-08-15T20:03:05.982Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

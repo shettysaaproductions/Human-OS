@@ -147,11 +147,9 @@ Available Tools for Subconscious Actions:
 1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder.
-   - data (structured JSON — preferred):
-     * TIME: { "title": "what to remind", "purpose": "why it matters (optional)", "urgency": "high|medium|low", "trigger_date": "2027-08-10", "trigger_time": "19:00", "recurrence_interval": 1, "recurrence_unit": "minutes|hours|days|weeks|months", "end_condition": "until_cancelled|until_date", "end_date": "2027-12-31" }
-     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up", "urgency": "high" }   ← "remind me when I wake up"
-     * RELATIVE: { "title": "call mom", "relative_value": 30, "relative_unit": "minutes" }
-     * SIMPLE TIME: { "title": "pay bill", "trigger_time": "19:00" }
+   - data (use simple time_phrase):
+     * TIME: { "title": "what to remind", "time_phrase": "in 10 minutes" | "at 7pm tomorrow" | "every 2 hours", "purpose": "why it matters" }
+     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up" }   ← "remind me when I wake up"
      * AUTO-TIMER: Include "is_auto": true if you are proactively setting a timer for the user without them asking.
    - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
    - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.
@@ -317,11 +315,9 @@ Available Tools for Subconscious Actions:
 1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
    - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
 2. "ReminderEngine" -> "schedule": Set a reminder.
-   - data (structured JSON — preferred):
-     * TIME: { "title": "what to remind", "purpose": "why it matters (optional)", "urgency": "high|medium|low", "trigger_date": "2027-08-10", "trigger_time": "19:00", "recurrence_interval": 1, "recurrence_unit": "minutes|hours|days|weeks|months", "end_condition": "until_cancelled|until_date", "end_date": "2027-12-31" }
-     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up", "urgency": "high" }   ← "remind me when I wake up"
-     * RELATIVE: { "title": "call mom", "relative_value": 30, "relative_unit": "minutes" }
-     * SIMPLE TIME: { "title": "pay bill", "trigger_time": "19:00" }
+   - data (use simple time_phrase):
+     * TIME: { "title": "what to remind", "time_phrase": "in 10 minutes" | "at 7pm tomorrow" | "every 2 hours", "purpose": "why it matters" }
+     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up" }   ← "remind me when I wake up"
      * AUTO-TIMER: Include "is_auto": true if you are proactively setting a timer for the user without them asking.
    - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
    - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.

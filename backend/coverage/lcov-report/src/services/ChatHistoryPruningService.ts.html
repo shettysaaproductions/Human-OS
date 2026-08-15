@@ -609,7 +609,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">﻿<span class="cstat-no" title="statement not covered" >import { supabaseAdmin } from '../lib/supabase';</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js"><span class="cstat-no" title="statement not covered" >import { supabaseAdmin } from '../lib/supabase';</span>
 <span class="cstat-no" title="statement not covered" >import { logger } from '../lib/logger';</span>
 &nbsp;
 const CHAR_BUDGET = <span class="cstat-no" title="statement not covered" >150_000;</span>
@@ -617,11 +617,11 @@ const TRIM_TARGET = <span class="cstat-no" title="statement not covered" >120_00
 const MAX_MESSAGES = <span class="cstat-no" title="statement not covered" >2_000;</span>
 const BATCH_SIZE = <span class="cstat-no" title="statement not covered" >100;</span>
 &nbsp;
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // EMOTION CLASSIFIER
 // Returns the dominant emotion label from the content.
-// Pure keyword heuristics — zero API calls, zero egress impact.
-// ─────────────────────────────────────────────────────────────────────────────
+// Pure keyword heuristics � zero API calls, zero egress impact.
+// -----------------------------------------------------------------------------
 const EMOTION_MAP: { emotion: string; keywords: string[] }[] = <span class="cstat-no" title="statement not covered" >[</span>
   { emotion: 'grief',     keywords: ['died', 'death', 'funeral', 'passed away', 'lost him', 'lost her', 'missing you', 'miss them', 'loss'] },
   { emotion: 'crisis',    keywords: ['suicidal', 'want to die', 'kill myself', 'end it all', 'no point', 'hopeless', 'give up on life'] },
@@ -644,30 +644,30 @@ function <span class="fstat-no" title="function not covered" >classifyEmotion(</
 <span class="cstat-no" title="statement not covered" >  return 'neutral';</span>
 }
 &nbsp;
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // IMPORTANCE SCORER
-// Returns a score 0.0–1.0.  Pure local heuristics — no external calls.
+// Returns a score 0.0�1.0.  Pure local heuristics � no external calls.
 //
 // Scoring philosophy:
-//   • High-emotion topics are inherently important (grief, crisis, anxiety)
-//   • Life events (health, family, career, money, goals) matter more than chit-chat
-//   • Longer messages contain more information → slight length boost
-//   • Short filler messages ("ok", "haan", "thanks") → low importance
-// ─────────────────────────────────────────────────────────────────────────────
+//   � High-emotion topics are inherently important (grief, crisis, anxiety)
+//   � Life events (health, family, career, money, goals) matter more than chit-chat
+//   � Longer messages contain more information ? slight length boost
+//   � Short filler messages ("ok", "haan", "thanks") ? low importance
+// -----------------------------------------------------------------------------
 const IMPORTANCE_TOPICS = <span class="cstat-no" title="statement not covered" >[</span>
-  // Critical / life events — weight 1.0
+  // Critical / life events � weight 1.0
   { weight: 1.0, keywords: ['suicidal', 'want to die', 'died', 'death', 'cancer', 'diagnosed', 'surgery', 'hospital', 'admitted', 'accident', 'abuse', 'assault'] },
-  // High-importance personal events — weight 0.85
+  // High-importance personal events � weight 0.85
   { weight: 0.85, keywords: ['breakup', 'divorce', 'fired', 'lost my job', 'got the job', 'promoted', 'pregnant', 'baby', 'marriage', 'engaged', 'heartbroken', 'grief', 'panic attack'] },
-  // Health &amp; medical — weight 0.80
+  // Health &amp; medical � weight 0.80
   { weight: 0.80, keywords: ['health', 'sick', 'fever', 'doctor', 'medicine', 'therapy', 'therapist', 'mental health', 'anxiety', 'depression', 'pain', 'blood pressure', 'diabetes'] },
-  // Relationships &amp; family — weight 0.75
+  // Relationships &amp; family � weight 0.75
   { weight: 0.75, keywords: ['wife', 'husband', 'mom', 'dad', 'mother', 'father', 'sister', 'brother', 'family', 'friend', 'relationship', 'argument', 'fight with'] },
-  // Career &amp; money — weight 0.70
+  // Career &amp; money � weight 0.70
   { weight: 0.70, keywords: ['salary', 'money', 'debt', 'loan', 'investment', 'career', 'exam', 'interview', 'college', 'university', 'marks', 'result', 'business'] },
-  // Goals &amp; personal growth — weight 0.65
+  // Goals &amp; personal growth � weight 0.65
   { weight: 0.65, keywords: ['goal', 'habit', 'workout', 'gym', 'meditation', 'learning', 'reading', 'project', 'startup', 'plan', 'schedule', 'routine'] },
-  // Emotions expressed — weight 0.60
+  // Emotions expressed � weight 0.60
   { weight: 0.60, keywords: ['feel', 'feeling', 'emotion', 'mood', 'stressed', 'excited', 'worried', 'scared', 'confused', 'hurt', 'angry', 'happy', 'sad'] },
 ];
 &nbsp;
@@ -676,15 +676,15 @@ const FILLER_PATTERNS = <span class="cstat-no" title="statement not covered" >/^
 function <span class="fstat-no" title="function not covered" >scoreImportance(</span>content: string, emotion: string): number {
   const lower = <span class="cstat-no" title="statement not covered" >content.toLowerCase().trim();</span>
 &nbsp;
-  // Filler messages → near-zero importance
+  // Filler messages ? near-zero importance
 <span class="cstat-no" title="statement not covered" >  if (content.length &lt; 15 &amp;&amp; FILLER_PATTERNS.test(lower)) <span class="cstat-no" title="statement not covered" >return 0.1;</span></span>
 &nbsp;
-  // Crisis/grief emotion → always maximum importance
+  // Crisis/grief emotion ? always maximum importance
 <span class="cstat-no" title="statement not covered" >  if (emotion === 'crisis' || emotion === 'grief') <span class="cstat-no" title="statement not covered" >return 1.0;</span></span>
 &nbsp;
   let score = <span class="cstat-no" title="statement not covered" >0.3;</span> // baseline for any non-filler message
 &nbsp;
-  // Topic matching — take the highest matching weight
+  // Topic matching � take the highest matching weight
 <span class="cstat-no" title="statement not covered" >  for (const { weight, keywords } of IMPORTANCE_TOPICS) {</span>
 <span class="cstat-no" title="statement not covered" >    if (keywords.some(<span class="fstat-no" title="function not covered" >kw </span>=&gt; <span class="cstat-no" title="statement not covered" >lower.includes(kw))</span>) {</span>
 <span class="cstat-no" title="statement not covered" >      score = Math.max(score, weight);</span>
@@ -698,26 +698,26 @@ function <span class="fstat-no" title="function not covered" >scoreImportance(</
   };
 <span class="cstat-no" title="statement not covered" >  score += (emotionBonus[emotion] || 0);</span>
 &nbsp;
-  // Length bonus — longer messages carry more information
+  // Length bonus � longer messages carry more information
 <span class="cstat-no" title="statement not covered" >  if (content.length &gt; 200) <span class="cstat-no" title="statement not covered" >score += 0.08;</span></span>
 <span class="cstat-no" title="statement not covered" >  if (content.length &gt; 100) <span class="cstat-no" title="statement not covered" >score += 0.04;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >  return Math.min(parseFloat(score.toFixed(2)), 1.0);</span>
 }
 &nbsp;
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // EXTRACTION GATE
 // Only extract messages that carry meaningful content worth keeping.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 function <span class="fstat-no" title="function not covered" >shouldExtractMemory(</span>content: string): boolean {
 <span class="cstat-no" title="statement not covered" >  if (content.trim().length &lt; 10) <span class="cstat-no" title="statement not covered" >return false; </span></span>// too short
 <span class="cstat-no" title="statement not covered" >  if (FILLER_PATTERNS.test(content.trim())) <span class="cstat-no" title="statement not covered" >return false; </span></span>// pure filler
 <span class="cstat-no" title="statement not covered" >  return true;</span>
 }
 &nbsp;
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // EXPORTS
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 export interface PruneResult {
   userId: string;
   skipped: boolean;
@@ -776,7 +776,7 @@ export const <span class="cstat-no" title="statement not covered" >chatHistoryPr
       // Only archive user messages that carry meaningful content
 <span class="cstat-no" title="statement not covered" >      if (row.role !== 'user' || !shouldExtractMemory(row.content)) <span class="cstat-no" title="statement not covered" >continue;</span></span>
 &nbsp;
-      // Include Nova's response as context — helps understand the full exchange
+      // Include Nova's response as context � helps understand the full exchange
       const next = <span class="cstat-no" title="statement not covered" >toDelete[i + 1];</span>
       const novaContext = <span class="cstat-no" title="statement not covered" >(next &amp;&amp; next.role === 'assistant' &amp;&amp; next.content.length &gt; 10)</span>
         ? ` | Nova responded: ${next.content.substring(0, 200)}${next.content.length &gt; 200 ? '...' : ''}`
@@ -796,7 +796,7 @@ export const <span class="cstat-no" title="statement not covered" >chatHistoryPr
         memory: memoryText,
         emotion,
         importance,
-        confidence: importance &gt;= 0.7 ? 0.9 : 0.75, // high-importance → higher confidence
+        confidence: importance &gt;= 0.7 ? 0.9 : 0.75, // high-importance ? higher confidence
       });
 <span class="cstat-no" title="statement not covered" >      memoriesExtracted++;</span>
     }
@@ -889,7 +889,7 @@ export const <span class="cstat-no" title="statement not covered" >chatHistoryPr
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-09T21:04:34.529Z
+                at 2026-08-15T20:03:05.982Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

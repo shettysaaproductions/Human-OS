@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">81.22% </span>
+                <span class="strong">80.47% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>199/245</span>
+                <span class='fraction'>202/251</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">68% </span>
+                <span class="strong">67.03% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>119/175</span>
+                <span class='fraction'>120/179</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">100% </span>
+                <span class="strong">95.23% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>19/19</span>
+                <span class='fraction'>20/21</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">82.89% </span>
+                <span class="strong">82.32% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>189/228</span>
+                <span class='fraction'>191/232</span>
             </div>
         
             
@@ -834,7 +834,11 @@
 <a name='L769'></a><a href='#L769'>769</a>
 <a name='L770'></a><a href='#L770'>770</a>
 <a name='L771'></a><a href='#L771'>771</a>
-<a name='L772'></a><a href='#L772'>772</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L772'></a><a href='#L772'>772</a>
+<a name='L773'></a><a href='#L773'>773</a>
+<a name='L774'></a><a href='#L774'>774</a>
+<a name='L775'></a><a href='#L775'>775</a>
+<a name='L776'></a><a href='#L776'>776</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -852,6 +856,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
@@ -1131,11 +1136,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1265,8 +1265,12 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1281,6 +1285,10 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1624,6 +1632,7 @@
  */
 &nbsp;
 import { supabaseAdmin } from '../lib/supabase';
+import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { sendPushNotification } from '../lib/pushNotifications';
 &nbsp;
@@ -1901,12 +1910,7 @@ export class NovaFollowupService {
       // Deliver FIRST — insert as Nova's message in chat history. If this fails the
       // follow-up must be retried, not silently dropped (the old code marked it 'sent'
       // before delivery, so any failure permanently lost the message).
-      const { error: insertErr } = await supabaseAdmin.from('chat_history').insert({
-        user_id: followup.user_id,
-        conversation_id: followup.conversation_id,
-        role: 'assistant',
-        content: followup.message,
-      });
+      const insertErr = await saveAssistantMessage(followup.user_id, followup.conversation_id, followup.message, 'NovaFollowupService').then(() =&gt; null).catch(<span class="fstat-no" title="function not covered" >(e</span>: any) =&gt; <span class="cstat-no" title="statement not covered" >e)</span>;
       <span class="missing-if-branch" title="if path not taken" >I</span>if (insertErr) <span class="cstat-no" title="statement not covered" >throw new Error(`chat_history insert failed: ${insertErr.message}`);</span>
 &nbsp;
       // Fetch push token and send notification
@@ -2030,28 +2034,36 @@ export class NovaFollowupService {
 &nbsp;
         const { data: newerMsgs } = await supabaseAdmin
           .from('chat_history')
-          .select('id')
+          .select('id, content')
           .eq('conversation_id', convId)
           .gt('created_at', userMsg.created_at)
           .limit(1);
 &nbsp;
         if (newerMsgs &amp;&amp; newerMsgs.length &gt; 0) {
-          // Nova (or someone) replied after this message. It's not stuck.
-          continue;
+          <span class="missing-if-branch" title="if path not taken" >I</span>if (newerMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
+<span class="cstat-no" title="statement not covered" >            logger.info('[NovaFollowup] Found fallback reply, treating conversation as stuck', { convId });</span>
+          } else {
+            // Nova (or someone) replied a real message after this message. It's not stuck.
+            continue;
+          }
         }
 &nbsp;
         // Add additional check: was ANY assistant message sent in the last 2 minutes?
         // This handles cases where conversationId rotated or time filtering is slightly off
         const { data: recentAssistantMsgs } = await supabaseAdmin
           .from('chat_history')
-          .select('id')
+          .select('id, content')
           .eq('user_id', userMsg.user_id)
           .eq('role', 'assistant')
           .gte('created_at', new Date(Date.now() - 90 * 1000).toISOString()) // 90s guard (was 2 min)
           .limit(1);
 &nbsp;
         <span class="missing-if-branch" title="if path not taken" >I</span>if (recentAssistantMsgs &amp;&amp; recentAssistantMsgs.length &gt; 0) {
-<span class="cstat-no" title="statement not covered" >           continue; </span>// Reply already sent recently
+<span class="cstat-no" title="statement not covered" >           if (recentAssistantMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {</span>
+             // Fallback doesn't count as a real reply
+           } else {
+<span class="cstat-no" title="statement not covered" >             continue; </span>// Real reply already sent recently
+           }
         }
 &nbsp;
         // It is stuck! Check if a follow-up is already queued (fire_at in the future)
@@ -2095,7 +2107,7 @@ export class NovaFollowupService {
           const { novaBrain } = await import('./NovaBrainService');
           const lastContent = userMsg.content?.substring(0, 200) || <span class="branch-1 cbranch-no" title="branch not covered" >'';</span>
           const generated = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a very short (1 sentence max) casual Hinglish follow-up message as if you just noticed you haven't replied. Warm, not pushy. Like a friend who genuinely just noticed. Do NOT say the user is busy. Say YOU missed it.`
+            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a short casual Hinglish reply directly answering their message. Make it sound natural, as if you just got a chance to respond. Do NOT say the user is busy or apologize heavily, just answer them.`
           );
           <span class="missing-if-branch" title="else path not taken" >E</span>if (generated?.message &amp;&amp; generated.message.length &lt; 200) {
             doubleTextMsg = generated.message;
@@ -2383,7 +2395,7 @@ export const novaFollowupService = new NovaFollowupService();
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-09T21:04:34.529Z
+                at 2026-08-15T20:03:05.982Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
