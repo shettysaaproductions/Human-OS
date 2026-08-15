@@ -412,7 +412,7 @@ export class NovaFollowupService {
         // had time to respond, creating a cascade: Nova times out → stuck detector fires
         // immediately → queues fallback → user sees "Busy lag raha hai" instead of a reply.
         // New values give the LLM + async pipeline enough time to complete.
-        const cutoffMinutes = isSerious ? 5 : isPersonal ? 7 : 10;
+        const cutoffMinutes = isSerious ? 2 : isPersonal ? 3 : 5;
 
         // Not old enough yet — skip for now
         if (ageMinutes < cutoffMinutes) continue;

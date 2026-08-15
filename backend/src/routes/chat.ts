@@ -657,7 +657,7 @@ chatRouter.post(
 
       // ── Mutex & Debounce ───────────────────────────────────────────────────
       // ── Mutex with Timeout ───────────────────────────────────────────────────
-      const MUTEX_TIMEOUT_MS = 30_000;
+      const MUTEX_TIMEOUT_MS = 15_000;
 
       const previousEntry = userLocks.get(userId);
       const lockToken = crypto.randomUUID();
@@ -1380,7 +1380,7 @@ chatRouter.post(
           } else {
             const { novaBrain } = await import('../services/NovaBrainService');
             
-            const LLM_TIMEOUT_MS = 25_000; // 25 seconds max for LLM
+            const LLM_TIMEOUT_MS = 12_000; // 12 seconds max for LLM (8B model is fast)
 
             const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
             let llmTimeoutId: NodeJS.Timeout | null = null;
@@ -1393,11 +1393,30 @@ chatRouter.post(
               result = await Promise.race([llmPromise, timeoutPromise]);
             } catch (llmErr: any) {
               if (llmErr.message === 'LLM_TIMEOUT') {
-                logger.error('[Chat] LLM call timed out', { userId, messageLength: effectiveMessage.length });
-                result = {
-                  reply: FALLBACK_REPLY,
-                  subconscious_actions: []
-                };
+                logger.error('[Chat] LLM call timed out, attempting fast 8B retry', { userId, messageLength: effectiveMessage.length });
+
+                // FAST RETRY: Use the 8B extraction model with a minimal prompt
+                try {
+                  const { chatCompletionBackground } = await import('../lib/nvidia');
+                  const fastRetryMessages = [
+                    { role: 'system' as const, content: 'You are Nova, a casual Hinglish-speaking friend. Reply in 1-2 short sentences like a WhatsApp text. Be warm and natural. No lists, no formatting, no emoji spam.' },
+                    { role: 'user' as const, content: message }
+                  ];
+                  const fastReply = await chatCompletionBackground(fastRetryMessages, {
+                    model: 'meta/llama-3.1-8b-instruct',
+                    maxTokens: 256,
+                    temperature: 0.9
+                  });
+                  if (fastReply && fastReply.trim().length > 0) {
+                    logger.info('[Chat] Fast 8B retry succeeded', { userId });
+                    result = { reply: fastReply.trim(), subconscious_actions: [] };
+                  } else {
+                    result = { reply: FALLBACK_REPLY, subconscious_actions: [] };
+                  }
+                } catch (retryErr) {
+                  logger.error('[Chat] Fast 8B retry also failed', { userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
+                  result = { reply: FALLBACK_REPLY, subconscious_actions: [] };
+                }
               } else {
                 throw llmErr;
               }

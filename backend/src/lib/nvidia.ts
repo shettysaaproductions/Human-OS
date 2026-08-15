@@ -24,7 +24,7 @@ import OpenAI from 'openai';
 import { config } from '../config';
 import { logger } from './logger';
 
-const NVIDIA_TIMEOUT_MS = 55_000;
+const NVIDIA_TIMEOUT_MS = 20_000;
 
 export class NvidiaTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -323,6 +323,19 @@ export async function chatCompletionMemory(
   options?: ChatOptions,
 ): Promise<string> {
   return executeWithFailover(brain.hippocampus, null, messages, options);
+}
+
+/**
+ * 🧠 Deep Cortex — For complex, emotional, or multi-step reasoning.
+ * Uses the 49B deep model with frontal+reserve failover.
+ * Called only when the message is classified as needing deeper thought.
+ */
+export async function chatCompletionDeep(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: ChatOptions,
+): Promise<string> {
+  const deepOptions = { ...options, model: config.nvidia.deepModel };
+  return executeWithFailover(brain.frontal, brain.reserve, messages, deepOptions);
 }
 
 /**

@@ -32,7 +32,8 @@ export const config = {
     apiKey5: optionalEnv('NVIDIA_API_KEY_5', ''),  // Key 5: Extra reserve capacity
     apiKey6: optionalEnv('NVIDIA_API_KEY_6', ''),  // Key 6: Extra reserve capacity
     baseUrl: optionalEnv('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
-    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'nvidia/llama-3.3-nemotron-super-49b-v1'),
+    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.1-8b-instruct'),
+    deepModel: optionalEnv('NVIDIA_DEEP_MODEL', 'nvidia/llama-3.3-nemotron-super-49b-v1'),
   },
 
   // Optional in Phase 1 — Supabase is not yet used.
