@@ -1408,7 +1408,7 @@ chatRouter.post(
           } else {
             const { novaBrain } = await import('../services/NovaBrainService');
             
-            const LLM_TIMEOUT_MS = 12_000; // 12 seconds max for LLM (8B model is fast)
+            const LLM_TIMEOUT_MS = 25_000; // 25 seconds max for LLM
 
             const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
             let llmTimeoutId: NodeJS.Timeout | null = null;
@@ -1685,8 +1685,11 @@ Set kar diya! Yaad dila dunga 10 min mein.
       ];
       const isFallbackReply = REJECT_PREFIXES.some(p => rawReply.includes(p));
 
-      // Only save to DB if it's NOT a fallback/error message, UNLESS we are in async_mode where we MUST guarantee a reply
-      if (!isDuplicate && (!isFallbackReply || async_mode)) {
+      // In async mode, we MUST guarantee a reply is written to the DB so the frontend stops polling.
+      // Dropping a duplicate here (especially a fallback) would leave the frontend hanging for 120s.
+      const shouldSave = async_mode ? true : (!isDuplicate && !isFallbackReply);
+
+      if (shouldSave) {
         // Fetch push token fresh for the loop
         const pushTokenResult = await supabaseAdmin
           .from('profiles')
