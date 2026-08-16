@@ -163,18 +163,20 @@ class BrainKeyRouter {
     logger.info(`[BrainKeyRouter] ${allKeys.length} NVIDIA API key(s) available`);
 
     if (allKeys.length >= 4) {
-      // Full brain: each region gets its own dedicated key
-      this.frontal     = new BrainRegion('frontal',     [allKeys[0]]);
+      // Full brain: frontal (user-facing replies) gets ALL keys — the highest priority
+      // operation must never fail on a single key's rate limit or outage. Other regions
+      // keep dedicated keys; reserve keeps its own + frontal's primary as a final fallback.
+      this.frontal     = new BrainRegion('frontal',     [...allKeys]);
       this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
       this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[2]]);
-      this.reserve     = new BrainRegion('reserve',     [allKeys[3]]);
+      this.reserve     = new BrainRegion('reserve',     [allKeys[3], allKeys[0]]);
 
       // If extra keys exist (5, 6, ...), add them to the reserve pool for extra resilience
       if (allKeys.length > 4) {
         const extraKeys = allKeys.slice(4);
         logger.info(`[BrainKeyRouter] ${extraKeys.length} extra key(s) added to reserve pool`);
-        // Recreate reserve with all extra keys + key 4
-        (this as any).reserve = new BrainRegion('reserve', [allKeys[3], ...extraKeys]);
+        // Recreate reserve with all extra keys + key 4 + key 1 (frontal's primary)
+        (this as any).reserve = new BrainRegion('reserve', [allKeys[3], allKeys[0], ...extraKeys]);
       }
     } else if (allKeys.length === 3) {
       // 3 keys: frontal gets dedicated, hippocampus+cerebellum share, reserve = frontal backup

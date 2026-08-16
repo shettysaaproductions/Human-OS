@@ -73,7 +73,7 @@ let _proactiveCheckInProgress = false;
 // ── Reply-wait polling — unified poller that covers both foreground and post-restart ──
 let _replyPollTimer: ReturnType<typeof setInterval> | null = null;
 let _replyPollStartTime = 0;
-const MAX_REPLY_WAIT_MS = 600_000; // 10 minutes max wait time to cover backend auto-retry
+const MAX_REPLY_WAIT_MS = 120_000; // 2 minutes max wait — frontend gives up cleanly
 
 function startReplyPolling(checkFn: () => Promise<void>) {
   if (_replyPollTimer) return; // already running
@@ -109,8 +109,8 @@ function startReplyPolling(checkFn: () => Promise<void>) {
     }
 
     await checkFn();
-  }, 3000);
-  console.log('[REPLY_POLL] Started (3s interval, 120s max wait)');
+  }, 2000);
+  console.log('[REPLY_POLL] Started (2s interval, 120s max wait)');
 }
 
 function stopReplyPolling() {
@@ -480,7 +480,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
 
       if (cachedData.messages.length > 0) {
+        const now = Date.now();
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
         const filteredCachedMessages = cachedData.messages.filter(msg => {
+          // Filter out messages older than 24h (stale cache)
+          const msgTime = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
+          if (msgTime && now - msgTime > ONE_DAY_MS) return false;
           // Hide internal system context from UI
           if (msg.content && msg.content.startsWith('[HIDDEN_CONTEXT]')) return false;
           // Hide proactive internal trigger commands
@@ -589,9 +594,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           );
           const mergedMessages = [...freshMessages, ...localExtra];
 
+          // Sort merged messages by timestamp to prevent backdated display
+          mergedMessages.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+
           set({
             messages: mergedMessages,
-            conversationId: history[0].conversation_id,
+            conversationId: history[history.length - 1]?.conversation_id || history[0]?.conversation_id,
             pendingQueue: pendingToRestore,
             isHydrated: true,
             hasMoreMessages: history.length >= PAGE_SIZE,
@@ -832,19 +840,19 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const newMessages: Message[] = [];
         const delayedChunks: Message[] = [];
+        let updatedExisting = false;
 
         for (const msg of history) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
-          
+
           if (role === 'assistant' && isBadMessage(msg.content)) continue;
-          
+
           // Hide internal system context from UI
           if (msg.content && msg.content.startsWith('[HIDDEN_CONTEXT]')) continue;
-          
+
           const msgId = msg.id;
 
           // Track updates to existing messages (cache sync)
-          let updatedExisting = false;
           const updateLocalMessageIfNeeded = (localId: string) => {
             const localMsg = currentMessages.find(m => m.id === localId);
             if (localMsg) {
