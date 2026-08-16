@@ -26,6 +26,12 @@ services:
         value: 10000              # Render assigns PORT automatically; this is the default
       - key: NVIDIA_API_KEY
         sync: false               # Marked secret — must be set in Render Dashboard
+      - key: NVIDIA_API_KEY_2
+        sync: false
+      - key: NVIDIA_API_KEY_3
+        sync: false
+      - key: NVIDIA_API_KEY_4
+        sync: false
       - key: NVIDIA_BASE_URL
         value: https://integrate.api.nvidia.com/v1
       - key: NVIDIA_CHAT_MODEL
