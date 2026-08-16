@@ -78,12 +78,37 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
  * Persist an assistant row (typically FALLBACK_REPLY) into chat_history so a reply that
  * was shown live but whose request returned early (streaming error paths) still survives a
  * refresh — otherwise the user message stays orphaned/unanswered on the next getHistory.
+ *
+ * In async_mode, if this fails, the fallback reply is permanently lost — the user message
+ * will appear unanswered on next hydrate, and the frontend will poll for 120s before giving up.
+ * This function now logs a CRITICAL alert so developers are immediately aware.
  */
-async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string): Promise<void> {
+async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string, context?: { asyncMode?: boolean; source?: string }): Promise<void> {
   try {
     await saveAssistantMessage(userId, conversationId, content, 'SystemFallback', replyToId);
   } catch (err) {
-    logger.warn('[Chat] Failed to persist fallback reply', { error: err });
+    const isAsync = context?.asyncMode === true;
+    const source = context?.source || 'unknown';
+
+    if (isAsync) {
+      // CRITICAL: In async_mode, losing the fallback reply means the user's message
+      // will NEVER get a reply — the frontend polls for 120s then gives up with no answer.
+      // This must alert developers immediately (not just warn).
+      logger.error('[CRITICAL] Async fallback reply LOST — user message will appear unanswered forever', {
+        userId,
+        conversationId,
+        source,
+        error: err instanceof Error ? err.message : String(err),
+        errorStack: err instanceof Error ? err.stack : undefined,
+        // Include content preview for debugging
+        contentPreview: content.substring(0, 100),
+      });
+
+      // TODO: Add alerting integration here (PagerDuty, Slack webhook, Sentry, etc.)
+      // Example: await alertingService.sendCriticalAlert('Async fallback reply lost', { userId, conversationId, source });
+    } else {
+      logger.warn('[Chat] Failed to persist fallback reply', { error: err, source });
+    }
   }
 }
 
@@ -1350,7 +1375,10 @@ chatRouter.post(
 
                 // Both the stream AND the retry failed — now, and only now, save the
                 // in-voice fallback so the user always gets a bubble (never a dead chat).
-                await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
+                await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId, {
+                  asyncMode: async_mode,
+                  source: 'streaming_retry_failed',
+                });
                 res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
                 res.end();
@@ -1502,7 +1530,10 @@ Set kar diya! Yaad dila dunga 10 min mein.
           if (isStreaming) {
             // Persist the fallback (the raw errStr shown live must NOT be stored — it would
             // render as a broken bubble in history). The user message stays orphaned otherwise.
-            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId);
+            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId, {
+              asyncMode: async_mode,
+              source: 'nvidia_error_streaming',
+            });
             res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
             if (typeof (res as any).flush === 'function') (res as any).flush();
             res.end();
@@ -1973,7 +2004,10 @@ Set kar diya! Yaad dila dunga 10 min mein.
           // '' into the uuid column makes the fallback insert fail silently, so the
           // user never gets their "glitch" recovery message.
           if (userId) {
-            await saveAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, 'AsyncFallback');
+            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, undefined, {
+              asyncMode: true,
+              source: 'async_catch_block',
+            });
             // Try to push a notification so user knows to check
             const ptResult = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
             if (ptResult.data?.push_token) {
