@@ -69,6 +69,8 @@ let _inFlightBatch: { id: string; content: string; replyToId?: string; replyToCo
 
 // ── Proactive check lock — prevents simultaneous duplicate checks ──────────────
 let _proactiveCheckInProgress = false;
+let _consecutivePollingErrors = 0;
+const MAX_CONSECUTIVE_POLLING_ERRORS = 3;
 
 // ── Reply-wait polling — unified poller that covers both foreground and post-restart ──
 let _replyPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -823,7 +825,13 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         // Fetch 20 so a fast conversation can't bury the reply just past the last batch.
         const history = await chatService.getHistory(convId, 20);
-        if (!history || history.length === 0) return;
+        if (!history || history.length === 0) {
+          // Reset consecutive error counter — this was a successful fetch, just no new messages
+          _consecutivePollingErrors = 0;
+          return;
+        }
+        // Successful fetch — reset the consecutive error counter
+        _consecutivePollingErrors = 0;
 
         // Build a comprehensive set of IDs already in store:
         // includes both raw IDs (user msgs) and all _part_N variants (assistant chunks)
@@ -963,7 +971,9 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (msgsNow[i].role === 'user') { lastUserIdx = i; break; }
           }
           const assistantMsgsAfter = msgsNow.slice(lastUserIdx + 1).filter(m => m.role === 'assistant');
-          const isOnlyFallback = assistantMsgsAfter.length > 0 && assistantMsgsAfter.every(m => m.content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.');
+          // Use startsWith because MessageFormatter appends random emojis (e.g., ✨) to all replies
+          const FALLBACK_PREFIX = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
+          const isOnlyFallback = assistantMsgsAfter.length > 0 && assistantMsgsAfter.every(m => m.content.startsWith(FALLBACK_PREFIX));
           const assistantAfterLastUser = lastUserIdx >= 0
             ? assistantMsgsAfter.length > 0 && !isOnlyFallback
             : true;
@@ -1004,7 +1014,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (newMessages.length === 0 && get().isTyping) {
           const storeMsgs = get().messages;
           const lastStoreMsg = storeMsgs[storeMsgs.length - 1];
-          if (lastStoreMsg?.role === 'assistant' && lastStoreMsg.content !== 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
+          // Use startsWith because MessageFormatter appends random emojis (e.g., ✨) to all replies
+          const FALLBACK_PREFIX = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
+          if (lastStoreMsg?.role === 'assistant' && !lastStoreMsg.content.startsWith(FALLBACK_PREFIX)) {
             console.log('[PROACTIVE] Self-healing: isTyping stuck true but reply already in store');
             set({ isTyping: false });
             stopReplyPolling();
@@ -1016,7 +1028,17 @@ export const useChatStore = create<ChatState>((set, get) => {
           proactiveReplyService.triggerProactiveCheck(latestTimestamp);
         }
       } catch (e) {
-        console.warn('[PROACTIVE] Failed to check for new messages:', e);
+        _consecutivePollingErrors++;
+        console.warn('[PROACTIVE] Failed to check for new messages (error', _consecutivePollingErrors, '):', e);
+
+        // If we've hit 3 consecutive polling errors, the backend DB is likely unreachable
+        // Force-clear the polling loop to prevent the UI from hanging for 120 seconds
+        if (_consecutivePollingErrors >= MAX_CONSECUTIVE_POLLING_ERRORS) {
+          console.error('[PROACTIVE] Max consecutive polling errors reached - forcing polling cleanup');
+          stopReplyPolling();
+          clearAwaitingReply();
+          set({ isTyping: false });
+        }
       } finally {
         _proactiveCheckInProgress = false;
       }
