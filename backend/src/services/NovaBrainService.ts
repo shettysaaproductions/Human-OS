@@ -466,24 +466,13 @@ If no tools need to be called, leave the JSON array empty: []
       fullText += chunk;
       if (replyClosed) continue;
 
-      // Locate the reply region inside the FULL accumulated text. This is robust to
-      // `<reply>` and `</reply>` arriving in the same chunk (very short replies) or
-      // being split across chunks — the old per-chunk slicing leaked the raw close tag
-      // and the <subconscious_actions> JSON into the streamed reply.
-      // Locate the reply region inside the FULL accumulated text.
       const openIdx = fullText.indexOf('<reply>');
       if (openIdx === -1) continue; // open tag not seen yet
 
       const closeIdx = fullText.indexOf('</reply>');
-      // If the close tag hasn't arrived, stop the reply at the subconscious_actions
-      // tag ONLY IF it appears AFTER the reply tag (handles model hallucination).
       const subIdx = fullText.indexOf('<subconscious_actions>', openIdx);
       const replyEnd = closeIdx === -1 ? (subIdx === -1 ? fullText.length : subIdx) : closeIdx;
 
-      // Sanitize the WHOLE accumulated reply before computing the delta, so a
-      // mid-reply leak like "(subconscious_actions: )" (seen in the 2026-08-14 test
-      // chat) is stripped even if it arrives split across chunks. `replyStreamed`
-      // tracks the sanitized text, so diffs stay consistent.
       const sanitizedReply = sanitizeReply(fullText.slice(openIdx + '<reply>'.length, replyEnd));
       if (sanitizedReply.length > replyStreamed.length) {
         const delta = sanitizedReply.slice(replyStreamed.length);
@@ -492,6 +481,33 @@ If no tools need to be called, leave the JSON array empty: []
       }
 
       if (closeIdx !== -1) replyClosed = true;
+    }
+
+    if (replyStreamed.length === 0 && fullText.trim().length > 0) {
+      let fallbackReply = '';
+      const mdResponseMatch = fullText.match(/\*\*Response\*\*[:\s]*([\s\S]*?)(?:\*\*Subconscious Actions\*\*|$)/i);
+      if (mdResponseMatch) {
+        fallbackReply = mdResponseMatch[1].trim();
+      } else {
+        fallbackReply = fullText
+          .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '')
+          .replace(/\*\*Response\*\*[:\s]*/gi, '')
+          .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
+          .trim();
+      }
+
+      fallbackReply = fallbackReply
+        .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
+        .replace(/<subconscious_actions>[\s\S]*/g, '')
+        .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '')
+        .replace(/\*\*Response\*\*[:\s]*/gi, '')
+        .replace(/\[\s*\{.*"tool".*\}.*\]/gs, '')
+        .trim();
+
+      fallbackReply = sanitizeReply(fallbackReply);
+      if (fallbackReply) {
+        yield fallbackReply;
+      }
     }
 
     let subconscious_actions: any[] = [];
