@@ -1,4 +1,5 @@
 import { chatCompletion, chatCompletionBackground } from '../lib/nvidia';
+import { config } from '../config';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 
@@ -98,11 +99,42 @@ function buildMessages(
 }
 
 /**
+ * Classifies whether a user message needs the deep model (49B) or the fast model (8B).
+ * Deep model for: reminders, emotional content, complex questions, memory operations.
+ * Fast model for: greetings, short replies, casual chat, acknowledgments.
+ */
+function needsDeepModel(message: string): boolean {
+  const lower = message.toLowerCase();
+  const DEEP_TRIGGERS = [
+    // Reminder keywords (Hindi + English)
+    'remind', 'yaad', 'timer', 'alarm', 'schedule', 'set kar',
+    // Memory operations
+    'remember', 'yaad hai', 'yaad rakho', 'bhool', 'forget',
+    // Emotional content
+    'stressed', 'sad', 'depressed', 'anxious', 'pareshan', 'tension', 'dukhi',
+    'crying', 'breakup', 'fight', 'lonely', 'akela', 'miss',
+    // Complex questions
+    'explain', 'samjhao', 'batao', 'kaise', 'kyun', 'why', 'how',
+    'compare', 'difference', 'analysis', 'suggest', 'recommend',
+    // Life events
+    'interview', 'exam', 'result', 'job', 'meeting', 'doctor', 'hospital',
+    // Planning
+    'plan', 'goal', 'target', 'list', 'todo', 'task',
+  ];
+
+  // Long messages (>80 chars) likely need deeper processing
+  if (message.length > 80) return true;
+
+  // Check for trigger keywords
+  return DEEP_TRIGGERS.some(t => lower.includes(t));
+}
+
+/**
  * NovaBrainService — The Centralized Cognition Engine (Subconscious Architecture)
  *
  * In a hyperrealistic architecture, Nova responds instantly to the user while
  * processing side-effects (memories, reminders, reflections) in the background.
- * The Brain outputs both the conversational reply and a list of subconscious actions.
+ * The main outputs both the conversational reply and a list of subconscious actions.
  */
 export class NovaBrainService {
   /**
@@ -195,9 +227,14 @@ If no tools need to be called, leave the JSON array empty: []
     const messages = buildMessages(fullPrompt, context.recentMessages, message);
 
     try {
+      const useDeep = needsDeepModel(message);
+      const modelToUse = useDeep ? config.nvidia.deepModel : undefined; // undefined = use default (8B)
+      logger.info(`[NOVA BRAIN] Model selection: ${useDeep ? 'DEEP (49B)' : 'FAST (8B)'}`, { messageLength: message.length });
+
       const rawRes = await chatCompletion(messages, {
         temperature: 0.85,
-        maxTokens: 1024
+        maxTokens: 1024,
+        ...(modelToUse ? { model: modelToUse } : {})
       });
 
       let reply = "Hmm, I lost my train of thought.";
@@ -270,6 +307,56 @@ If no tools need to be called, leave the JSON array empty: []
       // Sanitize formatting/leak leftovers (bold, menus, "(subconscious_actions: )" labels)
       // so a model that ignored the anti-robot prompt rules still renders as a friend.
       reply = sanitizeReply(reply);
+
+      // POST-PROCESS: If using fast model and the reply mentions actions but none were extracted,
+      // do a targeted extraction call with the 8B model to recover the tool actions the
+      // small model skipped (it often ignores the XML instruction block).
+      if (subconscious_actions.length === 0 && reply) {
+        const lowerReply = reply.toLowerCase();
+        const lowerMsg = message.toLowerCase();
+        const shouldHaveActions =
+          (lowerMsg.includes('remind') || lowerMsg.includes('yaad') || lowerMsg.includes('timer')) ||
+          (lowerReply.includes('remind') || lowerReply.includes('yaad dila') || lowerReply.includes('set kar'));
+
+        if (shouldHaveActions) {
+          try {
+            const extractionPrompt = `Based on this conversation, extract any actions that should be taken.
+
+User said: "${message}"
+Nova replied: "${reply}"
+
+If a reminder was discussed, output EXACTLY this JSON (fill in the values):
+[{"tool": "ReminderEngine", "action": "schedule", "data": {"title": "WHAT", "time_phrase": "WHEN", "purpose": "WHY"}}]
+
+If a memory should be saved, output:
+[{"tool": "MemoryRepository", "action": "save", "data": {"key": "CATEGORY", "value": "DETAIL"}}]
+
+If no actions needed, output: []
+
+Output ONLY the JSON array, nothing else.`;
+
+            const extractionResult = await chatCompletionBackground([
+              { role: 'system', content: 'You extract structured actions from conversations. Output only JSON.' },
+              { role: 'user', content: extractionPrompt }
+            ], {
+              model: 'meta/llama-3.1-8b-instruct',
+              maxTokens: 256,
+              temperature: 0.1
+            });
+
+            const cleaned = extractionResult.trim().replace(/^```json?\s*/, '').replace(/```$/, '').trim();
+            if (cleaned.startsWith('[')) {
+              const parsed = JSON.parse(cleaned);
+              if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].tool) {
+                subconscious_actions = parsed;
+                logger.info(`[NOVA BRAIN] Post-extraction recovered ${subconscious_actions.length} actions from fast model reply.`);
+              }
+            }
+          } catch (e) {
+            logger.warn('[NOVA BRAIN] Post-extraction failed (non-critical)', { error: e instanceof Error ? e.message : String(e) });
+          }
+        }
+      }
 
       logger.info(`[NOVA BRAIN] Generated reply and ${subconscious_actions.length} subconscious actions.`);
       return { reply, subconscious_actions };

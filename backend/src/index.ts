@@ -148,6 +148,28 @@ async function main(): Promise<void> {
     }, 6 * 60 * 60 * 1000); // 6 hours
     if (habitInterval.unref) habitInterval.unref();
 
+    // Free Tier Guard: Auto-cleanup to stay within Supabase free tier limits
+    // Runs every 6 hours — prunes old chat history, thoughts, logs, and expired data
+    const freeTierGuardInterval = setInterval(async () => {
+      try {
+        const { freeTierGuardService } = await import('./services/FreeTierGuardService');
+        await freeTierGuardService.runCleanup();
+      } catch (err) {
+        logger.error('Error in FreeTierGuard cleanup', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 6 * 60 * 60 * 1000); // 6 hours
+    if (freeTierGuardInterval.unref) freeTierGuardInterval.unref();
+
+    // Run initial cleanup 60s after boot
+    setTimeout(async () => {
+      try {
+        const { freeTierGuardService } = await import('./services/FreeTierGuardService');
+        await freeTierGuardService.runCleanup();
+      } catch (e) {
+        logger.warn('[BOOT] Initial FreeTierGuard cleanup failed (non-critical)', { error: e });
+      }
+    }, 60 * 1000);
+
     // Daily Reflection + Memory Pruning Scheduler (runs once per day)
     const dailyReflectionInterval = setInterval(async () => {
       try {

@@ -1667,11 +1667,39 @@ Set kar diya! Yaad dila dunga 10 min mein.
         // Prepare thoughts array
         const thoughts: any[] = [];
         if (situationBrief) {
-          thoughts.push({
-            engine: 'SituationalAwareness',
-            type: 'context',
-            detail: situationBrief
-          });
+          // Parse situationBrief into human-readable thoughts
+          const emotionMatch = situationBrief.match(/Last known mood:\s*(\w+)/);
+          const patternMatch = situationBrief.match(/BEHAVIOR PATTERN:\s*([A-Z_]+)/);
+          const timeMatch = situationBrief.match(/Right now:\s*([^\n]+)/);
+
+          if (emotionMatch) {
+            thoughts.push({
+              engine: '🧠 Emotional Intelligence',
+              type: 'context',
+              detail: `Sensing ${emotionMatch[1].toLowerCase()} vibes from you right now`
+            });
+          }
+          if (patternMatch) {
+            const pattern = patternMatch[1];
+            const patternLabels: Record<string, string> = {
+              'ACTIVE_CHATTING': '💬 You\'re actively chatting — keeping up the energy!',
+              'IDLE': '😴 You\'ve been quiet for a while — might check in soon',
+              'RETURNING': '👋 Welcome back! Catching up on what I missed',
+              'EMOTIONAL': '💛 Something emotional is going on — being extra thoughtful'
+            };
+            thoughts.push({
+              engine: '👁️ Awareness',
+              type: 'context',
+              detail: patternLabels[pattern] || `Current vibe: ${pattern}`
+            });
+          }
+          if (timeMatch) {
+            thoughts.push({
+              engine: '⏰ Time Awareness',
+              type: 'context',
+              detail: `It's ${timeMatch[1]} — adjusting my tone accordingly`
+            });
+          }
         }
         
         // Push accessed working memories if any
@@ -1732,9 +1760,9 @@ Set kar diya! Yaad dila dunga 10 min mein.
           });
         }
         thoughts.push({
-          engine: 'PromptBuilder',
-          type: 'anti_robot',
-          detail: 'Adjusting personality filters and communication style.'
+          engine: '🎭 Personality',
+          type: 'style',
+          detail: 'Speaking naturally — like a real friend, not a robot'
         });
 
         // Create separate DB rows for each bubble
