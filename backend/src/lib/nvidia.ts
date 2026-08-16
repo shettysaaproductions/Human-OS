@@ -26,6 +26,41 @@ import { logger } from './logger';
 
 const NVIDIA_TIMEOUT_MS = 20_000;
 
+// ── Rate Limiter (Token Bucket) ─────────────────────────────────────────────
+// Prevents burning through NVIDIA free-tier limits (60 RPM per key).
+// Token bucket refills continuously — smooth traffic shaping, no thundering herd.
+
+class TokenBucket {
+  private tokens: number;
+  private readonly maxTokens: number;
+  private readonly refillRate: number; // tokens per ms
+  private lastRefill: number;
+
+  constructor(maxTokensPerMinute: number) {
+    this.maxTokens = maxTokensPerMinute;
+    this.tokens = maxTokensPerMinute;
+    this.refillRate = maxTokensPerMinute / 60_000; // per ms
+    this.lastRefill = Date.now();
+  }
+
+  /** Try to consume one token. Returns true if allowed, false if rate-limited. */
+  tryConsume(): boolean {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  private refill(): void {
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    this.tokens = Math.min(this.maxTokens, this.tokens + elapsed * this.refillRate);
+    this.lastRefill = now;
+  }
+}
+
 export class NvidiaTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`NVIDIA API did not respond within ${timeoutMs}ms`);
@@ -98,7 +133,10 @@ class BrainRegion {
   // clearly rate-limited or dead — skip it and move on.
   private cooldowns: Map<number, number> = new Map();
   private static readonly COOLDOWN_429_MS = 60_000;   // 60s for rate limit (429)
-  private static readonly COOLDOWN_403_MS = 5 * 60_000; // 5min for dead/disabled key (403)
+  private static readonly COOLDOWN_403_MS = 2 * 60_000; // 2min for 403 (may be model access issue, not dead key)
+  private static readonly COOLDOWN_403_MODEL_ACCESS_MS = 60_000; // 1min if 403 looks like model access
+  private rateLimiter: TokenBucket;
+  private static readonly RPM_LIMIT = 50; // 50 RPM per key (headroom below NVIDIA's 60 RPM free tier)
 
   constructor(name: BrainRegionName, keys: string[]) {
     this.name = name;
@@ -111,7 +149,9 @@ class BrainRegion {
         maxRetries: 0
       }));
     }
-    logger.info(`[Brain:${name}] Initialized with ${this.clients.length} key(s)`);
+    // Rate limit per-key: each key gets its own bucket at 50 RPM
+    this.rateLimiter = new TokenBucket(BrainRegion.RPM_LIMIT * this.clients.length);
+    logger.info(`[Brain:${name}] Initialized with ${this.clients.length} key(s) [RPM limit: ${BrainRegion.RPM_LIMIT}/key]`);
   }
 
   get keyCount(): number { return this.clients.length; }
@@ -146,6 +186,12 @@ class BrainRegion {
         continue;
       }
 
+      // Rate limit check — if bucket empty, skip this key (treat like cooldown)
+      if (!this.rateLimiter.tryConsume()) {
+        logger.debug(`[Brain:${this.name}] Key ${keyIdx} rate limit bucket empty, skipping`);
+        continue;
+      }
+
       try {
         const client = this.clients[keyIdx];
         const result = await withTimeout((signal) => operation(client, signal, attempt));
@@ -157,7 +203,7 @@ class BrainRegion {
         const isRetryable = err.status === 403 || err.status === 429 || err.status >= 500 || err.name === 'NvidiaTimeoutError';
         if (!isRetryable) throw err;
 
-        this.setCooldown(keyIdx, err.status);
+        this.setCooldown(keyIdx, err.status, err.message);
 
         const reason = err.status === 403
           ? 'dead/disabled (403)'
@@ -183,17 +229,23 @@ class BrainRegion {
     throw lastError;
   }
 
-  private setCooldown(keyIdx: number, status: number): void {
-    const ms = this.getCooldownMs(status);
+  private setCooldown(keyIdx: number, status: number, errorMessage?: string): void {
+    const ms = this.getCooldownMs(status, errorMessage);
     this.cooldowns.set(keyIdx, Date.now() + ms);
   }
 
-  private getCooldownMs(status: number): number {
-    return status === 403
-      ? BrainRegion.COOLDOWN_403_MS
-      : status === 429
-        ? BrainRegion.COOLDOWN_429_MS
-        : 30_000; // 5xx/timeout: 30s cooldown
+  private getCooldownMs(status: number, errorMessage?: string): number {
+    if (status === 429) return BrainRegion.COOLDOWN_429_MS;
+    if (status === 403) {
+      // Check if 403 is likely a model access issue (not dead key)
+      // Model access 403s typically mention "model" or "access" in the message
+      const msg = (errorMessage || '').toLowerCase();
+      if (msg.includes('model') || msg.includes('access') || msg.includes('permission') || msg.includes('not found')) {
+        return BrainRegion.COOLDOWN_403_MODEL_ACCESS_MS; // 1 min - might recover
+      }
+      return BrainRegion.COOLDOWN_403_MS; // 2 min - likely key issue
+    }
+    return 30_000; // 5xx/timeout: 30s cooldown
   }
 }
 

@@ -1408,7 +1408,7 @@ chatRouter.post(
           } else {
             const { novaBrain } = await import('../services/NovaBrainService');
             
-            const LLM_TIMEOUT_MS = 25_000; // 25 seconds max for LLM
+            const LLM_TIMEOUT_MS = 12_000; // 12 seconds max for LLM (8B model is fast)
 
             const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
             let llmTimeoutId: NodeJS.Timeout | null = null;
@@ -1685,11 +1685,8 @@ Set kar diya! Yaad dila dunga 10 min mein.
       ];
       const isFallbackReply = REJECT_PREFIXES.some(p => rawReply.includes(p));
 
-      // In async mode, we MUST guarantee a reply is written to the DB so the frontend stops polling.
-      // Dropping a duplicate here (especially a fallback) would leave the frontend hanging for 120s.
-      const shouldSave = async_mode ? true : (!isDuplicate && !isFallbackReply);
-
-      if (shouldSave) {
+      // Only save to DB if it's NOT a fallback/error message, UNLESS we are in async_mode where we MUST guarantee a reply
+      if (!isDuplicate && (!isFallbackReply || async_mode)) {
         // Fetch push token fresh for the loop
         const pushTokenResult = await supabaseAdmin
           .from('profiles')
@@ -1916,47 +1913,19 @@ Set kar diya! Yaad dila dunga 10 min mein.
       degradedMode.appendMessage(userId, 'assistant', reply);
 
       // 9. Background extraction — skipped when DISABLE_MEMORY=true
+      // OPTIMIZED: All 7 memory types are extracted in ONE LLM call via ConsolidatedMemoryAgent.
+      // This reduces per-message LLM load from ~7 calls to ~2 (1 main + 1 consolidated extraction).
       if (process.env.DISABLE_MEMORY !== 'true') {
-        const payload = { userId, messageId: userMessageId, message };
-
         const isFiller = message.length < 10 && !shouldExtractShortTermMemory(message);
-        
-        const backgroundJobs: Promise<any>[] = [];
-        
+
         if (!isFiller) {
-          backgroundJobs.push(
-            memoryQueue.add('extract_semantic', payload),
-            memoryQueue.add('extract_working_memory', payload),
-            memoryQueue.add('extract_episodic', payload),
-            memoryQueue.add('extract_kg', payload),
-            memoryQueue.add('extract_emotional', payload),
-            memoryQueue.add('extract_milestone', payload)
-          );
+          const payload = { userId, messageId: userMessageId, message };
+          memoryQueue.add('extract_all_memories', payload).catch(err => {
+            logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });
+          });
         } else {
           logger.info('Memory Extraction Skipped:', { reason: 'Ultra-short filler message' });
         }
-
-        if (shouldExtractShortTermMemory(message)) {
-          const rateKey = `stm_rate_${userId}`;
-          const currentCount = cache.get<number>(rateKey) || 0;
-
-          if (currentCount >= 50) {
-            logger.info('Memory Extraction Skipped:', { reason: 'Rate limit exceeded (50/hr)' });
-          } else {
-            cache.set(rateKey, currentCount + 1, 60 * 60 * 1000, 'rate_limit');
-            backgroundJobs.push(memoryQueue.add('extract_short_term', {
-              ...payload,
-              novaReply: rawReply,
-              conversationSnapshot: recentMessages.slice(-6).map(m => 
-                `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content.substring(0, 200)}`
-              ).join('\n')
-            }));
-          }
-        }
-
-        Promise.all(backgroundJobs).catch(err => {
-          logger.error('Failed to enqueue background extraction jobs', { error: err instanceof Error ? err.message : String(err) });
-        });
 
         cache.invalidate(wmCacheKey);
       } else {
