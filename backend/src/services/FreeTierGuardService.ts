@@ -17,6 +17,10 @@ export class FreeTierGuardService {
   // NVIDIA call tracking per key
   private nvidiaCallCounts: Map<string, { count: number; resetAt: number }> = new Map();
   private static readonly NVIDIA_CALLS_PER_HOUR = 200; // Conservative limit per free-tier key
+
+  // Supabase auto-cleanup retention limits
+  private static readonly CHAT_HISTORY_LIMIT = 500;    // messages kept per user
+  private static readonly COMPLETED_JOB_DAYS = 7;      // days to keep completed jobs
   private static readonly SUPABASE_STORAGE_LIMIT_MB = 500;
   private static readonly SUPABASE_WARNING_MB = 400;
 
@@ -129,6 +133,150 @@ export class FreeTierGuardService {
 
     return { safe: usedMB < limitMB * 0.9, usedMB, limitMB };
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Supabase Auto-Cleanup (stays within free-tier storage)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Main cleanup method — scheduled periodically (e.g. every 6 hours).
+   * Prunes old rows so Supabase stays within the 500MB free-tier limit.
+   */
+  async runCleanup(): Promise<{ deleted: Record<string, number> }> {
+    const deleted: Record<string, number> = {};
+
+    try {
+      deleted.chat_history = await this.pruneChatHistory();
+      deleted.nova_thoughts = await this.pruneThoughts();
+      deleted.outreach_log = await this.pruneOutreachLog();
+      deleted.followups = await this.pruneFollowups();
+      deleted.background_jobs = await this.pruneBackgroundJobs();
+      deleted.working_memory = await this.pruneExpiredWorkingMemory();
+
+      const totalDeleted = Object.values(deleted).reduce((a, b) => a + b, 0);
+      if (totalDeleted > 0) {
+        logger.info('[FreeTierGuard] Cleanup complete', { deleted, total: totalDeleted });
+      }
+
+      return { deleted };
+    } catch (err) {
+      logger.error('[FreeTierGuard] Cleanup failed', { error: err instanceof Error ? err.message : String(err) });
+      return { deleted };
+    }
+  }
+
+  private async pruneChatHistory(): Promise<number> {
+    try {
+      // Get all distinct users that have chat history
+      const { data: users } = await supabaseAdmin
+        .from('chat_history')
+        .select('user_id')
+        .limit(1000);
+
+      if (!users || users.length === 0) return 0;
+      const uniqueUsers = [...new Set(users.map((u: any) => u.user_id))];
+      let totalDeleted = 0;
+
+      for (const userId of uniqueUsers) {
+        // Keep the newest N messages per user; find the created_at cutoff row
+        const { data: cutoffRow } = await supabaseAdmin
+          .from('chat_history')
+          .select('created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .range(FreeTierGuardService.CHAT_HISTORY_LIMIT, FreeTierGuardService.CHAT_HISTORY_LIMIT)
+          .limit(1)
+          .maybeSingle();
+
+        if (cutoffRow) {
+          const { count } = await supabaseAdmin
+            .from('chat_history')
+            .delete({ count: 'exact' })
+            .eq('user_id', userId)
+            .lt('created_at', cutoffRow.created_at);
+          totalDeleted += count || 0;
+        }
+      }
+      return totalDeleted;
+    } catch (e) {
+      logger.warn('[FreeTierGuard] Chat history prune failed', { error: e instanceof Error ? e.message : String(e) });
+      return 0;
+    }
+  }
+
+  private async pruneThoughts(): Promise<number> {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabaseAdmin
+        .from('nova_thoughts')
+        .delete({ count: 'exact' })
+        .lt('created_at', sevenDaysAgo);
+      return count || 0;
+    } catch (e) {
+      logger.warn('[FreeTierGuard] Thoughts prune failed', { error: e instanceof Error ? e.message : String(e) });
+      return 0;
+    }
+  }
+
+  private async pruneOutreachLog(): Promise<number> {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabaseAdmin
+        .from('nova_outreach_log')
+        .delete({ count: 'exact' })
+        .lt('created_at', thirtyDaysAgo);
+      return count || 0;
+    } catch (e) {
+      logger.warn('[FreeTierGuard] Outreach log prune failed', { error: e instanceof Error ? e.message : String(e) });
+      return 0;
+    }
+  }
+
+  private async pruneFollowups(): Promise<number> {
+    try {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabaseAdmin
+        .from('nova_followups')
+        .delete({ count: 'exact' })
+        .eq('status', 'sent')
+        .lt('created_at', fourteenDaysAgo);
+      return count || 0;
+    } catch (e) {
+      logger.warn('[FreeTierGuard] Followups prune failed', { error: e instanceof Error ? e.message : String(e) });
+      return 0;
+    }
+  }
+
+  private async pruneBackgroundJobs(): Promise<number> {
+    try {
+      const cutoff = new Date(Date.now() - FreeTierGuardService.COMPLETED_JOB_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabaseAdmin
+        .from('background_jobs')
+        .delete({ count: 'exact' })
+        .eq('status', 'completed')
+        .lt('created_at', cutoff);
+      return count || 0;
+    } catch (e) {
+      logger.warn('[FreeTierGuard] Background jobs prune failed', { error: e instanceof Error ? e.message : String(e) });
+      return 0;
+    }
+  }
+
+  private async pruneExpiredWorkingMemory(): Promise<number> {
+    try {
+      const { count } = await supabaseAdmin
+        .from('working_memory')
+        .delete({ count: 'exact' })
+        .lt('expires_at', new Date().toISOString());
+      return count || 0;
+    } catch (e) {
+      logger.warn('[FreeTierGuard] Working memory prune failed', { error: e instanceof Error ? e.message : String(e) });
+      return 0;
+    }
+  }
 }
 
 export const freeTierGuard = new FreeTierGuardService();
+
+/** Alias for the auto-cleanup scheduler (kept separate from the original full-guard singleton). */
+export const freeTierGuardService = new FreeTierGuardService();

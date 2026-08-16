@@ -11,7 +11,7 @@ import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
-const MIN_GAP_MINUTES = 3; // Reduced from 10 — more frequent for active friend experience
+const MIN_GAP_MINUTES = 2; // Minimum gap between outreach attempts
 const SERVER_BOOT_COOLDOWN_MS = 10 * 1000; // 10s cooldown after boot
 let serverBootTime = Date.now();
 // Re-entrancy guard: a pulse that takes longer than the 15-min scheduler interval would
@@ -317,10 +317,15 @@ export class NovaConsciousnessEngine {
     let abandonmentNote = '';
     let spontaneousThoughtNote = '';
 
-    if (userPresence === 'online' && gapMinutes >= 2 && gapMinutes <= 10) {
-      abandonmentNote = "CRITICAL NUDGE: User is actively looking at the chat but hasn't sent anything for a few minutes. They might have stopped typing or are hesitating. Nudge them gently (e.g. 'kuch type kar raha tha?', 'you were saying...?', 'sab theek?'). ";
-    } else if (gapMinutes > 180 && !agendaItem && !tContext.isSleepWindow) {
-      spontaneousThoughtNote = "SPONTANEOUS SUCCESS PULSE: It's been quiet for a few hours and you have no active agenda. Do NOT ask 'how are you'. Instead, share a spontaneous thought aligned with the user's SUCCESS or GROWTH. E.g., share a quick productivity hack, a profound quote relevant to their struggles, or a sudden insight about a project they mentioned. Be a success-driven companion.";
+    if (userPresence === 'online' && gapMinutes >= 5 && gapMinutes <= 15) {
+      // User is online but not typing — gentle single nudge only (not spam)
+      abandonmentNote = "GENTLE SINGLE NUDGE: User is looking at the chat but hasn't said anything for a few minutes. Send ONE casual message (e.g. 'kuch soch raha hai?', 'bata na...'). Do NOT send multiple messages — they can see you. ";
+    } else if (userPresence === 'offline' && gapMinutes >= 10 && gapMinutes <= 60) {
+      // User went offline recently — send ONE check-in (bathing, eating, commuting, etc.)
+      abandonmentNote = "USER JUST LEFT: They were here but went offline. They might be doing something (bathing, eating, commuting). Send ONE message acknowledging they might be busy — don't ask 'where are you' directly, just continue the conversation naturally or share something useful. ";
+    } else if (gapMinutes > 120 && !agendaItem && !tContext.isSleepWindow) {
+      // Long silence — spontaneous helpful message
+      spontaneousThoughtNote = "LONG SILENCE CHECK-IN: It's been quiet for 2+ hours. Don't ask 'how are you'. Instead, share something useful: a thought about their goals, a reminder about something they mentioned, a quick tip, or just say something funny/interesting. Be genuinely helpful. ";
     }
 
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
