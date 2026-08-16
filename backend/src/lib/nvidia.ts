@@ -93,6 +93,12 @@ class BrainRegion {
   readonly name: BrainRegionName;
   private clients: OpenAI[] = [];
   private currentIndex: number = 0;
+  // Per-key cooldown: when a key hits 429/403, it's cooled for this many ms
+  // before it's eligible again. This prevents burning retries on a key that's
+  // clearly rate-limited or dead — skip it and move on.
+  private cooldowns: Map<number, number> = new Map();
+  private static readonly COOLDOWN_429_MS = 60_000;   // 60s for rate limit (429)
+  private static readonly COOLDOWN_403_MS = 5 * 60_000; // 5min for dead/disabled key (403)
 
   constructor(name: BrainRegionName, keys: string[]) {
     this.name = name;
@@ -112,32 +118,82 @@ class BrainRegion {
 
   /**
    * Execute an operation using this region's key(s).
-   * If a key hits 429/5xx/timeout, rotates to the next key in this region.
+   * If a key hits 403/429/5xx/timeout, rotates to the next key in this region.
+   * Keys that recently failed are placed on cooldown so they're skipped entirely
+   * instead of burning a retry on a known-bad key.
    */
   async execute<T>(operation: (client: OpenAI, signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
     let lastError: any = null;
-    const maxAttempts = this.clients.length;
+    const total = this.clients.length;
+    const now = Date.now();
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const client = this.clients[this.currentIndex];
-      this.currentIndex = (this.currentIndex + 1) % this.clients.length;
+    // Build the rotation order once, starting at the current index.
+    const order: number[] = [];
+    for (let i = 0; i < total; i++) {
+      order.push((this.currentIndex + i) % total);
+    }
+    this.currentIndex = (this.currentIndex + 1) % total;
+
+    for (let attempt = 0; attempt < total; attempt++) {
+      const keyIdx = order[attempt];
+
+      // Skip keys currently on cooldown (rate-limited / dead) — move on to the next.
+      const cooldownUntil = this.cooldowns.get(keyIdx) ?? 0;
+      if (now < cooldownUntil) {
+        logger.debug(`[Brain:${this.name}] Key ${keyIdx} on cooldown, skipping`, {
+          remainingMs: cooldownUntil - now,
+        });
+        continue;
+      }
 
       try {
+        const client = this.clients[keyIdx];
         const result = await withTimeout((signal) => operation(client, signal, attempt));
+        // Success — clear any lingering cooldown for this key.
+        this.cooldowns.delete(keyIdx);
         return result;
       } catch (err: any) {
         lastError = err;
-        const isRetryable = err.status === 429 || err.status >= 500 || err.name === 'NvidiaTimeoutError';
+        const isRetryable = err.status === 403 || err.status === 429 || err.status >= 500 || err.name === 'NvidiaTimeoutError';
         if (!isRetryable) throw err;
 
-        logger.warn(`[Brain:${this.name}] Key failed (${attempt + 1}/${maxAttempts}), rotating`, {
+        this.setCooldown(keyIdx, err.status);
+
+        const reason = err.status === 403
+          ? 'dead/disabled (403)'
+          : err.status === 429
+            ? 'rate-limited (429)'
+            : `error ${err.status}`;
+        logger.warn(`[Brain:${this.name}] Key ${keyIdx} failed (${attempt + 1}/${total}), rotating — ${reason}`, {
           status: err.status,
           error: err.message,
-          name: err.name
+          cooldownMs: this.getCooldownMs(err.status),
         });
       }
     }
+
+    // If every key was on cooldown (nothing failed this call, nothing succeeded),
+    // surface a clear error instead of throwing null.
+    if (!lastError) {
+      const err = new Error(`[Brain:${this.name}] All ${total} key(s) on cooldown — no available key`);
+      err.name = 'AllKeysCoolingDownError';
+      logger.error(err.message);
+      throw err;
+    }
     throw lastError;
+  }
+
+  private setCooldown(keyIdx: number, status: number): void {
+    const ms = this.getCooldownMs(status);
+    this.cooldowns.set(keyIdx, Date.now() + ms);
+  }
+
+  private getCooldownMs(status: number): number {
+    return status === 403
+      ? BrainRegion.COOLDOWN_403_MS
+      : status === 429
+        ? BrainRegion.COOLDOWN_429_MS
+        : 30_000; // 5xx/timeout: 30s cooldown
   }
 }
 
