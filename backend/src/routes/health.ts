@@ -155,6 +155,11 @@ healthRouter.get('/keys', async (_req: Request, res: Response): Promise<void> =>
   }
 });
 
+// Root health check for Render (healthCheckPath: /health)
+healthRouter.get('/', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Also add a simple liveness check
 healthRouter.get('/live', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'alive', timestamp: new Date().toISOString() });
