@@ -15,7 +15,7 @@ ALTER TABLE public.app_settings
 -- Seed default model settings
 INSERT INTO public.app_settings (key, value, description) VALUES
   ('default_chat_model',      'meta/llama-3.1-8b-instruct',  'Primary model for general chat conversations'),
-  ('default_reasoning_model', 'meta/llama-3.1-70b-instruct', 'Model used for complex reasoning tasks'),
+  ('default_reasoning_model', 'nvidia/llama-3.3-nemotron-super-49b-v1', 'Model used for complex reasoning tasks'),
   ('default_embedding_model', 'nv-embedqa-e5-v5',            'Embedding model for semantic search'),
   ('fallback_model',          'mock',                         'Model to use when primary models fail')
 ON CONFLICT (key) DO NOTHING;

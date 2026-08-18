@@ -35,7 +35,7 @@ services:
       - key: NVIDIA_BASE_URL
         value: https://integrate.api.nvidia.com/v1
       - key: NVIDIA_CHAT_MODEL
-        value: meta/llama-3.1-8b-instruct
+        value: nvidia/llama-3.3-nemotron-super-49b-v1
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
