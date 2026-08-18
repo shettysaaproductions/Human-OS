@@ -121,6 +121,9 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
   - **Response Quality Gate** (`chat.ts`): Catch hallucinated reminders mid-stream. If Nova says "remind", "timer", or "yaad" but emits no `ReminderEngine` action, the gate appends "Wait, tell me what time though?" so the lie is intercepted.
   - **Auto-Timer Architecture** (`promptBuilder.ts`, `BackgroundActionService.ts`, `NovaBrainService.ts`): Nova now autonomously sets auto-timers when users mention time-sensitive activities via `is_auto: true` in the XML payload.
   - **Reminder Hardening** (`ReminderSchedulerService.ts`): Firing a reminder no longer depends on an LLM call. Generates warm messages via safe templates and retries DB inserts if Supabase flakes.
+- ✅ **Aug 18 Session — LLM 404 Model Not Found Fix:**
+  - **Dead Model Removal:** NVIDIA deleted the `70b` models (`nvidia/llama-3.1-nemotron-70b-instruct`). This caused the backend to hard-fail with 404 errors, triggering the `Hmm... mujhe thoda sochne de` fallback loop on every single message.
+  - **Render Config Fix:** Updated `render.yaml` to deploy with `nvidia/llama-3.3-nemotron-super-49b-v1` instead of forcing the dead 70b model, and updated `backend/.env` and migration files.
 
 
 ---
