@@ -88,6 +88,8 @@ async function main(): Promise<void> {
         await novaFollowupService.checkAndFireFollowups();
         // Unanswered & ignored checks are throttled/lightweight
         await novaFollowupService.checkUnansweredConversations();
+        // Proactive: check for Nova messages the user SAW but didn't reply to (left on read)
+        await novaFollowupService.checkIgnoredNovaMessages();
       } catch (err) {
         logger.error('Error in scheduled reminders check run', { error: err instanceof Error ? err.message : String(err) });
       }

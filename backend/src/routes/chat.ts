@@ -1315,7 +1315,7 @@ chatRouter.post(
             const stream = novaBrain.streamInteraction(userId, effectiveMessage, brainContext);
             const iterator = stream[Symbol.asyncIterator]();
             
-            const STREAM_CHUNK_TIMEOUT_MS = 60_000; // Increased to 60s to allow for slow TTFT on 70B models
+            const STREAM_CHUNK_TIMEOUT_MS = 60_000; // 60s — allows for slow TTFT on 49B Nemotron
 
             while (true) {
               let chunkTimeoutId: NodeJS.Timeout | null = null;
@@ -1408,7 +1408,7 @@ chatRouter.post(
           } else {
             const { novaBrain } = await import('../services/NovaBrainService');
             
-            const LLM_TIMEOUT_MS = 12_000; // 12 seconds max for LLM (8B model is fast)
+            const LLM_TIMEOUT_MS = 55_000; // 55s — must match NVIDIA client timeout (49B model needs 20-40s)
 
             const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
             let llmTimeoutId: NodeJS.Timeout | null = null;
