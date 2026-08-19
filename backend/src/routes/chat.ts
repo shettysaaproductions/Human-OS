@@ -1262,9 +1262,9 @@ chatRouter.post(
           const purpose = r.purpose ? ` — ${r.purpose}` : '';
           const autoTag = r.is_auto ? ' [auto-detected]' : '';
           return `- [ID: "${r.id}"] ${r.text || r.title} ${when}${recurrence}${dayFilter}${monthFilter}${urgency}${purpose}${autoTag}`;
-        }).join('\n') + '\n\nCRITICAL: This list is the absolute source of truth. If past chat history says a reminder was cancelled but it appears here, it is STILL ACTIVE. Do not contradict this list.';
+        }).join('\n') + '\n\nCRITICAL ANTI-HALLUCINATION RULE: This list is the absolute source of truth. If past chat history says a reminder was cancelled but it appears here, it is STILL ACTIVE. Do not contradict this list. Do NOT invent or guess about reminders not in this list. If the user asks about a reminder, rely strictly on these IDs and descriptions.';
       } else {
-        remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has NO active reminders. CRITICAL: This is the absolute source of truth. If past chat history says a reminder was set, but this list is empty, it means there are NO active reminders. Do not contradict this fact.';
+        remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\n[EMPTY LIST] The user currently has NO active reminders.\nCRITICAL ANTI-HALLUCINATION RULE: If the user asks for their reminders, you MUST tell them they have no active reminders. NEVER invent or hallucinate reminders. Do NOT guess from past conversation. If this list is empty, they have NO reminders.';
       }
 
       // === MEMORY RETRIEVAL (REUSE ALREADY-FETCHED DATA) ===

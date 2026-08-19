@@ -104,11 +104,9 @@ export class NovaFollowupService {
       // MINIMUM 15 MINUTES for any follow-up. Never follow up in seconds.
       // The old 0.25 min (15s) minimum caused the 36-message spam. Real friends don't text every 4 minutes.
       const MINIMUM_FOLLOWUP_MINUTES = 15;
-      // Guard against a missing/invalid delay from the LLM: Math.floor(undefined * 60) is
-      // NaN, which would make fireAt an Invalid Date and .toISOString() throw, silently
-      // dropping the follow-up (caught by the non-critical handler below).
+      // Guard against a missing/invalid delay from the LLM
       const safeDelayHours = Number.isFinite(delayHours) ? delayHours : 0.5;
-      const baseDelayMinutes = Math.min(Math.max(Math.floor(safeDelayHours * 60), MINIMUM_FOLLOWUP_MINUTES), 24 * 60);
+      const baseDelayMinutes = safeDelayHours === 0 ? 0 : Math.min(Math.max(Math.floor(safeDelayHours * 60), MINIMUM_FOLLOWUP_MINUTES), 24 * 60);
       let delayMinutes = baseDelayMinutes;
 
       // Inject TriggerEngine for realistic timing adjustments.
