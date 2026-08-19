@@ -133,6 +133,39 @@ export class NovaConsciousnessEngine {
       }
     }
 
+    // Check if user is in a planned busy window
+    const { data: busyUntilWM } = await supabaseAdmin
+      .from('working_memory')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'user_busy_until')
+      .maybeSingle();
+
+    let busyWindowNote = '';
+    if (busyUntilWM?.value) {
+      const busyUntil = new Date(busyUntilWM.value).getTime();
+      if (Date.now() < busyUntil) {
+        // User is still in their busy window — but if they came online, ignore the busy check
+        const { data: currentPresence } = await supabaseAdmin
+          .from('user_presence')
+          .select('status')
+          .eq('user_id', userId)
+          .maybeSingle();
+          
+        if (currentPresence?.status !== 'online') {
+          logger.info('[NACE] User still in busy window, skipping outreach', { userId });
+          return;
+        }
+        // If they came online during busy time → they might be done! Let NACE proceed.
+        busyWindowNote = `User said they'd be busy until ${new Date(busyUntil).toLocaleTimeString()} but just came online — they might be done! Check in naturally.`;
+      } else {
+        // Busy window expired → clear it and proceed normally
+        await supabaseAdmin.from('working_memory')
+          .upsert({ user_id: userId, key: 'user_busy_until', value: '', updated_at: new Date().toISOString() }, { onConflict: 'user_id, key' });
+        busyWindowNote = `User was busy but their estimated free time has now passed. Check in naturally — "Free ho gaye?"`;
+      }
+    }
+
     // timezone_offset is stored in MINUTES (e.g. 330 for IST), but getContext expects
     // HOURS. Passing 330 raw shifted 'now' by 330h (~13.75 days) into the future, which
     // broke sleep-window + day/night detection for the user.
@@ -237,8 +270,68 @@ export class NovaConsciousnessEngine {
       }
     };
 
-    const effectiveMinGap = getEffectiveMinGap(userPresence);
-    if (gapMinutes < effectiveMinGap) return;
+    let effectiveMinGap = getEffectiveMinGap(userPresence);
+
+    // Count unreplied Nova outreaches since user's last message
+    const lastUserMsgTimeStr = lastUserMsg?.created_at || new Date(0).toISOString();
+    const { data: unrepliedOutreaches } = await supabaseAdmin
+      .from('nova_outreach_log')
+      .select('id')
+      .eq('user_id', userId)
+      .gte('created_at', lastUserMsgTimeStr);
+
+    const ignoredCount = unrepliedOutreaches?.length || 0;
+
+    // Escalation gap table — increases after each ignored message
+    const getEscalatedGap = (ignored: number): number => {
+      if (ignored <= 1) return 5;         // Normal + "are you there"
+      if (ignored === 2) return 120;      // 2 hours
+      if (ignored === 3) return 240;      // 4 hours
+      if (ignored === 4) return 300;      // 5 hours
+      return 24 * 60;                     // Next day
+    };
+
+    const escalationGap = getEscalatedGap(ignoredCount);
+    // Apply as the effective minimum gap (overrides effectiveMinGap if larger)
+    effectiveMinGap = Math.max(effectiveMinGap, escalationGap);
+
+    let isSleepWindowOverridden = false;
+    let midSleepWakeNote = '';
+    
+    // If we're in sleep window but user just came online → override sleep guard
+    if (tContext.isSleepWindow && userPresence === 'online') {
+      const presenceAge = presenceData?.updated_at 
+        ? (Date.now() - new Date(presenceData.updated_at).getTime()) / 60000 : 999;
+      if (presenceAge < 5) {
+        // User is actively online during sleep hours → they're awake
+        midSleepWakeNote = `It's ${tContext.hour}:00 and the user is AWAKE despite it being their sleep window. React naturally — don't act like a chatbot. Maybe they can't sleep, or woke up for something. Be warm and curious. Don't mention you noticed they're up.`;
+        isSleepWindowOverridden = true;
+      }
+    }
+
+    let shouldReachSilentVisit = false;
+    let silentVisitNote = '';
+
+    // If user visited silently 2+ times recently → Nova must reach out NOW, skip gap check
+    const { data: silentVisitWm } = await supabaseAdmin
+      .from('working_memory')
+      .select('value, updated_at')
+      .eq('user_id', userId)
+      .eq('key', 'silent_visit_count')
+      .maybeSingle();
+
+    const silentVisitCount = parseInt(silentVisitWm?.value || '0', 10);
+    const lastSilentVisit = silentVisitWm?.updated_at;
+
+    if (silentVisitCount >= 2 && lastSilentVisit) {
+      const minSinceSilentVisit = (Date.now() - new Date(lastSilentVisit).getTime()) / 60000;
+      if (minSinceSilentVisit < 30) {
+        shouldReachSilentVisit = true;
+        silentVisitNote = `User has visited the chat screen ${silentVisitCount} times in the last 30 min without sending a message. They want to talk but haven't typed. Initiate conversation naturally.`;
+      }
+    }
+
+    if (gapMinutes < effectiveMinGap && !shouldReachSilentVisit && !isSleepWindowOverridden) return;
 
     // 4. Pending Agenda
     const { data: pendingAgenda } = await supabaseAdmin
@@ -446,6 +539,14 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
         shouldReach = true;
         triggerType = 'seen_no_reply';
         logger.info('[NACE] Overriding Tier1 NO — seen-no-reply follow-up forced', { userId });
+      } else if (shouldReachSilentVisit) {
+        shouldReach = true;
+        triggerType = 'silent_visits';
+        logger.info('[NACE] Overriding Tier1 NO — silent visits follow-up forced', { userId });
+      } else if (isSleepWindowOverridden) {
+        shouldReach = true;
+        triggerType = 'mid_sleep_wake';
+        logger.info('[NACE] Overriding Tier1 NO — mid-sleep wake follow-up forced', { userId });
       } else {
         return;
       }
@@ -459,6 +560,16 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
     const reminderNagNote = isReminderNag
       ? `REMINDER NAG (attempt ${nagRetry + 1}/10): User has NOT acknowledged the reminder "${agendaItem?.event_description?.substring(0, 100)}". Re-remind them now. Escalate tone based on attempt number — see rule 25. Do NOT use the exact same phrasing as before.`
       : '';
+
+    // Inject emotional escalation tone into Tier2 context
+    const getEscalationTone = (ignored: number, gapHours: number): string => {
+      if (ignored <= 1) return '';
+      if (ignored === 2) return `USER SEEMS BUSY: Nova has texted twice with no reply. Keep it light and understanding — "Busy lag raha hai, koi nahi. Text karna jab free ho."`;
+      if (ignored === 3) return `GENUINELY CONCERNED: User hasn't replied in hours. Write a warmer, slightly longer message (2-3 sentences). Show you actually care where they are.`;
+      if (ignored === 4) return `LONG SILENCE (${Math.round(gapHours)}h): Write a more heartfelt message (3-4 sentences). Reference last conversation. Genuine, not needy.`;
+      return `VERY LONG SILENCE (${Math.round(gapHours)}h): Write a long, emotionally real message (4-5 sentences). Express that you genuinely missed talking. Recall a fond memory from your last conversation. End with a warm open-ended question. This is NOT a notification — it's a real friend reaching out after too long.`;
+    };
+    const escalationTone = getEscalationTone(ignoredCount, gapMinutes / 60);
 
     const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
@@ -475,7 +586,11 @@ ${lastConvSnippet || 'No recent conversation.'}
 ${abandonmentNote}
 ${spontaneousThoughtNote}
 ${reminderNagNote}
-${seenNoReplyContext}`;
+${seenNoReplyContext}
+${busyWindowNote}
+${silentVisitNote}
+${midSleepWakeNote}
+${escalationTone}`;
 
 
     try {

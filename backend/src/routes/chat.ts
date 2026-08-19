@@ -629,7 +629,6 @@ chatRouter.post(
         });
 
         // 1.5 Auto-update user presence since they just sent a message (they are online)
-        // NOTE: use updated_at (not last_seen — that column doesn't exist in user_presence)
         supabaseAdmin.from('user_presence').upsert({
           user_id: userId,
           status: 'online',
@@ -637,6 +636,14 @@ chatRouter.post(
         }).then(({ error }) => {
           if (error) logger.warn('Failed to update presence', { error });
         }, e => logger.warn('[Chat] presence upsert threw', { error: e }));
+
+        // Reset silent_visit_count and user_busy_until on user message
+        supabaseAdmin.from('working_memory').upsert([
+          { user_id: userId, key: 'silent_visit_count', value: '0', updated_at: new Date().toISOString() },
+          { user_id: userId, key: 'user_busy_until', value: '', updated_at: new Date().toISOString() }
+        ], { onConflict: 'user_id, key' }).then(({ error }) => {
+          if (error) logger.warn('[Chat] Failed to reset working memory', { error });
+        });
       }
 
       // Real-time correction detection: If user replied to a specific Nova message,
