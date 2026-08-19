@@ -24,7 +24,7 @@ import OpenAI from 'openai';
 import { config } from '../config';
 import { logger } from './logger';
 
-const NVIDIA_TIMEOUT_MS = 20_000;
+const NVIDIA_TIMEOUT_MS = 55_000; // 55s — 49B Nemotron needs 20-40s on free tier
 
 // ── Rate Limiter (Token Bucket) ─────────────────────────────────────────────
 // Prevents burning through NVIDIA free-tier limits (60 RPM per key).

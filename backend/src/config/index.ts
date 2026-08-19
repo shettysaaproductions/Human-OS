@@ -12,7 +12,14 @@ dotenv.config();
 
 function optionalEnv(key: string, defaultValue: string): string {
   const value = process.env[key];
-  return value && value.trim() !== '' ? value.trim() : defaultValue;
+  const resolved = value && value.trim() !== '' ? value.trim() : defaultValue;
+  
+  // Auto-upgrade dead 70B models to 49B to prevent 404 crashes
+  // if the user's Render dashboard has the old variable stuck in memory
+  if (resolved.toLowerCase().includes('70b-instruct')) {
+    return 'nvidia/llama-3.3-nemotron-super-49b-v1';
+  }
+  return resolved;
 }
 
 export const config = {

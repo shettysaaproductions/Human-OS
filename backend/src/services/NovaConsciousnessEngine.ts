@@ -103,7 +103,11 @@ export class NovaConsciousnessEngine {
       .eq('id', userId)
       .maybeSingle();
 
-    if (!profile?.push_token) return;
+    if (!profile) return; // No profile at all — can't proceed
+    const hasPushToken = !!profile.push_token;
+    if (!hasPushToken) {
+      logger.warn('[NACE] User has no push_token — will save to DB but skip push notification', { userId });
+    }
 
     // Sleep/busy lock respect: if the user said "good night" / is suppressed, stay
     // silent — UNLESS a high-urgency agenda item (e.g. medical/exam reminder Nova
@@ -454,12 +458,14 @@ ${spontaneousThoughtNote}`;
         outreach_type: agendaItem ? 'agenda_followup' : 'engagement_checkin',
       });
 
-      // Send push notification
-      if (profile.push_token) {
+      // Send push notification (only if token exists — message is already saved to DB above)
+      if (hasPushToken) {
         const { sendNovaReplyNotification } = await import('../lib/pushNotifications');
         await sendNovaReplyNotification(profile.push_token, message, conversationId).catch(err =>
           logger.warn('[NACE] Push notification failed', { error: err?.message })
         );
+      } else {
+        logger.info('[NACE] Message saved to DB (no push token — user will see it on app open)', { userId });
       }
 
       logger.info('[NACE] Proactive message sent successfully', { userId, messagePreview: message.substring(0, 60) });
