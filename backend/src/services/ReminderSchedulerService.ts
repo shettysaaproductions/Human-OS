@@ -232,27 +232,51 @@ export class ReminderSchedulerService {
         .eq('id', reminderId);
       logger.info('Reminder fired and completed', { reminderId });
 
-      // Completion tracking: queue a Nova agenda item so NACE checks in on how it went.
-      // Only for finished reminders (one-shots or recurring that hit their limit) —
-      // ongoing recurring reminders don't spam the agenda with a "done?" follow-up.
+      // ACK-CHECK NAGGING LOOP: queue a high-cadence agenda item so NACE
+      // re-sends the reminder every 2 minutes until user replies.
+      // Classifier determines urgency so sleep window is respected for
+      // casual reminders (water, washroom) but broken for critical ones
+      // (medicine, ticket, deadline).
       try {
-        const followUpAfter = new Date(Date.now() + 45 * 60 * 1000);
+        const reminderText = reminder.text.toLowerCase();
+
+        // Context-aware urgency: analyse reminder text to decide if Nova
+        // should break sleep window (high) or respect it (medium).
+        const isCritical = [
+          'medicine', 'tablet', 'pill', 'dawai', 'dawa', 'doctor',
+          'hospital', 'injection', 'dose', 'medication',   // health
+          'ticket', 'booking', 'deadline', 'exam', 'interview',
+          'payment', 'fee', 'bill', 'rent', 'submit',      // time-sensitive
+          'emergency', 'urgent', 'important',
+        ].some(k => reminderText.includes(k));
+
+        const ackUrgency = isCritical ? 'high' : 'medium';
+
+        const firedAt = now.toISOString();
+        const firstNagAt = new Date(Date.now() + 2 * 60 * 1000); // 2 min from now
+
         await supabaseAdmin.from('nova_agenda').insert({
           user_id: reminder.user_id,
           event_description: reminder.text.substring(0, 500),
-          expected_time: now.toISOString(),
-          follow_up_question: `"${reminder.text}" ho gaya? Batao kaise gaya!`,
-          follow_up_after: followUpAfter.toISOString(),
-          source_message: 'Reminder fired',
+          follow_up_question: `User was reminded: "${reminder.text}". Check if acknowledged.`,
+          follow_up_after: firstNagAt.toISOString(),
+          // Store fired timestamp so NACE can check for user replies AFTER this moment
+          source_message: `reminder_ack_check:${firedAt}`,
           status: 'pending',
-          next_retry_at: followUpAfter.toISOString(),
-          urgency: 'medium',
-          is_recurring: false,
+          next_retry_at: firstNagAt.toISOString(),
+          urgency: ackUrgency,  // high breaks sleep window; medium respects it
+          is_recurring: true,
+          max_retries: 10,      // ~20 minutes of nagging (10 × 2-min retries)
         });
-        logger.info('[Reminder] Completion follow-up queued in agenda', { reminderId });
+        logger.info('[Reminder] ACK-check nag loop queued in agenda', {
+          reminderId,
+          urgency: ackUrgency,
+          firstNagAt: firstNagAt.toISOString(),
+        });
       } catch (agendaErr) {
-        logger.warn('[Reminder] Failed to queue completion follow-up', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
+        logger.warn('[Reminder] Failed to queue ACK-check agenda', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
       }
+
     }
 
     // 4. Send push notification to the user
