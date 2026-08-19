@@ -10,7 +10,7 @@ interface KeyTestResult {
   present: boolean;
   tests: {
     '8b': { success: boolean; latencyMs?: number; error?: string };
-    '70b': { success: boolean; latencyMs?: number; error?: string };
+    '49b': { success: boolean; latencyMs?: number; error?: string };
   };
 }
 
@@ -20,18 +20,18 @@ interface HealthResponse {
   summary: {
     total: number;
     working8b: number;
-    working70b: number;
+    working49b: number;
     anyWorking: boolean;
   };
 }
 
 const MODELS_TO_TEST = [
-  { key: '8b', model: 'meta/llama-3.1-8b-instruct' },
-  { key: '70b', model: 'meta/llama-3.1-70b-instruct' },
+  { key: '8b',  model: 'meta/llama-3.1-8b-instruct' },
+  { key: '49b', model: 'nvidia/llama-3.3-nemotron-super-49b-v1' },
 ];
 
 const NVIDIA_BASE_URL = config.nvidia.baseUrl || 'https://integrate.api.nvidia.com/v1';
-const TEST_TIMEOUT_MS = 15_000;
+const TEST_TIMEOUT_MS = 30_000; // 49B can take 20-25s on free tier
 
 async function testKeyWithModel(apiKey: string, model: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
   const startTime = Date.now();
@@ -76,8 +76,8 @@ async function testKey(keyName: string, apiKey: string): Promise<KeyTestResult> 
     name: keyName,
     present: !!apiKey && apiKey.trim() !== '' && apiKey !== 'dummy_key',
     tests: {
-      '8b': { success: false, error: 'Not tested' },
-      '70b': { success: false, error: 'Not tested' },
+      '8b':  { success: false, error: 'Not tested' },
+      '49b': { success: false, error: 'Not tested' },
     },
   };
 
@@ -85,14 +85,17 @@ async function testKey(keyName: string, apiKey: string): Promise<KeyTestResult> 
     return result;
   }
 
-  // Test both models in parallel
-  const [test8b, test70b] = await Promise.all([
-    testKeyWithModel(apiKey, MODELS_TO_TEST[0].model),
-    testKeyWithModel(apiKey, MODELS_TO_TEST[1].model),
-  ]);
-
+  // Test 8B first (fast) — only test 49B if 8B succeeds (saves time + quota)
+  const test8b = await testKeyWithModel(apiKey, MODELS_TO_TEST[0].model);
   result.tests['8b'] = test8b;
-  result.tests['70b'] = test70b;
+
+  // Only ping 49B if key is alive (avoids wasting quota on dead keys)
+  if (test8b.success) {
+    const test49b = await testKeyWithModel(apiKey, MODELS_TO_TEST[1].model);
+    result.tests['49b'] = test49b;
+  } else {
+    result.tests['49b'] = { success: false, error: '8B failed — skipped 49B test' };
+  }
 
   return result;
 }
@@ -127,9 +130,9 @@ healthRouter.get('/keys', async (_req: Request, res: Response): Promise<void> =>
     keysToTest.map(k => testKey(k.name, k.value))
   );
 
-  const working8b = results.filter(r => r.tests['8b'].success).length;
-  const working70b = results.filter(r => r.tests['70b'].success).length;
-  const anyWorking = working8b > 0 || working70b > 0;
+  const working8b  = results.filter(r => r.tests['8b'].success).length;
+  const working49b = results.filter(r => r.tests['49b'].success).length;
+  const anyWorking = working8b > 0;
 
   const response: HealthResponse = {
     timestamp: new Date().toISOString(),
@@ -137,7 +140,7 @@ healthRouter.get('/keys', async (_req: Request, res: Response): Promise<void> =>
     summary: {
       total: keysToTest.length,
       working8b,
-      working70b,
+      working49b,
       anyWorking,
     },
   };

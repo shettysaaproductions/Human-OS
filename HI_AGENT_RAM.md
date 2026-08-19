@@ -124,6 +124,13 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **Aug 18 Session — LLM 404 Model Not Found Fix:**
   - **Dead Model Removal:** NVIDIA deleted the `70b` models (`nvidia/llama-3.1-nemotron-70b-instruct`). This caused the backend to hard-fail with 404 errors, triggering the `Hmm... mujhe thoda sochne de` fallback loop on every single message.
   - **Render Config Fix:** Updated `render.yaml` to deploy with `nvidia/llama-3.3-nemotron-super-49b-v1` instead of forcing the dead 70b model, and updated `backend/.env` and migration files.
+- ✅ **Aug 19 Session — Critical Timeout Bug Killing ALL Replies:**
+  - **Root Cause Found:** `LLM_TIMEOUT_MS = 12_000` in `chat.ts` (line 1411) was aborting every LLM call after 12 seconds. The 49B Nemotron model on free tier takes 20-40 seconds. This means 100% of replies were timing out and falling back to `FALLBACK_REPLY = "Hmm... mujhe thoda sochne de..."`. 
+  - **Fix 1:** `chat.ts` L1411: `LLM_TIMEOUT_MS` 12s → **55s**
+  - **Fix 2:** `nvidia.ts` L27: `NVIDIA_TIMEOUT_MS` 20s → **55s** (client was also aborting before model could respond)
+  - **Fix 3:** `NovaConsciousnessEngine.ts`: NACE now continues even without `push_token` — saves message to DB (app sees it on open), logs a warning instead of silently returning.
+  - **Fix 4:** `config/index.ts`: Auto-upgrade dead 70B model string at startup so Render dashboard old env var can't cause 404s.
+  - **⚠️ CRITICAL RULE ADDED:** Never set `LLM_TIMEOUT_MS` below 55s for 49B model. The free-tier NVIDIA GPU queue adds 5-30s wait before generation even starts.
 
 
 ---
