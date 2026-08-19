@@ -252,6 +252,35 @@ export class NovaConsciousnessEngine {
 
     const agendaItem = (pendingAgenda && pendingAgenda.length > 0) ? pendingAgenda[0] : null;
 
+    // ── REMINDER ACK CHECK ─────────────────────────────────────────────────────
+    // If this agenda item is a reminder nag loop, check if user replied after
+    // the reminder fired. If yes → auto-expire the loop. If no → let NACE nag.
+    if (agendaItem?.source_message?.startsWith('reminder_ack_check:')) {
+      const firedAt = agendaItem.source_message.replace('reminder_ack_check:', '');
+      const { data: userReplyAfter } = await supabaseAdmin
+        .from('chat_history')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('role', 'user')
+        .gte('created_at', firedAt)
+        .limit(1);
+
+      if (userReplyAfter && userReplyAfter.length > 0) {
+        // User acknowledged! Auto-expire the nag loop — stop nagging.
+        await supabaseAdmin.from('nova_agenda')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .eq('id', agendaItem.id);
+        logger.info('[NACE] ✅ Reminder acknowledged by user — nag loop stopped', { userId });
+        return; // Nothing more to do
+      }
+      // User has NOT replied since reminder fired → fall through to Tier 2 (re-nag)
+      logger.info('[NACE] User has not acknowledged reminder — re-nagging', {
+        userId,
+        retryCount: agendaItem.retry_count,
+        reminder: agendaItem.event_description?.substring(0, 60),
+      });
+    }
+
     // Calculate dynamic gap based on situation
     const dynamicGap = this._calculateDynamicGap({
       isSleepWindow: tContext.isSleepWindow,
@@ -356,6 +385,43 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
 
     let shouldReach = false;
     let triggerType = 'engagement';
+    let seenNoReplyContext = ''; // Injected into Tier2 if user saw message but didn't reply
+
+    // ── READ RECEIPT AWARENESS ─────────────────────────────────────────────────
+    // If Nova sent a message that the user opened (is_read=true) but never replied to,
+    // after 3 minutes Nova should follow up naturally (without revealing she tracks reads).
+    try {
+      const { data: seenMsg } = await supabaseAdmin
+        .from('chat_history')
+        .select('id, content, created_at')
+        .eq('user_id', userId)
+        .eq('role', 'assistant')
+        .eq('is_read', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (seenMsg) {
+        const seenAt = new Date(seenMsg.created_at).getTime();
+        const minSinceSeen = (Date.now() - seenAt) / 60000;
+        // Check if user replied AFTER this message
+        const { data: replyAfter } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('role', 'user')
+          .gt('created_at', seenMsg.created_at)
+          .limit(1);
+
+        if (!replyAfter?.length && minSinceSeen >= 3 && minSinceSeen < 60) {
+          seenNoReplyContext = `READ BUT NO REPLY: User opened Nova's message "${seenMsg.content.substring(0, 100)}" ${Math.round(minSinceSeen)} min ago but hasn't replied. Follow up naturally — don't repeat the same message, just nudge (e.g. 'Bata na...', share a new thought). NEVER say 'I noticed you read my message'.`;
+          logger.info('[NACE] 👁️ Seen-no-reply detected — injecting follow-up context', { userId, minSinceSeen: Math.round(minSinceSeen) });
+        }
+      }
+    } catch (seenErr) {
+      // Non-critical — don't let read-receipt check break the whole pulse
+      logger.warn('[NACE] Read receipt check failed (non-critical)', { error: seenErr instanceof Error ? seenErr.message : String(seenErr) });
+    }
 
     try {
       const decision = await novaBrain.evaluateConsciousnessTier1(tier1Context);
@@ -374,9 +440,25 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
       }
     }
 
-    if (!shouldReach) return;
+    if (!shouldReach) {
+      // Even if Tier1 said no — if user read a message and didn't reply, always follow up
+      if (seenNoReplyContext) {
+        shouldReach = true;
+        triggerType = 'seen_no_reply';
+        logger.info('[NACE] Overriding Tier1 NO — seen-no-reply follow-up forced', { userId });
+      } else {
+        return;
+      }
+    }
 
     // --- TIER 2: Generation (Full Model) ---
+
+    // Build reminder nag escalation hint for Tier 2
+    const isReminderNag = agendaItem?.source_message?.startsWith('reminder_ack_check:');
+    const nagRetry = isReminderNag ? (agendaItem?.retry_count || 0) : 0;
+    const reminderNagNote = isReminderNag
+      ? `REMINDER NAG (attempt ${nagRetry + 1}/10): User has NOT acknowledged the reminder "${agendaItem?.event_description?.substring(0, 100)}". Re-remind them now. Escalate tone based on attempt number — see rule 25. Do NOT use the exact same phrasing as before.`
+      : '';
 
     const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
@@ -391,7 +473,10 @@ ${recentOutreachSnippet || 'None.'}
 LAST CONVERSATION (what was actually said — reference this naturally):
 ${lastConvSnippet || 'No recent conversation.'}
 ${abandonmentNote}
-${spontaneousThoughtNote}`;
+${spontaneousThoughtNote}
+${reminderNagNote}
+${seenNoReplyContext}`;
+
 
     try {
       // Generate the Tier 2 message directly — NACE is already on a scheduled timer, no extra delay needed
