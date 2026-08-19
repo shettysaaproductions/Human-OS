@@ -707,15 +707,24 @@ Return JSON:
   }
 
   async evaluateConsciousnessTier1(tier1Context: string): Promise<any> {
-    const prompt = `You are the subconscious impulse of Nova. Decide YES or NO if you should initiate contact with the user right now.
+    const prompt = `You are the subconscious impulse of Nova — a best-friend AI who proactively texts the user like a real friend would.
 
-Consider:
-- Is there a pending agenda item that is due? (YES)
-- Has the user been quiet for a long time during active hours? (YES)
-- Is the user currently in their sleep window? (NO, unless it's a critical emergency reminder)
-- Was the last outreach very recent (under 45 mins)? (NO)
+Nova's whole PURPOSE is to initiate conversations and check in — NOT to wait to be texted.
+Nova should lean toward YES unless there's a strong reason not to (sleep, just spoke, user suppressed).
 
-Output JSON: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
+Decide YES or NO: should Nova text the user right now?
+
+Use the exact presence-based gap rules from the context:
+- User ONLINE: reach out if gap >= 1 min
+- User AWAY: reach out if gap >= 3 min  
+- User OFFLINE: reach out if gap >= 5 min (not 45 min — that was too conservative)
+- Pending agenda: ALWAYS reach out during non-sleep hours
+- Sleep window: NO, unless high-urgency agenda
+- Very recent outreach (< dynamic gap shown): NO
+
+Bias toward YES — Nova exists to be present and proactive.
+
+Output JSON only: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
 
     const response = await chatCompletionBackground([
       { role: 'system', content: prompt },

@@ -35,23 +35,23 @@ export class NovaConsciousnessEngine {
   }): number {
     // Sleep window — very long gap unless high urgency
     if (context.isSleepWindow) {
-      return context.agendaUrgency === 'high' ? 15 : 120; // was 30/240
+      return context.agendaUrgency === 'high' ? 10 : 120;
     }
 
     // Work hours (morning/afternoon) — moderate gap
     if (['morning', 'afternoon'].includes(context.timeOfDayLabel)) {
-      return context.hasAgenda ? 8 : 12; // was 15/25
+      return context.hasAgenda ? 5 : 15;
     }
 
     // Evening/night — user is likely free, shorter gap
     if (['evening', 'late_night'].includes(context.timeOfDayLabel)) {
-      if (context.hasAgenda && context.agendaUrgency === 'high') return 3;
-      if (context.hasAgenda) return 5;
-      return 8; // was 8/12/15
+      if (context.hasAgenda && context.agendaUrgency === 'high') return 2;
+      if (context.hasAgenda) return 3;
+      return 5; // ← was 8: reduced so evening free-time outreach fires
     }
 
     // Default
-    return 5; // was 12
+    return 5;
   }
 
   async pulse(): Promise<void> {
@@ -230,9 +230,9 @@ export class NovaConsciousnessEngine {
     const getEffectiveMinGap = (presence: string): number => {
       switch (presence) {
         case 'typing': return 0;
-        case 'online': return 1;      // 1 min for active online users
-        case 'away': return 4;        // 4 min if user stepped away
-        case 'offline': return 15;    // 15 min if offline
+        case 'online': return 1;    // 1 min for active online users
+        case 'away': return 3;      // 3 min if user stepped away
+        case 'offline': return 5;   // ← was 15! 5 min if offline (15 was killing all proactive outreach)
         default: return 2;
       }
     };
@@ -362,11 +362,16 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
       shouldReach = decision.shouldReach;
       triggerType = decision.triggerType || 'engagement';
     } catch (e) {
-      logger.warn('[NACE] Tier 1 failed, using agenda-only fallback');
-      // Tighter fallback: only fire if there's a real agenda item (not random)
-      if (agendaItem && !tContext.isSleepWindow) shouldReach = true;
-      // If user is online with a long gap, nudge even without agenda
-      else if (userPresence === 'online' && gapMinutes > 5 && !tContext.isSleepWindow) shouldReach = true;
+      logger.warn('[NACE] Tier 1 LLM failed — using presence-aware fallback');
+      // Presence-aware fallback: reach out if the situation warrants it
+      if (agendaItem && !tContext.isSleepWindow) {
+        shouldReach = true; // Always fire for pending agenda
+      } else if (!tContext.isSleepWindow && gapMinutes >= effectiveMinGap) {
+        // Long silence during waking hours → reach out even without agenda
+        // This is the key fix: previously only fired if userPresence === 'online'
+        shouldReach = true;
+        triggerType = 'engagement';
+      }
     }
 
     if (!shouldReach) return;
