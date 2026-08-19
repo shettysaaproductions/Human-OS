@@ -329,6 +329,18 @@ export class BackgroundActionService {
              }
            }
         }
+        else if (action.tool === 'WorkingMemory' && action.action === 'set') {
+           const { key, value } = action.data;
+           if (key) {
+             await supabaseAdmin.from('working_memory').upsert({
+               user_id: userId,
+               key: key,
+               value: value || '',
+               updated_at: new Date().toISOString()
+             }, { onConflict: 'user_id, key' });
+             logger.info('[BackgroundAction] Updated WorkingMemory', { userId, key, value });
+           }
+        }
       } catch (err) {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });
       }

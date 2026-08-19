@@ -62,6 +62,42 @@ router.post('/', async (req: Request, res: Response) => {
           status,
           created_at: updateData.last_active_at
         });
+
+      // Detect "silent visit" (online -> offline/away transition without a message)
+      if (status === 'offline' || status === 'away') {
+        const prevOnline = latestHistory?.status === 'online';
+        if (prevOnline) {
+          const sessionStart = new Date(latestHistory.created_at).toISOString();
+          
+          // Did user send a message during this session?
+          const { data: msgDuringSession } = await supabaseAdmin
+            .from('chat_history')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('role', 'user')
+            .gte('created_at', sessionStart)
+            .limit(1);
+
+          if (!msgDuringSession || msgDuringSession.length === 0) {
+            // It's a silent visit! Increment count in working_memory
+            const { data: silentVisitWm } = await supabaseAdmin
+              .from('working_memory')
+              .select('value')
+              .eq('user_id', userId)
+              .eq('key', 'silent_visit_count')
+              .maybeSingle();
+
+            const currentCount = parseInt(silentVisitWm?.value || '0', 10);
+            
+            await supabaseAdmin.from('working_memory').upsert([
+              { user_id: userId, key: 'silent_visit_count', value: String(currentCount + 1), updated_at: new Date().toISOString() },
+              { user_id: userId, key: 'last_silent_visit_at', value: updateData.last_active_at, updated_at: new Date().toISOString() }
+            ], { onConflict: 'user_id, key' });
+            
+            logger.info('[Presence] Recorded silent visit', { userId, currentCount: currentCount + 1 });
+          }
+        }
+      }
     }
 
     res.status(200).json({ success: true });

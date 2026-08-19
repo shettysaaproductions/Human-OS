@@ -241,6 +241,10 @@ Available Tools for Subconscious Actions:
    - Only delete a reminder actually listed there. If unclear which one, ask.
 10. "EventDetector" -> "fire": When the user signals a life event that has an ACTIVE event-triggered reminder (listed in your ACTIVE REMINDERS block as: on event "..."), fire it now. E.g. user says "I'm awake" → fire reminders with event_trigger "wake_up"; "office se nikal gaya" → "left_the_office".
     - data: { "event": "the event string exactly as listed (e.g. wake_up, left_the_office)" }
+11. "WorkingMemory" -> "set": Use when user mentions they're doing something time-bound (bathing, eating, gym, meeting, sleeping). Calculate estimated free time:
+    - data: { "key": "user_busy_until", "value": "<ISO 8601 timestamp>" }
+    - Estimates: bathing=20m, eating=30m, gym=60m, meeting=45m, sleep=8hrs, office=until 7pm.
+    - Example: if user says "bathing", set value to NOW + 20 mins.
 
 If no tools need to be called, leave the JSON array empty: []
 `;
