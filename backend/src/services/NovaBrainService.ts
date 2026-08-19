@@ -267,7 +267,7 @@ If no tools need to be called, leave the JSON array empty: []
       let reply = "Hmm, I lost my train of thought.";
       let subconscious_actions: any[] = [];
 
-      const replyMatch = rawRes.match(/<reply>([\s\S]*?)<\/reply>/);
+      const replyMatch = rawRes.match(/<reply>([\s\S]*?)(?:<\/reply>|$)/);
       if (replyMatch) {
         reply = replyMatch[1].trim();
       } else {
