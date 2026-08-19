@@ -100,30 +100,51 @@ function buildMessages(
 
 /**
  * Classifies whether a user message needs the deep model (49B) or the fast model (8B).
- * Deep model for: reminders, emotional content, complex questions, memory operations.
- * Fast model for: greetings, short replies, casual chat, acknowledgments.
+ *
+ * STRATEGY: Default to 8B (fast, ~5-8s). Only escalate to 49B for:
+ *   - Long/complex messages that need real reasoning
+ *   - Reminders (need precise time parsing)
+ *   - Emotional depth (need empathetic phrasing)
+ *   - Explicit questions needing accurate answers
+ *
+ * Short greetings / casual chat / acknowledgments ALWAYS use 8B.
  */
 function needsDeepModel(message: string): boolean {
   const lower = message.toLowerCase();
+  const trimmed = message.trim();
+
+  // ── Fast-path short-circuit: NEVER use 49B for these ────────────────────────
+  // Single-word greetings, acknowledgments, reactions → always 8B
+  const FAST_ONLY = [
+    'hi', 'hello', 'hey', 'hii', 'heyy', 'sup', 'yo', 'ok', 'okay',
+    'haha', 'lol', 'hmm', 'hm', 'nice', 'cool', 'great', 'wow',
+    'thanks', 'thx', 'ty', 'np', 'yes', 'no', 'yep', 'nope',
+    'bye', 'gn', 'tc', 'cya', 'later',
+    'ha', 'lmao', 'xd', '😂', '👍', '❤️',
+  ];
+  if (FAST_ONLY.includes(trimmed.toLowerCase())) return false;
+  if (trimmed.length < 15) return false; // Very short message → always 8B
+
+  // ── Deep triggers: these NEED 49B for quality ────────────────────────────────
   const DEEP_TRIGGERS = [
-    // Reminder keywords (Hindi + English)
-    'remind', 'yaad', 'timer', 'alarm', 'schedule', 'set kar',
+    // Reminders (need precise time parsing)
+    'remind', 'yaad dila', 'timer', 'alarm', 'schedule', 'set kar',
     // Memory operations
-    'remember', 'yaad hai', 'yaad rakho', 'bhool', 'forget',
-    // Emotional content
-    'stressed', 'sad', 'depressed', 'anxious', 'pareshan', 'tension', 'dukhi',
-    'crying', 'breakup', 'fight', 'lonely', 'akela', 'miss',
-    // Complex questions
-    'explain', 'samjhao', 'batao', 'kaise', 'kyun', 'why', 'how',
-    'compare', 'difference', 'analysis', 'suggest', 'recommend',
+    'remember', 'yaad rakho', 'bhool mat', 'save this',
+    // Emotional depth
+    'stressed', 'depressed', 'anxious', 'pareshan', 'tension', 'dukhi',
+    'crying', 'breakup', 'fight', 'lonely', 'akela',
+    // Explicit explanation requests
+    'explain', 'samjhao', 'bata na', 'kyun hua', 'why did', 'how does',
+    'compare', 'difference between', 'analysis', 'suggest karo', 'recommend',
     // Life events
-    'interview', 'exam', 'result', 'job', 'meeting', 'doctor', 'hospital',
+    'interview', 'exam', 'result', 'meeting', 'doctor', 'hospital',
     // Planning
-    'plan', 'goal', 'target', 'list', 'todo', 'task',
+    'plan banao', 'goal', 'todo', 'task list',
   ];
 
-  // Long messages (>80 chars) likely need deeper processing
-  if (message.length > 80) return true;
+  // Long messages (>150 chars) likely need deeper reasoning
+  if (trimmed.length > 150) return true;
 
   // Check for trigger keywords
   return DEEP_TRIGGERS.some(t => lower.includes(t));
@@ -228,13 +249,15 @@ If no tools need to be called, leave the JSON array empty: []
 
     try {
       const useDeep = needsDeepModel(message);
-      const modelToUse = useDeep ? config.nvidia.deepModel : undefined; // undefined = use default (8B)
-      logger.info(`[NOVA BRAIN] Model selection: ${useDeep ? 'DEEP (49B)' : 'FAST (8B)'}`, { messageLength: message.length });
+      const modelToUse = useDeep ? config.nvidia.deepModel : config.nvidia.chatModel;
+      // 8B: cap at 512 tokens (fast casual reply budget), 49B: 1024 (needs space for reasoning)
+      const maxTok = useDeep ? 1024 : 512;
+      logger.info(`[NOVA BRAIN] Model: ${useDeep ? 'DEEP/49B' : 'FAST/8B'} | tokens: ${maxTok} | msgLen: ${message.length}`);
 
       const rawRes = await chatCompletion(messages, {
-        temperature: 0.85,
-        maxTokens: 1024,
-        ...(modelToUse ? { model: modelToUse } : {})
+        temperature: useDeep ? 0.80 : 0.90, // 8B slightly more creative/casual, 49B more precise
+        maxTokens: maxTok,
+        model: modelToUse,
       });
 
       let reply = "Hmm, I lost my train of thought.";
