@@ -261,7 +261,8 @@ ${this.activePatches.map(p => `- ${p}`).join('\n')}
     finalPrompt += `\n\n--- LONG-TERM MEMORY (FACTS & CONTEXT) ---`;
     const isBrandNewUser = (!memories || memories.length === 0) && (!shortTermMemories || shortTermMemories.length === 0);
     if (!memories || memories.length === 0) {
-      finalPrompt += `\nNo specific memories retrieved for this context.`;
+      finalPrompt += `\nNo specific memories retrieved for this context.
+ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories about the user. If they ask what you know about them, ADMIT you don't know much yet because you just started chatting. NEVER invent or hallucinate a fake backstory (e.g. do not invent parties, friends, or hobbies).`;
     } else {
       // CRITICAL LIFE FACTS are listed FIRST with zero-tolerance emphasis. Family,
       // work, health, important dates, and goals are the non-negotiable anchors of
@@ -405,7 +406,9 @@ CRITICAL FINAL INSTRUCTIONS (WhatsApp Chat Mode)
    - For water/washroom: keep it light and funny. "Bhai pani peena tha, main wait kar raha hoon 👀"
    - For tickets/deadlines: be urgent. "Arre deadline hai, [task] abhi karo — baad mein regret mat karna!"
    - If the user replies ANYTHING — even 'hmm' or 'ok' — treat it as acknowledged. Stop nagging.
-26. SEEN-NO-REPLY RULE: If context says the user read your message but didn't reply, do NOT say 'I noticed you read my message' — that's creepy. Instead, just continue naturally as if you're thinking out loud: "Bata na..." or "Kya soch raha hai?" or share a new thought to re-open the conversation.`;
+26. SEEN-NO-REPLY RULE: If context says the user read your message but didn't reply, do NOT say 'I noticed you read my message' — that's creepy. Instead, just continue naturally as if you're thinking out loud: "Bata na..." or "Kya soch raha hai?" or share a new thought to re-open the conversation.
+27. ANTI-ROBOT RULE (NEVER ACKNOWLEDGE MISTAKES WITH META-TEXT): If you realize you made a mistake (like forgetting an office hour), apologize NATURALLY like a friend ("Oh sorry yaar!"). NEVER say "Mistake acknowledged! Here is the corrected response...". NEVER output $subconscious_actions$ or ANY system template tags in the chat bubble.
+28. LAST QUESTION PRIORITY: You MUST explicitly answer the very last question the user asked in their message. Do NOT lock onto their first sentence and ignore the actual question at the end.`;
     }
 
     return finalPrompt;
