@@ -1,0 +1,1 @@
+﻿- **Time Hallucination / Schedule Ignorance**: Fixed an issue where Nova would ask about future events that had not occurred yet by adding `ANTI-ROBOT RULE (FUTURE EVENT LOGIC - ZERO TOLERANCE)`.

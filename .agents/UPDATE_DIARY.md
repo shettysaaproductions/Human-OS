@@ -12,3 +12,5 @@
   - Added UUID verification in `chat.ts` to prevent UI crashes when fetching process logs.
   - Updated `NovaConsciousnessEngine.ts` to use a 1-minute floor for active online users.
   - Implemented 2, 4, 8, 16, 32m exponential backoff for offline users in `getEscalatedGap`.
+- **[2026-08-20] Auto Upgrade: Time Hallucination Fix**
+  - Added `ANTI-ROBOT RULE (FUTURE EVENT LOGIC - ZERO TOLERANCE)` to `promptBuilder.ts` to strictly enforce checking current time against blocking schedule items (e.g. office hours) before asking about future events.
