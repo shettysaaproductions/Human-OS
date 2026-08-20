@@ -1,22 +1,3 @@
-# HumanOS Update Diary
-
-Chronological log of all agent-executed changes. Maintained by `update agent` command.
-
----
-
-## [2026-08-13] Claude/OmniRoute Behavioral Patches (Auto Upgrade)
-
-### Trigger
-Nova sent robotic, structured replies under the Claude/OmniRoute model: numbered lists + bold headers for a casual "Hi", an explicit AI self-narration disclaimer ("Since I'm a text-based AI and don't have the capability to send push notifications..."), a "Medicine Reminder Set! 🎉 ⏰ WARNING: TEXT-BASED REMINDER ONLY" confirmation banner, and a generated menu of options (A/B/C, 1/2/3) for the user to pick from. This stems from RLHF biases in the routed model — acting like a helpful subservient assistant instead of an equal friend.
-
-### Changes Made
-- **Anti-Robot Rules** (`backend/src/services/promptBuilder.ts`): Added three Claude/Omni-specific rules — `NO AI DISCLAIMERS` (ban "Since I'm a text-based AI", "I don't have the capability", any AI/bot limitation talk; if unable, say "Ye mere bas ka nahi hai yaar"), `NO MENUS OR AGENDAS` (ban A/B/C or 1/2/3 topic menus; pick ONE topic naturally), and `NO ROBOT CONFIRMATIONS` (ban "Reminder Set!", "WARNING", "Immediate Response Required"; confirm as a friend: "Set kar diya, yaad dila dunga").
-- **ReminderEngine Tool Prompt** (`backend/src/services/NovaBrainService.ts`): Both `ReminderEngine -> schedule` blocks (evaluateConsciousness + streaming variant) now carry a `CRITICAL FOR CLAUDE/OMNI MODELS` note — the backend sends the actual push notification, so the model MUST emit the tool instead of outputting a text-based-AI disclaimer. This addresses the root cause of reminder hallucinations under Claude models.
-
-### Status
-- Build passed (exit 0).
-- Docs updated (MEMORY.md, LEARNING_LOOP.md, KNOWN_ISSUES.md, UPDATE_DIARY.md).
-- Pending: commit + push to `main`, Render redeploy (manual), optional `eas update`.
 
 ---
 
