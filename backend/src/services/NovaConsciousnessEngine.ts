@@ -301,7 +301,13 @@ export class NovaConsciousnessEngine {
 
     const escalationGap = getEscalatedGap(ignoredCount);
     // Apply as the effective minimum gap (overrides effectiveMinGap if larger)
-    effectiveMinGap = Math.max(effectiveMinGap, escalationGap);
+    if (userPresence === 'online') {
+      // If user is actively online, ignore steep escalation gaps to keep triggering messages 
+      // but keep a small floor (3 min) so it doesn't spam exactly on every pulse.
+      effectiveMinGap = 3;
+    } else {
+      effectiveMinGap = Math.max(effectiveMinGap, escalationGap);
+    }
 
     let isSleepWindowOverridden = false;
     let midSleepWakeNote = '';
