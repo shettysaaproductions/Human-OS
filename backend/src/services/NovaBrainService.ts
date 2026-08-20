@@ -45,6 +45,7 @@ export function sanitizeReply(reply: string): string {
     .replace(/^[^\n]{3,60}:\s*\n/gm, '')
     // Strip "Subconscious Actions" leaks of all forms
     .replace(/\*\[Subconscious Actions[\s\S]*?\*\*/gi, ' ')
+    .replace(/\s*Subconscious Action[s]?\s*$/gi, '')
     .replace(/\s*\((?:subconscious_actions|subconscious actions)\s*:?\s*\)\s*/gi, ' ')
     .replace(/\s*<subconscious_actions>\s*\(?\s*\)?\s*<\/subconscious_actions>\s*/gi, ' ')
     .replace(/\s*\((?:subconscious_actions|tool)\b[^)]*\)\s*/gi, ' ')
@@ -228,6 +229,7 @@ Available Tools for Subconscious Actions:
    - Only queue if you genuinely want to continue the conversation — not as a reflex.
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
+   - 🔴 ATOMICITY RULE (CRITICAL): NEVER merge multiple distinct facts into a single memory. If the user mentions their wife's name AND that they love her cooking, emit TWO separate MemoryRepository actions (e.g. one for "Wife Name: Sakshi" and one for "Loves: Wife's cooking").
    - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat, short-term states, or fluff (e.g. "kaam hi kar raha hu", "3:35 AM", "feeling sleepy", "good morning"). ONLY save meaningful, long-term facts (e.g. likes, dislikes, family members, relationships, career goals).
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
    - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
@@ -471,6 +473,7 @@ Available Tools for Subconscious Actions:
    - CRITICAL (CONTEXT BRIDGING): NEVER use generic questions like "kya kar raha hai?". Your follow-up MUST bridge the context of what you were just talking about! Act like a human who got left on read (e.g. "To uska kya hua aage?").
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
+   - 🔴 ATOMICITY RULE (CRITICAL): NEVER merge multiple distinct facts into a single memory. If the user mentions their wife's name AND that they love her cooking, emit TWO separate MemoryRepository actions (e.g. one for "Wife Name: Sakshi" and one for "Loves: Wife's cooking").
    - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat, short-term states, or fluff (e.g. "kaam hi kar raha hu", "feeling sleepy"). ONLY save meaningful, long-term facts (likes, dislikes, career goals, etc).
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-specific thing the user mentioned.
    - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }

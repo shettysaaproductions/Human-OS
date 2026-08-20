@@ -344,10 +344,10 @@ function parseLLMResponse(rawReply: string): string[] {
   rawReply = rawReply.trim();
   if (!rawReply) return [];
 
-  // Level 1: Try explicit <NOVA_MSG> tags
-  if (rawReply.includes('<NOVA_MSG>')) {
+  // Level 1: Try explicit <NOVA_MSG> or <NOVA_MESSAGE_BREAK> tags
+  if (rawReply.includes('<NOVA_MSG>') || rawReply.includes('<NOVA_MESSAGE_BREAK>')) {
     const segments = rawReply
-      .split(/<\/?NOVA_MSG>/)
+      .split(/<\/?NOVA_MSG>|<\/?NOVA_MESSAGE_BREAK>/)
       .map(m => m.trim())
       .filter(Boolean);
     if (segments.length > 0) return segments;
