@@ -129,9 +129,25 @@ adminRouter.post('/hard-reset', async (req: Request, res: Response, next: NextFu
 
     // Delete all stateful data across tables
     const tables = [
-      'kg_nodes', 'kg_edges', 'memories', 'working_memory', 
-      'user_routines', 'nova_agenda', 'conversation_sessions', 
-      'chat_history', 'nova_outreach_log', 'reminders'
+      'nova_outreach_log',
+      'nova_agenda',
+      'user_routines',
+      'reminders',
+      'chat_history',
+      'short_term_memories',
+      'memories',
+      'working_memory',
+      'nova_thoughts',
+      'user_presence',
+      'kg_edges',
+      'kg_nodes',
+      'user_moments',
+      'reflections',
+      'emotional_states',
+      'nova_followups',
+      'profiles',
+      'episodic_memories',
+      'conversation_sessions'
     ];
 
     for (const table of tables) {
