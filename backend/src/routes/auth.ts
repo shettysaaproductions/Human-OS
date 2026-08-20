@@ -254,6 +254,9 @@ authRouter.delete('/mark-dead', authenticateUser, async (req: Request, res: Resp
       'chat_history',
       'short_term_memories',
       'memories',
+      'working_memory',
+      'nova_thoughts',
+      'user_presence',
       'kg_edges',
       'kg_nodes',
       'user_moments',
@@ -264,11 +267,7 @@ authRouter.delete('/mark-dead', authenticateUser, async (req: Request, res: Resp
 
     for (const table of tables) {
       try {
-        const query = supabaseAdmin.from(table).delete().eq('user_id', userId);
-        if (table === 'profiles') {
-          query.eq('id', userId);
-        }
-        await query;
+        await supabaseAdmin.from(table).delete().eq('user_id', userId);
       } catch (e) {
         logger.warn(`[Mark Dead] Failed to delete from ${table}`, { error: e instanceof Error ? e.message : String(e) });
       }

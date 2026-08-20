@@ -228,17 +228,18 @@ Available Tools for Subconscious Actions:
    - Only queue if you genuinely want to continue the conversation — not as a reflex.
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
-   - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat like "kaam hi kar raha hu", "3:35 AM", or "good morning". ONLY save meaningful facts (likes, dislikes, relationships, etc).
+   - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat, short-term states, or fluff (e.g. "kaam hi kar raha hu", "3:35 AM", "feeling sleepy", "good morning"). ONLY save meaningful, long-term facts (e.g. likes, dislikes, family members, relationships, career goals).
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
    - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
-   - 🔴 ANTI-TRASH RULE: DO NOT save internal conversational states (like "feeling sleepy") as events. Events are real-world occurrences (meetings, flights, exams).
+   - 🔴 ANTI-TRASH RULE: DO NOT save internal conversational states (like "feeling sleepy") as events. Events are strictly real-world occurrences (meetings, flights, exams).
 6. "LifeEventExtractor" -> "routine": Extract a recurring routine or habit the user mentioned.
    - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
+   - 🔴 ANTI-TRASH RULE: DO NOT save one-off actions as routines.
 7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
    - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
 8. "AgendaManager" -> "add": Implicitly log a goal or task the user mentioned so you can ask them about it later. Use this if they say "I need to do X" but don't ask for a specific reminder time.
    - data: { "task_description": "the task they need to do" }
-   - 🔴 ANTI-TRASH RULE: NEVER save conversational chat like "soo jaunga", "lag raha hai", or "pine ke lie" as goals. ONLY save actual tasks (e.g. "Buy groceries", "Finish project").
+   - 🔴 ANTI-TRASH RULE: NEVER save conversational chat like "soo jaunga", "lag raha hai", "pine ke lie", "nai aa rahi hai" as goals. ONLY save actual, actionable tasks (e.g. "Buy groceries", "Finish project"). If it is not an actionable task, do not use this tool.
 9. "ExternalApiEngine" -> "webhook": Trigger a real-world webhook or external action IF the user asks you to control something (like lights, notion, etc).
    - data: { "url": "the webhook url", "method": "POST|GET", "body": { "any": "data" } }
 9. "ReminderEngine" -> "delete": Cancel an active reminder when the user says "stop", "cancel", "hata de", "band kar do", etc.
@@ -470,14 +471,18 @@ Available Tools for Subconscious Actions:
    - CRITICAL (CONTEXT BRIDGING): NEVER use generic questions like "kya kar raha hai?". Your follow-up MUST bridge the context of what you were just talking about! Act like a human who got left on read (e.g. "To uska kya hua aage?").
 4. "MemoryRepository" -> "save": Save a factual detail about the user.
    - data: { "key": "category_name", "value": "detail" }
+   - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat, short-term states, or fluff (e.g. "kaam hi kar raha hu", "feeling sleepy"). ONLY save meaningful, long-term facts (likes, dislikes, career goals, etc).
 5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-specific thing the user mentioned.
    - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
+   - 🔴 ANTI-TRASH RULE: DO NOT save internal conversational states (like "feeling sleepy") as events. Events are strictly real-world occurrences (meetings, flights, exams).
 6. "LifeEventExtractor" -> "routine": Extract a recurring routine or habit the user mentioned.
    - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
+   - 🔴 ANTI-TRASH RULE: DO NOT save one-off actions as routines.
 7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
    - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
 8. "AgendaManager" -> "add": Implicitly log a goal or task the user mentioned so you can ask them about it later. Use this if they say "I need to do X" but don't ask for a specific reminder time.
    - data: { "task_description": "the task they need to do" }
+   - 🔴 ANTI-TRASH RULE: NEVER save conversational chat like "soo jaunga", "lag raha hai", "pine ke lie" as goals. ONLY save actual, actionable tasks (e.g. "Buy groceries", "Finish project"). If it is not an actionable task, do not use this tool.
 
 If no tools need to be called, leave the JSON array empty: []
 `;

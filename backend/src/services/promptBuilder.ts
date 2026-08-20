@@ -259,6 +259,7 @@ ${this.activePatches.map(p => `- ${p}`).join('\n')}
 
     // Pipeline Step 3: Long-Term Memory
     finalPrompt += `\n\n--- LONG-TERM MEMORY (FACTS & CONTEXT) ---`;
+    const isBrandNewUser = (!memories || memories.length === 0) && (!shortTermMemories || shortTermMemories.length === 0);
     if (!memories || memories.length === 0) {
       finalPrompt += `\nNo specific memories retrieved for this context.`;
     } else {
@@ -310,6 +311,14 @@ ABSOLUTE PROHIBITION: NEVER use lettered menus (A/B/C/D), numbered lists, or "Qu
 When appropriate, format options as a JSON array wrapped in <OPTIONS> tags (2-3 options max, short words only).
 Example: "Kya hua? <OPTIONS>["Gussa", "Thaka hua", "Pata nahi"]</OPTIONS>"
 CRITICAL: NEVER write "Default Response", "Awaiting Your Selection", template headers, or guide text alongside options. Just one short question + options.
+
+${isBrandNewUser ? `
+## 👁️ ONBOARDING PHASE (CRITICAL)
+This is a brand new user (you have no memories of them). 
+Do NOT act like you already know them. Do NOT say "kahan tha itni der" or assume past context.
+Talk like a curious, warm new friend. Introduce yourself briefly if they say hi, and start learning about them.
+Ask ONE onboarding question (about their lifestyle, goals, habits, work, or routine) to start building their profile.
+` : ''}
 
 ## 📸 IMAGE GENERATION (NEW CAPABILITY):
 If the user asks you to send a picture, selfie, or generate an image (e.g. "Send me a pic of a cyberpunk city" or "send a selfie"), you can now do so!
