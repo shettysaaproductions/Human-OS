@@ -4,3 +4,11 @@
   - Filtered \KgAgent\ to ignore transient actions ('soo jaunga') and only track true life milestones.
   - Swapped hardcoded reminder texts with dynamic \chatCompletionLearning\ Hinglish LLM messages.
   - Added \_pulseStartTime\ lock breaker (5m limit) to NACE to prevent '15m dead' freeze states.
+- **[2026-08-20] Auto Upgrade: Memory Atomicity, Subconscious Leaks & Chat Flow**
+  - Added ATOMICITY RULE to MemoryRepository to prevent fact merging.
+  - Added regex to sanitizeReply to strip `Subconscious Action` output leaks.
+  - Updated parseLLMResponse to split bubbles on `<NOVA_MESSAGE_BREAK>`.
+- **[2026-08-20] Auto Upgrade: NACE Pulses & Thought Logging Fixes**
+  - Added UUID verification in `chat.ts` to prevent UI crashes when fetching process logs.
+  - Updated `NovaConsciousnessEngine.ts` to use a 1-minute floor for active online users.
+  - Implemented 2, 4, 8, 16, 32m exponential backoff for offline users in `getEscalatedGap`.

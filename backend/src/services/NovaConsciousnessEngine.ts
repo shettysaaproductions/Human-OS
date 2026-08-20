@@ -273,7 +273,7 @@ export class NovaConsciousnessEngine {
         case 'typing': return 0;
         case 'online': return 1;    // 1 min for active online users
         case 'away': return 3;      // 3 min if user stepped away
-        case 'offline': return 5;   // ← was 15! 5 min if offline (15 was killing all proactive outreach)
+        case 'offline': return 2;   // 2 min if offline (exponential backoff follows)
         default: return 2;
       }
     };
@@ -290,12 +290,15 @@ export class NovaConsciousnessEngine {
 
     const ignoredCount = unrepliedOutreaches?.length || 0;
 
-    // Escalation gap table — increases after each ignored message
+    // Escalation gap table — increases after each ignored message (Exponential backoff for offline)
     const getEscalatedGap = (ignored: number): number => {
-      if (ignored <= 1) return 5;         // Normal + "are you there"
-      if (ignored === 2) return 120;      // 2 hours
-      if (ignored === 3) return 240;      // 4 hours
-      if (ignored === 4) return 300;      // 5 hours
+      if (ignored <= 1) return 2;         // 2 mins
+      if (ignored === 2) return 4;        // 4 mins
+      if (ignored === 3) return 8;        // 8 mins
+      if (ignored === 4) return 16;       // 16 mins
+      if (ignored === 5) return 32;       // 32 mins
+      if (ignored === 6) return 240;      // 4 hours (1st extended try)
+      if (ignored === 7) return 240;      // 4 hours (2nd extended try)
       return 24 * 60;                     // Next day
     };
 
@@ -303,8 +306,8 @@ export class NovaConsciousnessEngine {
     // Apply as the effective minimum gap (overrides effectiveMinGap if larger)
     if (userPresence === 'online') {
       // If user is actively online, ignore steep escalation gaps to keep triggering messages 
-      // but keep a small floor (3 min) so it doesn't spam exactly on every pulse.
-      effectiveMinGap = 3;
+      // but keep a small floor (1 min) so it doesn't spam exactly on every pulse.
+      effectiveMinGap = 1;
     } else {
       effectiveMinGap = Math.max(effectiveMinGap, escalationGap);
     }

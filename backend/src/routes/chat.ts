@@ -2094,6 +2094,13 @@ chatRouter.get(
       const userId = (req as any).user!.id;
       const { messageId } = req.params;
 
+      // Ensure messageId is a valid UUID to prevent Postgres errors on temporary IDs
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(messageId)) {
+        res.status(200).json({ thoughts: [] });
+        return;
+      }
+
       const { data, error } = await supabaseAdmin
         .from('nova_thoughts')
         .select('thoughts')
