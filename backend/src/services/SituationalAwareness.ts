@@ -251,11 +251,11 @@ export class SituationalAwareness {
   private getTimedPersona(now: Date, isWeekend: boolean): string {
     const hour = now.getUTCHours();
     if (hour >= 0 && hour < 5) return 'It\'s very late / early. User might be having trouble sleeping, studying late, or unwinding. Be low-key, warm, and chill. Don\'t be hyper.';
-    if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ' on weekend' : ''}. ${isWeekend ? 'Might be early riser or insomnia. Casual check-in.' : 'Probably getting ready for work/college. Keep it snappy.'}`;
-    if (hour >= 9 && hour < 12) return `${isWeekend ? 'Weekend morning' : 'Work hours morning'}. ${isWeekend ? 'Relaxed mode. They might be free.' : 'Mid-work/study. Don\'t distract unnecessarily.'}`;
-    if (hour >= 12 && hour < 14) return 'Lunch break — likely a short break. Good time for a casual conversation.';
-    if (hour >= 14 && hour < 17) return `${isWeekend ? 'Weekend afternoon' : 'Afternoon at work/college'}. ${isWeekend ? 'Might be chilling, watching something, out with someone.' : 'Productive hours — keep responses helpful.'}`;
-    if (hour >= 17 && hour < 20) return `Evening — winding down from the day. ${isWeekend ? 'Evening plans likely.' : 'After work/college. Most open to chatting now.'}`;
+    if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ' on weekend' : ''}. ${isWeekend ? 'Might be early riser or insomnia. Casual check-in.' : 'Keep it snappy.'}`;
+    if (hour >= 9 && hour < 12) return `${isWeekend ? 'Weekend morning' : 'Weekday morning'}. ${isWeekend ? 'Relaxed mode. They might be free.' : 'They might be busy with their day. Don\'t distract unnecessarily.'}`;
+    if (hour >= 12 && hour < 14) return 'Lunch time / Mid-day. Good time for a casual conversation.';
+    if (hour >= 14 && hour < 17) return `${isWeekend ? 'Weekend afternoon' : 'Weekday afternoon'}. ${isWeekend ? 'Might be chilling, watching something, out with someone.' : 'Keep responses helpful and respect their time if they are busy.'}`;
+    if (hour >= 17 && hour < 20) return `Evening — winding down from the day. ${isWeekend ? 'Evening plans likely.' : 'Most open to chatting now.'}`;
     if (hour >= 20 && hour < 23) return 'Night — prime conversation time. User is relaxed. Best time to have deeper conversations.';
     return 'Late night — likely tired. Keep it light.';
   }
