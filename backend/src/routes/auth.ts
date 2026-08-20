@@ -262,7 +262,10 @@ authRouter.delete('/mark-dead', authenticateUser, async (req: Request, res: Resp
       'user_moments',
       'reflections',
       'emotional_states',
-      'nova_followups'
+      'nova_followups',
+      'profiles',
+      'episodic_memories',
+      'conversation_sessions'
     ];
 
     for (const table of tables) {
