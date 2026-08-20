@@ -1,1 +1,2 @@
 ﻿- **Time Hallucination / Schedule Ignorance**: Fixed an issue where Nova would ask about future events that had not occurred yet by adding `ANTI-ROBOT RULE (FUTURE EVENT LOGIC - ZERO TOLERANCE)`.
+- **Discovery Phase / Hallucination**: Fixed an issue where Nova would hallucinate details or ask arbitrary questions to a new user by injecting a `DISCOVERY PHASE` rule when total memories are low.

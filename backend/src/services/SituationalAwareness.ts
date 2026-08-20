@@ -33,6 +33,7 @@ export interface SituationContext {
   } | null;
   behaviorPattern?: string | null;
   unreadNovaMessages?: number;   // assistant messages the user has not opened/read yet
+  totalMemoriesCount?: number | null; // count of long-term memories
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -98,6 +99,10 @@ export class SituationalAwareness {
       }
     } else {
       lines.push(`- Last contact: First message ever. Greet warmly, introduce yourself naturally.`);
+    }
+
+    if (ctx.totalMemoriesCount !== undefined && ctx.totalMemoriesCount !== null && ctx.totalMemoriesCount < 15) {
+      lines.push(`- 🚀 DISCOVERY PHASE: You barely know this user (only ${ctx.totalMemoriesCount} facts saved). Your main goal right now is to understand their life, daily routine, goals, and current situation. Do NOT make random guesses about their life (like asking if they are at the cinema). Instead, ask 1-2 warm, curious get-to-know-you questions!`);
     }
 
     // ── User Presence / Last-Seen (read-receipt awareness) ──
