@@ -88,7 +88,7 @@ export class NovaFollowupService {
     conversationId: string,
     message: string,
     delayHours: number,
-    opts?: { cancelExisting?: boolean }
+    opts?: { cancelExisting?: boolean; isOnlineNudge?: boolean }
   ): Promise<void> {
     try {
       // ── SLEEP & UNAVAILABILITY GUARD ─────────────────────────────────────────
@@ -110,9 +110,11 @@ export class NovaFollowupService {
         await this._cancelPendingFollowups(userId);
       }
 
-      // MINIMUM 15 MINUTES for any follow-up. Never follow up in seconds.
-      // The old 0.25 min (15s) minimum caused the 36-message spam. Real friends don't text every 4 minutes.
-      const MINIMUM_FOLLOWUP_MINUTES = 15;
+      // Minimum follow-up gate:
+      // - Online nudge (user is actively in app) → 1 minute minimum so Nova can be back-to-back
+      // - All other follow-ups → 15 minutes minimum (prevents the 36-message spam pattern)
+      const isOnlineNudge = opts?.isOnlineNudge ?? false;
+      const MINIMUM_FOLLOWUP_MINUTES = isOnlineNudge ? 1 : 15;
       // Guard against a missing/invalid delay from the LLM
       const safeDelayHours = Number.isFinite(delayHours) ? delayHours : 0.5;
       const baseDelayMinutes = safeDelayHours === 0 ? 0 : Math.min(Math.max(Math.floor(safeDelayHours * 60), MINIMUM_FOLLOWUP_MINUTES), 24 * 60);
@@ -667,7 +669,7 @@ export class NovaFollowupService {
           }
 
           logger.info('[NovaFollowup] Online (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
-          await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0);
+          await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0, { isOnlineNudge: true });
           continue;
         }
 
