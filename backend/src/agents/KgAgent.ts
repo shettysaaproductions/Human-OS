@@ -20,6 +20,11 @@ export class KgAgent extends BaseAgent {
         content: `You are the Knowledge Graph Agent for HumanOS.
 Analyze the user's message and extract entities and relationships.
 
+CRITICAL RULES FOR 'goal' ENTITIES:
+- A 'goal' MUST be a significant milestone, long-term aspiration, or major project (e.g., "learn Spanish", "lose 10kg", "build a house").
+- NEVER extract transient, trivial, or daily activities as goals (e.g., "going to sleep", "soo jaunga", "drinking water", "pine ke lie", "eating food").
+- If the user says a short-term action, IGNORE IT. Do not extract it as a goal.
+
 Return ONLY a valid JSON object:
 {
   "kg_nodes": [

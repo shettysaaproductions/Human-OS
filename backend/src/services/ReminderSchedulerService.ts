@@ -307,15 +307,41 @@ export class ReminderSchedulerService {
 
   private async generateReminderMessage(reminder: any): Promise<string> {
     const text = reminder.text || 'kuch kaam tha';
-    const templates = [
-      `Yaar, ${text} ka time ho gaya! Done kara ke batana 😊`,
-      `Arre sun, ${text} — abhi kar le! Phir bata kaisa gaya.`,
-      `Boss, ${text} yaad hai na? Chal jaldi kar!`,
-      `Reminder: ${text} karna tha abhi. Ho gaya kya?`,
-      `Ek chhota sa reminder: ${text}. Don't forget!`,
-      `Time for: ${text}. Let me know once you're done!`
-    ];
-    return templates[Math.floor(Math.random() * templates.length)];
+    
+    try {
+      const { chatCompletionLearning } = await import('../lib/nvidia');
+      const prompt = `You are Nova, an AI companion texting your friend. 
+You need to remind them to do this: "${text}". 
+Generate a SINGLE short, warm, and highly conversational Hinglish text message (max 1-2 lines). 
+Do NOT sound like a robotic alarm. Do NOT use words like "Reminder" or "Time for". Just casually nudge them to do it.
+
+Example 1: "Arey sun, Barfi movie dekhni thi na? Abhi free hai toh shuru kar de!"
+Example 2: "Yaar pani pi le thoda, dehydration ho jayegi."
+Example 3: "Oye uth ja, 10 baj gaye!"
+
+Output ONLY the raw text message. No markdown, no quotes, no labels.`;
+
+      const result = await chatCompletionLearning([
+        { role: 'system', content: prompt }
+      ], {
+        temperature: 0.7,
+        maxTokens: 100
+      });
+      
+      let clean = result.trim();
+      if (clean.startsWith('"') && clean.endsWith('"')) {
+        clean = clean.substring(1, clean.length - 1);
+      }
+      return clean || `Arey sun, ${text} ka time ho gaya!`;
+    } catch (err) {
+      logger.error('Failed to generate dynamic reminder message, falling back to template', { error: err instanceof Error ? err.message : String(err) });
+      const templates = [
+        `Yaar, ${text} ka time ho gaya! Done kara ke batana 😊`,
+        `Arre sun, ${text} — abhi kar le! Phir bata kaisa gaya.`,
+        `Boss, ${text} yaad hai na? Chal jaldi kar!`
+      ];
+      return templates[Math.floor(Math.random() * templates.length)];
+    }
   }
 
   private calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {

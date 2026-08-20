@@ -115,3 +115,39 @@ adminRouter.post('/prune-history', async (_req: Request, res: Response, next: Ne
   }
 });
 
+
+/**
+ * HARD RESET: Wipes all stateful data for a specific user.
+ */
+adminRouter.post('/hard-reset', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.body.userId || (req as any).user?.id;
+    if (!userId) {
+      res.status(400).json({ success: false, error: 'User ID is required' });
+      return;
+    }
+
+    // Delete all stateful data across tables
+    const tables = [
+      'kg_nodes', 'kg_edges', 'memories', 'working_memory', 
+      'user_routines', 'nova_agenda', 'conversation_sessions', 
+      'chat_history', 'nova_outreach_log', 'reminders'
+    ];
+
+    for (const table of tables) {
+      await supabaseAdmin.from(table).delete().eq('user_id', userId);
+    }
+
+    // Optionally clear ALL users if parameter is passed (for testing environment only)
+    if (req.body.clearAllUsers === true) {
+       for (const table of tables) {
+         await supabaseAdmin.from(table).delete().neq('user_id', '00000000-0000-0000-0000-000000000000');
+       }
+    }
+
+    res.status(200).json({ success: true, message: 'Hard reset complete for user ' + userId });
+  } catch (err) {
+    next(err);
+  }
+});
+
