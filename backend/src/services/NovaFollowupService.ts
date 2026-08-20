@@ -58,9 +58,18 @@ const BUSY_LOCK_HOURS = 2;
 // now (status online + a heartbeat within the last few minutes). A stale 'online'
 // (app killed) or a backgrounded 'away' must NOT trigger the quick nudge.
 const SEEN_RECENCY_MS = 5 * 60 * 1000;  // heartbeat must be within 5 min
-const UNSEEN_CHECK_IN_HOURS = 3.5;      // 3–4h deferred check-in after an unseen Nova message
-const UNSEEN_MAX_CHECK_INS = 3;         // up to 3 check-ins, then give space (user's choice)
+const UNSEEN_MAX_CHECK_INS = 5;          // up to 5 offline check-ins with exponential backoff
 const UNSEEN_COUNTER_KEY = 'nova_ignored_deferred_count';
+
+// Exponential backoff schedule for OFFLINE users (hours):
+// Attempt 1 → 1 min, 2 → 2 min, 3 → 4 min, 4 → 8 min, 5 → 16 min, then 3-4h cap
+// After UNSEEN_MAX_CHECK_INS consecutive ignores, give full 24h space.
+function offlineBackoffHours(attempt: number): number {
+  if (attempt <= 0) return 1 / 60; // 1 minute
+  const minuteBackoff = Math.pow(2, attempt); // 1, 2, 4, 8, 16 mins
+  const cappedMinutes = Math.min(minuteBackoff, 3.5 * 60); // cap at 3.5 hours
+  return cappedMinutes / 60;
+}
 
 export function classifyUnavailability(text: string): { type: 'sleep' | 'busy'; hours: number } | null {
   const lower = text.toLowerCase();
@@ -615,20 +624,34 @@ export class NovaFollowupService {
 
         const ageMinutes = (Date.now() - new Date(novaMsg.created_at).getTime()) / 60000;
 
-        // ── SEEN: user is actively in-app → quick 15-30 min nudge ──────────────
+        // ── SEEN: user is actively in-app → escalating nudges, then give space ──
+        // User is ONLINE — Nova must keep the conversation going!
+        // Escalation: nudge 1 (warm), nudge 2 (different angle), nudge 3 → give space
         if (activelyInApp) {
           const escalation = (ignoreEscalationCount.get(userId) || 0) + 1;
           ignoreEscalationCount.set(userId, escalation);
 
-          let prompt = '';
-          let fallback = '';
-          if (escalation === 1) {
-            prompt = `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied yet — left on read. Send ONE short, casual nudge. E.g., "Arey, busy ho kya?", "Kaam me phasa hai kya?";`;
-            fallback = 'Arey, busy hai kya? Jab time mile tab batana!';
-          } else {
-            prompt = `User has ignored you over ${Math.round(ageMinutes)} minutes. Send a brief, low-pressure closing note and stop. E.g., "Catch up later!";`;
-            fallback = 'Koi na, kaam pe focus kar. Phir baat karte hain!';
+          // Hard cap: after 3 online nudges with no reply, give space (don't harass)
+          if (escalation > 3) {
+            ignoreEscalationCount.delete(userId);
+            await this._writeSuppression(userId, 1); // 1h cooldown, not 24h
+            logger.info('[NovaFollowup] Online escalation cap — brief cooldown', { userId, escalation });
+            continue;
           }
+
+          const escalationPrompts: Record<number, string> = {
+            1: `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied. Send ONE short, warm nudge. Vary the angle — don't just say "busy ho?". E.g., try teasing them, sharing a thought, or asking one specific thing.`,
+            2: `Your first nudge was ignored. User is STILL online. Try a completely DIFFERENT approach — a joke, a new topic, or something curious. Do NOT repeat any phrase from your previous message.`,
+            3: `User is still not replying despite being online. Send ONE very low-pressure closing note. E.g., "Chal theek hai, jab free ho bata dena.".`
+          };
+          const escalationFallbacks: Record<number, string> = {
+            1: 'Arey, busy hai kya? Jab time mile tab batana!',
+            2: 'Btw, kuch interesting chal raha tha... baat karte hain?',
+            3: 'Chal theek hai yaar, jab free ho toh ping kar dena.'
+          };
+
+          const prompt = escalationPrompts[escalation] || escalationPrompts[3];
+          const fallback = escalationFallbacks[escalation] || escalationFallbacks[3];
 
           ignoredFollowupSent.set(userId, Date.now());
 
@@ -643,17 +666,13 @@ export class NovaFollowupService {
             logger.warn('[NovaFollowup] LLM gen failed', { escalation });
           }
 
-          if (escalation >= 2) {
-            ignoreEscalationCount.delete(userId);
-            await this._writeSuppression(userId, 24);
-          }
-
-          logger.info('[NovaFollowup] Seen (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
+          logger.info('[NovaFollowup] Online (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
           await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0);
           continue;
         }
 
-        // ── UNSEEN: user is offline → deferred 3.5h check-in (up to UNSEEN_MAX_CHECK_INS) ──
+        // ── UNSEEN: user is offline → exponential backoff check-ins ──
+        // Backoff schedule: 1min → 2min → 4min → 8min → 16min → (cap 3.5h) → 24h give space
         const { data: countRow } = await supabaseAdmin
           .from('working_memory')
           .select('value')
@@ -664,25 +683,28 @@ export class NovaFollowupService {
 
         if (unseenCount >= UNSEEN_MAX_CHECK_INS) {
           await this._writeSuppression(userId, 24);
-          logger.info('[NovaFollowup] Unseen cap reached — giving space', { userId, count: unseenCount });
+          logger.info('[NovaFollowup] Offline backoff cap reached — giving 24h space', { userId, count: unseenCount });
           continue;
         }
+
+        // Compute exponential backoff delay
+        const backoffHours = offlineBackoffHours(unseenCount);
+        const backoffMinutes = Math.round(backoffHours * 60);
 
         let deferredMsg = 'Arre, kaisa chal raha? Bas check kar raha tha — kabhi free ho toh bata dena.';
         ignoredFollowupSent.set(userId, Date.now());
         try {
           const { novaBrain } = await import('./NovaBrainService');
           const gen = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User hasn't been online since. Send ONE short, very low-pressure check-in that does NOT demand a reply. E.g., "No rush, just thinking about you — jab free ho tab baat karte hain.";`
+            `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User is offline and hasn't replied (attempt ${unseenCount + 1}). Send ONE short, very low-pressure check-in. Vary your angle completely from previous nudges — different energy each time.`
           );
           if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) deferredMsg = gen.message;
         } catch (e) {
-          logger.warn('[NovaFollowup] Unseen check-in gen failed, using fallback');
+          logger.warn('[NovaFollowup] Offline check-in gen failed, using fallback');
         }
 
-        const checkInAtMs = new Date(novaMsg.created_at).getTime() + UNSEEN_CHECK_IN_HOURS * 3600e3;
-        await this._writeSuppression(userId, (checkInAtMs - Date.now()) / 3600e3);
-        await this.queueFollowup(userId, novaMsg.conversation_id, deferredMsg, (checkInAtMs - Date.now()) / 3600e3, { cancelExisting: false });
+        await this._writeSuppression(userId, backoffHours);
+        await this.queueFollowup(userId, novaMsg.conversation_id, deferredMsg, backoffHours, { cancelExisting: false });
 
         await supabaseAdmin.from('working_memory').upsert({
           user_id: userId,
@@ -691,8 +713,8 @@ export class NovaFollowupService {
           expires_at: new Date(Date.now() + 48 * 3600e3).toISOString()
         }, { onConflict: 'user_id,key' });
 
-        logger.info('[NovaFollowup] Unseen — deferred check-in booked', {
-          userId, ageMinutes: Math.round(ageMinutes), checkInAt: new Date(checkInAtMs).toISOString(), count: unseenCount + 1
+        logger.info('[NovaFollowup] Offline exponential backoff check-in booked', {
+          userId, ageMinutes: Math.round(ageMinutes), backoffMinutes, attempt: unseenCount + 1
         });
       }
     } catch (err) {

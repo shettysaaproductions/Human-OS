@@ -11,7 +11,9 @@ import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
-const MIN_GAP_MINUTES = 2; // Minimum gap between outreach attempts
+// Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
+// The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
+const MIN_GAP_MINUTES = 1;
 const SERVER_BOOT_COOLDOWN_MS = 10 * 1000; // 10s cooldown after boot
 let serverBootTime = Date.now();
 // Re-entrancy guard: a pulse that takes longer than the 15-min scheduler interval would
@@ -271,10 +273,10 @@ export class NovaConsciousnessEngine {
     const getEffectiveMinGap = (presence: string): number => {
       switch (presence) {
         case 'typing': return 0;
-        case 'online': return 1;    // 1 min for active online users
+        case 'online': return 1;    // 1 min for active online users (enables back-to-back)
         case 'away': return 3;      // 3 min if user stepped away
-        case 'offline': return 2;   // 2 min if offline (exponential backoff follows)
-        default: return 2;
+        case 'offline': return 1;   // 1 min base for offline (exponential backoff escalates from here)
+        default: return 1;
       }
     };
 
@@ -291,24 +293,27 @@ export class NovaConsciousnessEngine {
     const ignoredCount = unrepliedOutreaches?.length || 0;
 
     // Escalation gap table — increases after each ignored message (Exponential backoff for offline)
+    // Spec: 1 min → 2 → 4 → 8 → 16 min, then every 3/4 hours (180-240 min)
     const getEscalatedGap = (ignored: number): number => {
-      if (ignored <= 1) return 2;         // 2 mins
-      if (ignored === 2) return 4;        // 4 mins
-      if (ignored === 3) return 8;        // 8 mins
-      if (ignored === 4) return 16;       // 16 mins
-      if (ignored === 5) return 32;       // 32 mins
-      if (ignored === 6) return 240;      // 4 hours (1st extended try)
-      if (ignored === 7) return 240;      // 4 hours (2nd extended try)
-      return 24 * 60;                     // Next day
+      if (ignored <= 1) return 1;         // 1 min (1st ignored)
+      if (ignored === 2) return 2;        // 2 mins
+      if (ignored === 3) return 4;        // 4 mins
+      if (ignored === 4) return 8;        // 8 mins
+      if (ignored === 5) return 16;       // 16 mins
+      if (ignored === 6) return 180;      // 3 hours
+      if (ignored === 7) return 240;      // 4 hours
+      return 240;                         // 4 hours ongoing (3/4 hours target)
     };
 
     const escalationGap = getEscalatedGap(ignoredCount);
     // Apply as the effective minimum gap (overrides effectiveMinGap if larger)
     if (userPresence === 'online') {
-      // If user is actively online, ignore steep escalation gaps to keep triggering messages 
-      // but keep a small floor (1 min) so it doesn't spam exactly on every pulse.
-      effectiveMinGap = 1;
+      // If user is actively online, enable "back-to-back" messaging - minimum 1 min floor
+      // But still respect escalation if it's HIGHER (prevents ignoring user who went silent)
+      // For online: floor is 1 min, but if escalation > 1, use escalation (user ignored us)
+      effectiveMinGap = Math.max(1, escalationGap);
     } else {
+      // For offline/away: use the escalation gap (exponential backoff applies)
       effectiveMinGap = Math.max(effectiveMinGap, escalationGap);
     }
 
@@ -485,9 +490,9 @@ ${abandonmentNote}
 ${spontaneousThoughtNote}
 
 DECISION RULES (use actual gap values above, not hardcoded numbers):
-- User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately.
-- User is AWAY: reach out if gap >= 4 min. They stepped away but will see it soon.
-- User is OFFLINE: reach out if gap >= 15 min. They're not active right now.
+- User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately — enable back-to-back messaging.
+- User is AWAY: reach out if gap >= 3 min. They stepped away but will see it soon.
+- User is OFFLINE: reach out if gap >= 1 min initially (exponential backoff: 1→2→4→8→16→3h→4h). They're not active right now.
 - High urgency agenda item: ALWAYS reach out during non-sleep hours.
 - Morning/afternoon work hours without agenda: only reach if gap > 20 min.
 - Evening/night with no agenda: reach out freely if gap >= dynamic gap.

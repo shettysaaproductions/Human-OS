@@ -21,11 +21,23 @@ export async function saveAssistantMessage(
       options: []
     };
 
+    // Hard strip any leaked XML/JSON (subconscious actions, NOVA tags, raw arrays)
+    // that may have slipped into a proactive/background-generated message. This is
+    // the last chokepoint before the DB — nothing internal should ever reach the UI.
+    const sanitized = String(content)
+      .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/gi, '')
+      .replace(/<NOVA_MSG>|<\/NOVA_MSG>/gi, '')
+      .replace(/<NOVA_MESSAGE_BREAK>|<\/NOVA_MESSAGE_BREAK>/gi, '')
+      .replace(/<reply>|<\/reply>/gi, '')
+      .replace(/\{\s*"tool"\s*:[\s\S]*?\}\s*,\s*/g, '')
+      .replace(/\[\s*(?:\{[^{}]*tool[^{}]*\}\s*,?\s*)+\]/g, '')
+      .trim();
+
     const rowData: any = {
       user_id: userId,
       conversation_id: conversationId,
       role: 'assistant',
-      content,
+      content: sanitized,
       meta
     };
 
