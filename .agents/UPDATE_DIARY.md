@@ -14,3 +14,5 @@
   - Implemented 2, 4, 8, 16, 32m exponential backoff for offline users in `getEscalatedGap`.
 - **[2026-08-20] Auto Upgrade: Time Hallucination Fix**
   - Added `ANTI-ROBOT RULE (FUTURE EVENT LOGIC - ZERO TOLERANCE)` to `promptBuilder.ts` to strictly enforce checking current time against blocking schedule items (e.g. office hours) before asking about future events.
+- **[2026-08-20] Auto Upgrade: Discovery Phase**
+  - Added logic in `chat.ts` and `SituationalAwareness.ts` to count total long-term memories. If `< 15`, Nova is explicitly instructed via `promptBuilder.ts` to ask curious, get-to-know-you questions instead of hallucinating.

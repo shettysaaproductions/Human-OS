@@ -1030,8 +1030,10 @@ chatRouter.post(
       let userPresence: { status: string; last_active_at?: string | null; last_typing_at?: string | null } | null = null;
       let unreadNovaMessages = 0;
 
+      let totalMemoriesCount: number | null = null;
+
       try {
-        const [emotionResult, episodicResult, reflectionResult, lastMsgResult, presenceResult, unreadResult] = await Promise.all([
+        const [emotionResult, episodicResult, reflectionResult, lastMsgResult, presenceResult, unreadResult, totalMemoriesResult] = await Promise.all([
           // Latest emotional state
           qt.track('get_latest_emotion', 'emotional_states', () =>
             supabaseAdmin.from('emotional_states')
@@ -1081,6 +1083,12 @@ chatRouter.post(
               .eq('user_id', userId)
               .eq('role', 'assistant')
               .eq('is_read', false)
+          ),
+          // Total long-term memories count to determine Discovery Phase
+          qt.track('get_total_memories_count', 'memories', () =>
+            supabaseAdmin.from('memories')
+              .select('id', { count: 'exact', head: true })
+              .eq('user_id', userId)
           )
         ]);
 
@@ -1099,6 +1107,9 @@ chatRouter.post(
         }
         if (typeof unreadResult.count === 'number') {
           unreadNovaMessages = unreadResult.count;
+        }
+        if (typeof totalMemoriesResult.count === 'number') {
+          totalMemoriesCount = totalMemoriesResult.count;
         }
 
         // Apply Gap Truncation logic to recentMessages
@@ -1181,6 +1192,7 @@ chatRouter.post(
         userPresence,
         unreadNovaMessages,
         behaviorPattern,
+        totalMemoriesCount,
       };
       situationBrief = situationalAwareness.buildBrief(situationCtx);
 
