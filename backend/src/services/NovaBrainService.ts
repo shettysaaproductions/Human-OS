@@ -59,6 +59,14 @@ export function sanitizeReply(reply: string): string {
     .replace(/AUTOMATIC \d+-(?:MINUTE|HOUR) WAKE-UP ALERT SET[\s\S]*?(?=\n\n|$)/gi, ' ')
     // Strip "Subconscious Actions (Behind the Scenes)" section completely
     .replace(/Subconscious Actions\s*\(Behind the Scenes\)[\s\S]*/gi, ' ')
+    // Strip Discovery Phase / system instruction leaks (e.g., "Remember, you barely know this user")
+    .replace(/(?:⏰|🚀|ℹ️|Note:|Reminder:)\s*(?:Remember|You(?:'re| are| should| must|r goal)|I should|I must|Ask open)[^.!?\n]*[.!?]?/gi, '')
+    .replace(/Remember,?\s+you(?:'re|\s+are)?\s+(?:talking to|dealing with|chatting with|barely know)[^.!?\n]*[.!?]?/gi, '')
+    .replace(/Your\s+(?:main\s+)?goal\s+(?:right now|is)[^.!?\n]*[.!?]?/gi, '')
+    .replace(/You should ask[^.!?\n]*[.!?]?/gi, '')
+    .replace(/You must remember[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\bAs an AI companion[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\*(?:Remember|Note|Important|Reminder),?[^*]+\*/gi, '') // italic instruction fragments
     // CJK leak
     .replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, '')
     // Collapse repeated emoji
