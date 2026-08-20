@@ -17,6 +17,7 @@ let serverBootTime = Date.now();
 // Re-entrancy guard: a pulse that takes longer than the 15-min scheduler interval would
 // otherwise run concurrently and double-outreach (and double-increment agenda retries).
 let _pulseInProgress = false;
+let _pulseStartTime = 0;
 
 // Human-like response timing (in seconds)
 
@@ -56,10 +57,17 @@ export class NovaConsciousnessEngine {
 
   async pulse(): Promise<void> {
     if (_pulseInProgress) {
-      logger.warn('[NACE] Pulse skipped — previous pulse still running (re-entrancy guard)');
-      return;
+      // Break lock if stuck for more than 5 minutes
+      if (Date.now() - _pulseStartTime > 5 * 60 * 1000) {
+         logger.warn('[NACE] Breaking stuck pulse lock (older than 5 minutes)');
+         _pulseInProgress = false;
+      } else {
+         logger.warn('[NACE] Pulse skipped — previous pulse still running (re-entrancy guard)');
+         return;
+      }
     }
     _pulseInProgress = true;
+    _pulseStartTime = Date.now();
     try {
       // Find active users (last 7 days)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
