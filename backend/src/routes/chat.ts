@@ -433,6 +433,11 @@ function sanitizeMarkdown(raw: string): string {
     processed = processed.replace(p, '');
   }
 
+  // ── Strip leaked code blocks (e.g., ```json) ──────────────────────────────
+  // In WhatsApp mode, Nova should never send code blocks. These are usually
+  // internal monologues or JSON tool calls that leaked out.
+  processed = processed.replace(/```[a-z]*\s*[\s\S]*?(?:```|$)/gi, '');
+
   const lines = processed.split('\n');
   const cleaned = lines.map(line => {
     const trimmed = line.trim();
