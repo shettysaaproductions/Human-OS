@@ -298,11 +298,12 @@ export class NovaConsciousnessEngine {
     let isSleepWindowOverridden = false;
     let midSleepWakeNote = '';
     
-    // If we're in sleep window but user just came online → override sleep guard
+    // If we're in sleep window but user just came online AND recently chatted → override sleep guard
     if (tContext.isSleepWindow && userPresence === 'online') {
       const presenceAge = presenceData?.updated_at 
         ? (Date.now() - new Date(presenceData.updated_at).getTime()) / 60000 : 999;
-      if (presenceAge < 5) {
+      // Only wake up if they actively chatted in the last 15 mins (not just background presence)
+      if (presenceAge < 5 && gapMinutes < 15) {
         // User is actively online during sleep hours → they're awake
         midSleepWakeNote = `It's ${tContext.hour}:00 and the user is AWAKE despite it being their sleep window. React naturally — don't act like a chatbot. Maybe they can't sleep, or woke up for something. Be warm and curious. Don't mention you noticed they're up.`;
         isSleepWindowOverridden = true;
@@ -506,7 +507,9 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
           .gt('created_at', seenMsg.created_at)
           .limit(1);
 
-        if (!replyAfter?.length && minSinceSeen >= 3 && minSinceSeen < 60) {
+        // Do NOT nag for 'seen no reply' if the user is explicitly in a busy window
+        const isCurrentlyBusy = !!busyWindowNote && !busyWindowNote.includes('might be done');
+        if (!replyAfter?.length && minSinceSeen >= 3 && minSinceSeen < 60 && !isCurrentlyBusy && !tContext.isSleepWindow) {
           seenNoReplyContext = `READ BUT NO REPLY: User opened Nova's message "${seenMsg.content.substring(0, 100)}" ${Math.round(minSinceSeen)} min ago but hasn't replied. Follow up naturally — don't repeat the same message, just nudge (e.g. 'Bata na...', share a new thought). NEVER say 'I noticed you read my message'.`;
           logger.info('[NACE] 👁️ Seen-no-reply detected — injecting follow-up context', { userId, minSinceSeen: Math.round(minSinceSeen) });
         }
