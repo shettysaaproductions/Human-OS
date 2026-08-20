@@ -116,7 +116,16 @@ Return ONLY a valid JSON object with these exact keys (omit empty arrays/objects
 CRITICAL:
 - If the user mentions ANY important time, date, schedule, or appointment worth remembering long-term, extract it as a 'semantic' memory with type "important_dates".
 - Only extract what is genuinely present. Use null/empty arrays for absent types.
-- Do NOT extract insignificant daily chatter.`
+- Do NOT extract insignificant daily chatter.
+
+ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
+- Each distinct fact MUST be a SEPARATE object in the "semantic_memories" array.
+- NEVER combine two or more distinct facts into a single memory object.
+- Example: "My wife's name is Sakshi and I love her cooking" is TWO facts, so return:
+  → Object 1: { "shouldPersist": true, "type": "family", "key": "wife_name", "value": "Sakshi", ... }
+  → Object 2: { "shouldPersist": true, "type": "family", "key": "likes_wifes_cooking", "value": "User loves his wife's cooking", ... }
+- Each memory object must contain EXACTLY ONE atomic fact — no compound statements.
+- When in doubt, split it into MORE objects rather than fewer.`
       },
       {
         role: 'user',

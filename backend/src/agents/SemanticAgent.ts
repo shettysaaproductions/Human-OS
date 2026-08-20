@@ -20,14 +20,23 @@ Analyze the user's message and extract ONLY long-term facts, preferences, goals,
 CRITICAL: If the user mentions any important time, date, schedule, or appointment that is worth remembering for a long period (e.g., "my exam is on 15th", "I always wake up at 6 AM", "doctor appointment next Tuesday"), you MUST extract it as an 'important_dates' memory immediately.
 Do NOT extract temporary states or insignificant daily chatter.
 
+ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
+- Each distinct fact MUST be a SEPARATE object in the "semantic_memories" array.
+- NEVER combine two or more distinct facts into a single memory object.
+- If the user says "My wife's name is Sakshi and I love her cooking", that is TWO separate facts:
+  → Object 1: key="wife_name", value="Sakshi"
+  → Object 2: key="likes_wifes_cooking", value="User loves his wife's cooking"
+- Each memory object must contain EXACTLY ONE atomic fact — no compound statements.
+- When in doubt, split it into more objects rather than fewer.
+
 Return ONLY a valid JSON object with the exact key:
 {
   "semantic_memories": [
     {
       "shouldPersist": true,
       "type": "family" | "personal" | "work" | "goals" | "preferences" | "health" | "important_dates",
-      "key": "snake_case_identifier",
-      "value": "string value",
+      "key": "snake_case_identifier_unique_per_fact",
+      "value": "single atomic fact only",
       "importance": 0-100,
       "confidence": 0.0-1.0,
       "emotional_weight": -10 to 10

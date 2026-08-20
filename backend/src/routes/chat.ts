@@ -19,6 +19,7 @@ import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pu
 import { reminderService } from '../services/reminderService';
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
+import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1451,7 +1452,15 @@ chatRouter.post(
                 try {
                   const { chatCompletionBackground } = await import('../lib/nvidia');
                   const fastRetryMessages = [
-                    { role: 'system' as const, content: 'You are Nova, a casual Hinglish-speaking friend. Reply in 1-2 short sentences like a WhatsApp text. Be warm and natural. No lists, no formatting, no emoji spam.' },
+                    { role: 'system' as const, content: `You are Nova, a casual Hinglish-speaking friend texting on WhatsApp.
+Reply in 1-2 SHORT sentences. Max 1 emoji. NO lists, NO formatting, NO emoji spam.
+HINGLISH RULES:
+- NEVER use "Aap", "Aapka", "Aapko", "Aapne", "Dhanyavad", "Shubh ratri", "Suprabhat", "Namaste", "Kripaya", "Prayas", "Laado", "Khed".
+- ONLY "Tu/Tera/Tujhe" or "Tum/Tumhara/Tumko".
+- Code-switch naturally: English verbs + Hindi nouns = "Tu office gaya?", "Main wahan milta hoon".
+- Question at END: "Kahan ja raha hai tu?", "Kya chal raha hai?".
+- Use: "yaar", "bhai", "sahi hai", "mast", "tension mat le", "scene kya hai", "kya chal raha hai", "jhakaas", "bakwas", "chill", "full on", "top", "solid".
+- NO bullet points, NO bold, NO markdown. Plain text only.` },
                     { role: 'user' as const, content: message }
                   ];
                   const fastReply = await chatCompletionBackground(fastRetryMessages, {
@@ -1461,7 +1470,9 @@ chatRouter.post(
                   });
                   if (fastReply && fastReply.trim().length > 0) {
                     logger.info('[Chat] Fast 8B retry succeeded', { userId });
-                    result = { reply: fastReply.trim(), subconscious_actions: [] };
+                    // Sanitize to prevent subconscious action leaks from 8B model
+                    const sanitizedFastReply = sanitizeReply(fastReply.trim());
+                    result = { reply: sanitizedFastReply || NOVA_EMPTY_REPLY, subconscious_actions: [] };
                   } else {
                     result = { reply: FALLBACK_REPLY, subconscious_actions: [] };
                   }
@@ -1521,7 +1532,8 @@ Set kar diya! Yaad dila dunga 10 min mein.
               const retryResult = await novaBrain.processInteraction(userId, correctivePrompt, brainContext);
 
               if (retryResult.reply) {
-                rawReply = retryResult.reply;
+                // Sanitize corrective retry to prevent subconscious action leaks
+                rawReply = sanitizeReply(retryResult.reply);
               }
 
               if (retryResult.subconscious_actions && retryResult.subconscious_actions.length > 0) {

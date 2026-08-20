@@ -37,3 +37,17 @@ Observations captured during task-oriented work.
 **Suggested improvement:** LLM decision prompts that gate on timing values must inject the ACTUAL computed values from code (e.g. "Min gap allowed right now: 5 min"), not hardcode thresholds. The NACE Tier1 context string already computed `effectiveMinGap` — it just wasn't reflected in the decision rules section of the prompt.
 
 **Principle:** Never hardcode numeric thresholds in LLM decision prompts when those same thresholds are computed dynamically in code. The prompt must reference the computed value, not a stale hardcoded copy.
+
+### Observation 3: Flat offline check-in gap ignores user's online/offline state
+
+**Status:** OPEN
+**Date:** 2026-08-20
+**Session context:** Fixing Nova's proactive follow-up cadence for online vs offline users
+**Skill:** New skill candidate: proactive-ai-messaging-debug
+**Type:** internal
+
+**Issue:** NovaFollowupService used a flat 3.5h offline gap and only 2-level online escalation. User expects exponential backoff (1min->2min->4min->8min->16min) for offline and continuous follow-ups when online.
+
+**Suggested improvement:** Replace flat gap with offlineBackoffHours(attempt) exponential function. Add 3-level online escalation with varying angles, and replace 24h give-space after 2 nudges with 1h cooldown after 3 nudges.
+
+**Principle:** Proactive AI companion messaging must distinguish between online-ignored and offline-absent users and apply separate cadence logic.
