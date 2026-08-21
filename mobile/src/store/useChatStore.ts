@@ -445,7 +445,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               succeeded = true;
             } else {
               console.log('[QUEUE] network error, retrying in', retryDelay, 'ms');
-              set({ isTyping: false });
+              // We do NOT set isTyping: false here, because we want the bubble to stay
+              // visible while we retry in the background. The user should not see it flicker.
               await new Promise(r => setTimeout(r, retryDelay));
               retryDelay = Math.min(retryDelay * 1.5, 30000);
             }
@@ -905,7 +906,19 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
 
           // Skip user messages if the exact same content is already in the local store.
-          if (role === 'user' && existingUserContent.has(msg.content.trim())) continue;
+          if (role === 'user' && existingUserContent.has(msg.content.trim())) {
+            // Fix clock-skew bugs: if local clock is ahead of server, the local user message timestamp 
+            // will be > server reply timestamp, causing the reply to sort BEFORE the user message,
+            // preventing assistantAfterLastUser from stopping the poller and hiding the reply!
+            const localMsg = currentMessages.find(m => m.role === 'user' && m.content.trim() === msg.content.trim());
+            if (localMsg && (localMsg.timestamp !== msg.created_at || localMsg.id !== msg.id)) {
+              set((s) => ({
+                messages: s.messages.map(m => m.id === localMsg.id ? { ...m, id: msg.id, timestamp: msg.created_at || new Date().toISOString() } : m)
+              }));
+              updatedExisting = true;
+            }
+            continue;
+          }
 
           // For assistant messages, avoid duplicates from SSE streams / proactive injection by
           // checking if we already have a message with the EXACT same content that was generated

@@ -115,7 +115,7 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error('Error in NACE pulse', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 3 * 60 * 1000); // NACE pulse every 3 minutes
+    }, 15 * 60 * 1000); // NACE pulse every 15 minutes (Free tier hard limit)
     if (naceInterval.unref) naceInterval.unref();
 
     // Jarvis Protocol: Proactive Environment Monitoring (Runs every 3 hours)
