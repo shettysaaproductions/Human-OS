@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { chatService } from '../services/chatService';
 import * as SecureStore from 'expo-secure-store';
 import { proactiveReplyService } from '../services/proactiveReplyService';
+import NetInfo from '@react-native-community/netinfo';
 
 console.log('USECHATSTORE_LOADED');
 
@@ -319,6 +320,14 @@ export const useChatStore = create<ChatState>((set, get) => {
   // Store get reference globally so watchdog can access queue length without circular deps
   (globalThis as any).__chatStoreGet = get;
 
+  // Setup NetInfo listener to auto-resume the queue when internet comes back
+  NetInfo.addEventListener(state => {
+    if (state.isConnected) {
+      console.log('[NetInfo] Connection restored. Flushing pending queue...');
+      get().processQueue();
+    }
+  });
+
   const processQueue = async () => {
     if (_isProcessing) return;
     _isProcessing = true;
@@ -415,9 +424,13 @@ export const useChatStore = create<ChatState>((set, get) => {
             succeeded = true;
             console.log('[QUEUE] async send success for batch starting with:', primaryId);
           } catch (err: any) {
-            const isServerError = err?.response?.status >= 400 && err?.response?.status < 500;
+            // Only classify PERMANENT 4xx errors as fatal. 401 (Auth), 429 (Rate Limit), 
+            // 5xx (Server/Gateway Error), and undefined (Network Error) will trigger a retry!
+            const status = err?.response?.status;
+            const isServerError = status && [400, 403, 404, 413, 422].includes(status);
+            
             if (isServerError) {
-              console.log('[QUEUE] 4xx error, not retrying:', err?.response?.status);
+              console.log('[QUEUE] Permanent 4xx error, dropping:', status);
               set((s) => ({
                 isTyping: false,
                 messages: s.messages.map(m =>
