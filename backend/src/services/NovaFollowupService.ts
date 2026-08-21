@@ -32,6 +32,12 @@ const ignoredFollowupSent = new Map<string, number>();
 // Key: userId → count. Resets when user replies.
 const ignoreEscalationCount = new Map<string, number>();
 
+// ── Global proactive message cooldown (Fix #5: Multi-Scheduler Concurrency Lock) ──
+// Prevents duplicate greetings from NACE, Followup, and Weather schedulers firing
+// close together. Key: userId → timestamp of last proactive message sent.
+const lastProactiveSentAt = new Map<string, number>();
+const GLOBAL_PROACTIVE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes between any two proactive messages
+
 // ── Sleep / unavailability signal classification ──────────────────────────────
 // Shared by queueFollowup's guard, chat.ts's immediate lock (recordUnavailability),
 // and the unseen-check-in path in checkIgnoredNovaMessages.
@@ -79,6 +85,100 @@ export function classifyUnavailability(text: string): { type: 'sleep' | 'busy'; 
 }
 
 export class NovaFollowupService {
+
+  /**
+   * Get user's local hour from their timezone_offset (stored in minutes, e.g. 330 = IST).
+   * Returns the hour (0-23) in the user's local timezone.
+   */
+  private async _getUserLocalHour(userId: string): Promise<number> {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('timezone_offset')
+        .eq('id', userId)
+        .maybeSingle();
+      const tzOffsetMinutes = profile?.timezone_offset ?? 0; // default UTC
+      const now = new Date();
+      const localMs = now.getTime() + (tzOffsetMinutes * 60 * 1000);
+      return new Date(localMs).getUTCHours();
+    } catch {
+      return new Date().getUTCHours(); // fallback to UTC
+    }
+  }
+
+  /**
+   * Check if the user's local time is in quiet hours (11 PM – 7:30 AM).
+   * Returns true if proactive messages should be suppressed.
+   */
+   private async _isQuietHours(userId: string): Promise<boolean> {
+    const hour = await this._getUserLocalHour(userId);
+    // Quiet: 23:00–23:59 (11 PM–midnight) and 00:00–06:59 (midnight–7 AM)
+    // We only have integer hours, so we allow from hour 7 onwards (7:00 AM+).
+    return hour >= 23 || hour < 7;
+  }
+
+  /**
+   * Enforce global 10-minute proactive message cooldown (Fix #5).
+   * Returns true if the cooldown allows sending, false if blocked.
+   */
+  private _checkProactiveCooldown(userId: string): boolean {
+    const lastSent = lastProactiveSentAt.get(userId) || 0;
+    return (Date.now() - lastSent) >= GLOBAL_PROACTIVE_COOLDOWN_MS;
+  }
+
+  /**
+   * Record that a proactive message was sent for this user.
+   */
+  private _recordProactiveSent(userId: string): void {
+    lastProactiveSentAt.set(userId, Date.now());
+  }
+
+  /**
+   * Check if the user has received a follow-up after the last assistant message
+   * without replying in between. Prevents infinite follow-up chaining.
+   * Returns true if Nova already sent a follow-up that wasn't answered.
+   */
+  private async _hasUnansweredFollowup(userId: string): Promise<boolean> {
+    try {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      // Get the most recent assistant message
+      const { data: lastAssistant } = await supabaseAdmin
+        .from('chat_history')
+        .select('id, created_at, meta')
+        .eq('user_id', userId)
+        .eq('role', 'assistant')
+        .gte('created_at', oneHourAgo)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!lastAssistant) return false;
+
+      // Check if there was a user reply after it
+      const { data: userReply } = await supabaseAdmin
+        .from('chat_history')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('role', 'user')
+        .gt('created_at', lastAssistant.created_at)
+        .limit(1)
+        .maybeSingle();
+
+      if (userReply) return false; // User replied → chain is broken
+
+      // Check if this assistant message came from a follow-up service (not the main chat)
+      const source = lastAssistant.meta?.source;
+      const isFollowupSource = source === 'NovaFollowupService' || source === 'NovaConsciousnessEngine';
+
+      // If the last assistant message was from a follow-up service and user hasn't replied,
+      // we already sent one follow-up → don't chain another
+      if (isFollowupSource) return true;
+
+      return false;
+    } catch {
+      return false; // fail open
+    }
+  }
 
   /**
    * Queue the next follow-up message from Nova Brain.
@@ -356,6 +456,10 @@ export class NovaFollowupService {
       lastContent: normalizedNew,
       lastSentAt: Date.now()
     });
+
+    // Record global proactive cooldown (Fix #5) — every follow-up fired here is
+    // proactive (queued via queueFollowup), so it counts toward the 10-min lock.
+    this._recordProactiveSent(followup.user_id);
   }
   /**
    * Scan for conversations where the last message was from the user (unanswered)
@@ -393,6 +497,23 @@ export class NovaFollowupService {
       }
 
       for (const [convId, userMsg] of conversationMap.entries()) {
+        // ── QUIET HOURS GUARD (Fix #1) ─────────────────────────────────────────
+        if (await this._isQuietHours(userMsg.user_id)) {
+          // Check if user messaged within last 10 min (they just sent this message, so yes)
+          // Since this IS a response to a user message, we allow it during quiet hours
+          // but only if the user message is recent (within 10 min)
+          const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+          const userMsgTime = new Date(userMsg.created_at).toISOString();
+          if (userMsgTime < tenMinAgo) {
+            continue; // User's message was old — don't follow up in quiet hours
+          }
+        }
+
+        // ── GLOBAL PROACTIVE COOLDOWN (Fix #5) ─────────────────────────────────
+        if (!this._checkProactiveCooldown(userMsg.user_id)) {
+          continue;
+        }
+
         // Determine how serious/deep this message is
         const content = (userMsg.content || '').toLowerCase();
         const ageMinutes = (Date.now() - new Date(userMsg.created_at).getTime()) / 60000;
@@ -532,8 +653,10 @@ export class NovaFollowupService {
    */
   async checkIgnoredNovaMessages(): Promise<void> {
     try {
-      // Look for Nova messages sent 15min - 60min ago
-      // We don't want to double text immediately like a needy robot! Wait at least 15 mins.
+      // ── QUIET HOURS GUARD (Fix #1) ─────────────────────────────────────────
+      // Suppress all unsolicited follow-ups during 11 PM – 7:30 AM local time.
+      // Only allow if the user sent a message within the last 10 minutes (they're awake).
+      const quietUsers = new Set<string>();
       const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
@@ -556,6 +679,41 @@ export class NovaFollowupService {
       }
 
       for (const [userId, novaMsg] of userMap.entries()) {
+        // ── QUIET HOURS GUARD: Check per-user local time ─────────────────────────
+        if (quietUsers.has(userId)) {
+          // User is in quiet hours and didn't message recently
+          continue;
+        }
+        const isQuiet = await this._isQuietHours(userId);
+        if (isQuiet) {
+          // Check if user messaged within last 10 min — if so, they're awake
+          const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+          const { data: recentUserMsg } = await supabaseAdmin
+            .from('chat_history')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('role', 'user')
+            .gte('created_at', tenMinAgo)
+            .limit(1)
+            .maybeSingle();
+          if (!recentUserMsg) {
+            quietUsers.add(userId);
+            continue; // Suppress all proactive follow-ups in quiet hours
+          }
+        }
+
+        // ── GLOBAL PROACTIVE COOLDOWN (Fix #5): 10 min min between any proactive msgs ──
+        if (!this._checkProactiveCooldown(userId)) {
+          logger.info('[NovaFollowup] Global proactive cooldown active — skipping', { userId });
+          continue;
+        }
+
+        // ── ANTI-CHAINING GUARD: Don't follow up on our own follow-ups ──────────────
+        if (await this._hasUnansweredFollowup(userId)) {
+          logger.info('[NovaFollowup] Unanswered follow-up already exists — not chaining', { userId });
+          continue;
+        }
+
         // Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
         const lastSent = ignoredFollowupSent.get(userId) || 0;
         if (Date.now() - lastSent < 3 * 60 * 1000) continue;
