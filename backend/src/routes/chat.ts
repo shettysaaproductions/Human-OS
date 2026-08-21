@@ -468,6 +468,7 @@ function sanitizeMarkdown(raw: string): string {
 // Without this, a request that timed out waiting (or finished late after a timeout)
 // would delete a NEWER request's lock entry, letting concurrent replies slip through.
 const userLocks = new Map<string, { promise: Promise<void>; token: string }>();
+const backToBackTimers = new Map<string, NodeJS.Timeout>();
 
 chatRouter.post(
   '/',
@@ -1978,6 +1979,17 @@ Set kar diya! Yaad dila dunga 10 min mein.
         logger.warn('[Chat] Total request slow', { userId, totalDurationMs: totalDuration });
       }
       
+      // If user is actively chatting, schedule a targeted NACE pulse 60s from now
+      // to handle back-to-back proactive messaging without spamming the global cron
+      if (!is_proactive) {
+        if (backToBackTimers.has(userId)) clearTimeout(backToBackTimers.get(userId));
+        backToBackTimers.set(userId, setTimeout(() => {
+          import('../services/NovaConsciousnessEngine').then(({ novaConsciousnessEngine }) => {
+            novaConsciousnessEngine.pulse().catch(e => logger.error('[NACE] Back-to-back pulse failed', { error: e }));
+          }).catch(() => {});
+        }, 60000));
+      }
+
       if (asyncDeadlineTimer) {
         clearTimeout(asyncDeadlineTimer);
       }
