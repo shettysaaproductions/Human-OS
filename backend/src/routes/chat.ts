@@ -802,7 +802,7 @@ chatRouter.post(
         // 3. Recent chat history (last 100, for deep context continuity)
         qt.track('get_chat_history', 'chat_history', () =>
           supabaseAdmin.from('chat_history')
-            .select('role, content')
+            .select('role, content, reply_to_content')
             .eq('user_id', userId)
             .eq('conversation_id', activeConversationId)
             .order('created_at', { ascending: false })
@@ -933,7 +933,9 @@ chatRouter.post(
         .reverse()
         .map(msg => ({
           role: msg.role as 'user' | 'assistant' | 'system',
-          content: msg.content
+          content: msg.reply_to_content 
+            ? `[Replying to: "${msg.reply_to_content}"]\n${msg.content}` 
+            : msg.content
         }));
 
       // 3.5 Cross-session context — also filter fallback messages
