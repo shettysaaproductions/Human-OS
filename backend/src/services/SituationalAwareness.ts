@@ -109,7 +109,23 @@ export class SituationalAwareness {
     // Lets Nova "see" whether the user is on the app right now and how to pace the reply.
     if (ctx.userPresence && ctx.userPresence.status) {
       const p = ctx.userPresence;
-      const status = p.status;
+
+      // ── GHOST PRESENCE GUARD (Fix #2) ──────────────────────────────────────
+      // Supabase `user_presence.status` can stay 'online' forever if the app was
+      // killed without disconnecting the realtime channel. If last_active_at is
+      // older than 5 minutes, the stored status is STALE — force OFFLINE/AWAY
+      // regardless of what the DB says.
+      const STALE_PRESENCE_MS = 5 * 60 * 1000;
+      const lastActiveMs = p.last_active_at ? new Date(p.last_active_at).getTime() : 0;
+      const presenceAgeMs = lastActiveMs > 0 ? (ctx.nowLocal.getTime() - lastActiveMs) : Infinity;
+      let status = p.status;
+      let staleNote = '';
+      if ((status === 'online' || status === 'typing') && presenceAgeMs > STALE_PRESENCE_MS) {
+        // Downgrade: typing → away, online → away (they were active but left)
+        status = 'away';
+        staleNote = ' [stale status corrected — app likely closed without updating]';
+      }
+
       const lastActiveStr = p.last_active_at ? this.describeLastActive(p.last_active_at, ctx.nowLocal) : null;
 
       const statusLabel = status === 'typing'
@@ -120,7 +136,7 @@ export class SituationalAwareness {
         ? 'AWAY (stepped away, checked recently)'
         : 'OFFLINE';
 
-      lines.push(`- 👁️ USER PRESENCE: ${statusLabel}${lastActiveStr ? ` (last active ${lastActiveStr})` : ''}.`);
+      lines.push(`- 👁️ USER PRESENCE: ${statusLabel}${lastActiveStr ? ` (last active ${lastActiveStr})` : ''}.${staleNote}`);
 
       if (status === 'typing') {
         lines.push(`- The user is mid-keystroke — they are writing a follow-up RIGHT NOW. Do NOT fire another question or close the conversation. Let them finish; your job is to be ready for their next bubble.`);

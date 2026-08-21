@@ -10,6 +10,11 @@ interface GeocodeResult {
 }
 
 export class WeatherWatcherService {
+  // In-memory 12-hour per-user lock to prevent rapid duplicate alerts (Fix #4)
+  // Key: userId → timestamp of last weather alert sent
+  private static weatherAlertsSent = new Map<string, number>();
+  private static readonly WEATHER_ALERT_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
+
   /**
    * Fetches the current weather for a user's location and evaluates if an alert is needed.
    * Runs as a background CRON job (e.g., every 3-4 hours).
@@ -50,6 +55,14 @@ export class WeatherWatcherService {
         return;
       }
 
+      // ── IN-MEMORY 12-HOUR COOLDOWN (Fix #4) ────────────────────────────────
+      // Prevents multiple alerts in the same weather event across cron ticks.
+      // This runs BEFORE the DB check for speed and as a safety net.
+      const lastAlertAt = WeatherWatcherService.weatherAlertsSent.get(userId) || 0;
+      if (Date.now() - lastAlertAt < WeatherWatcherService.WEATHER_ALERT_COOLDOWN_MS) {
+        return; // Already sent recently
+      }
+
       // Check if we already alerted the user about weather in the last 12 hours
       // (schema columns are outreach_type/created_at — the old query errored, so the
       // 12h dedup NEVER worked and severe-weather alerts could repeat every cron tick)
@@ -74,6 +87,10 @@ Write a very short, casual text message warning them or checking in. (e.g., "hey
 
       const alertMessage = await chatCompletionBackground([{ role: 'system', content: prompt }], { maxTokens: 50 });
 
+      // ── QUOTE STRIPPING (Fix #4) ───────────────────────────────────────────
+      // LLM sometimes wraps the output in quotation marks. Strip them.
+      const cleanAlertMessage = alertMessage.trim().replace(/^["']|["']$/g, '').trim();
+
       // 4. Send the alert using the Trigger Engine.
       // Use the shared singleton so the 30 req/min rate limit is actually tracked —
       // `new NovaTriggerEngine()` starts with an empty requestTimestamps every time,
@@ -89,13 +106,16 @@ Write a very short, casual text message warning them or checking in. (e.g., "hey
         userActivity: null,
         pendingReminders: 0,
         emotionalState: {}
-      }, async () => alertMessage.trim());
+      }, async () => cleanAlertMessage);
+
+      // Record in-memory cooldown (Fix #4)
+      WeatherWatcherService.weatherAlertsSent.set(userId, Date.now());
 
       // Log the specific weather alert type so we don't spam
       // ('proactive_weather' is added to the outreach_type CHECK in migration 026)
       await supabaseAdmin.from('nova_outreach_log').insert({
         user_id: userId,
-        message: alertMessage.trim(),
+        message: cleanAlertMessage,
         outreach_type: 'proactive_weather',
       });
 
