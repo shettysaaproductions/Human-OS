@@ -535,22 +535,6 @@ export function ChatScreen() {
       console.log('Newest message:', messages[messages.length - 1]?.timestamp);
     }
   }, [developerMode, messages.length]);
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 10,
-    minimumViewTime: 100,
-  }).current;
-
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems && viewableItems.length > 0) {
-      const topItem = viewableItems[viewableItems.length - 1].item;
-      if (topItem && topItem.timestamp) {
-        const newDate = formatDateSeparator(topItem.timestamp);
-        // Bail out if date hasn't changed — prevents unnecessary re-renders
-        setStickyDate(prev => prev === newDate ? prev : newDate);
-      }
-    }
-  }).current;
-
   useEffect(() => {
     logEvent('COMPONENT_MOUNT');
     hydrateMessages();
@@ -688,13 +672,8 @@ export function ChatScreen() {
       } else if (item.status === 'responded') {
         StatusIcon = <Text style={{ fontSize: 10, color: '#3B82F6', marginLeft: 4 }}>✓✓</Text>;
       } else {
-        // 'sent' — delivered, awaiting Nova reply
-        const hasReply = reversedMessages.slice(0, index).some(m => m.role === 'assistant');
-        if (hasReply) {
-          StatusIcon = <Text style={{ fontSize: 10, color: '#3B82F6', marginLeft: 4 }}>✓✓</Text>;
-        } else {
-          StatusIcon = <Text style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 4 }}>✓✓</Text>;
-        }
+        // 'sent' — delivered
+        StatusIcon = <Text style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 4 }}>✓</Text>;
       }
     }
     
@@ -1013,15 +992,8 @@ export function ChatScreen() {
             <Text style={{ color: '#fff', fontSize: 8 }}>Conv: {diagnostics.activeConversationId}</Text>
           </View>
         )}
-        {/* Messages and Sticky Header Container */}
+        {/* Messages Container */}
         <View style={{ flex: 1 }}>
-          {stickyDate && (
-            <View style={s.stickyDateContainer}>
-              <Text style={[s.dateSeparatorText, { backgroundColor: colors.border, color: colors.textSecondary }]}>
-                {stickyDate}
-              </Text>
-            </View>
-          )}
 
           <FlatList
             ref={flatListRef}
@@ -1059,8 +1031,6 @@ export function ChatScreen() {
             initialNumToRender={15}
             maxToRenderPerBatch={5}
             updateCellsBatchingPeriod={50}
-            viewabilityConfig={viewabilityConfig}
-            onViewableItemsChanged={onViewableItemsChanged}
             onEndReached={() => {
               // In an inverted list, "end" is visually the TOP = oldest messages
               if (hasMoreMessages && !isLoadingMore) {
