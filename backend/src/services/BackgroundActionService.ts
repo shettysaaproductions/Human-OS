@@ -179,6 +179,14 @@ export class BackgroundActionService {
            const memString = action.data.memory || action.data.summary || action.data.key || action.data.moment;
            if (!memString) continue;
 
+           // QUALITY GATE: Ignore generic conversational fluff
+           const lowerMem = memString.toLowerCase();
+           const FLUFF_WORDS = ['said hi', 'said hello', 'how are', 'how is', 'checking in', 'good morning', 'good night', 'nothing much', 'just texting', 'just saying hi'];
+           if (FLUFF_WORDS.some(w => lowerMem.includes(w)) || memString.length < 15) {
+             logger.info('[BackgroundAction] Rejected short-term memory as fluff', { memString });
+             continue;
+           }
+
            // Dedupe: check if exact memory was saved in last 10 mins
            const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
            const { data: existing } = await supabaseAdmin
@@ -332,12 +340,20 @@ export class BackgroundActionService {
         else if (action.tool === 'WorkingMemory' && action.action === 'set') {
            const { key, value } = action.data;
            if (key) {
-             await supabaseAdmin.from('working_memory').upsert({
+             const isPermanentKey = ['work_schedule', 'weekoff_day', 'daily_commute', 'sleep_cycle'].includes(key.toLowerCase());
+             const payload: any = {
                user_id: userId,
                key: key,
                value: value || '',
                updated_at: new Date().toISOString()
-             }, { onConflict: 'user_id, key' });
+             };
+             
+             if (isPermanentKey) {
+               // Make schedule facts effectively permanent (10 years) to override the default 7-day expiry
+               payload.expires_at = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString();
+             }
+             
+             await supabaseAdmin.from('working_memory').upsert(payload, { onConflict: 'user_id, key' });
              logger.info('[BackgroundAction] Updated WorkingMemory', { userId, key, value });
            }
         }

@@ -1252,6 +1252,7 @@ chatRouter.post(
         unreadNovaMessages,
         behaviorPattern,
         totalMemoriesCount,
+        goalMemories: memories.filter((m: any) => m.memory_type === 'goals'),
       };
       situationBrief = situationalAwareness.buildBrief(situationCtx);
 
@@ -1365,6 +1366,7 @@ chatRouter.post(
         remindersContext,
         recentMessages,
         memoryContext,
+        basePrompt: BASE_SYSTEM_PROMPT,
         lengthInstruction: message.length < 20
           ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
           : "Match the user's depth, but still use short conversational messages.",
