@@ -1,7 +1,17 @@
 # Known Issues List (Active)
 
 This document tracks identified bugs, limitations, and workarounds.
-**Last Updated: Aug 10, 2026**
+**Last Updated: Aug 22, 2026**
+
+---
+
+## ✅ Resolved Aug 22, 2026
+
+- **Weekend/Weekoff Schedule Bug (P0):** `isWeekend` was calendar-only, ignored user's actual schedule from memory. Fixed: `chat.ts` now checks `working_memory` schedule keys and overrides `isWeekend` + injects `scheduleOverrideNote` into the Situation Brief.
+- **Broken Replies (P1):** `sanitizeReply` colon-strip regex `^[^\n]{3,60}:\s*\n` was eating sentence openers like "Let's break it down:\n...". Fixed: tightened to only strip ALL_CAPS or Title Case standalone label lines.
+- **Weather Spam (P1):** In-memory cooldown Map reset on every Render restart, making the 12h dedup ineffective. Fixed: removed in-memory Map, now 100% DB-backed via `nova_outreach_log`. Added topic-level dedup checking recent chat history for weather keywords.
+- **8B Model Used for Career/Schedule Messages (P2):** "I have target of 10 selects" went to 8B model. Fixed: added `schedule`, `weekoff`, `target`, `selects`, `hr`, `recruitment` etc. to `DEEP_TRIGGERS` in `NovaBrainService.ts`.
+- **No Schedule Memory Saving (P0):** Nova had no rule to save user-corrected schedule to working_memory. Fixed: added `SCHEDULE SELF-CORRECTION` rule to `promptBuilder.ts` that forces WorkingMemory.set emission.
 
 ---
 

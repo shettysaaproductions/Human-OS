@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-10 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-22 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -124,6 +124,12 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **Aug 18 Session — LLM 404 Model Not Found Fix:**
   - **Dead Model Removal:** NVIDIA deleted the `70b` models (`nvidia/llama-3.1-nemotron-70b-instruct`). This caused the backend to hard-fail with 404 errors, triggering the `Hmm... mujhe thoda sochne de` fallback loop on every single message.
   - **Render Config Fix:** Updated `render.yaml` to deploy with `nvidia/llama-3.3-nemotron-super-49b-v1` instead of forcing the dead 70b model, and updated `backend/.env` and migration files.
+- ✅ **Aug 22 Session — Schedule Memory Override + Reply Quality + Weather Spam Fix:**
+  - **Weekend Override** (`chat.ts`): `isWeekend` now checks `working_memory` schedule keys before trusting the calendar. User who works Saturday gets `isWeekend=false`. Injects `scheduleOverrideNote` into Situation Brief to correct the LLM's assumption.
+  - **Schedule Self-Correction Rule** (`promptBuilder.ts`): New `SCHEDULE SELF-CORRECTION` rule forces Nova to emit `WorkingMemory.set` with `work_schedule` + `weekoff_day` whenever user corrects their schedule. Saves it for all future sessions.
+  - **sanitizeReply Fix** (`NovaBrainService.ts`): Tightened colon-stripping regex to only nuke ALL_CAPS/Title Case labels, not sentence openers like "Let's break it down:". Prevents broken half-replies.
+  - **Weather Spam Fix** (`WeatherWatcherService.ts`): Removed unreliable in-memory cooldown Map (resets on Render restart). Now 100% DB-backed via `nova_outreach_log`. Added topic-level dedup: checks recent chat history for weather keywords over 6h window.
+  - **49B Deep Triggers** (`NovaBrainService.ts`): Added schedule/career keywords (`weekoff`, `target`, `selects`, `hr`, `recruitment`, etc.) to `DEEP_TRIGGERS` so complex career messages go to 49B, not 8B.
 - ✅ **Aug 19 Session — NACE Proactive Messaging Restored + Critical Timeout Fix:**
   - **Timeout Fix:** `LLM_TIMEOUT_MS` 12s → 55s in `chat.ts` and `nvidia.ts`. Nova was timing out 100% of LLM calls on Render free tier (49B needs 20-40s). This is why Nova wasn't replying at all.
   - **Dead Model Fix:** `config/index.ts` auto-upgrades dead `70b` model strings at startup.
