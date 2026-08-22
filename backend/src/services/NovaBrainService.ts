@@ -1,5 +1,4 @@
-import { chatCompletion, chatCompletionBackground } from '../lib/nvidia';
-import { config } from '../config';
+import { complete, determineUserProfile, stream } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 import { backgroundActions } from './BackgroundActionService';
@@ -135,80 +134,6 @@ function buildMessages(
 }
 
 /**
- * Classifies whether a user message needs the deep model (49B) or the fast model (8B).
- *
- * STRATEGY: Default to 8B (fast, ~5-8s). Only escalate to 49B for:
- *   - Long/complex messages that need real reasoning
- *   - Reminders (need precise time parsing)
- *   - Emotional depth (need empathetic phrasing)
- *   - Explicit questions needing accurate answers
- *
- * Short greetings / casual chat / acknowledgments ALWAYS use 8B.
- */
-function needsDeepModel(message: string): boolean {
-  const lower = message.toLowerCase();
-  const trimmed = message.trim();
-
-  const EMOTIONAL_ALWAYS_DEEP = [
-    'pareshan', 'thaka hua', 'thaki hui', 'dukhi', 'akela', 'akeli',
-    'rone wala', 'rone wali', 'rona aa raha', 'sad hoon', 'stressed',
-    'anxious', 'frustrated', 'help me', 'mujhe dar', 'scared', 'heartbreak',
-    'lonely', 'upset', 'bura lag raha', 'bahut bura', 'bahut pareshan',
-    'galat ho gaya', 'depressed', 'crying', 'ro raha', 'ro rahi'
-  ];
-  if (EMOTIONAL_ALWAYS_DEEP.some(t => lower.includes(t))) return true;
-
-  // ── Fast-path short-circuit: NEVER use 49B for these ────────────────────────
-  // Single-word greetings, acknowledgments, reactions → always 8B
-  const FAST_ONLY = [
-    'hi', 'hello', 'hey', 'hii', 'heyy', 'sup', 'yo', 'ok', 'okay',
-    'haha', 'lol', 'hmm', 'hm', 'nice', 'cool', 'great', 'wow',
-    'thanks', 'thx', 'ty', 'np', 'yes', 'no', 'yep', 'nope',
-    'bye', 'gn', 'tc', 'cya', 'later',
-    'ha', 'lmao', 'xd', '😂', '👍', '❤️',
-  ];
-  if (FAST_ONLY.includes(trimmed.toLowerCase())) return false;
-  if (trimmed.length < 8) return false; // Very short message → always 8B
-
-  // ── Deep triggers: these NEED 49B for quality ────────────────────────────────
-  const DEEP_TRIGGERS = [
-    // Reminders (need precise time parsing)
-    'remind', 'yaad dila', 'timer', 'alarm', 'set kar',
-    // Memory operations
-    'remember', 'yaad rakho', 'bhool mat', 'save this',
-    // Emotional depth
-    'stressed', 'depressed', 'anxious', 'pareshan', 'tension', 'dukhi',
-    'crying', 'breakup', 'fight', 'lonely', 'akela',
-    // Explicit explanation requests
-    'explain', 'samjhao', 'bata na', 'kyun hua', 'why did', 'how does',
-    'compare', 'difference between', 'analysis', 'suggest karo', 'recommend',
-    // Life events
-    'interview', 'exam', 'result', 'meeting', 'doctor', 'hospital',
-    // Planning
-    'plan banao', 'goal', 'todo', 'task list',
-    // Schedule / work context — user's actual life situation needs 49B for accuracy
-    'schedule', 'weekoff', 'week off', 'working day', 'shift', 'office hours',
-    // Universal career / professional context (any profession)
-    'target', 'deadline', 'joining', 'onboard', 'appraisal', 'increment',
-    'promotion', 'salary', 'raise', 'bonus', 'layoff', 'resign', 'quit job',
-    'new job', 'job offer', 'offer letter', 'notice period',
-    // Client / project / work output (developer, designer, freelancer, sales, any)
-    'client', 'customer', 'project', 'task', 'sprint', 'milestone', 'launch',
-    'release', 'demo', 'pitch', 'presentation', 'proposal', 'contract',
-    // Academic (student, teacher, researcher)
-    'exam', 'test', 'assignment', 'submission', 'result', 'marks', 'grade',
-    // Business (entrepreneur, startup, shop owner)
-    'revenue', 'profit', 'loss', 'investor', 'funding', 'startup',
-  ];
-
-  // Long messages (>150 chars) likely need deeper reasoning
-  if (trimmed.length > 150) return true;
-
-  // Check for trigger keywords
-  return DEEP_TRIGGERS.some(t => lower.includes(t));
-}
-
-/**
  * Determines if a user message is a CRITICAL action that must be executed synchronously
  * to guarantee truthful confirmation. Uses deterministic regex to avoid expensive LLM calls.
  * 
@@ -253,12 +178,12 @@ Example:
 ]`;
 
   try {
-    const rawExtraction = await chatCompletionBackground(
+    const rawExtraction = await complete('CRITICAL_ACTION',
       [
         { role: 'system', content: prompt },
         { role: 'user', content: message }
       ],
-      { model: 'meta/llama-3.1-8b-instruct', maxTokens: 300, temperature: 0.1 }
+      { maxTokens: 300, temperature: 0.1 }
     );
 
     if (!rawExtraction) return [];
@@ -347,15 +272,13 @@ export class NovaBrainService {
     let reply = NOVA_EMPTY_REPLY;
 
     try {
-      const useDeep = needsDeepModel(message);
-      const modelToUse = useDeep ? config.nvidia.deepModel : config.nvidia.chatModel;
-      const maxTok = useDeep ? 512 : 256;
-      logger.info(`[NOVA BRAIN] Call 1 (Conversation) — Model: ${useDeep ? 'DEEP/49B' : 'FAST/8B'} | tokens: ${maxTok} | msgLen: ${message.length}`);
+      const profile = determineUserProfile(message);
+      const maxTok = profile === 'USER_DEEP' ? 512 : 256;
+      logger.info('[NOVA BRAIN] Call 1 (Conversation)', { profile, maxTokens: maxTok, messageLength: message.length });
 
-      const rawReply = await chatCompletion(conversationMessages, {
+      const rawReply = await complete(profile, conversationMessages, {
         temperature: 0.85,
         maxTokens: maxTok,
-        model: modelToUse,
       });
 
       reply = rawReply
@@ -458,10 +381,10 @@ export class NovaBrainService {
 
     const messages = buildMessages(fullPrompt, context.recentMessages, message);
 
-    const { chatCompletionStream } = await import('../lib/nvidia');
-    const stream = chatCompletionStream(messages, {
+    const profile = determineUserProfile(message);
+    const responseStream = stream(profile, messages, {
       temperature: 0.85,
-      maxTokens: 1024
+      maxTokens: profile === 'USER_DEEP' ? 512 : 256,
     });
 
     let fullText = '';
@@ -469,7 +392,7 @@ export class NovaBrainService {
     let replyStreamed = '';
     let replyClosed = false;
 
-    for await (const chunk of stream) {
+    for await (const chunk of responseStream) {
       fullText += chunk;
       if (replyClosed) continue;
 
@@ -555,7 +478,7 @@ Return ONLY a JSON object with:
   "iso_timestamp_utc": "ISO string for today at that time in UTC, or null if no time found"
 }`;
 
-    const response = await chatCompletionBackground([
+    const response = await complete('PROACTIVE', [
       { role: 'system', content: 'You are a precise time extractor.' },
       { role: 'user', content: prompt }
     ], {
@@ -593,7 +516,7 @@ Return a JSON object matching this structure:
   "source_memory_id": "string (the exact ID of the goal or node that this is about, or null)"
 }`;
 
-    const response = await chatCompletionBackground([
+    const response = await complete('PROACTIVE', [
       { role: 'system', content: 'You extract goal check-ins in JSON format.' },
       { role: 'user', content: prompt }
     ], {
@@ -630,7 +553,7 @@ Return a JSON object matching this structure:
   "source_memory_id": "string (the exact ID of the node or memory this is about, or null)"
 }`;
 
-    const response = await chatCompletionBackground([
+    const response = await complete('PROACTIVE', [
       { role: 'system', content: 'You extract child milestone check-ins in JSON format.' },
       { role: 'user', content: prompt }
     ], {
@@ -658,7 +581,7 @@ Return JSON:
   "body": "Refined Body"
 }`;
 
-    const response = await chatCompletionBackground([
+    const response = await complete('PROACTIVE', [
       { role: 'system', content: 'You validate and refine check-in notifications in JSON.' },
       { role: 'user', content: prompt }
     ], {
@@ -689,7 +612,7 @@ Bias toward YES — Nova exists to be present and proactive.
 
 Output JSON only: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
 
-    const response = await chatCompletionBackground([
+    const response = await complete('PROACTIVE', [
       { role: 'system', content: prompt },
       { role: 'user', content: tier1Context }
     ], {
@@ -715,7 +638,7 @@ RULES:
 - NO markdown code blocks. Just the raw curly braces.
 Output JSON: {"message": "your reply here", "tone": "emotional | playful | concerned"}`;
 
-    const response = await chatCompletionBackground([
+    const response = await complete('PROACTIVE', [
       { role: 'system', content: prompt },
       { role: 'user', content: tier2Context }
     ], {
@@ -740,7 +663,7 @@ Output JSON: {"message": "your reply here", "tone": "emotional | playful | conce
       }
     ];
 
-    const raw = await chatCompletionBackground(messages, { response_format: { type: 'json_object' }, maxTokens: 512 });
+    const raw = await complete('PROACTIVE', messages, { response_format: { type: 'json_object' }, maxTokens: 512 });
     return JSON.parse(raw);
   }
 
@@ -756,7 +679,7 @@ Output JSON: {"message": "your reply here", "tone": "emotional | playful | conce
       }
     ];
 
-    const raw = await chatCompletionBackground(messages, { response_format: { type: 'json_object' }, maxTokens: 768 });
+    const raw = await complete('PROACTIVE', messages, { response_format: { type: 'json_object' }, maxTokens: 768 });
     return JSON.parse(raw);
   }
 }

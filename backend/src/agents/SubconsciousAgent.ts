@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionBackground } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { backgroundActions } from '../services/BackgroundActionService';
 
@@ -35,11 +35,10 @@ Example:
 ]
 If there are no non-critical actions to take, return an empty array [].`;
 
-      const response = await chatCompletionBackground([
+      const response = await complete('SUBCONSCIOUS', [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `User: "${message}"\nNova: "${novaReply}"` }
       ], {
-        model: 'meta/llama-3.1-8b-instruct',
         maxTokens: 500,
         temperature: 0.1,
       });

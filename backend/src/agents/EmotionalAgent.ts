@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { EmotionalState } from '../types/memory';
 
@@ -12,7 +12,7 @@ export class EmotionalAgent extends BaseAgent {
   protected async execute(job: Job): Promise<number> {
     const { userId, message } = job.payload;
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Emotional Agent for HumanOS.
@@ -33,7 +33,6 @@ If there is no clear emotional state, return {"emotional_state": null}.`
         content: message
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });

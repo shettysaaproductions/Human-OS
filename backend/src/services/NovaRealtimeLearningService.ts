@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { chatCompletionLearning } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 
@@ -105,7 +105,7 @@ Output JSON only:
 If this is NOT a correction (just normal conversation), return:
 { "isCorrection": false }`;
 
-      const result = await chatCompletionLearning([
+      const result = await complete('LEARNING', [
         { role: 'system', content: analysisPrompt },
         { role: 'user', content: 'Analyze the above correction and generate a patch.' }
       ], {

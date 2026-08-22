@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { chatCompletionLearning } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 
@@ -110,7 +110,7 @@ Output JSON only in this format:
 }
 If no flaws are detected, return { "flawsDetected": [], "healthScore": 100, "summary": "Nova is healthy." }.`;
 
-      const analysisResult = await chatCompletionLearning([
+      const analysisResult = await complete('LEARNING', [
         { role: 'system', content: prompt },
         { role: 'user', content: `RECENT CHAT LOG:\n${chatLog}` }
       ], {

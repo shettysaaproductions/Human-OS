@@ -4,7 +4,23 @@
 
 ---
 
-## 1. Current Deployed Stack
+## 1. Authoritative Runtime Router
+
+`backend/src/lib/nvidia.ts` and its `BrainKeyRouter` are the only runtime NVIDIA router. They own the 15-key region pools, rotation, cooldowns, retries, and Reserve failover. `ModelRouterService` is retained as unused Supabase provider-management code and must not be added to the live NVIDIA request path.
+
+Production callers select a capability, not a model or key:
+
+| Profile | Region | Model |
+|---|---|---|
+| `USER_FAST` | Frontal | `NVIDIA_CHAT_MODEL` |
+| `USER_DEEP` | Deep Cortex | `NVIDIA_DEEP_MODEL` |
+| `MEMORY`, `SUBCONSCIOUS`, `CRITICAL_ACTION`, `TIMEOUT_FALLBACK` | Hippocampus/Cerebellum as applicable | 8B extraction model |
+| `LEARNING` | Hippocampus | `NVIDIA_CHAT_MODEL` |
+| `PROACTIVE` | Cerebellum | `NVIDIA_CHAT_MODEL` |
+
+User streaming and non-streaming both call the same deterministic `determineUserProfile()` function, so they select the same profile, region, and model for identical input.
+
+## 2. Historical Deployment Notes
 
 Nova uses NVIDIA's NIM API (OpenAI-compatible endpoint) in production.
 
@@ -16,7 +32,7 @@ Nova uses NVIDIA's NIM API (OpenAI-compatible endpoint) in production.
 
 ---
 
-## 2. Two-Tier Key Routing Strategy
+## 3. Historical Two-Tier Key Routing Strategy
 
 The second NVIDIA key exclusively powers **background consciousness work** so it never competes with live user chat:
 
@@ -29,7 +45,7 @@ The second NVIDIA key exclusively powers **background consciousness work** so it
 
 ---
 
-## 3. ModelRouterService (Supabase-Backed)
+## 4. ModelRouterService (Supabase-Backed, Not Runtime Routing)
 
 The `ModelRouterService` (`src/services/ModelRouterService.ts`) reads from the `llm_providers` table in Supabase. This allows adding, disabling, or reprioritizing LLM keys without a code deploy.
 
@@ -39,7 +55,7 @@ The `ModelRouterService` (`src/services/ModelRouterService.ts`) reads from the `
 
 ---
 
-## 4. Escalation Rules (Future Growth Path)
+## 5. Escalation Rules (Future Growth Path)
 
 As Nova grows beyond the free tier, the following escalation ladder applies:
 
@@ -52,7 +68,7 @@ As Nova grows beyond the free tier, the following escalation ladder applies:
 
 ---
 
-## 5. Logging Requirements
+## 6. Logging Requirements
 
 Every LLM call must log to `agent_metrics` table asynchronously:
 - Model used
@@ -64,7 +80,7 @@ Every LLM call must log to `agent_metrics` table asynchronously:
 
 ---
 
-## 6. Implementation Notes
+## 7. Implementation Notes
 
 - `src/lib/nvidia.ts` contains both `nvidiaClient` (Key 1) and `nvidiaClientSecondary` (Key 2)
 - `chatCompletion()` uses Key 1 (user-facing)

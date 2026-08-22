@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 
 interface ExtractedShortTermMemory {
@@ -22,7 +22,7 @@ export class ShortTermMemoryAgent extends BaseAgent {
   protected async execute(job: Job): Promise<number> {
     const { messageId, userId, message, novaReply, conversationSnapshot } = job.payload;
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Short-Term Memory Agent for Nova.
@@ -81,7 +81,6 @@ ${message}
 ${novaReply || '(No reply generated)'}`
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });

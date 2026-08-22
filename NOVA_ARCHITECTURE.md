@@ -19,7 +19,7 @@ All 7 engines are currently live and deployed on Render backend.
 | 3 | **Situational Awareness** | `SituationalAwareness.ts` | Time/day/gap/mood/reply-intent situation brief | Every user message |
 | 4 | **Moment Engine** | `MomentEngineService.ts` | Magical memory moments, goal follow-ups, Time Capsules | Daily |
 | 5 | **Reflection Scheduler** | `ReflectionSchedulerService.ts` | Daily/weekly life summaries and growth insights | Daily + Weekly |
-| 6 | **Model Router** | `ModelRouterService.ts` | Dual NVIDIA key routing — user-facing vs. background | On every LLM call |
+| 6 | **NVIDIA Router** | `lib/nvidia.ts` | Authoritative 15-key brain-region routing and profiles | On every NVIDIA LLM call |
 | 7 | **Prompt Builder** | `promptBuilder.ts` | Full system prompt assembly + dynamic behavioral patches | Every user message |
 
 ---
@@ -74,6 +74,10 @@ NovaBrainService.processInteraction()
 ---
 
 ## 5. Quad NVIDIA Key Pool Strategy (Multi-LLM Load Balancing)
+
+`lib/nvidia.ts` is the authoritative runtime routing layer. `USER_FAST` uses Frontal Cortex and `USER_DEEP` uses Deep Cortex; both preserve Reserve failover. Streaming and non-streaming first use the same deterministic profile selection. Memory, subconscious extraction, and critical-action extraction remain explicitly on the 8B extraction model.
+
+`ModelRouterService.ts` is not in the runtime request path.
 
 To handle the immense computational load of the Auto-Upgrade background scans and NACE outreach without ever rate-limiting the user-facing chat, Nova employs a Quad-Key Pool Strategy using 4 distinct free-tier NVIDIA API keys in parallel:
 

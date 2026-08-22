@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { EpisodicMemory } from '../types/memory';
 
@@ -12,7 +12,7 @@ export class EpisodicAgent extends BaseAgent {
   protected async execute(job: Job): Promise<number> {
     const { messageId, userId, message } = job.payload;
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Episodic Memory Agent for HumanOS.
@@ -35,7 +35,6 @@ If there are no events to extract, return {"episodic_memories": []}.`
         content: message
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });

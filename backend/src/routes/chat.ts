@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { saveAssistantMessage } from '../services/ChatHistoryHelpers';
 import { classifyIntent } from '../services/ResponseIntelligence';
 import { z } from 'zod';
-import { chatCompletion } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
@@ -535,7 +535,7 @@ chatRouter.post(
           rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
         } else {
           try {
-            rawReply = await chatCompletion([
+            rawReply = await complete('USER_FAST', [
               { role: 'system', content: BASE_SYSTEM_PROMPT + '\n[Note: Running in degraded mode — some memories may be unavailable.]' },
               ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
             ], {
@@ -1146,7 +1146,7 @@ chatRouter.post(
 
                 // FAST RETRY: Use the 8B extraction model with a minimal prompt
                 try {
-                  const { chatCompletionBackground } = await import('../lib/nvidia');
+                  const { complete } = await import('../lib/nvidia');
                   const fastRetryMessages = [
                     { role: 'system' as const, content: `You are Nova, a casual Hinglish-speaking friend texting on WhatsApp.
 Reply in 1-2 SHORT sentences. Max 1 emoji. NO lists, NO formatting, NO emoji spam.
@@ -1159,8 +1159,7 @@ HINGLISH RULES:
 - NO bullet points, NO bold, NO markdown. Plain text only.` },
                     { role: 'user' as const, content: message }
                   ];
-                  const fastReply = await chatCompletionBackground(fastRetryMessages, {
-                    model: 'meta/llama-3.1-8b-instruct',
+                  const fastReply = await complete('TIMEOUT_FALLBACK', fastRetryMessages, {
                     maxTokens: 256,
                     temperature: 0.9
                   });
