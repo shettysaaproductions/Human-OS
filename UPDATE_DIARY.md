@@ -2,6 +2,30 @@
 ---
 
 
+## [2026-08-22] Auto Upgrade: Nova Deep Audit & Production Upgrade Plan - 8 Phase Implementation
+
+### Trigger
+User requested full production-level upgrade to fix character identity denial, memory noise, emotional/goal disconnection, and working memory expiry. 
+
+### Changes Made
+- **Phase 1**: `sanitizeReply()` in `NovaBrainService.ts` now strictly filters out AI-admission phrases to enforce identity lock at the output level.
+- **Phase 2**: Added `EMOTIONAL_ALWAYS_DEEP` keywords and lowered character threshold to force 49B model for short emotional states.
+- **Phase 3**: Removed dual-prompt conflict by passing `BASE_SYSTEM_PROMPT` directly from `chat.ts` to `brainContext`.
+- **Phase 4**: Added 3 new `ANTI-ROBOT` rules in `promptBuilder.ts`: LIFE-STATE COHERENCE, ONBOARDING ANCHOR, and GOAL-EMOTION BRIDGE.
+- **Phase 5**: Implemented a memory quality gate in `BackgroundActionService.ts` with a `FLUFF_WORDS` filter to prevent saving junk short-term memories.
+- **Phase 6**: Hardened `BackgroundActionService.ts` to set permanent 10-year expiry for schedule keys (`work_schedule`, `weekoff_day`, etc.), fixing amnesia.
+- **Phase 7**: Upgraded `onboardingService.ts` to save passions and goals as individual atomic memories instead of large blobs.
+- **Phase 8**: Added `buildLifeStateContext()` in `SituationalAwareness.ts` to dynamically bridge the user's latest emotion, current goal, and recent life event.
+- **Phase 9**: Verified build locally (`npm run build`).
+- **Phase 10**: Synced to git and triggered OTA update to mobile production channel.
+
+### Status
+- Build passed (exit 0).
+- Committed and pushed to `main`.
+- OTA update deployed to mobile (production branch).
+
+---
+
 ### Trigger
 User requested fix for 4 production bugs found in the last 20 chat messages: FALLBACK_REPLY firing on NVIDIA rate-limit, robotic list format in Nova's responses, reminder GET endpoint missing active filter, and reminder scheduler crashing on NULL trigger_at.
 

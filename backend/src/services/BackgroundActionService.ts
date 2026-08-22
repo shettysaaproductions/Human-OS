@@ -179,6 +179,14 @@ export class BackgroundActionService {
            const memString = action.data.memory || action.data.summary || action.data.key || action.data.moment;
            if (!memString) continue;
 
+           // QUALITY GATE: Ignore generic conversational fluff
+           const lowerMem = memString.toLowerCase();
+           const FLUFF_WORDS = ['said hi', 'said hello', 'how are', 'how is', 'checking in', 'good morning', 'good night', 'nothing much', 'just texting', 'just saying hi'];
+           if (FLUFF_WORDS.some(w => lowerMem.includes(w)) || memString.length < 15) {
+             logger.info('[BackgroundAction] Rejected short-term memory as fluff', { memString });
+             continue;
+           }
+
            // Dedupe: check if exact memory was saved in last 10 mins
            const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
            const { data: existing } = await supabaseAdmin
@@ -204,16 +212,32 @@ export class BackgroundActionService {
            });
         }
         else if (action.tool === 'MemoryRepository' && action.action === 'save') {
-           // Direct save
-           logger.info('[BackgroundAction] Saving memory', action.data);
-           await supabaseAdmin.from('memories').upsert({
-             user_id: userId,
-             key: action.data.key,
-             value: action.data.value,
-             memory_type: 'semantic',
-             last_accessed_at: new Date().toISOString(),
-             updated_at: new Date().toISOString()
-           });
+           // Quality gate — reject trash before it pollutes long-term memory
+           const memValue = String(action.data?.value || '').trim();
+           const memKey = String(action.data?.key || '').trim();
+           const MEMORY_TRASH_PATTERNS = [
+             /^(user (?:was|is|said|feeling|feels|mentioned|says))\s+(?:sleepy|tired|ok|fine|good|kaam|busy|bored)/i,
+             /^\d+:\d+/,
+             /^(feeling|feel|mood|state)\s+\w+\s*$/i,
+             /^(kaam|lag|pine|soo|raat|neend|ok|hmm|haan|nahi)/i,
+             /^(user is|user was|currently)\s+\w+\s*$/i,
+           ];
+           const isTrash = !memValue || memValue.length < 12 || memValue.split(' ').length < 3 ||
+             MEMORY_TRASH_PATTERNS.some(p => p.test(memValue));
+           if (isTrash) {
+             logger.info('[BackgroundAction] MemoryRepository quality gate: rejected', { memKey, memValue });
+           } else {
+             logger.info('[BackgroundAction] Saving memory', action.data);
+             await supabaseAdmin.from('memories').upsert({
+               user_id: userId,
+               key: memKey,
+               value: memValue,
+               memory_type: action.data.memory_type || 'semantic',
+               source_message: action.data.source || 'background_action',
+               last_accessed_at: new Date().toISOString(),
+               updated_at: new Date().toISOString()
+             });
+           }
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
            const { novaFollowupService } = await import('./NovaFollowupService');
@@ -332,12 +356,23 @@ export class BackgroundActionService {
         else if (action.tool === 'WorkingMemory' && action.action === 'set') {
            const { key, value } = action.data;
            if (key) {
-             await supabaseAdmin.from('working_memory').upsert({
+             const PERMANENT_KEYS = ['work_schedule', 'weekoff_day', 'daily_commute', 'sleep_cycle',
+               'office_hours', 'login_time', 'logout_time', 'gym_time', 'working_days', 'work_days',
+               'sleep_time', 'wake_time', 'shift_time', 'lunch_time'];
+             const isPermanentKey = PERMANENT_KEYS.some(k => key.toLowerCase().includes(k));
+             const payload: any = {
                user_id: userId,
                key: key,
                value: value || '',
                updated_at: new Date().toISOString()
-             }, { onConflict: 'user_id, key' });
+             };
+             
+             if (isPermanentKey) {
+               // Make schedule facts effectively permanent (10 years) to override the default 7-day expiry
+               payload.expires_at = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString();
+             }
+             
+             await supabaseAdmin.from('working_memory').upsert(payload, { onConflict: 'user_id, key' });
              logger.info('[BackgroundAction] Updated WorkingMemory', { userId, key, value });
            }
         }

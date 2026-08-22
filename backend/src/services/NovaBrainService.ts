@@ -22,6 +22,24 @@ export function sanitizeReply(reply: string): string {
   if (!reply) return '';
   let text = String(reply);
 
+  // ── Extract "Actual Output:" section if model narrates its reasoning ──────────
+  // When the LLM explains what it is doing before giving the reply (e.g. "Note: Since the
+  // response needs to be plain text... Actual Output: <reply>"), strip everything before
+  // the actual output marker and keep only the final spoken text.
+  const actualOutputMatch = text.match(/(?:Actual Output|Final Output|Plain Text Output|WhatsApp Style)[:\s]*([^]*)/i);
+  if (actualOutputMatch) {
+    text = actualOutputMatch[1].trim();
+  }
+
+  // Strip meta-commentary "Note: Since..." blocks that appear before the real reply
+  text = text
+    .replace(/^Note:\s*Since[^\n]*\n?/gi, '')
+    .replace(/^Note:\s*[^\n]*\n?/gi, '')
+    .replace(/^(?:I(?:'ve| have|'m| am)|Since the|Per the|Following the|Based on the)\s+(?:combined|updated|new|given)\s*(?:the )?(?:instructions?|guidelines?|rules?|format)[^\n]*\n?/gi, '')
+    .replace(/^(?:As per|According to) the updated instructions?[^\n]*/gi, '')
+    .replace(/^\[Replying to:[^\]]*\]\s*/gm, '')
+    .trim();
+
   // --- Nuke entire reply if it is clearly a structured menu/report ---------------
   // If the reply has 3+ lines that are bullet/numbered/lettered menu items,
   // it is a structured report, NOT a human text. Kill everything after the first
@@ -52,6 +70,8 @@ export function sanitizeReply(reply: string): string {
     .replace(/\s*\[\s*(?:subconscious_actions|subconscious actions)[^\]]*\]\s*/gi, ' ')
     .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ')
     .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ')
+    // Strip [Replying to: "..."] prefixes echoed into reply text
+    .replace(/^\[Replying to:[^\]]*\]\s*/gm, '')
     // Strip system-text leaks
     .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ')
     .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')
@@ -59,6 +79,11 @@ export function sanitizeReply(reply: string): string {
     .replace(/AUTOMATIC \d+-(?:MINUTE|HOUR) WAKE-UP ALERT SET[\s\S]*?(?=\n\n|$)/gi, ' ')
     // Strip "Subconscious Actions (Behind the Scenes)" section completely
     .replace(/Subconscious Actions\s*\(Behind the Scenes\)[\s\S]*/gi, ' ')
+    // Strip AI admission phrases — identity lock at the output level
+    .replace(/\b(?:as (?:an? )?(?:ai|language model|llm|text-based ai|virtual assistant))[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\b(?:i (?:don't|do not|cannot|can't) (?:have|access|see|feel|experience))[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\bi(?:'m| am) (?:just |only )?(?:an? )?(?:ai|language model|chatbot|text|program)\b/gi, 'Nova')
+    .replace(/\b(?:since|because|as) i(?:'m| am) (?:an? )?(?:ai|text-based)[^.!?\n]*[.!?]?/gi, '')
     // Strip Discovery Phase / system instruction leaks (e.g., "Remember, you barely know this user")
     .replace(/(?:⏰|🚀|ℹ️|Note:|Reminder:)\s*(?:Remember|You(?:'re| are| should| must|r goal)|I should|I must|Ask open)[^.!?\n]*[.!?]?/gi, '')
     .replace(/Remember,?\s+you(?:'re|\s+are)?\s+(?:talking to|dealing with|chatting with|barely know)[^.!?\n]*[.!?]?/gi, '')
@@ -122,6 +147,15 @@ function needsDeepModel(message: string): boolean {
   const lower = message.toLowerCase();
   const trimmed = message.trim();
 
+  const EMOTIONAL_ALWAYS_DEEP = [
+    'pareshan', 'thaka hua', 'thaki hui', 'dukhi', 'akela', 'akeli',
+    'rone wala', 'rone wali', 'rona aa raha', 'sad hoon', 'stressed',
+    'anxious', 'frustrated', 'help me', 'mujhe dar', 'scared', 'heartbreak',
+    'lonely', 'upset', 'bura lag raha', 'bahut bura', 'bahut pareshan',
+    'galat ho gaya', 'depressed', 'crying', 'ro raha', 'ro rahi'
+  ];
+  if (EMOTIONAL_ALWAYS_DEEP.some(t => lower.includes(t))) return true;
+
   // ── Fast-path short-circuit: NEVER use 49B for these ────────────────────────
   // Single-word greetings, acknowledgments, reactions → always 8B
   const FAST_ONLY = [
@@ -132,7 +166,7 @@ function needsDeepModel(message: string): boolean {
     'ha', 'lmao', 'xd', '😂', '👍', '❤️',
   ];
   if (FAST_ONLY.includes(trimmed.toLowerCase())) return false;
-  if (trimmed.length < 15) return false; // Very short message → always 8B
+  if (trimmed.length < 8) return false; // Very short message → always 8B
 
   // ── Deep triggers: these NEED 49B for quality ────────────────────────────────
   const DEEP_TRIGGERS = [
@@ -189,10 +223,10 @@ export class NovaBrainService {
     message: string,
     context: any // Aggregated context from Temporal, Situational, Memory engines
   ): Promise<{ reply: string; subconscious_actions: any[] }> {
-    
-    // Build the system prompt using the existing robust promptBuilder
-    const systemPrompt = promptBuilder.buildSystemPrompt(
-      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.\n\n## 🧠 MEMORY USAGE (MANDATORY)\nYou have access to the user\'s stored memories above. You MUST:\n- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")\n- Mention specific people by name (e.g., "How is Sakshi doing?")\n- Recall specific events with dates when relevant\n- NEVER give generic template responses\n- If asked "what do you remember", quote memories VERBATIM\n- If you don\'t see relevant memories, say "I need to check my notes" instead of making things up',
+    // ── CALL 1: Conversation Reply ────────────────────────────────────────────
+    // The 49B model's ONLY job: be Nova. No tool JSON. No XML tags.
+    const conversationSystemPrompt = promptBuilder.buildSystemPrompt(
+      context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
       context.memories || [],
       context.workingMemories || [],
       context.profile?.preferred_name,
@@ -203,224 +237,95 @@ export class NovaBrainService {
       'HUMAN_CHAT',
       context.situationBrief
     );
-    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}\n${context.temporalContextBlock || ''}\n${context.remindersContext || ''}\n${context.lengthInstruction || ''}
 
-## 🧠 SUBCONSCIOUS ACTIONS & JSON FORMAT (CRITICAL)
-You are capable of generating a conversational reply AND taking background actions simultaneously.
-You MUST format your EXACT output using these two XML tags IN THIS EXACT ORDER:
+    const conversationFullPrompt = [
+      conversationSystemPrompt,
+      context.memoryContext || '',
+      context.temporalContextBlock || '',
+      context.remindersContext || '',
+      context.lengthInstruction || '',
+      '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
+    ].filter(Boolean).join('\n');
 
-<subconscious_actions>
-[
-  { "tool": "MomentEngine", "action": "extract", "data": { "moment": "...", "emotion": "..." } }
-]
-</subconscious_actions>
-<reply>
-CRITICAL: STRICTLY 1-2 sentences MAX. OUTCOME ONLY. NO bullet points. NO care packages. NO summaries. Keep it casual like a WhatsApp text.
-</reply>
+    const conversationMessages = buildMessages(conversationFullPrompt, context.recentMessages, message);
 
-Available Tools for Subconscious Actions:
-1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
-   - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
-2. "ReminderEngine" -> "schedule": Set a reminder.
-   - data (use simple time_phrase OR structured recurrence):
-     * ONE-TIME: { "title": "what to remind", "time_phrase": "in 10 minutes" | "at 7pm tomorrow", "purpose": "why it matters" }
-     * RECURRING (CRITICAL - DO NOT USE time_phrase): { "title": "...", "time_of_day": "08:30" (or 24hr time), "recurrence_interval": 1, "recurrence_unit": "days|weeks|months", "purpose": "..." }
-     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up" }   ← "remind me when I wake up"
-     * AUTO-TIMER: Include "is_auto": true if you are proactively setting a timer for the user without them asking.
-   - MULTIPLE REMINDERS: If the user asks for multiple reminders, emit an array in "reminders":
-     { "reminders": [
-         { "title": "medicine 1", "time_phrase": "in 10 minutes", "purpose": "morning dose" },
-         { "title": "medicine 2", "time_phrase": "in 6 hours", "purpose": "evening dose" }
-       ] }
-   - SPECIFIC DAY: If user says "remind me on Sunday" (no time) → ask "What time on Sunday?" and DO NOT emit schedule yet.
-   - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
-   - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.
-   - CRITICAL FOR CLAUDE/OMNI MODELS: Do NOT explain that you are an AI or a "text-based" assistant and cannot send push notifications. The backend sends the push. Simply emit this tool and tell the user you set it ("Set kar diya, yaad dila dunga").
-   - 🔴 MANDATORY: If user says "remind me in X minutes/hours" or "remind me at TIME" → YOU MUST EMIT ReminderEngine action. DO NOT just reply "Reminder Set!" without the action.
-3. "NovaFollowupService" -> "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged.
-   - data: { "question": "the follow-up text", "delay_hours": 0.5 }
-   - DELAY RULES (CRITICAL — Real friends don't spam):
-     * 0.5 = 30 min → user just said something personal/emotional (use sparingly)
-     * 1.0 = 1 hour  → standard follow-up for an open conversation
-     * 2.0 = 2 hours → user seems a bit busy or gave short replies
-     * 4.0 = 4 hours → user hasn't replied or seems occupied
-     * NEVER use delays below 0.5. Sending in 36 seconds or 2 minutes is harassment, not friendship.
-     * If the user said "bye", "gn", "soone ja raha hoon", or "busy hoon" → DO NOT queue any follow-up at all.
-     * If the topic feels concluded → DO NOT queue a follow-up.
-   - Only queue if you genuinely want to continue the conversation — not as a reflex.
-4. "MemoryRepository" -> "save": Save a factual detail about the user.
-   - data: { "key": "category_name", "value": "detail" }
-   - 🔴 ATOMICITY RULE (CRITICAL): NEVER merge multiple distinct facts into a single memory. If the user mentions their wife's name AND that they love her cooking, emit TWO separate MemoryRepository actions (e.g. one for "Wife Name: Sakshi" and one for "Loves: Wife's cooking").
-   - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat, short-term states, or fluff (e.g. "kaam hi kar raha hu", "3:35 AM", "feeling sleepy", "good morning"). ONLY save meaningful, long-term facts (e.g. likes, dislikes, family members, relationships, career goals).
-5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-sensitive thing the user mentioned.
-   - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
-   - 🔴 ANTI-TRASH RULE: DO NOT save internal conversational states (like "feeling sleepy") as events. Events are strictly real-world occurrences (meetings, flights, exams).
-6. "LifeEventExtractor" -> "routine": Extract a recurring routine or habit the user mentioned.
-   - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
-   - 🔴 ANTI-TRASH RULE: DO NOT save one-off actions as routines.
-7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
-   - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
-8. "AgendaManager" -> "add": Implicitly log a goal or task the user mentioned so you can ask them about it later. Use this if they say "I need to do X" but don't ask for a specific reminder time.
-   - data: { "task_description": "the task they need to do" }
-   - 🔴 ANTI-TRASH RULE: NEVER save conversational chat like "soo jaunga", "lag raha hai", "pine ke lie", "nai aa rahi hai" as goals. ONLY save actual, actionable tasks (e.g. "Buy groceries", "Finish project"). If it is not an actionable task, do not use this tool.
-9. "ExternalApiEngine" -> "webhook": Trigger a real-world webhook or external action IF the user asks you to control something (like lights, notion, etc).
-   - data: { "url": "the webhook url", "method": "POST|GET", "body": { "any": "data" } }
-9. "ReminderEngine" -> "delete": Cancel an active reminder when the user says "stop", "cancel", "hata de", "band kar do", etc.
-   - data: { "id": "the EXACT id string from the ACTIVE REMINDERS (SOURCE OF TRUTH) block, e.g. <uuid>" }
-   - Only delete a reminder actually listed there. If unclear which one, ask.
-10. "EventDetector" -> "fire": When the user signals a life event that has an ACTIVE event-triggered reminder (listed in your ACTIVE REMINDERS block as: on event "..."), fire it now. E.g. user says "I'm awake" → fire reminders with event_trigger "wake_up"; "office se nikal gaya" → "left_the_office".
-    - data: { "event": "the event string exactly as listed (e.g. wake_up, left_the_office)" }
-11. "WorkingMemory" -> "set": Use when user mentions they're doing something time-bound (bathing, eating, gym, meeting, sleeping). Calculate estimated free time:
-    - data: { "key": "user_busy_until", "value": "<ISO 8601 timestamp>" }
-    - Estimates: bathing=20m, eating=30m, gym=60m, meeting=45m, sleep=8hrs, office=until 7pm.
-    - Example: if user says "bathing", set value to NOW + 20 mins.
-
-If no tools need to be called, leave the JSON array empty: []
-`;
-
-    const messages = buildMessages(fullPrompt, context.recentMessages, message);
+    let reply = NOVA_EMPTY_REPLY;
+    let subconscious_actions: any[] = [];
 
     try {
       const useDeep = needsDeepModel(message);
       const modelToUse = useDeep ? config.nvidia.deepModel : config.nvidia.chatModel;
-      // 8B: cap at 512 tokens (fast casual reply budget), 49B: 1024 (needs space for reasoning)
-      const maxTok = useDeep ? 1024 : 512;
-      logger.info(`[NOVA BRAIN] Model: ${useDeep ? 'DEEP/49B' : 'FAST/8B'} | tokens: ${maxTok} | msgLen: ${message.length}`);
+      const maxTok = useDeep ? 512 : 256;
+      logger.info(`[NOVA BRAIN] Call 1 (Conversation) — Model: ${useDeep ? 'DEEP/49B' : 'FAST/8B'} | tokens: ${maxTok} | msgLen: ${message.length}`);
 
-      const rawRes = await chatCompletion(messages, {
-        temperature: useDeep ? 0.80 : 0.90, // 8B slightly more creative/casual, 49B more precise
+      const rawReply = await chatCompletion(conversationMessages, {
+        temperature: 0.85,
         maxTokens: maxTok,
         model: modelToUse,
       });
 
-      let reply = "Hmm, I lost my train of thought.";
-      let subconscious_actions: any[] = [];
-
-      const replyMatch = rawRes.match(/<reply>([\s\S]*?)(?:<\/reply>|$)/);
-      if (replyMatch) {
-        reply = replyMatch[1].trim();
-      } else {
-        // Fallback A: Nemotron/some models output markdown headers instead of XML tags:
-        // "**Response**\nActual reply text\n\n**Subconscious Actions**\n[{...}]"
-        // Extract just the text between **Response** and **Subconscious Actions**.
-        const mdResponseMatch = rawRes.match(/\*\*Response\*\*[:\s]*([\s\S]*?)(?:\*\*Subconscious Actions\*\*|$)/i);
-        if (mdResponseMatch) {
-          reply = mdResponseMatch[1].trim();
-        } else {
-          // Fallback B: no tags at all — strip known sections and use the rest
-          reply = rawRes
-            .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '') // strip markdown section
-            .replace(/\*\*Response\*\*[:\s]*/gi, '')              // strip "**Response**" prefix
-            .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
-            .trim();
-        }
-      }
-
-      // Safety strip: Remove any XML, JSON, or markdown bleed from the reply
-      reply = reply
+      reply = rawReply
         .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
-        .replace(/<subconscious_actions>[\s\S]*/g, '') // unclosed tag
-        .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '') // Nemotron markdown section
-        .replace(/\*\*Response\*\*[:\s]*/gi, '') // Nemotron "**Response**" prefix
-        .replace(/\[\s*\{.*"tool".*\}.*\]/gs, '') // JSON array bleed
+        .replace(/<subconscious_actions>[\s\S]*/g, '')
+        .replace(/<reply>([\s\S]*?)<\/reply>/i, '$1')
+        .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '')
+        .replace(/\[[\s\S]*?"tool"[\s\S]*?\]/g, '')
         .trim();
 
-      if (!reply) reply = NOVA_EMPTY_REPLY; // absolute last resort — in-voice, never jargon
-
-      const subMatch = rawRes.match(/<subconscious_actions>([\s\S]*?)<\/subconscious_actions>/);
-      if (subMatch) {
-        try {
-          let jsonStr = subMatch[1].trim();
-          if (jsonStr.startsWith('```json')) {
-            jsonStr = jsonStr.replace(/^```json/, '').replace(/```$/, '').trim();
-          } else if (jsonStr.startsWith('```')) {
-            jsonStr = jsonStr.replace(/^```/, '').replace(/```$/, '').trim();
-          }
-          const parsed = JSON.parse(jsonStr);
-          subconscious_actions = Array.isArray(parsed) ? parsed : [parsed];
-        } catch (e) {
-          logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e });
-        }
-      }
-
-      // Fallback: If no subconscious_actions XML tag was parsed, search rawRes for any code block or inline JSON tool call
-      if (subconscious_actions.length === 0) {
-        const fallbackMatch = rawRes.match(/(?:```(?:json)?\s*)?(\[\s*\{\s*"tool"[\s\S]*?\}\s*\]|\{\s*"tool"[\s\S]*?\}\s*\})(?:```)?/i);
-        if (fallbackMatch) {
-          try {
-            const parsed = JSON.parse(fallbackMatch[1].trim());
-            const arr = Array.isArray(parsed) ? parsed : [parsed];
-            if (arr.length > 0 && arr[0].tool) {
-              subconscious_actions = arr;
-              logger.info(`[NOVA BRAIN] Fallback-extracted ${subconscious_actions.length} tool actions from raw response block.`);
-            }
-          } catch (e) {
-            // Ignore fallback parse error
-          }
-        }
-      }
-
-      // Sanitize formatting/leak leftovers (bold, menus, "(subconscious_actions: )" labels)
-      // so a model that ignored the anti-robot prompt rules still renders as a friend.
+      if (!reply) reply = NOVA_EMPTY_REPLY;
       reply = sanitizeReply(reply);
-
-      // POST-PROCESS: If using fast model and the reply mentions actions but none were extracted,
-      // do a targeted extraction call with the 8B model to recover the tool actions the
-      // small model skipped (it often ignores the XML instruction block).
-      if (subconscious_actions.length === 0 && reply) {
-        const lowerReply = reply.toLowerCase();
-        const lowerMsg = message.toLowerCase();
-        const shouldHaveActions =
-          (lowerMsg.includes('remind') || lowerMsg.includes('yaad') || lowerMsg.includes('timer')) ||
-          (lowerReply.includes('remind') || lowerReply.includes('yaad dila') || lowerReply.includes('set kar'));
-
-        if (shouldHaveActions) {
-          try {
-            const extractionPrompt = `Based on this conversation, extract any actions that should be taken.
-
-User said: "${message}"
-Nova replied: "${reply}"
-
-If a reminder was discussed, output EXACTLY this JSON (fill in the values):
-[{"tool": "ReminderEngine", "action": "schedule", "data": {"title": "WHAT", "time_phrase": "WHEN", "purpose": "WHY"}}]
-
-If a memory should be saved, output:
-[{"tool": "MemoryRepository", "action": "save", "data": {"key": "CATEGORY", "value": "DETAIL"}}]
-
-If no actions needed, output: []
-
-Output ONLY the JSON array, nothing else.`;
-
-            const extractionResult = await chatCompletionBackground([
-              { role: 'system', content: 'You extract structured actions from conversations. Output only JSON.' },
-              { role: 'user', content: extractionPrompt }
-            ], {
-              model: 'meta/llama-3.1-8b-instruct',
-              maxTokens: 256,
-              temperature: 0.1
-            });
-
-            const cleaned = extractionResult.trim().replace(/^```json?\s*/, '').replace(/```$/, '').trim();
-            if (cleaned.startsWith('[')) {
-              const parsed = JSON.parse(cleaned);
-              if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].tool) {
-                subconscious_actions = parsed;
-                logger.info(`[NOVA BRAIN] Post-extraction recovered ${subconscious_actions.length} actions from fast model reply.`);
-              }
-            }
-          } catch (e) {
-            logger.warn('[NOVA BRAIN] Post-extraction failed (non-critical)', { error: e instanceof Error ? e.message : String(e) });
-          }
-        }
-      }
-
-      logger.info(`[NOVA BRAIN] Generated reply and ${subconscious_actions.length} subconscious actions.`);
-      return { reply, subconscious_actions };
+      logger.info(`[NOVA BRAIN] Call 1 reply: "${reply.substring(0, 80)}..."`);
 
     } catch (error) {
-      logger.error('[NOVA BRAIN] LLM failure', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('[NOVA BRAIN] Call 1 (Conversation) failed', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
+
+    // ── CALL 2: Background Extraction ────────────────────────────────────────
+    // The 8B model's ONLY job: structured JSON extraction.
+    // Non-fatal — if this fails, user still gets the reply.
+    try {
+      const extractionPrompt = promptBuilder.buildExtractionPrompt(
+        message,
+        reply,
+        context.workingMemories || [],
+        context.remindersContext || ''
+      );
+
+      logger.info('[NOVA BRAIN] Call 2 (Extraction) — 8B model');
+
+      const rawExtraction = await chatCompletionBackground(
+        [
+          { role: 'system', content: 'You are a JSON extraction engine. Output only valid JSON arrays. No explanations.' },
+          { role: 'user', content: extractionPrompt }
+        ],
+        {
+          model: 'meta/llama-3.1-8b-instruct',
+          maxTokens: 512,
+          temperature: 0.1,
+        }
+      );
+
+      let jsonStr = rawExtraction.trim()
+        .replace(/^```json\s*/, '').replace(/```$/, '')
+        .replace(/^```\s*/, '').replace(/```$/, '')
+        .trim();
+
+      if (jsonStr.startsWith('[') || jsonStr.startsWith('{')) {
+        const parsed = JSON.parse(jsonStr);
+        subconscious_actions = Array.isArray(parsed) ? parsed : [parsed];
+        logger.info(`[NOVA BRAIN] Call 2 extracted ${subconscious_actions.length} actions`);
+      }
+
+    } catch (extractionError) {
+      logger.warn('[NOVA BRAIN] Call 2 (Extraction) failed — non-critical', {
+        error: extractionError instanceof Error ? extractionError.message : String(extractionError)
+      });
+      subconscious_actions = [];
+    }
+
+    logger.info(`[NOVA BRAIN] Done — reply ready, ${subconscious_actions.length} background actions queued.`);
+    return { reply, subconscious_actions };
   }
 
   /**
@@ -434,7 +339,7 @@ Output ONLY the JSON array, nothing else.`;
   ): AsyncGenerator<string, { subconscious_actions: any[] }, unknown> {
     
     const systemPrompt = promptBuilder.buildSystemPrompt(
-      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.\n\n## 🧠 MEMORY USAGE (MANDATORY)\nYou have access to the user\'s stored memories above. You MUST:\n- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")\n- Mention specific people by name (e.g., "How is Sakshi doing?")\n- Recall specific events with dates when relevant\n- NEVER give generic template responses\n- If asked "what do you remember", quote memories VERBATIM\n- If you don\'t see relevant memories, say "I need to check my notes" instead of making things up',
+      context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
       context.memories || [],
       context.workingMemories || [],
       context.profile?.preferred_name,
@@ -446,70 +351,14 @@ Output ONLY the JSON array, nothing else.`;
       context.situationBrief
     );
 
-    const fullPrompt = `${systemPrompt}\n${context.memoryContext || ''}\n${context.temporalContextBlock || ''}\n${context.remindersContext || ''}\n${context.lengthInstruction || ''}
-
-## 🧠 SUBCONSCIOUS ACTIONS & STREAMING (CRITICAL FORMAT)
-You are capable of generating a conversational reply AND taking background actions simultaneously.
-You MUST format your EXACT output using these two XML tags IN THIS EXACT ORDER:
-
-<subconscious_actions>
-[
-  { "tool": "MomentEngine", "action": "extract", "data": { "moment": "...", "emotion": "..." } },
-  { "tool": "ReminderEngine", "action": "schedule", "data": { "time_phrase": "in 10 minutes", "description": "Check if user is back from being busy" } }
-]
-</subconscious_actions>
-<reply>
-CRITICAL: STRICTLY 1-2 sentences MAX. OUTCOME ONLY. NO bullet points. NO care packages. NO summaries. Keep it casual like a WhatsApp text.
-</reply>
-
-Available Tools for Subconscious Actions:
-1. "MomentEngine" -> "extract": Extract a core life event or emotional moment from the text.
-   - data: { "moment": "brief description", "emotion": "happy/sad/etc", "importance": 1-10 }
-2. "ReminderEngine" -> "schedule": Set a reminder.
-   - data (use simple time_phrase):
-     * TIME: { "title": "what to remind", "time_phrase": "in 10 minutes" | "at 7pm tomorrow" | "every 2 hours", "purpose": "why it matters" }
-     * EVENT (no time needed): { "title": "take medicine", "event_trigger": "wake_up" }   ← "remind me when I wake up"
-     * AUTO-TIMER: Include "is_auto": true if you are proactively setting a timer for the user without them asking.
-   - MULTIPLE REMINDERS: If the user asks for multiple reminders, emit an array in "reminders":
-     { "reminders": [
-         { "title": "medicine 1", "time_phrase": "in 10 minutes", "purpose": "morning dose" },
-         { "title": "medicine 2", "time_phrase": "in 6 hours", "purpose": "evening dose" }
-       ] }
-   - SPECIFIC DAY: If user says "remind me on Sunday" (no time) → ask "What time on Sunday?" and DO NOT emit schedule yet.
-   - RECURRING: "every 30 minutes" or "every day at 8am" → include in time_phrase naturally.
-   - CLARITY RULE: If the user asks for a reminder WITHOUT any time, frequency, or event → ask ONE clarifying question in your reply and DO NOT emit schedule yet.
-   - CRITICAL HONESTY RULE: If you schedule, you MUST emit a real ReminderEngine action here. NEVER say "I'll remind you", "ok done", or invent a fake/imaginary countdown. Only ever tell the user a reminder is set when you are actually scheduling it in this list. If you instead asked a clarifying question, say you'll set it once they tell you when.
-   - CRITICAL FOR CLAUDE/OMNI MODELS: Do NOT explain that you are an AI or a "text-based" assistant and cannot send push notifications. The backend sends the push. Simply emit this tool and tell the user you set it.
-   - 🔴 MANDATORY: If user says "remind me in X minutes/hours" or "remind me at TIME" → YOU MUST EMIT ReminderEngine action. DO NOT just reply "Reminder Set!" without the action.
-3. "NovaFollowupService" -> "queue": Queue a follow-up ONLY if you asked a heartfelt question or the topic is unresolved AND the user seems engaged.
-   - data: { "question": "the follow-up text", "delay_hours": 0.5 }
-   - DELAY RULES (CRITICAL — Real friends don't spam):
-     * 0.5 = 30 min → user just said something personal/emotional (use sparingly)
-     * 1.0 = 1 hour  → standard follow-up for an open conversation
-     * 2.0 = 2 hours → user seems a bit busy or gave short replies
-     * 4.0 = 4 hours → user hasn't replied or seems occupied
-     * NEVER use delays below 0.5. Sending in 36 seconds or 2 minutes is harassment, not friendship.
-     * If the user said "bye", "gn", "soone ja raha hoon", or "busy hoon" → DO NOT queue any follow-up at all.
-     * If the topic feels concluded → DO NOT queue a follow-up.
-   - CRITICAL (CONTEXT BRIDGING): NEVER use generic questions like "kya kar raha hai?". Your follow-up MUST bridge the context of what you were just talking about! Act like a human who got left on read (e.g. "To uska kya hua aage?").
-4. "MemoryRepository" -> "save": Save a factual detail about the user.
-   - data: { "key": "category_name", "value": "detail" }
-   - 🔴 ATOMICITY RULE (CRITICAL): NEVER merge multiple distinct facts into a single memory. If the user mentions their wife's name AND that they love her cooking, emit TWO separate MemoryRepository actions (e.g. one for "Wife Name: Sakshi" and one for "Loves: Wife's cooking").
-   - 🔴 ANTI-TRASH RULE: NEVER save literal conversational chat, short-term states, or fluff (e.g. "kaam hi kar raha hu", "feeling sleepy"). ONLY save meaningful, long-term facts (likes, dislikes, career goals, etc).
-5. "LifeEventExtractor" -> "event": Log an upcoming event, meeting, or time-specific thing the user mentioned.
-   - data: { "description": "Short description", "expected_time": "ISO 8601 timestamp", "follow_up_question": "What to ask later", "follow_up_after_minutes": 60, "urgency": "high|medium|low", "is_recurring": false }
-   - 🔴 ANTI-TRASH RULE: DO NOT save internal conversational states (like "feeling sleepy") as events. Events are strictly real-world occurrences (meetings, flights, exams).
-6. "LifeEventExtractor" -> "routine": Extract a recurring routine or habit the user mentioned.
-   - data: { "routineType": "sleep | diet | activity | general", "description": "Short description of the routine" }
-   - 🔴 ANTI-TRASH RULE: DO NOT save one-off actions as routines.
-7. "AgendaManager" -> "update_status": Mark a previously discussed agenda item or task as completed, cancelled, or snoozed. Use this when the user says they finished a task or asks you to forget it.
-   - data: { "task_description": "the task they finished", "status": "completed|cancelled|snoozed" }
-8. "AgendaManager" -> "add": Implicitly log a goal or task the user mentioned so you can ask them about it later. Use this if they say "I need to do X" but don't ask for a specific reminder time.
-   - data: { "task_description": "the task they need to do" }
-   - 🔴 ANTI-TRASH RULE: NEVER save conversational chat like "soo jaunga", "lag raha hai", "pine ke lie" as goals. ONLY save actual, actionable tasks (e.g. "Buy groceries", "Finish project"). If it is not an actionable task, do not use this tool.
-
-If no tools need to be called, leave the JSON array empty: []
-`;
+    const fullPrompt = [
+      systemPrompt,
+      context.memoryContext || '',
+      context.temporalContextBlock || '',
+      context.remindersContext || '',
+      context.lengthInstruction || '',
+      '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
+    ].filter(Boolean).join('\n');
 
     const messages = buildMessages(fullPrompt, context.recentMessages, message);
 
@@ -520,6 +369,7 @@ If no tools need to be called, leave the JSON array empty: []
     });
 
     let fullText = '';
+    let fallbackReply = '';
     let replyStreamed = '';
     let replyClosed = false;
 
@@ -572,42 +422,42 @@ If no tools need to be called, leave the JSON array empty: []
     }
 
     let subconscious_actions: any[] = [];
-    const subMatch = fullText.match(/<subconscious_actions>([\s\S]*?)<\/subconscious_actions>/);
-    if (subMatch) {
-      try {
-        let jsonStr = subMatch[1].trim();
-        // Strip markdown if the LLM wrapped it
-        if (jsonStr.startsWith('```json')) {
-          jsonStr = jsonStr.replace(/^```json/, '').replace(/```$/, '').trim();
-        } else if (jsonStr.startsWith('```')) {
-          jsonStr = jsonStr.replace(/^```/, '').replace(/```$/, '').trim();
-        }
-        
-        let parsed = JSON.parse(jsonStr);
-        // Auto-wrap single object in array to prevent crashes
-        if (!Array.isArray(parsed) && typeof parsed === 'object' && parsed !== null) {
-          parsed = [parsed];
-        }
-        subconscious_actions = Array.isArray(parsed) ? parsed : [];
-      } catch (e) {
-        logger.warn('[NOVA BRAIN] Failed to parse subconscious actions JSON', { error: e, rawText: subMatch[1] });
-      }
-    }
+    try {
+      const extractionPrompt = promptBuilder.buildExtractionPrompt(
+        message,
+        replyStreamed || fallbackReply || NOVA_EMPTY_REPLY,
+        context.workingMemories || [],
+        context.remindersContext || ''
+      );
 
-    if (subconscious_actions.length === 0) {
-      const fallbackMatch = fullText.match(/(?:```(?:json)?\s*)?(\[\s*\{\s*"tool"[\s\S]*?\}\s*\]|\{\s*"tool"[\s\S]*?\}\s*\})(?:```)?/i);
-      if (fallbackMatch) {
-        try {
-          const parsed = JSON.parse(fallbackMatch[1].trim());
-          const arr = Array.isArray(parsed) ? parsed : [parsed];
-          if (arr.length > 0 && arr[0].tool) {
-            subconscious_actions = arr;
-            logger.info(`[NOVA BRAIN] Stream fallback-extracted ${subconscious_actions.length} tool actions from full text.`);
-          }
-        } catch (e) {
-          // Ignore fallback parse error
+      logger.info('[NOVA BRAIN] Stream Call 2 (Extraction) — 8B model');
+
+      const rawExtraction = await chatCompletionBackground(
+        [
+          { role: 'system', content: 'You are a JSON extraction engine. Output only valid JSON arrays. No explanations.' },
+          { role: 'user', content: extractionPrompt }
+        ],
+        {
+          model: 'meta/llama-3.1-8b-instruct',
+          maxTokens: 512,
+          temperature: 0.1,
         }
+      );
+
+      let jsonStr = rawExtraction.trim()
+        .replace(/^```json\s*/, '').replace(/```$/, '')
+        .replace(/^```\s*/, '').replace(/```$/, '')
+        .trim();
+
+      if (jsonStr.startsWith('[') || jsonStr.startsWith('{')) {
+        const parsed = JSON.parse(jsonStr);
+        subconscious_actions = Array.isArray(parsed) ? parsed : [parsed];
+        logger.info(`[NOVA BRAIN] Stream Call 2 extracted ${subconscious_actions.length} actions`);
       }
+    } catch (extractionError) {
+      logger.warn('[NOVA BRAIN] Stream Call 2 (Extraction) failed — non-critical', {
+        error: extractionError instanceof Error ? extractionError.message : String(extractionError)
+      });
     }
 
     logger.info(`[NOVA BRAIN] Stream finished. Generated ${subconscious_actions.length} subconscious actions.`);
