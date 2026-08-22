@@ -9,6 +9,93 @@ const TIMEZONE_OFFSETS: Record<string, number> = {
 const processedCache = new Map<string, number>();
 
 export class BackgroundActionService {
+  async processCriticalActions(userId: string, requestId: string, actions: any[], userCountry: string): Promise<{ success: boolean, actionType: string, error?: string }> {
+    if (!actions || actions.length === 0) return { success: true, actionType: 'none' };
+
+    // We only execute the FIRST action synchronously as the primary critical action
+    const action = actions[0];
+    const actionType = `${action.tool}.${action.action}`;
+
+    try {
+      // 1. Atomic Idempotency Check
+      const { error } = await supabaseAdmin
+        .from('action_idempotency')
+        .insert({
+          user_id: userId,
+          idempotency_key: requestId,
+          action_type: actionType,
+          status: 'pending'
+        })
+        .select()
+        .maybeSingle();
+
+      if (error && error.code === '23505') {
+        // Conflict! Row already exists.
+        const { data: existing } = await supabaseAdmin
+          .from('action_idempotency')
+          .select('status, result')
+          .eq('user_id', userId)
+          .eq('idempotency_key', requestId)
+          .maybeSingle();
+
+        if (existing?.status === 'completed') {
+          return { success: true, actionType };
+        } else if (existing?.status === 'failed') {
+          return { success: false, actionType, error: existing.result?.error || 'Previously failed' };
+        } else {
+          return { success: false, actionType, error: 'Action is currently pending execution by another process' };
+        }
+      }
+
+      // 2. Execute Action Synchronously
+      if (action.tool === 'ReminderEngine' && action.action === 'schedule') {
+        const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
+        const { ReminderEngine } = await import('./ReminderEngine');
+        const engine = new ReminderEngine(userTzOffset);
+        
+        let specs = action.data.reminders || [action.data];
+        if (!Array.isArray(specs)) specs = [specs];
+        
+        specs = specs.map((spec: any) => {
+          if (!spec.time_phrase) return this.normalizeStructuredSpec(spec);
+          // For critical synchronous execution, we only want to support the structured LLM output
+          // to avoid complex regex logic, but we'll fall back to normalize if needed.
+          // Wait, we need the regex from earlier for safety! We will just re-use the exact same logic.
+          // Actually, we can just extract that regex block into a private method `parseLegacySpec`.
+          return this.parseLegacySpec(spec, userTzOffset);
+        });
+
+        const allScheduled: any[] = [];
+        for (const spec of specs) {
+          const parsedList = engine.parse(spec);
+          const inserted = await engine.scheduleAll(userId, parsedList);
+          allScheduled.push(...inserted);
+        }
+        logger.info('[BackgroundAction] Synchronously scheduled reminders', { userId, count: allScheduled.length });
+      } else {
+        // Unhandled critical action type
+        throw new Error(`Unsupported critical action: ${actionType}`);
+      }
+
+      // 3. Mark Completed
+      await supabaseAdmin.from('action_idempotency')
+        .update({ status: 'completed', result: { success: true }, completed_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .eq('idempotency_key', requestId);
+
+      return { success: true, actionType };
+    } catch (e: any) {
+      logger.error(`[BackgroundAction] Critical action failed: ${actionType}`, { error: e.message });
+      // Mark Failed
+      await supabaseAdmin.from('action_idempotency')
+        .update({ status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .eq('idempotency_key', requestId);
+        
+      return { success: false, actionType, error: e.message };
+    }
+  }
+
   async processActions(userId: string, conversationId: string, actions: any[], userCountry: string, messageHash?: string) {
     if (!actions || actions.length === 0) return;
 
@@ -45,121 +132,7 @@ export class BackgroundActionService {
           // natural language → structured fields, kept for safety.
           specs = specs.map((spec: any) => {
             if (!spec.time_phrase) return this.normalizeStructuredSpec(spec);
-
-            const phrase = String(spec.time_phrase).toLowerCase().trim();
-            const title = spec.description || spec.title || spec.text || 'Reminder';
-            const base: any = { title, notes: spec.notes };
-
-            // Pattern: "every X minutes/hours/days/weeks/months" → RECURRING reminder
-            const everyMatch = phrase.match(/every\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
-            if (everyMatch) {
-              base.relative_value = parseFloat(everyMatch[1]); // first fire in X units
-              base.relative_unit = everyMatch[2];
-              base.recurrence_interval_value = parseFloat(everyMatch[1]);
-              base.recurrence_interval_unit = everyMatch[2];
-              return base;
-            }
-
-            // Pattern: "in X minutes/hours/days/weeks/months" or "X mins later" → one-shot
-            const relMatch = phrase.match(/(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
-            if (relMatch) {
-              base.relative_value = parseFloat(relMatch[1]);
-              base.relative_unit = relMatch[2];
-              return base;
-            }
-
-            // Pattern: "on <dayname> at HH:MM" or "on Sunday at 10am" — specific day with time
-            const dayAtTimeMatch = phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-            if (dayAtTimeMatch) {
-              const dayName = dayAtTimeMatch[1].toLowerCase();
-              let hh = parseInt(dayAtTimeMatch[2]);
-              const mm = dayAtTimeMatch[3] ? parseInt(dayAtTimeMatch[3]) : 0;
-              const meridiem = dayAtTimeMatch[4]?.toLowerCase();
-              if (meridiem === 'pm' && hh < 12) hh += 12;
-              if (meridiem === 'am' && hh === 12) hh = 0;
-              base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-
-              const dayIndex = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);
-              if (dayIndex !== -1) {
-                const today = new Date(Date.now() + userTzOffset * 3600000);
-                let daysAhead = (dayIndex - today.getDay() + 7) % 7;
-                if (daysAhead === 0) daysAhead = 7;
-                const targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + daysAhead);
-                base.date = targetDate.toISOString().split('T')[0];
-                base.active_days = [dayName];
-              }
-              base.needs_time_clarification = false;
-              return base;
-            }
-
-            // Pattern: "at HH:MM" or "at 7am" or "at 10:30pm"
-            const atTimeMatch = phrase.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-            if (atTimeMatch) {
-              let hh = parseInt(atTimeMatch[1]);
-              const mm = atTimeMatch[2] ? parseInt(atTimeMatch[2]) : 0;
-              const meridiem = atTimeMatch[3]?.toLowerCase();
-              if (meridiem === 'pm' && hh < 12) hh += 12;
-              if (meridiem === 'am' && hh === 12) hh = 0;
-              base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-              // If "tomorrow" mentioned, add date
-              if (phrase.includes('tomorrow')) {
-                const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
-                base.date = d.toISOString().split('T')[0];
-              }
-              return base;
-            }
-
-            // Pattern: "tomorrow" (no time → 9am default)
-            if (phrase.includes('tomorrow')) {
-              const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
-              base.date = d.toISOString().split('T')[0];
-              base.time_of_day = '09:00';
-              return base;
-            }
-
-            // Pattern: "on <dayname>" — e.g. "on Sunday", "on Monday" — needs time clarification if no time given
-            const dayMatch = phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
-            if (dayMatch) {
-              const dayName = dayMatch[1].toLowerCase();
-              const dayIndex = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);
-              if (dayIndex !== -1) {
-                const today = new Date(Date.now() + userTzOffset * 3600000);
-                let daysAhead = (dayIndex - today.getDay() + 7) % 7;
-                if (daysAhead === 0) daysAhead = 7; // Next week if today
-                const targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + daysAhead);
-                base.date = targetDate.toISOString().split('T')[0];
-                // No time provided — will default to 9am in ReminderEngine, but we should flag for clarification
-                base.needs_time_clarification = true;
-                base.active_days = [dayName];
-              }
-              return base;
-            }
-
-            // Pattern: time-of-day keywords
-            if (phrase.includes('tonight') || phrase.includes('evening')) {
-              base.time_of_day = '20:00';
-              return base;
-            }
-            if (phrase.includes('morning')) {
-              base.time_of_day = '08:00';
-              return base;
-            }
-            if (phrase.includes('noon') || phrase.includes('lunch')) {
-              base.time_of_day = '12:00';
-              return base;
-            }
-            if (phrase.includes('night')) {
-              base.time_of_day = '22:00';
-              return base;
-            }
-
-            // Fallback: 1 hour from now
-            logger.warn('[BackgroundAction] Could not parse time_phrase, defaulting to 1h', { phrase });
-            base.relative_value = 1;
-            base.relative_unit = 'hours';
-            return base;
+            return this.parseLegacySpec(spec, userTzOffset);
           });
 
           const allScheduled: any[] = [];
@@ -455,6 +428,113 @@ export class BackgroundActionService {
     if (m[3] === 'pm' && hh < 12) hh += 12;
     if (m[3] === 'am' && hh === 12) hh = 0;
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+
+  private parseLegacySpec(spec: any, userTzOffset: number): any {
+    const phrase = String(spec.time_phrase).toLowerCase().trim();
+    const title = spec.description || spec.title || spec.text || 'Reminder';
+    const base: any = { title, notes: spec.notes };
+
+    const everyMatch = phrase.match(/every\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
+    if (everyMatch) {
+      base.relative_value = parseFloat(everyMatch[1]);
+      base.relative_unit = everyMatch[2];
+      base.recurrence_interval_value = parseFloat(everyMatch[1]);
+      base.recurrence_interval_unit = everyMatch[2];
+      return base;
+    }
+
+    const relMatch = phrase.match(/(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
+    if (relMatch) {
+      base.relative_value = parseFloat(relMatch[1]);
+      base.relative_unit = relMatch[2];
+      return base;
+    }
+
+    const dayAtTimeMatch = phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    if (dayAtTimeMatch) {
+      const dayName = dayAtTimeMatch[1].toLowerCase();
+      let hh = parseInt(dayAtTimeMatch[2]);
+      const mm = dayAtTimeMatch[3] ? parseInt(dayAtTimeMatch[3]) : 0;
+      const meridiem = dayAtTimeMatch[4]?.toLowerCase();
+      if (meridiem === 'pm' && hh < 12) hh += 12;
+      if (meridiem === 'am' && hh === 12) hh = 0;
+      base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+
+      const dayIndex = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);
+      if (dayIndex !== -1) {
+        const today = new Date(Date.now() + userTzOffset * 3600000);
+        let daysAhead = (dayIndex - today.getDay() + 7) % 7;
+        if (daysAhead === 0) daysAhead = 7;
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + daysAhead);
+        base.date = targetDate.toISOString().split('T')[0];
+        base.active_days = [dayName];
+      }
+      base.needs_time_clarification = false;
+      return base;
+    }
+
+    const atTimeMatch = phrase.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    if (atTimeMatch) {
+      let hh = parseInt(atTimeMatch[1]);
+      const mm = atTimeMatch[2] ? parseInt(atTimeMatch[2]) : 0;
+      const meridiem = atTimeMatch[3]?.toLowerCase();
+      if (meridiem === 'pm' && hh < 12) hh += 12;
+      if (meridiem === 'am' && hh === 12) hh = 0;
+      base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+      if (phrase.includes('tomorrow')) {
+        const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
+        base.date = d.toISOString().split('T')[0];
+      }
+      return base;
+    }
+
+    if (phrase.includes('tomorrow')) {
+      const d = new Date(Date.now() + userTzOffset * 3600000 + 86400000);
+      base.date = d.toISOString().split('T')[0];
+      base.time_of_day = '09:00';
+      return base;
+    }
+
+    const dayMatch = phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+    if (dayMatch) {
+      const dayName = dayMatch[1].toLowerCase();
+      const dayIndex = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);
+      if (dayIndex !== -1) {
+        const today = new Date(Date.now() + userTzOffset * 3600000);
+        let daysAhead = (dayIndex - today.getDay() + 7) % 7;
+        if (daysAhead === 0) daysAhead = 7;
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + daysAhead);
+        base.date = targetDate.toISOString().split('T')[0];
+        base.needs_time_clarification = true;
+        base.active_days = [dayName];
+      }
+      return base;
+    }
+
+    if (phrase.includes('tonight') || phrase.includes('evening')) {
+      base.time_of_day = '20:00';
+      return base;
+    }
+    if (phrase.includes('morning')) {
+      base.time_of_day = '08:00';
+      return base;
+    }
+    if (phrase.includes('noon') || phrase.includes('lunch')) {
+      base.time_of_day = '12:00';
+      return base;
+    }
+    if (phrase.includes('night')) {
+      base.time_of_day = '22:00';
+      return base;
+    }
+
+    logger.warn('[BackgroundAction] Could not parse time_phrase, defaulting to 1h', { phrase });
+    base.relative_value = 1;
+    base.relative_unit = 'hours';
+    return base;
   }
 }
 

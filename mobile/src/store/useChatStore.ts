@@ -399,7 +399,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               get().conversationId || undefined,
               batch[0].replyToId,
               batch[0].replyToContent,
-              batch[0].imageBase64
+              batch[0].imageBase64,
+              primaryId
             );
             console.log(`[PROCESS_QUEUE] Delivered message ${primaryId} to DB/backend`);
             const convId: string = data?.conversation_id || get().conversationId || '';

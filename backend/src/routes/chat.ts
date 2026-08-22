@@ -159,6 +159,7 @@ const ChatSchema = z.object({
   reply_to_id: z.string().uuid().optional(),
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
+  client_message_id: z.string().uuid().optional(),
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -480,11 +481,11 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content, image_base64 } = parseResult.data;
+      const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content, image_base64, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
       
       const requestStartTime = Date.now();
-      const requestId = crypto.randomUUID();
+      const requestId = client_message_id || crypto.randomUUID();
       logger.info('[Chat] Request started', { requestId, userId, messageLength: message.length, isAsync: async_mode, isProactive: is_proactive });
       let activeConversationId = conversation_id || crypto.randomUUID();
 
@@ -1004,7 +1005,8 @@ chatRouter.post(
           ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
           : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN',
-        conversationId: activeConversationId
+        conversationId: activeConversationId,
+        requestId: requestId
       };
 
       // Trigger engine is for proactive scheduling only — skip for direct replies

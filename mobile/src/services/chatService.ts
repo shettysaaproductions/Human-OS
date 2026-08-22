@@ -1,6 +1,7 @@
 import { api } from './api';
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../store/useAuthStore';
+import crypto from 'crypto';
 
 export const chatService = {
   getHistory: async (conversationId?: string, limit: number = 50, beforeId?: string) => {
@@ -31,19 +32,24 @@ export const chatService = {
     }
   },
 
-  sendMessage: async (message: string, conversationId?: string) => {
+  sendMessage: async (message: string, conversationId?: string, clientMessageId?: string) => {
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;
+    if (clientMessageId) payload.client_message_id = clientMessageId;
+    else payload.client_message_id = crypto.randomUUID();
     const response = await api.post('/chat', payload);
     return response.data;
   },
 
-  async sendMessageAsync(message: string, conversationId?: string, replyToId?: string, replyToContent?: string, imageBase64?: string): Promise<{ conversation_id: string, user_message_id?: string } | null> {
+  async sendMessageAsync(message: string, conversationId?: string, replyToId?: string, replyToContent?: string, imageBase64?: string, clientMessageId?: string): Promise<{ conversation_id: string, user_message_id?: string } | null> {
     const payload: any = { message, async_mode: true };
     if (conversationId) payload.conversation_id = conversationId;
     if (replyToId) payload.reply_to_id = replyToId;
     if (replyToContent) payload.reply_to_content = replyToContent;
     if (imageBase64) payload.image_base64 = imageBase64;
+    
+    if (clientMessageId) payload.client_message_id = clientMessageId;
+    else payload.client_message_id = crypto.randomUUID();
 
     // We use the native fetch API with keepalive: true so that the OS
     // completes the HTTP request even if the JS thread is suspended immediately after.
@@ -104,7 +110,8 @@ export const chatService = {
     onSetup: (convId: string) => void,
     onChunk: (chunk: string) => void,
     onDone: () => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
+    clientMessageId?: string
   ): Promise<void> => {
     return new Promise(async (resolve, reject) => {
       let settled = false;
@@ -127,6 +134,8 @@ export const chatService = {
         const token = await SecureStore.getItemAsync('accessToken');
         const payload: any = { message };
         if (conversationId) payload.conversation_id = conversationId;
+        if (clientMessageId) payload.client_message_id = clientMessageId;
+        else payload.client_message_id = crypto.randomUUID();
 
         const url = `${api.defaults.baseURL}/chat`;
         console.log('[STREAM] Connecting to:', url);

@@ -3,11 +3,7 @@ import { config } from '../config';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 import { backgroundActions } from './BackgroundActionService';
-import { createHash } from 'crypto';
 
-function hashMessage(msg: string): string {
-  return createHash('sha256').update(msg.toLowerCase().trim().replace(/\s+/g, ' ')).digest('hex').slice(0, 16);
-}
 
 /**
  * Nova's natural, in-voice safety-net reply when the LLM returns nothing usable.
@@ -221,9 +217,14 @@ function needsDeepModel(message: string): boolean {
  */
 function isCriticalAction(message: string): boolean {
   const m = message.toLowerCase().trim();
-  // Regex: "remind me", "set a reminder", "create a task", "set an alarm", "schedule this"
-  // Ensures word boundaries and avoids generic uses like "remind me why..."
-  return /\b(remind me(?:\s+(?:to|at|in|on|tomorrow|tonight))?|set (?:a|another|an) reminder|create (?:a |new )?task|set (?:an )?alarm|schedule (?:this|it|that|for))\b/i.test(m);
+  // We only match explicit intent to set/create/schedule an actionable item, rejecting conversational queries.
+  // "remind me" must be followed by an actionable preposition/time.
+  const hasGenericRemind = /\bremind me\b/i.test(m);
+  const hasSpecificRemind = /\bremind me\s+(?:to|at|in|on|tomorrow|tonight|next)\b/i.test(m);
+  if (hasGenericRemind && !hasSpecificRemind) {
+    return false; // Rejects "Can you remind me why I started this?"
+  }
+  return /\b(remind me\s+(?:to|at|in|on|tomorrow|tonight|next)|set (?:a|another|an )?reminder|create (?:a |new )?task|set (?:an )?alarm|schedule (?:this|it|that|for))\b/i.test(m);
 }
 
 /**
@@ -314,18 +315,19 @@ export class NovaBrainService {
       const criticalActions = await extractCriticalAction(message);
       
       if (criticalActions.length > 0) {
-        try {
-          await backgroundActions.processActions(
-            _userId,
-            context.conversationId || '',
-            criticalActions,
-            context.userCountry || 'IN',
-            hashMessage(message)
-          );
-          criticalActionSuccessContext = '\n[SYSTEM NOTICE: The user\'s requested action (reminder/task/schedule) was just successfully saved to the database. You can now confirm to them that it is done.]\n';
-        } catch (execError) {
-          logger.error('[NOVA BRAIN] Critical action execution failed', { error: execError instanceof Error ? execError.message : String(execError) });
-          criticalActionSuccessContext = '\n[SYSTEM NOTICE: The user\'s requested action FAILED to save due to a system error. Do NOT tell them it was successful. Apologize and say you could not set it.]\n';
+        const result = await backgroundActions.processCriticalActions(
+          _userId,
+          context.requestId || crypto.randomUUID(),
+          criticalActions,
+          context.userCountry || 'IN'
+        );
+        
+        if (result.success) {
+          criticalActionSuccessContext = `\n[SYSTEM NOTICE: The user's requested action (Type: ${result.actionType}) was just successfully saved to the database. You can now confirm to them that it is done.]\n`;
+        } else {
+          logger.warn(`[NOVA BRAIN] Bypassing LLM due to critical action failure: ${result.error}`);
+          const fallbackReply = `I'm really sorry, but I ran into a system issue and couldn't save that ${result.actionType.includes('schedule') ? 'reminder' : 'action'}. Could you try again in a moment?`;
+          return { reply: fallbackReply, subconscious_actions: [] };
         }
       }
     }
@@ -426,18 +428,20 @@ export class NovaBrainService {
       const criticalActions = await extractCriticalAction(message);
       
       if (criticalActions.length > 0) {
-        try {
-          await backgroundActions.processActions(
-            _userId,
-            context.conversationId || '',
-            criticalActions,
-            context.userCountry || 'IN',
-            hashMessage(message)
-          );
-          criticalActionSuccessContext = '\n[SYSTEM NOTICE: The user\'s requested action (reminder/task/schedule) was just successfully saved to the database. You can now confirm to them that it is done.]\n';
-        } catch (execError) {
-          logger.error('[NOVA BRAIN] Stream: Critical action execution failed', { error: execError instanceof Error ? execError.message : String(execError) });
-          criticalActionSuccessContext = '\n[SYSTEM NOTICE: The user\'s requested action FAILED to save due to a system error. Do NOT tell them it was successful. Apologize and say you could not set it.]\n';
+        const result = await backgroundActions.processCriticalActions(
+          _userId,
+          context.requestId || crypto.randomUUID(),
+          criticalActions,
+          context.userCountry || 'IN'
+        );
+        
+        if (result.success) {
+          criticalActionSuccessContext = `\n[SYSTEM NOTICE: The user's requested action (Type: ${result.actionType}) was just successfully saved to the database. You can now confirm to them that it is done.]\n`;
+        } else {
+          logger.warn(`[NOVA BRAIN] Stream: Bypassing LLM due to critical action failure: ${result.error}`);
+          const fallbackReply = `I'm really sorry, but I ran into a system issue and couldn't save that ${result.actionType.includes('schedule') ? 'reminder' : 'action'}. Could you try again in a moment?`;
+          yield fallbackReply;
+          return { subconscious_actions: [] };
         }
       }
     }
