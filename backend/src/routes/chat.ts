@@ -962,6 +962,7 @@ chatRouter.post(
         currentVisualContext: profile?.current_visual_context, userPresence,
         unreadNovaMessages: unreadResult.count || 0, behaviorPattern: behaviorPatternResult.pattern !== 'UNKNOWN' ? `${behaviorPatternResult.pattern} (${behaviorPatternResult.description})` : null,
         totalMemoriesCount: totalMemoriesResult.count || 0,
+        goalMemories: memories.filter((m: any) => m.memory_type === 'goals'),
       };
       situationBrief = situationalAwareness.buildBrief(situationCtx);
 

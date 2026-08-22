@@ -37,6 +37,7 @@ export interface SituationContext {
   behaviorPattern?: string | null;
   unreadNovaMessages?: number;   // assistant messages the user has not opened/read yet
   totalMemoriesCount?: number | null; // count of long-term memories
+  goalMemories?: { key: string; value: string; memory_type?: string }[];
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -225,6 +226,18 @@ export class SituationalAwareness {
       if (momentum) lines.push(`- 📈 EMOTIONAL MOMENTUM: ${momentum}`);
     }
 
+    // ── Life-State Synthesis ──
+    const recentEp = ctx.recentEpisodes && ctx.recentEpisodes.length > 0 ? ctx.recentEpisodes[0] : null;
+    const lifeState = this.buildLifeStateContext(
+      ctx.latestEmotion || null,
+      ctx.goalMemories || [],
+      recentEp,
+      ctx.latestReflection || null
+    );
+    if (lifeState) {
+      lines.push(lifeState);
+    }
+
     // ── Jarvis Reminder Mode ──
     if (ctx.upcomingReminders && ctx.upcomingReminders.length > 0) {
       const nowMs = ctx.nowLocal.getTime();
@@ -384,6 +397,39 @@ export class SituationalAwareness {
     }
 
     return null;
+  }
+
+  buildLifeStateContext(
+    latestEmotion: { mood: string; intensity: number; notes: string } | null,
+    goalMemories: { key: string; value: string }[],
+    recentEpisode: { summary: string; emotion: string | null; created_at?: string } | null,
+    latestReflection: { summary: string; key_takeaways: any } | null
+  ): string {
+    const parts: string[] = [];
+
+    if (latestEmotion && goalMemories && goalMemories.length > 0) {
+      const topGoal = goalMemories[0].value;
+      const mood = latestEmotion.mood;
+      const intensity = latestEmotion.intensity;
+      parts.push(
+        `🔗 LIFE-STATE COHERENCE: User is currently feeling "${mood}" (intensity ${intensity}/10). ` +
+        `Their active goal is "${topGoal}". ` +
+        `When relevant, BRIDGE this emotion to their goal — e.g., validate the emotional load of pursuing this goal.`
+      );
+    }
+
+    if (recentEpisode) {
+      parts.push(`📖 Recent life event: "${recentEpisode.summary}" [${recentEpisode.emotion || 'neutral'}] — reference this naturally if relevant.`);
+    }
+
+    if (latestReflection?.key_takeaways) {
+      const takeaways = Array.isArray(latestReflection.key_takeaways)
+        ? latestReflection.key_takeaways.slice(0, 2).join('; ')
+        : String(latestReflection.key_takeaways).slice(0, 200);
+      parts.push(`💡 Yesterday's reflection insight: ${takeaways}`);
+    }
+
+    return parts.length > 0 ? '\n## 🔗 LIFE STATE SYNTHESIS\n' + parts.join('\n') : '';
   }
 }
 
