@@ -6,9 +6,26 @@ const TIMEZONE_OFFSETS: Record<string, number> = {
   UK: 0,
 };
 
+const processedCache = new Map<string, number>();
+
 export class BackgroundActionService {
-  async processActions(userId: string, conversationId: string, actions: any[], userCountry: string) {
+  async processActions(userId: string, conversationId: string, actions: any[], userCountry: string, messageHash?: string) {
     if (!actions || actions.length === 0) return;
+
+    if (messageHash) {
+      const cacheKey = `${userId}:${messageHash}`;
+      const now = Date.now();
+      if (processedCache.has(cacheKey) && (now - processedCache.get(cacheKey)!) < 60000) {
+        logger.info(`[BackgroundAction] Idempotency hit for ${cacheKey}, skipping duplicate execution.`);
+        return;
+      }
+      processedCache.set(cacheKey, now);
+      
+      // Cleanup old cache entries
+      for (const [k, v] of processedCache.entries()) {
+        if (now - v > 60000) processedCache.delete(k);
+      }
+    }
 
     for (const action of actions) {
       try {

@@ -176,3 +176,4 @@ export const memoryQueue = new QueueService('memoryQueue', [
   'extract_kg', 'extract_emotional', 'extract_milestone', 'extract_short_term'
 ]);
 export const reflectionQueue = new QueueService('reflectionQueue', ['daily_reflection']);
+export const subconsciousQueue = new QueueService('subconsciousQueue', ['extract_subconscious_actions']);
