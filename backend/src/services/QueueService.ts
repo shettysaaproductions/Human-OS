@@ -24,6 +24,8 @@ export class QueueService {
   private queueName: string;
   private processor?: JobProcessor;
   private isProcessing: boolean = false;
+  private activeJobs: number = 0;
+  private maxConcurrency: number = 5;
   private maxAttempts = 3;
 
   constructor(queueName: string, private jobTypes?: string[]) {
@@ -86,9 +88,18 @@ export class QueueService {
         .eq('status', 'running')
         .lt('started_at', staleCutoff);
 
-      while (true) {
+      const poll = async () => {
+        if (!this.processor) {
+          this.isProcessing = false;
+          return;
+        }
+
+        if (this.activeJobs >= this.maxConcurrency) {
+          setTimeout(poll, 1000);
+          return;
+        }
+
         const start = Date.now();
-        // Use atomic lock-free queue claiming to avoid race conditions across pods/restarts
         const { data: jobs, error } = await supabaseAdmin.rpc('claim_next_background_job', {
           p_job_types: this.jobTypes && this.jobTypes.length > 0 ? this.jobTypes : null
         });
@@ -96,27 +107,41 @@ export class QueueService {
         qt.record('poll_pending_job', 'background_jobs', Date.now() - start, jobs?.length ?? 0);
 
         if (error || !jobs || jobs.length === 0) {
-          break;
+          this.isProcessing = false;
+          return;
         }
 
         const job = jobs[0] as Job;
+        this.activeJobs++;
 
-        try {
-          await this.processor(job);
-          
-          // Mark as completed
-          await supabaseAdmin
-            .from('background_jobs')
-            .update({ status: 'completed', finished_at: new Date().toISOString() })
-            .eq('id', job.id);
-            
-        } catch (jobError) {
-          logger.error(`Job ${job.id} failed`, { error: jobError instanceof Error ? jobError.message : String(jobError) });
-          await this.handleJobFailure(job, jobError instanceof Error ? jobError.message : String(jobError));
-        }
-      }
-    } finally {
+        this.processJob(job).finally(() => {
+          this.activeJobs--;
+          if (!this.isProcessing) {
+            this.startProcessing().catch(err => logger.error(`Queue restart failed`, { error: err }));
+          }
+        });
+        
+        setImmediate(poll);
+      };
+
+      poll();
+    } catch (err) {
+      logger.error(`Queue ${this.queueName} startProcessing failed`, { error: err instanceof Error ? err.message : String(err) });
       this.isProcessing = false;
+    }
+  }
+
+  private async processJob(job: Job) {
+    if (!this.processor) return;
+    try {
+      await this.processor(job);
+      await supabaseAdmin
+        .from('background_jobs')
+        .update({ status: 'completed', finished_at: new Date().toISOString() })
+        .eq('id', job.id);
+    } catch (jobError) {
+      logger.error(`Job ${job.id} failed`, { error: jobError instanceof Error ? jobError.message : String(jobError) });
+      await this.handleJobFailure(job, jobError instanceof Error ? jobError.message : String(jobError));
     }
   }
 

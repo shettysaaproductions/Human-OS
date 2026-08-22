@@ -14,23 +14,24 @@ export class WebSearchService {
     // ── Fast-path keyword detection (no LLM call needed) ─────────────────
     // Covers English + Hinglish search intents without burning NVIDIA tokens.
     const SEARCH_TRIGGERS = [
-      // English
-      'search', 'google', 'look up', 'find out', 'what is', 'who is', 'where is',
-      'how to', 'latest news', 'current', 'today\'s', 'right now', 'live score',
-      'stock price', 'weather', 'temperature', 'cricket score', 'ipl', 'icc',
-      'news', 'headline', 'breaking', 'trending', 'what happened',
+      // English (Explicit live/external intent)
+      'search', 'google', 'look up', 'latest news', 'current price',
+      'today\'s weather', 'live score', 'breaking news', 'current temperature',
+      'current location', 'today\'s result',
+      'stock price', 'weather', 'cricket score', 'ipl', 'icc', 'headline', 'trending',
       // Hinglish / Hindi
-      'aaj ka mausam', 'mausam kaisa', 'weather kya', 'news kya', 'kya hua',
-      'kaisa chal raha', 'live score', 'score kya hai', 'kitna hua',
-      'search kar', 'dhundh', 'pata karo', 'batao kya hai', 'latest kya',
-      'abhi kya ho raha', 'aaj ka news', 'kal ki news', 'rate kya hai',
-      'price kya hai', 'kab hua', 'kahan hua', 'kaun hai',
+      'aaj ka mausam', 'mausam kaisa', 'weather kya', 'news kya',
+      'live score', 'score kya hai', 'kitna hua',
+      'search kar', 'dhundh', 'pata karo', 'latest kya hai',
+      'aaj ka news', 'kal ki news', 'rate kya hai', 'price kya hai',
     ];
     
     const EXCLUDED_PATTERNS = [
       // These look like search but are personal/conversational
       'what is your', 'what are you', 'who are you', 'what do you think',
       'mujhe lagta', 'kya lagta', 'tera kya', 'tumhara kya', 'mera kya',
+      'kaise chal raha', 'kya hai', 'what is my', 'where are you', 'how are you',
+      'tell me about', 'mera '
     ];
     
     const isExcluded = EXCLUDED_PATTERNS.some(p => lower.includes(p));

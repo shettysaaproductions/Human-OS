@@ -63,6 +63,21 @@ router.post('/', async (req: Request, res: Response) => {
           created_at: updateData.last_active_at
         });
 
+      // Detect session start (transition to online)
+      if (status === 'online') {
+        const prevOffline = !latestHistory || latestHistory.status !== 'online';
+        if (prevOffline) {
+          // Fire-and-forget background job for session cognition
+          supabaseAdmin.from('background_jobs').insert({
+            job_type: 'session_start_cognition',
+            payload: { user_id: userId, timestamp: updateData.last_active_at },
+            status: 'pending'
+          }).then(({ error }) => {
+            if (error) logger.error('[Presence] Failed to queue session cognition', { error: error.message });
+          });
+        }
+      }
+
       // Detect "silent visit" (online -> offline/away transition without a message)
       if (status === 'offline' || status === 'away') {
         const prevOnline = latestHistory?.status === 'online';

@@ -62,6 +62,8 @@ export function sanitizeReply(reply: string): string {
     // e.g. "Current Status:" or "REMINDER SET:" — but NOT sentence openers like "Let's break it down:"
     // Rule: line must be ALL_CAPS, or every word starts with a capital (Title Case), AND ends with colon.
     .replace(/^(?:[A-Z][A-Z\s&'()\d]+|(?:[A-Z][a-z]+\s*)+):\s*$/gm, '')
+    // Strip specific internal orchestration tags (case insensitive)
+    .replace(/^[\s]*(?:CURRENT TIME ACKNOWLEDGMENT|GET-TO-KNOW-YOU QUESTION|DISCOVERY PHASE|SITUATION BRIEF|INTERNAL UNDERSTANDING|USER PRESENCE:|BEHAVIOR PATTERN:|CURRENT TIME:|REMINDER NAG:|TIER 1:|TIER 2:|AUTONOMOUS BEHAVIORAL PATCHES|FOLLOW-UP ENGINE|SUBCONSCIOUS ACTIONS)[\s\S]*?(?=\n|$)/gmi, '')
     // Strip "Subconscious Actions" leaks of all forms
     .replace(/\*\[Subconscious Actions[\s\S]*?\*\*/gi, ' ')
     .replace(/\s*Subconscious Action[s]?\s*$/gi, '')

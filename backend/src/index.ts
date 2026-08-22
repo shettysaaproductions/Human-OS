@@ -35,9 +35,7 @@ async function main(): Promise<void> {
   if (!process.env.EXPO_ACCESS_TOKEN) {
     logger.error('⚠️ EXPO_ACCESS_TOKEN is NOT set! Push notifications will FAIL silently. Add it to Render environment variables.');
   } else {
-    logger.info('✅ EXPO_ACCESS_TOKEN is configured', {
-      tokenPreview: process.env.EXPO_ACCESS_TOKEN.substring(0, 8) + '...',
-    });
+    logger.info('✅ EXPO_ACCESS_TOKEN is configured');
   }
 
   // Load autonomous behavioral patches into memory before accepting traffic
