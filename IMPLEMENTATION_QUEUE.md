@@ -40,6 +40,7 @@ This document tracks upcoming features queued for development, ordered by priori
 
 | Feature | Completed |
 |---|---|
+| Durable Subconscious Processing (Phase 2 Hardening) | Aug 2026 |
 | Auto Upgrade Protocol execution & patches | July 2026 |
 | Push Notification Bug Fix (`ExpoPushToken[`) | July 2026 |
 | `reminders.status` Bug Fix (Migration) | July 2026 |

@@ -1,7 +1,8 @@
-import { memoryQueue, reflectionQueue } from '../services/QueueService';
+import { memoryQueue, reflectionQueue, subconsciousQueue } from '../services/QueueService';
 import { consolidatedMemoryAgent } from '../agents/ConsolidatedMemoryAgent';
 import { shortTermMemoryAgent } from '../agents/ShortTermMemoryAgent';
 import { reflectionAgent } from '../agents/ReflectionAgent';
+import { subconsciousAgent } from '../agents/SubconsciousAgent';
 import { logger } from '../lib/logger';
 
 const MAX_RETRIES = 3;
@@ -83,6 +84,16 @@ export function startWorkers() {
         break;
       default:
         logger.warn(`Unknown reflection job type: ${job.job_type}`);
+    }
+  });
+
+  subconsciousQueue.process(async (job) => {
+    switch (job.job_type) {
+      case 'extract_subconscious_actions':
+        await processWithBackoff(job, subconsciousAgent.processJob.bind(subconsciousAgent), 'extract_subconscious_actions');
+        break;
+      default:
+        logger.warn(`Unknown subconscious job type: ${job.job_type}`);
     }
   });
 }
