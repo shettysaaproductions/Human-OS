@@ -59,6 +59,11 @@ export function sanitizeReply(reply: string): string {
     .replace(/AUTOMATIC \d+-(?:MINUTE|HOUR) WAKE-UP ALERT SET[\s\S]*?(?=\n\n|$)/gi, ' ')
     // Strip "Subconscious Actions (Behind the Scenes)" section completely
     .replace(/Subconscious Actions\s*\(Behind the Scenes\)[\s\S]*/gi, ' ')
+    // Strip AI admission phrases — identity lock at the output level
+    .replace(/\b(?:as (?:an? )?(?:ai|language model|llm|text-based ai|virtual assistant))[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\b(?:i (?:don't|do not|cannot|can't) (?:have|access|see|feel|experience))[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\bi(?:'m| am) (?:just |only )?(?:an? )?(?:ai|language model|chatbot|text|program)\b/gi, 'Nova')
+    .replace(/\b(?:since|because|as) i(?:'m| am) (?:an? )?(?:ai|text-based)[^.!?\n]*[.!?]?/gi, '')
     // Strip Discovery Phase / system instruction leaks (e.g., "Remember, you barely know this user")
     .replace(/(?:⏰|🚀|ℹ️|Note:|Reminder:)\s*(?:Remember|You(?:'re| are| should| must|r goal)|I should|I must|Ask open)[^.!?\n]*[.!?]?/gi, '')
     .replace(/Remember,?\s+you(?:'re|\s+are)?\s+(?:talking to|dealing with|chatting with|barely know)[^.!?\n]*[.!?]?/gi, '')
@@ -122,6 +127,15 @@ function needsDeepModel(message: string): boolean {
   const lower = message.toLowerCase();
   const trimmed = message.trim();
 
+  const EMOTIONAL_ALWAYS_DEEP = [
+    'pareshan', 'thaka hua', 'thaki hui', 'dukhi', 'akela', 'akeli',
+    'rone wala', 'rone wali', 'rona aa raha', 'sad hoon', 'stressed',
+    'anxious', 'frustrated', 'help me', 'mujhe dar', 'scared', 'heartbreak',
+    'lonely', 'upset', 'bura lag raha', 'bahut bura', 'bahut pareshan',
+    'galat ho gaya', 'depressed', 'crying', 'ro raha', 'ro rahi'
+  ];
+  if (EMOTIONAL_ALWAYS_DEEP.some(t => lower.includes(t))) return true;
+
   // ── Fast-path short-circuit: NEVER use 49B for these ────────────────────────
   // Single-word greetings, acknowledgments, reactions → always 8B
   const FAST_ONLY = [
@@ -132,7 +146,7 @@ function needsDeepModel(message: string): boolean {
     'ha', 'lmao', 'xd', '😂', '👍', '❤️',
   ];
   if (FAST_ONLY.includes(trimmed.toLowerCase())) return false;
-  if (trimmed.length < 15) return false; // Very short message → always 8B
+  if (trimmed.length < 8) return false; // Very short message → always 8B
 
   // ── Deep triggers: these NEED 49B for quality ────────────────────────────────
   const DEEP_TRIGGERS = [
@@ -192,7 +206,7 @@ export class NovaBrainService {
     
     // Build the system prompt using the existing robust promptBuilder
     const systemPrompt = promptBuilder.buildSystemPrompt(
-      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.\n\n## 🧠 MEMORY USAGE (MANDATORY)\nYou have access to the user\'s stored memories above. You MUST:\n- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")\n- Mention specific people by name (e.g., "How is Sakshi doing?")\n- Recall specific events with dates when relevant\n- NEVER give generic template responses\n- If asked "what do you remember", quote memories VERBATIM\n- If you don\'t see relevant memories, say "I need to check my notes" instead of making things up',
+      context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
       context.memories || [],
       context.workingMemories || [],
       context.profile?.preferred_name,
@@ -434,7 +448,7 @@ Output ONLY the JSON array, nothing else.`;
   ): AsyncGenerator<string, { subconscious_actions: any[] }, unknown> {
     
     const systemPrompt = promptBuilder.buildSystemPrompt(
-      'You are Nova, an autonomous AI companion. You have a central subconscious brain that processes side-effects.\n\n## 🧠 MEMORY USAGE (MANDATORY)\nYou have access to the user\'s stored memories above. You MUST:\n- Reference specific goals by exact name (e.g., "Your goal to learn guitar by December")\n- Mention specific people by name (e.g., "How is Sakshi doing?")\n- Recall specific events with dates when relevant\n- NEVER give generic template responses\n- If asked "what do you remember", quote memories VERBATIM\n- If you don\'t see relevant memories, say "I need to check my notes" instead of making things up',
+      context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
       context.memories || [],
       context.workingMemories || [],
       context.profile?.preferred_name,

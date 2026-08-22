@@ -47,6 +47,26 @@ export class OnboardingService {
       }
 
       // 2. Insert Seed Memories directly (bypassing LLM)
+      const parseAtomic = (str: string): string[] => (str || '').split(/[,;\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+      
+      const atomicGoals = parseAtomic(answers.goals).map((goal, idx) => ({
+        type: 'goals' as const,
+        key: `goal_${idx + 1}_${goal.substring(0, 15).replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`,
+        value: goal,
+        shouldPersist: true,
+        importance: 90,
+        confidence: 1.0
+      }));
+
+      const atomicPassions = parseAtomic(answers.passions).map((passion, idx) => ({
+        type: 'personal' as const,
+        key: `passion_${idx + 1}_${passion.substring(0, 15).replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`,
+        value: passion,
+        shouldPersist: true,
+        importance: 80,
+        confidence: 1.0
+      }));
+
       const seedMemories: ExtractedMemory[] = [
         {
           type: 'preferences',
@@ -56,22 +76,8 @@ export class OnboardingService {
           importance: 100,
           confidence: 1.0
         },
-        {
-          type: 'personal',
-          key: 'passions_and_interests',
-          value: answers.passions,
-          shouldPersist: true,
-          importance: 80,
-          confidence: 1.0
-        },
-        {
-          type: 'goals',
-          key: 'current_goals',
-          value: answers.goals,
-          shouldPersist: true,
-          importance: 90,
-          confidence: 1.0
-        },
+        ...atomicPassions,
+        ...atomicGoals,
         {
           type: 'family',
           key: 'family_and_relationships',
