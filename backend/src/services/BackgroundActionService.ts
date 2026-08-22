@@ -212,16 +212,32 @@ export class BackgroundActionService {
            });
         }
         else if (action.tool === 'MemoryRepository' && action.action === 'save') {
-           // Direct save
-           logger.info('[BackgroundAction] Saving memory', action.data);
-           await supabaseAdmin.from('memories').upsert({
-             user_id: userId,
-             key: action.data.key,
-             value: action.data.value,
-             memory_type: 'semantic',
-             last_accessed_at: new Date().toISOString(),
-             updated_at: new Date().toISOString()
-           });
+           // Quality gate — reject trash before it pollutes long-term memory
+           const memValue = String(action.data?.value || '').trim();
+           const memKey = String(action.data?.key || '').trim();
+           const MEMORY_TRASH_PATTERNS = [
+             /^(user (?:was|is|said|feeling|feels|mentioned|says))\s+(?:sleepy|tired|ok|fine|good|kaam|busy|bored)/i,
+             /^\d+:\d+/,
+             /^(feeling|feel|mood|state)\s+\w+\s*$/i,
+             /^(kaam|lag|pine|soo|raat|neend|ok|hmm|haan|nahi)/i,
+             /^(user is|user was|currently)\s+\w+\s*$/i,
+           ];
+           const isTrash = !memValue || memValue.length < 12 || memValue.split(' ').length < 3 ||
+             MEMORY_TRASH_PATTERNS.some(p => p.test(memValue));
+           if (isTrash) {
+             logger.info('[BackgroundAction] MemoryRepository quality gate: rejected', { memKey, memValue });
+           } else {
+             logger.info('[BackgroundAction] Saving memory', action.data);
+             await supabaseAdmin.from('memories').upsert({
+               user_id: userId,
+               key: memKey,
+               value: memValue,
+               memory_type: action.data.memory_type || 'semantic',
+               source_message: action.data.source || 'background_action',
+               last_accessed_at: new Date().toISOString(),
+               updated_at: new Date().toISOString()
+             });
+           }
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
            const { novaFollowupService } = await import('./NovaFollowupService');
@@ -340,7 +356,10 @@ export class BackgroundActionService {
         else if (action.tool === 'WorkingMemory' && action.action === 'set') {
            const { key, value } = action.data;
            if (key) {
-             const isPermanentKey = ['work_schedule', 'weekoff_day', 'daily_commute', 'sleep_cycle'].includes(key.toLowerCase());
+             const PERMANENT_KEYS = ['work_schedule', 'weekoff_day', 'daily_commute', 'sleep_cycle',
+               'office_hours', 'login_time', 'logout_time', 'gym_time', 'working_days', 'work_days',
+               'sleep_time', 'wake_time', 'shift_time', 'lunch_time'];
+             const isPermanentKey = PERMANENT_KEYS.some(k => key.toLowerCase().includes(k));
              const payload: any = {
                user_id: userId,
                key: key,

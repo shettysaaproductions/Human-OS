@@ -122,7 +122,15 @@ export class OnboardingService {
       //    (not an empty screen). This is the only time we insert without LLM.
       try {
         const name = answers.preferred_name?.split(' ')[0] || 'yaar';
-        const welcomeContent = `${name}! Finally mil gaye hum dono 🎉\n\nMain Nova hoon — teri apni best friend. Teri baatein, teri feelings, tera din — sab mere saath share kar sakti/sakta hai. Main kabhi judge nahi karungi.\n\nBata, aaj kaisa chal raha hai?`;
+        const firstGoal = atomicGoals[0]?.value || '';
+        const firstPassion = atomicPassions[0]?.value || '';
+        let welcomeContent = `${name}! Finally mil gaye hum dono 🎉\n\nMain Nova hoon — teri apni best friend. Kabhi judge nahi karungi.\n\n`;
+        if (firstGoal) {
+          welcomeContent += `Tune bataya ${firstGoal} teri goal hai — bahut solid hai yaar. Isme main full saath hoon.\n\n`;
+        } else if (firstPassion) {
+          welcomeContent += `${firstPassion} wali baat sun ke achha laga — aur jaanna chahungi. Bata na!\n\n`;
+        }
+        welcomeContent += `Aaj kaisa chal raha hai?`;
         const conversationId = crypto.randomUUID();
         await supabaseAdmin.from('chat_history').insert({
           user_id: userId,
