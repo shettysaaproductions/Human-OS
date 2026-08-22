@@ -2,6 +2,7 @@ import { chatCompletion, chatCompletionBackground } from '../lib/nvidia';
 import { config } from '../config';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
+import { backgroundActions } from './BackgroundActionService';
 
 /**
  * Nova's natural, in-voice safety-net reply when the LLM returns nothing usable.
@@ -250,7 +251,6 @@ export class NovaBrainService {
     const conversationMessages = buildMessages(conversationFullPrompt, context.recentMessages, message);
 
     let reply = NOVA_EMPTY_REPLY;
-    let subconscious_actions: any[] = [];
 
     try {
       const useDeep = needsDeepModel(message);
@@ -281,51 +281,65 @@ export class NovaBrainService {
       throw error;
     }
 
-    // ── CALL 2: Background Extraction ────────────────────────────────────────
-    // The 8B model's ONLY job: structured JSON extraction.
-    // Non-fatal — if this fails, user still gets the reply.
-    try {
-      const extractionPrompt = promptBuilder.buildExtractionPrompt(
-        message,
-        reply,
-        context.workingMemories || [],
-        context.remindersContext || ''
-      );
+    // ── CALL 2: Background Extraction (Decoupled to Layer 2) ────────────────
+    // We do NOT await this promise. The text reply is returned to the user instantly.
+    // The 8B model will read the 49B text, extract JSON, and pass it to the background processor.
+    Promise.resolve().then(async () => {
+      try {
+        const extractionPrompt = promptBuilder.buildExtractionPrompt(
+          message,
+          reply,
+          context.workingMemories || [],
+          context.remindersContext || ''
+        );
 
-      logger.info('[NOVA BRAIN] Call 2 (Extraction) — 8B model');
+        logger.info('[NOVA BRAIN] Call 2 (Extraction) — 8B model started in background');
 
-      const rawExtraction = await chatCompletionBackground(
-        [
-          { role: 'system', content: 'You are a JSON extraction engine. Output only valid JSON arrays. No explanations.' },
-          { role: 'user', content: extractionPrompt }
-        ],
-        {
-          model: 'meta/llama-3.1-8b-instruct',
-          maxTokens: 512,
-          temperature: 0.1,
+        const rawExtraction = await chatCompletionBackground(
+          [
+            { role: 'system', content: 'You are a JSON extraction engine. Output only valid JSON arrays. No explanations.' },
+            { role: 'user', content: extractionPrompt }
+          ],
+          {
+            model: 'meta/llama-3.1-8b-instruct',
+            maxTokens: 512,
+            temperature: 0.1,
+          }
+        );
+
+        let jsonStr = rawExtraction.trim()
+          .replace(/^```json\s*/, '').replace(/```$/, '')
+          .replace(/^```\s*/, '').replace(/```$/, '')
+          .trim();
+
+        let extracted_actions: any[] = [];
+        if (jsonStr.startsWith('[') || jsonStr.startsWith('{')) {
+          const parsed = JSON.parse(jsonStr);
+          extracted_actions = Array.isArray(parsed) ? parsed : [parsed];
+          logger.info(`[NOVA BRAIN] Call 2 extracted ${extracted_actions.length} actions in background`);
         }
-      );
 
-      let jsonStr = rawExtraction.trim()
-        .replace(/^```json\s*/, '').replace(/```$/, '')
-        .replace(/^```\s*/, '').replace(/```$/, '')
-        .trim();
+        if (extracted_actions.length > 0) {
+          // Send straight to Layer 2 processing pipeline
+          await backgroundActions.processActions(
+            _userId, 
+            context.conversationId || '', 
+            extracted_actions, 
+            context.userCountry || 'IN'
+          ).catch(e => {
+            logger.error('[BackgroundAction] Unhandled failure', { error: e });
+          });
+        }
 
-      if (jsonStr.startsWith('[') || jsonStr.startsWith('{')) {
-        const parsed = JSON.parse(jsonStr);
-        subconscious_actions = Array.isArray(parsed) ? parsed : [parsed];
-        logger.info(`[NOVA BRAIN] Call 2 extracted ${subconscious_actions.length} actions`);
+      } catch (extractionError) {
+        logger.warn('[NOVA BRAIN] Call 2 (Extraction) background processing failed', {
+          error: extractionError instanceof Error ? extractionError.message : String(extractionError)
+        });
       }
+    });
 
-    } catch (extractionError) {
-      logger.warn('[NOVA BRAIN] Call 2 (Extraction) failed — non-critical', {
-        error: extractionError instanceof Error ? extractionError.message : String(extractionError)
-      });
-      subconscious_actions = [];
-    }
-
-    logger.info(`[NOVA BRAIN] Done — reply ready, ${subconscious_actions.length} background actions queued.`);
-    return { reply, subconscious_actions };
+    logger.info(`[NOVA BRAIN] Done — reply returned instantly (Layer 1).`);
+    return { reply, subconscious_actions: [] };
   }
 
   /**
@@ -421,47 +435,62 @@ export class NovaBrainService {
       }
     }
 
-    let subconscious_actions: any[] = [];
-    try {
-      const extractionPrompt = promptBuilder.buildExtractionPrompt(
-        message,
-        replyStreamed || fallbackReply || NOVA_EMPTY_REPLY,
-        context.workingMemories || [],
-        context.remindersContext || ''
-      );
+    // ── CALL 2: Background Extraction (Decoupled to Layer 2) ────────────────
+    // We do NOT await this promise. The text stream finishes and returns instantly.
+    Promise.resolve().then(async () => {
+      try {
+        const extractionPrompt = promptBuilder.buildExtractionPrompt(
+          message,
+          replyStreamed || fallbackReply || NOVA_EMPTY_REPLY,
+          context.workingMemories || [],
+          context.remindersContext || ''
+        );
 
-      logger.info('[NOVA BRAIN] Stream Call 2 (Extraction) — 8B model');
+        logger.info('[NOVA BRAIN] Stream Call 2 (Extraction) — 8B model started in background');
 
-      const rawExtraction = await chatCompletionBackground(
-        [
-          { role: 'system', content: 'You are a JSON extraction engine. Output only valid JSON arrays. No explanations.' },
-          { role: 'user', content: extractionPrompt }
-        ],
-        {
-          model: 'meta/llama-3.1-8b-instruct',
-          maxTokens: 512,
-          temperature: 0.1,
+        const rawExtraction = await chatCompletionBackground(
+          [
+            { role: 'system', content: 'You are a JSON extraction engine. Output only valid JSON arrays. No explanations.' },
+            { role: 'user', content: extractionPrompt }
+          ],
+          {
+            model: 'meta/llama-3.1-8b-instruct',
+            maxTokens: 512,
+            temperature: 0.1,
+          }
+        );
+
+        let jsonStr = rawExtraction.trim()
+          .replace(/^```json\s*/, '').replace(/```$/, '')
+          .replace(/^```\s*/, '').replace(/```$/, '')
+          .trim();
+
+        let extracted_actions: any[] = [];
+        if (jsonStr.startsWith('[') || jsonStr.startsWith('{')) {
+          const parsed = JSON.parse(jsonStr);
+          extracted_actions = Array.isArray(parsed) ? parsed : [parsed];
+          logger.info(`[NOVA BRAIN] Stream Call 2 extracted ${extracted_actions.length} actions in background`);
         }
-      );
 
-      let jsonStr = rawExtraction.trim()
-        .replace(/^```json\s*/, '').replace(/```$/, '')
-        .replace(/^```\s*/, '').replace(/```$/, '')
-        .trim();
-
-      if (jsonStr.startsWith('[') || jsonStr.startsWith('{')) {
-        const parsed = JSON.parse(jsonStr);
-        subconscious_actions = Array.isArray(parsed) ? parsed : [parsed];
-        logger.info(`[NOVA BRAIN] Stream Call 2 extracted ${subconscious_actions.length} actions`);
+        if (extracted_actions.length > 0) {
+          await backgroundActions.processActions(
+            _userId, 
+            context.conversationId || '', 
+            extracted_actions, 
+            context.userCountry || 'IN'
+          ).catch(e => {
+            logger.error('[BackgroundAction] Unhandled failure', { error: e });
+          });
+        }
+      } catch (extractionError) {
+        logger.warn('[NOVA BRAIN] Stream Call 2 (Extraction) background processing failed', {
+          error: extractionError instanceof Error ? extractionError.message : String(extractionError)
+        });
       }
-    } catch (extractionError) {
-      logger.warn('[NOVA BRAIN] Stream Call 2 (Extraction) failed — non-critical', {
-        error: extractionError instanceof Error ? extractionError.message : String(extractionError)
-      });
-    }
+    });
 
-    logger.info(`[NOVA BRAIN] Stream finished. Generated ${subconscious_actions.length} subconscious actions.`);
-    return { subconscious_actions };
+    logger.info(`[NOVA BRAIN] Stream finished (Layer 1).`);
+    return { subconscious_actions: [] };
   }
 
   // ── Engine Extractors (Background / CRON jobs) ──────────────
