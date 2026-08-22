@@ -29,6 +29,14 @@ export class ValidationError extends AppError {
   }
 }
 
+export class SchemaValidationError extends AppError {
+  public readonly isPermanent: boolean = true;
+  constructor(message: string) {
+    super(message, 400, 'SCHEMA_VALIDATION_ERROR');
+    this.name = 'SchemaValidationError';
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(resource: string) {
     super(`${resource} not found`, 404, 'NOT_FOUND');

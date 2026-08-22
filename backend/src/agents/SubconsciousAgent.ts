@@ -3,6 +3,23 @@ import { Job } from '../services/QueueService';
 import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { backgroundActions } from '../services/BackgroundActionService';
+import { z } from 'zod';
+import { SchemaValidationError } from '../types/errors';
+
+export const SubconsciousJobPayloadSchema = z.object({
+  userId: z.string().min(1, 'userId is required'),
+  messageId: z.string().min(1, 'messageId is required'),
+  conversationId: z.string().default(''),
+  message: z.string().optional(),
+  userMessage: z.string().optional(),
+  novaReply: z.string().min(1, 'novaReply is required'),
+  userCountry: z.string().optional().default('IN'),
+}).refine(data => !!(data.message || data.userMessage), {
+  message: 'Either message or userMessage must be provided',
+  path: ['message']
+});
+
+export type SubconsciousJobPayload = z.infer<typeof SubconsciousJobPayloadSchema>;
 
 export class SubconsciousAgent extends BaseAgent {
   constructor() {
@@ -10,7 +27,15 @@ export class SubconsciousAgent extends BaseAgent {
   }
 
   protected async execute(job: Job): Promise<number> {
-    const { userId, conversationId, message, novaReply, userCountry } = job.payload;
+    const parseResult = SubconsciousJobPayloadSchema.safeParse(job.payload);
+    if (!parseResult.success) {
+      const errorMsg = `Invalid payload for SubconsciousAgent: ${parseResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`;
+      logger.error('[SubconsciousAgent] Schema validation failed', { jobId: job.id, error: errorMsg, payload: job.payload });
+      throw new SchemaValidationError(errorMsg);
+    }
+
+    const { userId, conversationId, novaReply, userCountry } = parseResult.data;
+    const message = parseResult.data.message || parseResult.data.userMessage || '';
 
     try {
       const systemPrompt = `You are the Subconscious Action Extractor for HumanOS.

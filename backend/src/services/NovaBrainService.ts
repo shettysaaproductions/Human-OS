@@ -305,11 +305,14 @@ export class NovaBrainService {
     // The queue will durably process this in the background to ensure at-least-once extraction.
     if (!isCritical) {
       logger.info('[NOVA BRAIN] Enqueuing non-critical subconscious extraction job');
+      const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
       import('./QueueService').then(({ subconsciousQueue }) => {
         subconsciousQueue.add('extract_subconscious_actions', {
           userId: _userId,
+          messageId: jobMessageId,
           conversationId: context.conversationId || '',
           message,
+          userMessage: message,
           novaReply: reply,
           userCountry: context.userCountry || 'IN'
         });
@@ -447,11 +450,14 @@ export class NovaBrainService {
     // If it's non-critical, we enqueue the extraction job.
     if (!isCritical) {
       logger.info('[NOVA BRAIN] Stream: Enqueuing non-critical subconscious extraction job');
+      const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
       import('./QueueService').then(({ subconsciousQueue }) => {
         subconsciousQueue.add('extract_subconscious_actions', {
           userId: _userId,
+          messageId: jobMessageId,
           conversationId: context.conversationId || '',
           message,
+          userMessage: message,
           novaReply: replyStreamed || fallbackReply || NOVA_EMPTY_REPLY,
           userCountry: context.userCountry || 'IN'
         });

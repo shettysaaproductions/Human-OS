@@ -19,6 +19,19 @@ async function processWithBackoff(job: any, processor: (job: any) => Promise<voi
       await processor(job);
       return; // Success
     } catch (err: any) {
+      const isPermanent = err?.isPermanent === true ||
+        err?.name === 'SchemaValidationError' ||
+        err?.name === 'ZodError' ||
+        (err?.message && (err.message.includes('missing messageId') || err.message.includes('Schema validation failed')));
+
+      if (isPermanent) {
+        logger.error(`[QueueWorker] ${jobName} failed permanently with schema validation error (skipping retries)`, {
+          jobId: job.id,
+          error: err.message
+        });
+        throw err;
+      }
+
       const isRateLimited = err.status === 429 ||
         (err.message && (err.message.includes('rate limit') || err.message.includes('429')) ||
          err.message.includes('RPM') || err.message.includes('bucket'));

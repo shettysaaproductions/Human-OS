@@ -3,6 +3,7 @@ import { Job } from '../services/QueueService';
 import { logger } from '../lib/logger';
 import { cache, CACHE_NS, CACHE_TTL } from '../lib/cache';
 import { qt } from '../lib/queryTracker';
+import { SchemaValidationError } from '../types/errors';
 
 // Buffered agent metrics — flushed every 15 seconds
 interface MetricRecord {
@@ -98,9 +99,9 @@ export abstract class BaseAgent {
    * Handles idempotency, timing, batched metrics, and error handling.
    */
   public async processJob(job: Job): Promise<void> {
-    const messageId = job.payload.messageId;
-    if (!messageId) {
-      throw new Error(`Job payload missing messageId for agent ${this.agentName}`);
+    const messageId = job.payload?.messageId;
+    if (!messageId || typeof messageId !== 'string' || messageId.trim() === '') {
+      throw new SchemaValidationError(`Job payload missing messageId for agent ${this.agentName}`);
     }
 
     const alreadyProcessed = await this.isIdempotent(messageId);

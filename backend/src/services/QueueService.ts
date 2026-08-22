@@ -139,17 +139,24 @@ export class QueueService {
         .from('background_jobs')
         .update({ status: 'completed', finished_at: new Date().toISOString() })
         .eq('id', job.id);
-    } catch (jobError) {
-      logger.error(`Job ${job.id} failed`, { error: jobError instanceof Error ? jobError.message : String(jobError) });
-      await this.handleJobFailure(job, jobError instanceof Error ? jobError.message : String(jobError));
+    } catch (jobError: any) {
+      const errorMessage = jobError instanceof Error ? jobError.message : String(jobError);
+      logger.error(`Job ${job.id} failed`, { error: errorMessage });
+      const isPermanent = jobError?.isPermanent === true || 
+                          jobError?.name === 'SchemaValidationError' || 
+                          jobError?.name === 'ZodError' ||
+                          errorMessage.includes('missing messageId') ||
+                          errorMessage.includes('Schema validation failed') ||
+                          errorMessage.includes('Invalid payload for');
+      await this.handleJobFailure(job, errorMessage, isPermanent);
     }
   }
 
-  private async handleJobFailure(job: Job, errorMessage: string) {
-    const newAttempts = job.attempts + 1;
+  private async handleJobFailure(job: Job, errorMessage: string, isPermanent = false) {
+    const newAttempts = isPermanent ? this.maxAttempts : job.attempts + 1;
     
-    if (newAttempts >= this.maxAttempts) {
-      // Move to DLQ
+    if (newAttempts >= this.maxAttempts || isPermanent) {
+      // Move to DLQ immediately without endless retry cycles
       await supabaseAdmin
         .from('background_jobs')
         .update({ status: 'failed', error: errorMessage, attempts: newAttempts, finished_at: new Date().toISOString() })

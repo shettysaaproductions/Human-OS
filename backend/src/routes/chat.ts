@@ -1041,7 +1041,9 @@ chatRouter.post(
           : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN',
         conversationId: activeConversationId,
-        requestId: requestId
+        requestId: requestId,
+        userMessageId: userMessageId,
+        messageId: userMessageId
       };
 
       // Trigger engine is for proactive scheduling only — skip for direct replies
