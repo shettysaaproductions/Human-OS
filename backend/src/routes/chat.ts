@@ -1023,9 +1023,46 @@ chatRouter.post(
       const ampm = hh >= 12 ? 'PM' : 'AM';
       const timeStr = `${hh % 12 || 12}:${mm.toString().padStart(2,'0')} ${ampm}`;
       const tzLabel = tzOffset === 5.5 ? 'IST' : `UTC${tzOffset >= 0 ? '+' : ''}${tzOffset}`;
-      const isWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
+      let isWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
         ? dayIdx === 5 || dayIdx === 6
         : dayIdx === 0 || dayIdx === 6;
+
+      // ── SCHEDULE OVERRIDE: user's actual work schedule beats the calendar ──
+      // If working_memory contains schedule facts that contradict the calendar weekday,
+      // flip isWeekend so the Situation Brief reflects reality, not assumptions.
+      // e.g. user works Saturday → isWeekend must be false even though Sat = calendar weekend.
+      if (workingMemories && workingMemories.length > 0) {
+        const todayName = DAY_NAMES[dayIdx].toLowerCase(); // e.g. 'saturday'
+        const scheduleKeys = ['work_schedule','working_days','weekoff_day','weekoff','schedule','work_days'];
+        for (const wm of workingMemories) {
+          const key = wm.key.toLowerCase();
+          const val = wm.value.toLowerCase();
+          if (!scheduleKeys.some(sk => key.includes(sk))) continue;
+          // Pattern: "saturday working" / "saturday is working day" → isWeekend = false
+          if (val.includes(todayName) && (val.includes('working') || val.includes('work day') || val.includes('office'))) {
+            isWeekend = false;
+            logger.info('[SituationalAwareness] Schedule override: memory says today is a working day', { todayName, key: wm.key, val: wm.value });
+            break;
+          }
+          // Pattern: "weekoff sunday" / "sunday weekoff" → if today is sunday, isWeekend = true (already true); if today is NOT the weekoff day, isWeekend = false
+          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off')) && val.includes(todayName)) {
+            isWeekend = true;
+            logger.info('[SituationalAwareness] Schedule override: memory confirms today is weekoff', { todayName, key: wm.key, val: wm.value });
+            break;
+          }
+          // Pattern: "weekoff sunday" but today is saturday → saturday is working
+          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off'))) {
+            const DAYS_LC = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+            const weekoffDayMentioned = DAYS_LC.find(d => val.includes(d));
+            if (weekoffDayMentioned && weekoffDayMentioned !== todayName) {
+              // Today is NOT the user's weekoff day — treat as working day
+              isWeekend = false;
+              logger.info('[SituationalAwareness] Schedule override: today is not weekoff day per memory', { todayName, weekoffDay: weekoffDayMentioned, key: wm.key });
+              break;
+            }
+          }
+        }
+      }
 
       // Fetch disconnected engine data in parallel (all lightweight, single-row queries)
       let latestEmotion: { mood: string; intensity: number; notes: string } | null = null;
@@ -1178,6 +1215,22 @@ chatRouter.post(
         logger.warn('[SituationalAwareness] Behavior pattern fetch failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
+      // Build a schedule override note if the calendar day was corrected by working_memory
+      let scheduleOverrideNote: string | undefined;
+      if (workingMemories && workingMemories.length > 0) {
+        const calendarIsWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
+          ? dayIdx === 5 || dayIdx === 6
+          : dayIdx === 0 || dayIdx === 6;
+        if (calendarIsWeekend !== isWeekend) {
+          // The working_memory override flipped the flag — inform the LLM explicitly
+          if (!isWeekend) {
+            scheduleOverrideNote = `⚠️ SCHEDULE OVERRIDE (from user's own memory): The calendar says today (${DAY_NAMES[dayIdx]}) is a weekend, BUT the user's actual work schedule says they are WORKING today. Treat today as a NORMAL WORKING DAY. WEEKOFF MODE does NOT apply. Do NOT suggest they are relaxing or free. They are at work.`;
+          } else {
+            scheduleOverrideNote = `⚠️ SCHEDULE OVERRIDE (from user's own memory): The user's memory says today (${DAY_NAMES[dayIdx]}) is their WEEKOFF / day off. Treat today as a rest day, not a workday.`;
+          }
+        }
+      }
+
       // Build the Situation Brief
       const situationCtx: SituationContext = {
         nowLocal,
@@ -1188,6 +1241,7 @@ chatRouter.post(
         recentEpisodes,
         latestReflection,
         isWeekend,
+        scheduleOverrideNote,
         dayName: DAY_NAMES[dayIdx],
         dateStr,
         timeStr,
