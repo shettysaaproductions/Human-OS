@@ -13,6 +13,7 @@
 - [ ] Monitor FreeTierGuard logs for any limit warnings
 
 ## ✅ Completed
+- [x] Auto Upgrade: Nova Deep Audit & Production Upgrade Plan (8 Phases)
 - [x] Fix NVIDIA fallback, Reminder bugs and anti-robot rules (Auto Upgrade)
 - [x] Delete `backend/test_nvidia.ts`
 - [x] Fix push notification backend crash (`push_token_updated_at`)

@@ -27,6 +27,7 @@ Its purpose is to prevent context loss between AI sessions, ensuring that archit
   - OTA update system with popup notification on app launch (fixed to `checkAutomatically: ON_LOAD`)
   - Push token freshness guarantee across new APK installs (`ensureTokenFresh`)
   - Additional anti-robot rules: Schedule pre-check, Same-session amnesia zero-tolerance, Proactive depth for NACE messages
+  - Auto Upgrade 8-Phase Protocol: AI-admission filtering in sanitizeReply, lowered char threshold for EMOTIONAL_ALWAYS_DEEP routing, basePrompt unification to fix dual-prompt conflict, LIFE-STATE COHERENCE and GOAL-EMOTION BRIDGE patches, memory quality gate (fluff words filter), permanent schedule memory retention (fixes amnesia), atomic onboarding goal/passion saves, and buildLifeStateContext in SituationalAwareness.
   - Dual NVIDIA key routing (Key 1: chat, Key 2: background)
   - `NovaSelfImprovementService` — daily autonomous self-repair loop
   - Enhanced `SituationalAwareness` — reply intent, conversation phase, emotional momentum
