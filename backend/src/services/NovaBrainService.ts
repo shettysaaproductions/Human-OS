@@ -39,10 +39,10 @@ export function sanitizeReply(reply: string): string {
     .replace(/^[\s]*[-•*]\s+/gm, '')                                    // bullet markers (-, •, *)
     .replace(/^[\s]*\d+[.)]\s+/gm, '')                                  // numbered-list markers
     .replace(/^[\s]*[A-D][.)]\s+/gm, '')                                // lettered option markers A) B) C) D)
-    // Strip robotic section header lines (e.g. "Nova's Snack Acknowledgement:", "Current Status Update:")
-    .replace(/^[A-Z][A-Za-z &'()\d]+:\s*$/gm, '')
-    // Strip any line that is PURELY a label or header: starts capital, ends with colon
-    .replace(/^[^\n]{3,60}:\s*\n/gm, '')
+    // Strip robotic section header lines that are PURELY a label (ALL_CAPS or Title Case)
+    // e.g. "Current Status:" or "REMINDER SET:" — but NOT sentence openers like "Let's break it down:"
+    // Rule: line must be ALL_CAPS, or every word starts with a capital (Title Case), AND ends with colon.
+    .replace(/^(?:[A-Z][A-Z\s&'()\d]+|(?:[A-Z][a-z]+\s*)+):\s*$/gm, '')
     // Strip "Subconscious Actions" leaks of all forms
     .replace(/\*\[Subconscious Actions[\s\S]*?\*\*/gi, ' ')
     .replace(/\s*Subconscious Action[s]?\s*$/gi, '')
@@ -137,7 +137,7 @@ function needsDeepModel(message: string): boolean {
   // ── Deep triggers: these NEED 49B for quality ────────────────────────────────
   const DEEP_TRIGGERS = [
     // Reminders (need precise time parsing)
-    'remind', 'yaad dila', 'timer', 'alarm', 'schedule', 'set kar',
+    'remind', 'yaad dila', 'timer', 'alarm', 'set kar',
     // Memory operations
     'remember', 'yaad rakho', 'bhool mat', 'save this',
     // Emotional depth
@@ -150,6 +150,11 @@ function needsDeepModel(message: string): boolean {
     'interview', 'exam', 'result', 'meeting', 'doctor', 'hospital',
     // Planning
     'plan banao', 'goal', 'todo', 'task list',
+    // Schedule / work / career context — needs 49B for accurate memory recall
+    'schedule', 'weekoff', 'week off', 'working day', 'working saturday', 'working sunday',
+    'saturday work', 'sunday work', 'shift', 'office hours', 'login time', 'logout time',
+    'target', 'selects', 'select karni', 'recruitment', 'joining', 'onboard',
+    'appraisal', 'increment', 'promotion', 'salary', 'hr', 'human resource',
   ];
 
   // Long messages (>150 chars) likely need deeper reasoning

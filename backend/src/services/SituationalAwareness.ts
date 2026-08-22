@@ -13,6 +13,9 @@ export interface SituationContext {
   gapMinutes: number | null;
   latestEmotion: { mood: string; intensity: number; notes: string } | null;
   recentEpisodes: { summary: string; emotion: string | null; created_at: string }[];
+  /** When the calendar weekend flag was overridden by working_memory schedule data,
+   *  this note is injected at the top of the brief so the LLM gets the corrected context. */
+  scheduleOverrideNote?: string;
   latestReflection: { summary: string; key_takeaways: any } | null;
   isWeekend: boolean;
   dayName: string;
@@ -73,9 +76,14 @@ export class SituationalAwareness {
       lines.push(`👀 [AUTONOMOUS EYES]: You (Nova) can currently see: "${ctx.currentVisualContext}". Factor this into your awareness before replying!`);
     }
 
+    // ── SCHEDULE OVERRIDE (highest priority — must appear before any mode label) ──
+    if (ctx.scheduleOverrideNote) {
+      lines.push(ctx.scheduleOverrideNote);
+    }
+
     lines.push(`## SITUATION BRIEF — Nova's Internal Understanding`);
     lines.push(`- Right now: ${ctx.dayName}, ${ctx.dateStr}, ${ctx.timeStr} ${ctx.tzLabel} (${ctx.isWeekend ? 'Weekend / Weekoff' : 'Weekday'})`);
-    if (ctx.isWeekend) {
+    if (ctx.isWeekend && !ctx.scheduleOverrideNote) {
       lines.push(`- WEEKOFF MODE: It's a weekend. The user is likely relaxing, off from work, or has casual plans. Avoid pushing work/office topics unless the user explicitly brings them up.`);
     }
     lines.push(`- Time of day: ${this.getTimeOfDay(ctx.nowLocal)}`);

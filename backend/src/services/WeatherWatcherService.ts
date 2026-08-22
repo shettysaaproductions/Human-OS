@@ -10,10 +10,9 @@ interface GeocodeResult {
 }
 
 export class WeatherWatcherService {
-  // In-memory 12-hour per-user lock to prevent rapid duplicate alerts (Fix #4)
-  // Key: userId → timestamp of last weather alert sent
-  private static weatherAlertsSent = new Map<string, number>();
-  private static readonly WEATHER_ALERT_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
+  // NOTE: In-memory cooldown removed — it resets on every Render restart (free tier).
+  // Cooldown is now 100% DB-backed via nova_outreach_log (outreach_type = 'proactive_weather').
+  // This means the 12-hour dedup survives server restarts.
 
   /**
    * Fetches the current weather for a user's location and evaluates if an alert is needed.
@@ -55,17 +54,10 @@ export class WeatherWatcherService {
         return;
       }
 
-      // ── IN-MEMORY 12-HOUR COOLDOWN (Fix #4) ────────────────────────────────
-      // Prevents multiple alerts in the same weather event across cron ticks.
-      // This runs BEFORE the DB check for speed and as a safety net.
-      const lastAlertAt = WeatherWatcherService.weatherAlertsSent.get(userId) || 0;
-      if (Date.now() - lastAlertAt < WeatherWatcherService.WEATHER_ALERT_COOLDOWN_MS) {
-        return; // Already sent recently
-      }
-
-      // Check if we already alerted the user about weather in the last 12 hours
-      // (schema columns are outreach_type/created_at — the old query errored, so the
-      // 12h dedup NEVER worked and severe-weather alerts could repeat every cron tick)
+      // ── DB-BACKED 12-HOUR COOLDOWN (survives server restarts) ───────────────
+      // Check if we already sent a weather alert in the last 12 hours.
+      // This is the ONLY cooldown gate — the previous in-memory Map was removed
+      // because it resets on every Render free-tier restart.
       const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
       const { data: recentAlerts } = await supabaseAdmin
         .from('nova_outreach_log')
@@ -75,7 +67,32 @@ export class WeatherWatcherService {
         .gte('created_at', twelveHoursAgo);
 
       if (recentAlerts && recentAlerts.length > 0) {
-        return; // Already alerted
+        logger.info(`[WeatherWatcher] Cooldown active — weather alert already sent in last 12h`, { userId });
+        return; // Already alerted this weather event
+      }
+
+      // ── TOPIC-LEVEL DEDUP: check if Nova already mentioned weather recently ──
+      // Catches cases where NACE or another engine already discussed the weather
+      // in the last 6 hours, even without a 'proactive_weather' log entry.
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recentWeatherMsgs } = await supabaseAdmin
+        .from('chat_history')
+        .select('content')
+        .eq('user_id', userId)
+        .eq('role', 'assistant')
+        .gte('created_at', sixHoursAgo)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (recentWeatherMsgs && recentWeatherMsgs.length > 0) {
+        const weatherKeywords = ['weather', 'rain', 'raining', 'thunderstorm', 'umbrella', 'storm', 'temperature', 'baarish', 'garmi', 'thand'];
+        const alreadyTalkedWeather = recentWeatherMsgs.some(msg =>
+          weatherKeywords.some(kw => msg.content.toLowerCase().includes(kw))
+        );
+        if (alreadyTalkedWeather) {
+          logger.info(`[WeatherWatcher] Topic dedup — weather already mentioned in recent chat`, { userId });
+          return;
+        }
       }
 
       // 3. Generate a hyper-realistic alert message
@@ -108,11 +125,7 @@ Write a very short, casual text message warning them or checking in. (e.g., "hey
         emotionalState: {}
       }, async () => cleanAlertMessage);
 
-      // Record in-memory cooldown (Fix #4)
-      WeatherWatcherService.weatherAlertsSent.set(userId, Date.now());
-
-      // Log the specific weather alert type so we don't spam
-      // ('proactive_weather' is added to the outreach_type CHECK in migration 026)
+      // Record in outreach log so the 12-hour DB cooldown fires on future cron ticks
       await supabaseAdmin.from('nova_outreach_log').insert({
         user_id: userId,
         message: cleanAlertMessage,
