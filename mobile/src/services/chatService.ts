@@ -1,7 +1,7 @@
 import { api } from './api';
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../store/useAuthStore';
-import crypto from 'crypto';
+import * as Crypto from 'expo-crypto';
 
 export const chatService = {
   getHistory: async (conversationId?: string, limit: number = 50, beforeId?: string) => {
@@ -36,7 +36,7 @@ export const chatService = {
     const payload: any = { message };
     if (conversationId) payload.conversation_id = conversationId;
     if (clientMessageId) payload.client_message_id = clientMessageId;
-    else payload.client_message_id = crypto.randomUUID();
+    else payload.client_message_id = Crypto.randomUUID();
     const response = await api.post('/chat', payload);
     return response.data;
   },
@@ -49,7 +49,7 @@ export const chatService = {
     if (imageBase64) payload.image_base64 = imageBase64;
     
     if (clientMessageId) payload.client_message_id = clientMessageId;
-    else payload.client_message_id = crypto.randomUUID();
+    else payload.client_message_id = Crypto.randomUUID();
 
     // We use the native fetch API with keepalive: true so that the OS
     // completes the HTTP request even if the JS thread is suspended immediately after.
