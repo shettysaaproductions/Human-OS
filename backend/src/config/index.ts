@@ -32,13 +32,22 @@ export const config = {
 
 
   nvidia: {
-    apiKey: optionalEnv('NVIDIA_API_KEY', ''),
-    apiKey2: optionalEnv('NVIDIA_API_KEY_2', ''),
-    apiKey3: optionalEnv('NVIDIA_API_KEY_3', ''),  // Key 3: Cerebellum (Background tasks)
-    apiKey4: optionalEnv('NVIDIA_API_KEY_4', ''),  // Key 4: Reserve (Emergency failover)
-    apiKey5: optionalEnv('NVIDIA_API_KEY_5', ''),  // Key 5: Extra reserve capacity
-    apiKey6: optionalEnv('NVIDIA_API_KEY_6', ''),  // Key 6: Extra reserve capacity
-    baseUrl: optionalEnv('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
+    apiKey:   optionalEnv('NVIDIA_API_KEY',    ''),  // Key 1:  Frontal Cortex (real-time chat)
+    apiKey2:  optionalEnv('NVIDIA_API_KEY_2',  ''),  // Key 2:  Hippocampus (memory)
+    apiKey3:  optionalEnv('NVIDIA_API_KEY_3',  ''),  // Key 3:  Cerebellum (background)
+    apiKey4:  optionalEnv('NVIDIA_API_KEY_4',  ''),  // Key 4:  Reserve / failover
+    apiKey5:  optionalEnv('NVIDIA_API_KEY_5',  ''),  // Key 5:  Frontal overflow
+    apiKey6:  optionalEnv('NVIDIA_API_KEY_6',  ''),  // Key 6:  Frontal overflow
+    apiKey7:  optionalEnv('NVIDIA_API_KEY_7',  ''),  // Key 7:  Frontal overflow
+    apiKey8:  optionalEnv('NVIDIA_API_KEY_8',  ''),  // Key 8:  Frontal overflow
+    apiKey9:  optionalEnv('NVIDIA_API_KEY_9',  ''),  // Key 9:  Hippocampus overflow
+    apiKey10: optionalEnv('NVIDIA_API_KEY_10', ''),  // Key 10: Hippocampus overflow
+    apiKey11: optionalEnv('NVIDIA_API_KEY_11', ''),  // Key 11: Cerebellum overflow
+    apiKey12: optionalEnv('NVIDIA_API_KEY_12', ''),  // Key 12: Cerebellum overflow
+    apiKey13: optionalEnv('NVIDIA_API_KEY_13', ''),  // Key 13: Deep Cortex (Reflection/Reasoning)
+    apiKey14: optionalEnv('NVIDIA_API_KEY_14', ''),  // Key 14: Deep Cortex overflow
+    apiKey15: optionalEnv('NVIDIA_API_KEY_15', ''),  // Key 15: Emergency reserve
+    baseUrl:   optionalEnv('NVIDIA_BASE_URL',   'https://integrate.api.nvidia.com/v1'),
     chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.1-8b-instruct'),
     deepModel: optionalEnv('NVIDIA_DEEP_MODEL', 'nvidia/llama-3.3-nemotron-super-49b-v1'),
   },
