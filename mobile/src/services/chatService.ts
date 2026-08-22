@@ -217,4 +217,16 @@ export const chatService = {
     const response = await api.post('/auth/push-token', { token });
     return response.data;
   },
+
+  // Presence heartbeat — call every 30s while ChatScreen is focused to keep presence fresh
+  updatePresence: async (status: 'online' | 'away' | 'offline') => {
+    try {
+      const { useAuthStore } = await import('../store/useAuthStore');
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) return;
+      await api.post('/presence', { userId, status, timestamp: new Date().toISOString() });
+    } catch (_e) {
+      // Non-fatal: presence heartbeat failure should never block chat
+    }
+  },
 };

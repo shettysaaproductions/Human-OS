@@ -9,7 +9,7 @@ export interface OnboardingAnswers {
   goals: string;
   family: string;
   important_facts: string;
-  companion_personality: string;
+  companion_personality?: string; // Optional — not collected in current onboarding flow
   timezone?: string;
 }
 
@@ -111,6 +111,28 @@ export class OnboardingService {
         .eq('source_message', 'onboarding_seed');
 
       logger.info('Onboarding processed successfully', { userId });
+
+      // 3. Seed a warm first message from Nova so user lands on a real conversation
+      //    (not an empty screen). This is the only time we insert without LLM.
+      try {
+        const name = answers.preferred_name?.split(' ')[0] || 'yaar';
+        const welcomeContent = `${name}! Finally mil gaye hum dono 🎉\n\nMain Nova hoon — teri apni best friend. Teri baatein, teri feelings, tera din — sab mere saath share kar sakti/sakta hai. Main kabhi judge nahi karungi.\n\nBata, aaj kaisa chal raha hai?`;
+        const conversationId = crypto.randomUUID();
+        await supabaseAdmin.from('chat_history').insert({
+          user_id: userId,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: welcomeContent,
+          source: 'onboarding_welcome',
+          created_at: new Date().toISOString(),
+        });
+        logger.info('[Onboarding] Welcome message seeded', { userId });
+      } catch (welcomeErr) {
+        // Non-fatal — onboarding is still complete even if welcome seed fails
+        logger.warn('[Onboarding] Welcome message seed failed (non-critical)', {
+          error: welcomeErr instanceof Error ? welcomeErr.message : String(welcomeErr)
+        });
+      }
     } catch (error) {
       logger.error('Error processing onboarding', { userId, error: error instanceof Error ? error.message : String(error) });
       throw error;

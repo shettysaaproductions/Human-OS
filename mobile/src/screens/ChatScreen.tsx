@@ -543,6 +543,13 @@ export function ChatScreen() {
     // Fires the seen-signal so Nova's situation brief reflects "read" (not left-on-read).
     chatService.markMessagesRead();
 
+    // Presence heartbeat: ping online every 30s while on chat screen.
+    // Fixes stale presence contradiction ("AWAY" + "ACTIVE_CHATTING" at the same time).
+    chatService.updatePresence('online');
+    const presenceHeartbeat = setInterval(() => {
+      chatService.updatePresence('online');
+    }, 30_000);
+
     // Suppress push notification banners while user is on chat screen (WhatsApp-style)
     setChatScreenActive(true);
 
@@ -575,11 +582,17 @@ export function ChatScreen() {
         chatService.markMessagesRead();
         // Kick queue in case it got stuck while app was backgrounded
         useChatStore.getState().processQueue();
+        // Update presence when app comes to foreground
+        chatService.updatePresence('online');
+      } else if (nextState === 'background') {
+        chatService.updatePresence('away');
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => {
       subscription.remove();
+      clearInterval(presenceHeartbeat);
+      chatService.updatePresence('away');
       // Restore notification banners when user leaves chat screen
       setChatScreenActive(false);
       // Clear the callback on unmount to avoid stale closures
@@ -712,7 +725,7 @@ export function ChatScreen() {
               style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(139, 92, 246, 0.15)', zIndex: 10 }]} 
             />
           )}
-          <View style={[s.bubble, isUser ? s.userBubble : s.novaBubble]}>
+          <View style={[s.bubble, item.isSystemMessage ? { backgroundColor: 'transparent', alignSelf: 'center', maxWidth: '90%' } : isUser ? s.userBubble : s.novaBubble]}>
           {!isUser && (
             <View style={s.avatarDot} />
           )}
@@ -732,11 +745,15 @@ export function ChatScreen() {
                 borderLeftColor: '#8B5CF6'
               }}>
                 <Text style={{ color: isUser ? colors.buttonText : colors.assistantText, fontSize: 13, opacity: 0.9, fontWeight: '500' }} numberOfLines={1}>
-                  {item.reply_to_content.length > 50 ? item.reply_to_content.substring(0, 50) + '...' : item.reply_to_content}
+                  {'↩ '}{item.reply_to_content.length > 60 ? item.reply_to_content.substring(0, 60) + '...' : item.reply_to_content}
                 </Text>
               </View>
             )}
-            {!isUser ? (
+            {item.isSystemMessage ? (
+              <Text style={{ color: '#888', fontSize: 13, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 8, paddingVertical: 4 }}>
+                {item.content}
+              </Text>
+            ) : !isUser ? (
               <SmartMarkdown
                 content={item.content}
                 colors={colors}
