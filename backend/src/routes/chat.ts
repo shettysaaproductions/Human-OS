@@ -156,10 +156,10 @@ const ChatSchema = z.object({
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
   is_proactive: z.boolean().optional().default(false),
   async_mode: z.boolean().optional().default(false),
-  reply_to_id: z.string().uuid().optional(),
+  reply_to_id: z.string().optional(),
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
-  client_message_id: z.string().uuid().optional(),
+  client_message_id: z.string().optional(),
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -481,10 +481,28 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, is_proactive, async_mode, reply_to_id, reply_to_content, image_base64, client_message_id } = parseResult.data;
+      const { message, conversation_id, is_proactive, async_mode, reply_to_content, image_base64 } = parseResult.data;
+      let { reply_to_id, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
       
-      const requestStartTime = Date.now();
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (reply_to_id && !UUID_REGEX.test(reply_to_id)) {
+        logger.warn('[Chat] Stripping malformed legacy reply_to_id', { reply_to_id, userId });
+        reply_to_id = undefined;
+      }
+      if (client_message_id && !UUID_REGEX.test(client_message_id)) {
+        logger.warn('[Chat] Stripping malformed legacy client_message_id', { client_message_id, userId });
+        client_message_id = undefined;
+      }
+
+      const request_received_ms = Date.now();
+      let context_started_ms: number | null = null;
+      let context_ready_ms: number | null = null;
+      let llm_started_ms: number | null = null;
+      let first_token_ms: number | null = null;
+      let llm_completed_ms: number | null = null;
+      let response_sent_ms: number | null = null;
+      
       const requestId = client_message_id || crypto.randomUUID();
       logger.info('[Chat] Request started', { requestId, userId, messageLength: message.length, isAsync: async_mode, isProactive: is_proactive });
       let activeConversationId = conversation_id || crypto.randomUUID();
@@ -782,6 +800,7 @@ chatRouter.post(
       const today = new Date().toISOString().split('T')[0];
 
       const dbStartTime = Date.now();
+      context_started_ms = dbStartTime;
 
       const profilePromise = (cachedProfile && cachedProfile.push_token)
         ? Promise.resolve({ data: cachedProfile, error: null })
@@ -857,6 +876,7 @@ chatRouter.post(
       ]);
 
       const dbDuration = Date.now() - dbStartTime;
+      context_ready_ms = Date.now();
       logger.info('[Chat] Parallel context fetch completed', { userId, durationMs: dbDuration });
 
       if (searchData) {
@@ -1026,7 +1046,7 @@ chatRouter.post(
         }
       } else {
         try {
-          const llmStartTime = Date.now();
+          llm_started_ms = Date.now();
           logger.info('[Chat] Calling LLM', { userId });
           
           if (isStreaming) {
@@ -1121,6 +1141,7 @@ chatRouter.post(
                 break;
               }
               if (value) {
+                if (!first_token_ms) first_token_ms = Date.now();
                 rawReply += value;
                 res.write(`data: ${JSON.stringify({ type: 'chunk', content: value })}\n\n`);
                 if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -1188,7 +1209,7 @@ HINGLISH RULES:
             }
           }
           
-          const llmDuration = Date.now() - llmStartTime;
+          const llmDuration = Date.now() - llm_started_ms!;
           logger.info('[Chat] LLM response received', { userId, durationMs: llmDuration });
           if (llmDuration > 5000) {
             logger.warn('[Chat] LLM call slow', { userId, durationMs: llmDuration });
@@ -1229,6 +1250,8 @@ HINGLISH RULES:
           } else {
             throw new ExternalServiceError('NVIDIA', errStr);
           }
+        } finally {
+          llm_completed_ms = Date.now();
         }
       }
 
@@ -1615,7 +1638,7 @@ HINGLISH RULES:
 
       // Push notifications are now sent per-bubble directly after DB insert
 
-      const totalDuration = Date.now() - requestStartTime;
+      const totalDuration = Date.now() - request_received_ms;
       logger.info('[Chat] Request completed', { requestId, userId, durationMs: totalDuration });
       if (totalDuration > 10000) {
         logger.warn('[Chat] Total request slow', { userId, totalDurationMs: totalDuration });
@@ -1651,6 +1674,20 @@ HINGLISH RULES:
           }
         });
       }
+
+      response_sent_ms = Date.now();
+      const ttft_ms = first_token_ms && llm_started_ms ? first_token_ms - llm_started_ms : null;
+      const generation_latency_ms = llm_completed_ms && first_token_ms ? llm_completed_ms - first_token_ms : null;
+      const total_server_latency_ms = response_sent_ms - request_received_ms;
+
+      logger.info('[Latency] Request completed', {
+        requestId,
+        userId,
+        ttft_ms,
+        generation_latency_ms,
+        total_server_latency_ms,
+        context_fetch_ms: context_ready_ms && context_started_ms ? context_ready_ms - context_started_ms : null,
+      });
     } catch (err) {
       // In async_mode: 202 was already sent. If we reach here, the user message
       // is in the DB but Nova never replied. Save a fallback reply so the user

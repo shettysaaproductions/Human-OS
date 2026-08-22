@@ -3,6 +3,7 @@ import { chatService } from '../services/chatService';
 import * as SecureStore from 'expo-secure-store';
 import { proactiveReplyService } from '../services/proactiveReplyService';
 import NetInfo from '@react-native-community/netinfo';
+import * as Crypto from 'expo-crypto';
 
 console.log('USECHATSTORE_LOADED');
 
@@ -771,7 +772,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     sendMessage: async (content: string, imageBase64?: string) => {
       const replyingTo = get().replyingTo;
       const userMsg: Message = {
-        id: Date.now().toString() + Math.random().toString().slice(2, 6),
+        id: Crypto.randomUUID(),
         role: 'user',
         content,
         status: 'sending',
@@ -815,7 +816,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       set((s) => ({
         messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m),
-        pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content, imageBase64: msg.image_base64 }]
+        pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content, imageBase64: msg.image_base64, replyToId: msg.reply_to_id, replyToContent: msg.reply_to_content }]
       }));
 
       get().processQueue();

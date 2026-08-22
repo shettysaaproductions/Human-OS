@@ -1,5 +1,4 @@
 import { logger } from '../lib/logger';
-import { complete } from '../lib/nvidia';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { geminiPool } from '../lib/geminiPool';
@@ -49,28 +48,10 @@ export class WebSearchService {
       return cleanQuery;
     }
     
-    // ── Slow-path: LLM for ambiguous queries (only if no fast-path match) ──
-    const prompt = `You are a Search Intent Analyzer for an AI assistant. 
-Does this user message require searching the LIVE internet to answer correctly or provide source links?
-(E.g., current news, weather, stock prices, recent sports scores, general factual questions, or anything outside of personal chat).
-
-Message: "${message}"
-
-If YES, output ONLY the exact search query you would use (e.g., "current weather in Mumbai" or "who won the F1 race yesterday").
-If NO, output exactly "NO_SEARCH".`;
-
-    try {
-      const result = await complete('PROACTIVE', [{ role: 'system', content: prompt }], {
-        maxTokens: 50,
-        temperature: 0.1
-      });
-      const res = result.trim();
-      if (res === 'NO_SEARCH' || res === '' || res.toLowerCase().includes('no_search')) return null;
-      return res;
-    } catch (e) {
-      logger.warn('[WebSearch] Failed to evaluate search need', { error: e });
-      return null;
-    }
+    // ── Slow-path: LLM classifier removed (Phase 4.2 Latency Optimization) ──
+    // Highly nuanced search intents (e.g. "what's the temp") without explicit trigger words
+    // will temporarily be missed, but this tradeoff is acceptable for the massive latency reduction.
+    return null;
   }
 
   /**
