@@ -14,7 +14,7 @@ import { cache, CACHE_NS, CACHE_TTL } from '../lib/cache';
 import { qt } from '../lib/queryTracker';
 import { dbHealthService } from '../services/DatabaseHealthService';
 import { degradedMode } from '../services/DegradedModeService';
-import { situationalAwareness, SituationContext } from '../services/SituationalAwareness';
+import { situationalAwareness } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
 import { presencePatternService } from '../services/PresencePatternService';
@@ -771,588 +771,222 @@ chatRouter.post(
           }
         }
       
-      // ── PARALLEL FETCH: profile, chat history, cross-session,
-      // working memory, long-term memories, short-term memories — all at once.
+      // ── UNIFIED PARALLEL FETCH (Phase 1 Latency Optimization) ──
       const keywords = extractKeywords(effectiveMessage);
-
       const profileCacheKey = `profile:${userId}`;
       const wmCacheKey = `working_memory:${userId}`;
-      const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string }>(profileCacheKey);
+      const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string; timezone_offset?: number }>(profileCacheKey);
       const cachedWm = cache.get<{ key: string; value: string }[]>(wmCacheKey);
-
       const skipMemory = process.env.DISABLE_MEMORY === 'true';
+      const today = new Date().toISOString().split('T')[0];
 
       const dbStartTime = Date.now();
-      const [
-        profileResult,
-        historyResult,
-        crossSessionResult,
-        wmResult,
-        memoriesResult,
-        stmResult,
-        searchNeedResult
-      ] = await Promise.all([
-        // 1. Profile (use cache only if it has a push_token — avoids stale cache killing push delivery)
-        (cachedProfile && cachedProfile.push_token)
-          ? Promise.resolve({ data: cachedProfile, error: null })
-          : qt.track('get_profile', 'profiles', () =>
-              supabaseAdmin.from('profiles')
-                .select('preferred_name, companion_personality, country, push_token, current_visual_context, timezone_offset')
-                .eq('id', userId).maybeSingle()
-            ),
 
-        // 3. Recent chat history (last 100, for deep context continuity)
-        qt.track('get_chat_history', 'chat_history', () =>
-          supabaseAdmin.from('chat_history')
-            .select('role, content, reply_to_content')
-            .eq('user_id', userId)
-            .eq('conversation_id', activeConversationId)
-            .order('created_at', { ascending: false })
-            .limit(100)
-        ),
+      const profilePromise = (cachedProfile && cachedProfile.push_token)
+        ? Promise.resolve({ data: cachedProfile, error: null })
+        : qt.track('get_profile', 'profiles', () => supabaseAdmin.from('profiles').select('preferred_name, companion_personality, country, push_token, current_visual_context, timezone_offset').eq('id', userId).maybeSingle());
 
-        // 3.5 Cross-session recent context
-        qt.track('get_cross_session_context', 'chat_history', () =>
-          supabaseAdmin.from('chat_history')
-            .select('role, content')
-            .eq('user_id', userId)
-            .neq('conversation_id', activeConversationId)
-            .order('created_at', { ascending: false })
-            .limit(6)
-        ).catch(() => ({ data: null, error: null })),
+      const historyPromise = qt.track('get_chat_history', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content, reply_to_content').eq('user_id', userId).eq('conversation_id', activeConversationId).order('created_at', { ascending: false }).limit(100));
 
-        // 4. Working memory (use cache if available)
-        cachedWm
-          ? Promise.resolve({ data: cachedWm.map(w => ({ key: w.key, value: w.value })), error: null })
-          : skipMemory
-          ? Promise.resolve({ data: [], error: null })
-          : qt.track('get_working_memory', 'working_memory', () =>
-              supabaseAdmin.from('working_memory')
-                .select('key, value')
-                .eq('user_id', userId)
-                .gt('expires_at', new Date().toISOString())
-                .limit(10)
-            ),
+      const crossSessionPromise = qt.track('get_cross_session_context', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content').eq('user_id', userId).neq('conversation_id', activeConversationId).order('created_at', { ascending: false }).limit(6)).then(res => res).catch(() => ({ data: null, error: null }));
 
-        // 4. Long-term semantic memories
-        skipMemory
-          ? Promise.resolve([])
-          : memoryRepository.searchMemories(userId, keywords).catch(() => []),
+      const wmPromise = cachedWm
+        ? Promise.resolve({ data: cachedWm.map(w => ({ key: w.key, value: w.value })), error: null })
+        : skipMemory
+        ? Promise.resolve({ data: [], error: null })
+        : qt.track('get_working_memory', 'working_memory', () => supabaseAdmin.from('working_memory').select('key, value').eq('user_id', userId).gt('expires_at', new Date().toISOString()).limit(10));
 
-        // 4.5 Short-term memories
-        skipMemory
-          ? Promise.resolve({ data: [], error: null })
-          : qt.track('get_short_term_memories', 'short_term_memories', () =>
-              supabaseAdmin.from('short_term_memories')
-                .select('memory, emotion, importance, mention_count, expires_at, confidence, created_at')
-                .eq('user_id', userId)
-                .gte('confidence', 0.6)
-                .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
-                .order('importance', { ascending: false })
-                .order('last_mentioned_at', { ascending: false })
-                .limit(20)
-            ),
-            
-        // 5. Evaluate Web Search Need (Jarvis Protocol)
-        import('../services/WebSearchService')
-          .then(({ webSearchService }) => webSearchService.evaluateSearchNeed(effectiveMessage))
-          .catch(() => null),
-      ]);
-      const dbDuration = Date.now() - dbStartTime;
-      logger.info('[Chat] Context fetch completed', { userId, durationMs: dbDuration });
+      const memoriesPromise = skipMemory ? Promise.resolve([]) : memoryRepository.searchMemories(userId, keywords).catch(() => []);
 
-      // If a web search is needed, execute it and PREPEND to effectiveMessage
-      // CRITICAL: Previously was added to memoryContext (buried) — LLM ignored it.
-      // Now injected directly into the message the LLM is replying to.
-      if (searchNeedResult) {
-        try {
-          const { webSearchService } = await import('../services/WebSearchService');
-          const searchData = await webSearchService.executeSearch(searchNeedResult);
-          if (searchData) {
-            // Prepend search results DIRECTLY to the message the LLM will reply to
-            effectiveMessage = `${searchData}\n\nUser's question: ${effectiveMessage}`;
-            logger.info('[Chat] Web Search prepended to effectiveMessage', { query: searchNeedResult });
-          }
-        } catch (e) {
-          logger.warn('[Chat] Failed to execute web search', { error: e });
-        }
-      }
-      const webSearchContext = ''; // No longer used — search results now go into effectiveMessage
+      const stmPromise = skipMemory
+        ? Promise.resolve({ data: [], error: null })
+        : qt.track('get_short_term_memories', 'short_term_memories', () => supabaseAdmin.from('short_term_memories').select('memory, emotion, importance, mention_count, expires_at, confidence, created_at').eq('user_id', userId).gte('confidence', 0.6).or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`).order('importance', { ascending: false }).order('last_mentioned_at', { ascending: false }).limit(20));
 
-      // ── Unpack results ─────────────────────────────────────────────────────────
-      // 1. Profile
-      let profile = profileResult.data as { preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string; timezone_offset?: number } | null;
-      if (profile && !cachedProfile) {
-        cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
-      }
+      const searchPromise = import('../services/WebSearchService')
+        .then(({ webSearchService }) => webSearchService.evaluateSearchNeed(effectiveMessage)
+          .then(need => need ? webSearchService.executeSearch(need) : null))
+        .catch(e => { logger.warn('[Chat] Web search failed', { error: e }); return null; });
 
-      // 2.5 Track Session (fire & forget — non-critical)
-      const today = new Date().toISOString().split('T')[0];
-      (async () => {
-        try {
-          const { data: session } = await qt.track('get_session', 'conversation_sessions', () =>
-            supabaseAdmin.from('conversation_sessions')
-              .select('id, message_count').eq('user_id', userId).eq('session_date', today).maybeSingle()
-          );
-          if (session) {
-            await qt.track('update_session', 'conversation_sessions', () =>
-              supabaseAdmin.from('conversation_sessions')
-                .update({ message_count: (session.message_count || 0) + 1, updated_at: new Date().toISOString() })
-                .eq('id', session.id)
-            );
-          } else {
-            await qt.track('create_session', 'conversation_sessions', () =>
-              supabaseAdmin.from('conversation_sessions')
-                .insert({ user_id: userId, session_date: today, message_count: 1 })
-            );
-          }
-        } catch (err) {
-          logger.error('Failed to track session', { error: err instanceof Error ? err.message : String(err) });
-        }
-      })();
+      const sessionPromise = qt.track('get_session', 'conversation_sessions', () => supabaseAdmin.from('conversation_sessions').select('id, message_count').eq('user_id', userId).eq('session_date', today).maybeSingle())
+        .then(({ data: session }) => {
+          if (session) supabaseAdmin.from('conversation_sessions').update({ message_count: (session.message_count || 0) + 1, updated_at: new Date().toISOString() }).eq('id', session.id).then(res => res);
+          else supabaseAdmin.from('conversation_sessions').insert({ user_id: userId, session_date: today, message_count: 1 }).then(res => res);
+        }).then(res => res).catch(() => null);
 
-      // 3. Chat history — filter out system fallback/error messages so
-      // Nova never sees them in context and never responds TO them.
-      const FALLBACK_PREFIXES = [
-        'Yaar, kuch technical issue',
-        'Yaar, thoda technical glitch',
-        'kuch technical issue aa gaya',
-        '[SYSTEM]',
-        'Thodi der mein phir try karo',
-        // LLM-hallucinated refusals — should also be filtered so Nova doesn't reference them
-        'reminder set nahi kar sakta',
-        'reminder system thoda busy',
-        'Nova ka reminder system',
-        'Sorry yaar, reminder',
-        'system busy hai',
-        'set nahi kar sakta',
-      ];
-      const isFallback = (content: string) =>
-        FALLBACK_PREFIXES.some(p => content.includes(p));
+      const emotionPromise = qt.track('get_latest_emotion', 'emotional_states', () => supabaseAdmin.from('emotional_states').select('mood, intensity, notes').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle()).then(res => res).catch(() => ({ data: null }));
+      const episodicPromise = qt.track('get_recent_episodes', 'episodic_memories', () => supabaseAdmin.from('episodic_memories').select('summary, emotion, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(5)).then(res => res).catch(() => ({ data: [] }));
+      const reflectionPromise = qt.track('get_latest_reflection', 'reflections', () => supabaseAdmin.from('reflections').select('summary, key_takeaways').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle()).then(res => res).catch(() => ({ data: null }));
+      const lastMsgPromise = qt.track('get_last_msg_time', 'chat_history', () => supabaseAdmin.from('chat_history').select('created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle()).then(res => res).catch(() => ({ data: null }));
+      const presencePromise = qt.track('get_user_presence', 'user_presence', () => supabaseAdmin.from('user_presence').select('status, last_active_at, last_typing_at').eq('user_id', userId).maybeSingle()).then(res => res).catch(() => ({ data: null }));
+      const unreadPromise = qt.track('get_unread_nova', 'chat_history', () => supabaseAdmin.from('chat_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('role', 'assistant').eq('is_read', false)).then(res => res).catch(() => ({ count: 0 }));
+      const totalMemoriesPromise = qt.track('get_total_memories_count', 'memories', () => supabaseAdmin.from('memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)).then(res => res).catch(() => ({ count: 0 }));
 
-      let recentMessages = ((historyResult.data || []) as any[])
-        .filter(msg => msg.role !== 'assistant' || !isFallback(msg.content))
-        .reverse()
-        .map(msg => ({
-          role: msg.role as 'user' | 'assistant' | 'system',
-          content: msg.reply_to_content 
-            ? `[Replying to: "${msg.reply_to_content}"]\n${msg.content}` 
-            : msg.content
-        }));
+      const remindersPromise = reminderService.getUpcomingReminders(userId).catch(err => {
+        logger.warn('[SituationalAwareness] Reminders fetch failed', { error: err instanceof Error ? err.message : String(err) }); return [];
+      });
+      const behaviorPatternPromise = presencePatternService.getBehaviorPattern(userId).catch(err => {
+        logger.warn('[SituationalAwareness] Behavior pattern fetch failed', { error: err instanceof Error ? err.message : String(err) }); return { pattern: 'UNKNOWN', description: '' };
+      });
 
-      // 3.5 Cross-session context — also filter fallback messages
-      let recentCrossSessionContext = '';
-      if (crossSessionResult.data && (crossSessionResult.data as any[]).length > 0) {
-        const lines = (crossSessionResult.data as any[])
-          .filter(m => !isFallback(m.content))  // ← no fallbacks in cross-session either
-          .reverse()
-          .map(m =>
-            `${m.role === 'assistant' ? 'Nova' : 'User'}: ${m.content.substring(0, 200)}${m.content.length > 200 ? '...' : ''}`
-          );
-        recentCrossSessionContext = lines.join('\n');
-      }
-
-      // 4. Working memory
-      let workingMemories: { key: string; value: string }[] = [];
-      if (!skipMemory) {
-        if (cachedWm) {
-          workingMemories = cachedWm;
-        } else if (wmResult.data) {
-          workingMemories = (wmResult.data as any[]).map(wm => ({ key: wm.key, value: wm.value }));
-          cache.set(wmCacheKey, workingMemories, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
-        }
-      }
-
-      // 4. Long-term memories
-      const memories: any[] = Array.isArray(memoriesResult) ? memoriesResult : [];
-
-      // 4.5 Short-term memories
-      let shortTermMemories: any[] = [];
-      if (!skipMemory) {
-        const allFetched = (stmResult.data as any[]) || [];
-        let stmTokens = 0;
-        const budgetMemories = [];
-
-        for (const m of allFetched) {
-          const memStr = `${m.memory} ${m.emotion || ''}`;
-          const tokens = Math.ceil(memStr.length / 4);
-          if (stmTokens + tokens > 600) break;
-          budgetMemories.push({
-            memory: m.memory,
-            emotion: m.emotion,
-            importance: m.importance,
-            timestamp: m.created_at ? timeAgo(m.created_at) : null
-          });
-          stmTokens += tokens;
-        }
-
-        shortTermMemories = budgetMemories;
-        const importantShortTermCount = shortTermMemories.filter(m => m.expires_at === null).length;
-        logger.info('ShortTermMemories Loaded:', { count: shortTermMemories.length });
-        logger.info('Important Memories:', { count: importantShortTermCount });
-        logger.info('Memory Tokens Injected:', { tokens: stmTokens });
-
-        // Count total short term memories for user (fire & forget)
-        supabaseAdmin.from('short_term_memories').select('id', { count: 'exact', head: true }).eq('user_id', userId)
-          .then(({ count }) => {
-            if (count !== null) logger.info('Total Memories For User:', { count });
-          }, e => logger.warn('[Chat] total memories count threw', { error: e }));
-      } else {
-        logger.info('[DEBUG] DISABLE_MEMORY=true — skipping all memory fetches');
-      }
-
-
-      // 5. Build prompt
-      const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
-
-      // 5.1 Situational Awareness: Fetch context from disconnected engines (parallel, lightweight)
-      const userCountry = (profile as any)?.country || 'IN';
-      const TIMEZONE_OFFSETS: Record<string, number> = {
-        IN: 5.5, US: -5, UK: 0,  AU: 10, AE: 4,  SA: 3,
-        PK: 5,   BD: 6,  SG: 8,  JP: 9,  DE: 1,  FR: 1,
-        CA: -5,  NZ: 12, ZA: 2,  NG: 1,  KE: 3,  BR: -3,
-      };
-      const FRIDAY_SAT_WEEKEND = ['AE', 'SA', 'QA', 'BH', 'KW', 'OM', 'AF', 'IR'];
-      const tzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
-      const nowLocal = new Date(Date.now() + tzOffset * 3600 * 1000);
-      const DAY_NAMES   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-      const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-      const dayIdx  = nowLocal.getUTCDay();
-      const dateStr = `${DAY_NAMES[dayIdx]}, ${MONTH_NAMES[nowLocal.getUTCMonth()]} ${nowLocal.getUTCDate()}, ${nowLocal.getUTCFullYear()}`;
-      const hh = nowLocal.getUTCHours(), mm = nowLocal.getUTCMinutes();
-      const ampm = hh >= 12 ? 'PM' : 'AM';
-      const timeStr = `${hh % 12 || 12}:${mm.toString().padStart(2,'0')} ${ampm}`;
-      const tzLabel = tzOffset === 5.5 ? 'IST' : `UTC${tzOffset >= 0 ? '+' : ''}${tzOffset}`;
-      let isWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
-        ? dayIdx === 5 || dayIdx === 6
-        : dayIdx === 0 || dayIdx === 6;
-
-      // ── SCHEDULE OVERRIDE: user's actual work schedule beats the calendar ──
-      // If working_memory contains schedule facts that contradict the calendar weekday,
-      // flip isWeekend so the Situation Brief reflects reality, not assumptions.
-      // e.g. user works Saturday → isWeekend must be false even though Sat = calendar weekend.
-      if (workingMemories && workingMemories.length > 0) {
-        const todayName = DAY_NAMES[dayIdx].toLowerCase(); // e.g. 'saturday'
-        const scheduleKeys = ['work_schedule','working_days','weekoff_day','weekoff','schedule','work_days'];
-        for (const wm of workingMemories) {
-          const key = wm.key.toLowerCase();
-          const val = wm.value.toLowerCase();
-          if (!scheduleKeys.some(sk => key.includes(sk))) continue;
-          // Pattern: "saturday working" / "saturday is working day" → isWeekend = false
-          if (val.includes(todayName) && (val.includes('working') || val.includes('work day') || val.includes('office'))) {
-            isWeekend = false;
-            logger.info('[SituationalAwareness] Schedule override: memory says today is a working day', { todayName, key: wm.key, val: wm.value });
-            break;
-          }
-          // Pattern: "weekoff sunday" / "sunday weekoff" → if today is sunday, isWeekend = true (already true); if today is NOT the weekoff day, isWeekend = false
-          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off')) && val.includes(todayName)) {
-            isWeekend = true;
-            logger.info('[SituationalAwareness] Schedule override: memory confirms today is weekoff', { todayName, key: wm.key, val: wm.value });
-            break;
-          }
-          // Pattern: "weekoff sunday" but today is saturday → saturday is working
-          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off'))) {
-            const DAYS_LC = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-            const weekoffDayMentioned = DAYS_LC.find(d => val.includes(d));
-            if (weekoffDayMentioned && weekoffDayMentioned !== todayName) {
-              // Today is NOT the user's weekoff day — treat as working day
-              isWeekend = false;
-              logger.info('[SituationalAwareness] Schedule override: today is not weekoff day per memory', { todayName, weekoffDay: weekoffDayMentioned, key: wm.key });
-              break;
-            }
-          }
-        }
-      }
-
-      // Fetch disconnected engine data in parallel (all lightweight, single-row queries)
-      let latestEmotion: { mood: string; intensity: number; notes: string } | null = null;
-      let recentEpisodes: { summary: string; emotion: string | null; created_at: string }[] = [];
-      let latestReflection: { summary: string; key_takeaways: any } | null = null;
-      let gapMinutes: number | null = null;
-      let userPresence: { status: string; last_active_at?: string | null; last_typing_at?: string | null } | null = null;
-      let unreadNovaMessages = 0;
-
-      let totalMemoriesCount: number | null = null;
-
-      try {
-        const [emotionResult, episodicResult, reflectionResult, lastMsgResult, presenceResult, unreadResult, totalMemoriesResult] = await Promise.all([
-          // Latest emotional state
-          qt.track('get_latest_emotion', 'emotional_states', () =>
-            supabaseAdmin.from('emotional_states')
-              .select('mood, intensity, notes')
-              .eq('user_id', userId)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-          ),
-          // Recent episodic memories (last 5 life events)
-          qt.track('get_recent_episodes', 'episodic_memories', () =>
-            supabaseAdmin.from('episodic_memories')
-              .select('summary, emotion, created_at')
-              .eq('user_id', userId)
-              .order('created_at', { ascending: false })
-              .limit(5)
-          ),
-          // Latest daily reflection
-          qt.track('get_latest_reflection', 'reflections', () =>
-            supabaseAdmin.from('reflections')
-              .select('summary, key_takeaways')
-              .eq('user_id', userId)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-          ),
-          // Last message timestamp (for gap calculation)
-          qt.track('get_last_msg_time', 'chat_history', () =>
-            supabaseAdmin.from('chat_history')
-              .select('created_at')
-              .eq('user_id', userId)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-          ),
-          // User presence — lets Nova "see" online/away/offline + last-seen when replying
-          qt.track('get_user_presence', 'user_presence', () =>
-            supabaseAdmin.from('user_presence')
-              .select('status, last_active_at, last_typing_at')
-              .eq('user_id', userId)
-              .maybeSingle()
-          ),
-          // Read receipts — how many of Nova's messages the user has NOT opened/read yet
-          qt.track('get_unread_nova', 'chat_history', () =>
-            supabaseAdmin.from('chat_history')
-              .select('id', { count: 'exact', head: true })
-              .eq('user_id', userId)
-              .eq('role', 'assistant')
-              .eq('is_read', false)
-          ),
-          // Total long-term memories count to determine Discovery Phase
-          qt.track('get_total_memories_count', 'memories', () =>
-            supabaseAdmin.from('memories')
-              .select('id', { count: 'exact', head: true })
-              .eq('user_id', userId)
-          )
-        ]);
-
-        if (emotionResult.data) latestEmotion = emotionResult.data;
-        if (episodicResult.data) recentEpisodes = episodicResult.data;
-        if (reflectionResult.data) latestReflection = reflectionResult.data;
-        if (lastMsgResult.data?.created_at) {
-          gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;
-        }
-        if (presenceResult.data) {
-          userPresence = {
-            status: presenceResult.data.status || 'offline',
-            last_active_at: presenceResult.data.last_active_at,
-            last_typing_at: presenceResult.data.last_typing_at,
-          };
-        }
-        if (typeof unreadResult.count === 'number') {
-          unreadNovaMessages = unreadResult.count;
-        }
-        if (typeof totalMemoriesResult.count === 'number') {
-          totalMemoriesCount = totalMemoriesResult.count;
-        }
-
-        // Apply Gap Truncation logic to recentMessages
-        if (gapMinutes !== null) {
-          if (gapMinutes > 1440) { // 24 hours
-            logger.info('[SituationalAwareness] Gap > 24h. Truncating context and rotating conversation_id.', { gapMinutes });
-            // Rotate conversation ID so future DB fetches are clean
-            const oldConversationId = activeConversationId;
-            activeConversationId = crypto.randomUUID();
-            // The user message was already inserted under the OLD id (line 542). Move it to
-            // the new id, otherwise Nova's reply (inserted under the NEW id below) is torn
-            // into a different conversation and the active thread shows a reply with no user
-            // bubble, while the old conversation keeps a permanently unanswered user row.
-            if (!is_proactive && userMessageId && !userMessageId.startsWith('msg_')) {
-              supabaseAdmin.from('chat_history')
-                .update({ conversation_id: activeConversationId })
-                .eq('id', userMessageId)
-                .then(({ error }) => { if (error) logger.warn('[Chat] Gap-rotation: failed to move user message', { error }); },
-                  e => logger.warn('[Chat] Gap-rotation: move user message threw', { error: e }));
-            } else if (userMessageId && oldConversationId) {
-              logger.warn('[Chat] Gap-rotation: could not relocate proactive/msg_ user id', { userMessageId, oldConversationId });
-            }
-            // Keep ONLY the latest user message
-            if (recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user') {
-              recentMessages = [recentMessages[recentMessages.length - 1]];
-            } else {
-              recentMessages = [];
-            }
-          } else if (gapMinutes > 360) { // 6 hours
-            logger.info('[SituationalAwareness] Gap > 6h. Limiting context to last 3 messages.', { gapMinutes });
-            recentMessages = recentMessages.slice(-3);
-          }
-        }
-
-        logger.info('[SituationalAwareness] Context loaded', {
-          hasEmotion: !!latestEmotion,
-          episodes: recentEpisodes.length,
-          hasReflection: !!latestReflection,
-          gapMinutes: gapMinutes ? Math.round(gapMinutes) : null
-        });
-      } catch (err) {
-        logger.warn('[SituationalAwareness] Context fetch failed (non-critical)', {
-          error: err instanceof Error ? err.message : String(err)
-        });
-      }
-
-      let upcomingReminders: any[] = [];
-      try {
-        upcomingReminders = await reminderService.getUpcomingReminders(userId);
-      } catch (err) {
-        logger.warn('[SituationalAwareness] Reminders fetch failed', { error: err instanceof Error ? err.message : String(err) });
-      }
-
-      let behaviorPattern: string | null = null;
-      try {
-        const { pattern, description } = await presencePatternService.getBehaviorPattern(userId);
-        if (pattern !== 'UNKNOWN') {
-           behaviorPattern = `${pattern} (${description})`;
-        }
-      } catch (err) {
-        logger.warn('[SituationalAwareness] Behavior pattern fetch failed', { error: err instanceof Error ? err.message : String(err) });
-      }
-
-      // Build a schedule override note if the calendar day was corrected by working_memory
-      let scheduleOverrideNote: string | undefined;
-      if (workingMemories && workingMemories.length > 0) {
-        const calendarIsWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry)
-          ? dayIdx === 5 || dayIdx === 6
-          : dayIdx === 0 || dayIdx === 6;
-        if (calendarIsWeekend !== isWeekend) {
-          // The working_memory override flipped the flag — inform the LLM explicitly
-          if (!isWeekend) {
-            scheduleOverrideNote = `⚠️ SCHEDULE OVERRIDE (from user's own memory): The calendar says today (${DAY_NAMES[dayIdx]}) is a weekend, BUT the user's actual work schedule says they are WORKING today. Treat today as a NORMAL WORKING DAY. WEEKOFF MODE does NOT apply. Do NOT suggest they are relaxing or free. They are at work.`;
-          } else {
-            scheduleOverrideNote = `⚠️ SCHEDULE OVERRIDE (from user's own memory): The user's memory says today (${DAY_NAMES[dayIdx]}) is their WEEKOFF / day off. Treat today as a rest day, not a workday.`;
-          }
-        }
-      }
-
-      // Build the Situation Brief
-      const situationCtx: SituationContext = {
-        nowLocal,
-        tzLabel,
-        country: userCountry,
-        gapMinutes,
-        latestEmotion,
-        recentEpisodes,
-        latestReflection,
-        isWeekend,
-        scheduleOverrideNote,
-        dayName: DAY_NAMES[dayIdx],
-        dateStr,
-        timeStr,
-        lastUserMessage: effectiveMessage, // For availability/mood signal detection
-        upcomingReminders,
-        currentVisualContext: profile?.current_visual_context,
-        userPresence,
-        unreadNovaMessages,
-        behaviorPattern,
-        totalMemoriesCount,
-      };
-      situationBrief = situationalAwareness.buildBrief(situationCtx);
-
-      // 5.5 Phase 3: Temporal Memory Search — inject exact timestamped history when user asks time-based questions
-      let temporalContextBlock = '';
       const TEMPORAL_KEYWORDS = [
         'yesterday', 'days ago', 'last week', 'last month', 'do you remember',
         'what time', 'what day', 'when did', 'earlier today', 'this morning', 
         'last night', 'tell me what', 'you said', 'i said', 'we talked',
-        // Hindi/Hinglish
         'kal', 'parso', 'yaad hai', 'yaad karo', 'kab', 'kitne baje', 
         'time kya tha', 'exact time', 'pehle', 'abhi', 'aaj subah',
         'raat ko', 'dopahar', 'shaam ko', 'maine kaha tha', 'tune kaha tha',
         'bataya tha', 'bola tha', 'likha tha'
       ];
-      const lowerMsg = effectiveMessage.toLowerCase();
-      const isTemporalQuery = TEMPORAL_KEYWORDS.some(kw => lowerMsg.includes(kw));
+      const isTemporalQuery = TEMPORAL_KEYWORDS.some(kw => effectiveMessage.toLowerCase().includes(kw));
+      const temporalPromise = isTemporalQuery
+        ? qt.track('get_temporal_context', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content, created_at').eq('user_id', userId).gte('created_at', new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()).order('created_at', { ascending: false }).limit(80)).then(res => res).catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] });
 
-      if (isTemporalQuery) {
-        try {
-          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-          const { data: temporalData } = await qt.track('get_temporal_context', 'chat_history', () =>
-            supabaseAdmin.from('chat_history')
-              .select('role, content, created_at')
-              .eq('user_id', userId)
-              .gte('created_at', thirtyDaysAgo)
-              .order('created_at', { ascending: false })
-              .limit(80)
-          );
+      const upcomingRemindersFullPromise = supabaseAdmin.from('reminders').select('*').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(10).then(res => res, _err => ({ data: [] }));
 
-          if (temporalData && temporalData.length > 0) {
-            const chronologicalData = temporalData.reverse();
-            // Shift each archive timestamp into the USER's local timezone — NOT a hardcoded
-            // IST offset. tzOffset/tzLabel are already computed above (lines 974/983) from the
-            // user's country, so a US/UK/etc. user sees times in their own clock, not +5:30.
-            const tzMs = tzOffset * 3600 * 1000;
-            const lines = chronologicalData.map(m => {
-              const d = new Date(new Date(m.created_at).getTime() + tzMs);
-              const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const tStr = `${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')} ${tzLabel}`;
-              const speaker = m.role === 'assistant' ? 'Nova' : 'You';
-              const preview = m.content.substring(0, 300) + (m.content.length > 300 ? '...' : '');
-              return `[${tStr}] ${speaker}: ${preview}`;
-            });
-            temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n') + '\n\nCRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory.';
-            logger.info('[Temporal] Injected archive', { rows: temporalData.length });
-          }
-        } catch (err) {
-          logger.warn('[Temporal] Context fetch failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
+      // AWAIT ALL CONTEXT CONCURRENTLY
+      const [
+        profileResult, historyResult, crossSessionResult, wmResult, memoriesResult, stmResult, searchData,
+        emotionResult, episodicResult, reflectionResult, lastMsgResult, presenceResult,
+        unreadResult, totalMemoriesResult, upcomingReminders, behaviorPatternResult, temporalResult, upcomingDbResult
+      ] = await Promise.all([
+        profilePromise, historyPromise, crossSessionPromise, wmPromise, memoriesPromise, stmPromise, searchPromise,
+        emotionPromise, episodicPromise, reflectionPromise, lastMsgPromise, presencePromise,
+        unreadPromise, totalMemoriesPromise, remindersPromise, behaviorPatternPromise, temporalPromise, upcomingRemindersFullPromise, sessionPromise
+      ]);
+
+      const dbDuration = Date.now() - dbStartTime;
+      logger.info('[Chat] Parallel context fetch completed', { userId, durationMs: dbDuration });
+
+      if (searchData) {
+        effectiveMessage = `${searchData}\n\nUser's question: ${effectiveMessage}`;
+        logger.info('[Chat] Web Search prepended to effectiveMessage');
+      }
+
+      // ── Unpack results ─────────────────────────────────────────────────────────
+      let profile = profileResult.data as any;
+      if (profile && !cachedProfile) cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);
+
+      const FALLBACK_PREFIXES = [ 'Yaar, kuch technical issue', 'Yaar, thoda technical glitch', 'kuch technical issue aa gaya', '[SYSTEM]', 'Thodi der mein phir try karo', 'reminder set nahi kar sakta', 'reminder system thoda busy', 'Nova ka reminder system', 'Sorry yaar, reminder', 'system busy hai', 'set nahi kar sakta' ];
+      const isFallback = (content: string) => FALLBACK_PREFIXES.some(p => content.includes(p));
+
+      let recentMessages = ((historyResult.data || []) as any[])
+        .filter(msg => msg.role !== 'assistant' || !isFallback(msg.content))
+        .reverse()
+        .map(msg => ({ role: msg.role as 'user'|'assistant'|'system', content: msg.reply_to_content ? `[Replying to: "${msg.reply_to_content}"]\n${msg.content}` : msg.content }));
+
+      let recentCrossSessionContext = '';
+      if (crossSessionResult.data && (crossSessionResult.data as any[]).length > 0) {
+        recentCrossSessionContext = (crossSessionResult.data as any[]).filter(m => !isFallback(m.content)).reverse().map(m => `${m.role === 'assistant' ? 'Nova' : 'User'}: ${m.content.substring(0, 200)}${m.content.length > 200 ? '...' : ''}`).join('\n');
+      }
+
+      let workingMemories: { key: string; value: string }[] = [];
+      if (!skipMemory) {
+        if (cachedWm) workingMemories = cachedWm;
+        else if (wmResult.data) {
+          workingMemories = (wmResult.data as any[]).map(wm => ({ key: wm.key, value: wm.value }));
+          cache.set(wmCacheKey, workingMemories, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);
         }
       }
 
-      const { data: upcoming } = await supabaseAdmin
-        .from('reminders')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        // Include event-triggered reminders (trigger_at IS NULL) so Nova sees them.
-        .or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`)
-        .order('trigger_at', { ascending: true })
-        .limit(10);
-      
-      let remindersContext = '';
-      if (upcoming && upcoming.length > 0) {
-        // Use the user's tzOffset/tzLabel (computed at lines 974/983) instead of
-        // hardcoding Asia/Kolkata. The same shifted-Date pattern as the temporal
-        // archive (lines 1183-1187): add offset in ms, then read via UTC getters.
-        const tzMs = tzOffset * 3600 * 1000;
-        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const memories: any[] = Array.isArray(memoriesResult) ? memoriesResult : [];
 
-        remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has these reminders active:\n' + upcoming.map(r => {
-          const when = r.trigger_at
-            ? (() => {
-                const d = new Date(new Date(r.trigger_at).getTime() + tzMs);
-                return `at ${dayNames[d.getUTCDay()]}, ${monthNames[d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')} ${tzLabel}`;
-              })()
-            : `on event "${r.event_trigger || 'unknown event'}"`;
-          const recurrence = r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : '';
-          const dayFilter = r.active_days?.length ? ` [only on: ${r.active_days.join(', ')}]` : '';
-          const monthFilter = r.active_months?.length ? ` [only in: ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''}]` : '';
-          const urgency = r.urgency && r.urgency !== 'medium' ? ` [${r.urgency} urgency]` : '';
-          const purpose = r.purpose ? ` — ${r.purpose}` : '';
-          const autoTag = r.is_auto ? ' [auto-detected]' : '';
-          return `- [ID: "${r.id}"] ${r.text || r.title} ${when}${recurrence}${dayFilter}${monthFilter}${urgency}${purpose}${autoTag}`;
+      let shortTermMemories: any[] = [];
+      if (!skipMemory) {
+        const allFetched = (stmResult.data as any[]) || [];
+        let stmTokens = 0;
+        for (const m of allFetched) {
+          const memStr = `${m.memory} ${m.emotion || ''}`;
+          const tokens = Math.ceil(memStr.length / 4);
+          if (stmTokens + tokens > 600) break;
+          shortTermMemories.push({ memory: m.memory, emotion: m.emotion, importance: m.importance, timestamp: m.created_at ? timeAgo(m.created_at) : null });
+          stmTokens += tokens;
+        }
+      }
+
+      const userCountry = profile?.country || 'IN';
+      const TIMEZONE_OFFSETS: Record<string, number> = { IN: 5.5, US: -5, UK: 0, AU: 10, AE: 4, SA: 3, PK: 5, BD: 6, SG: 8, JP: 9, DE: 1, FR: 1, CA: -5, NZ: 12, ZA: 2, NG: 1, KE: 3, BR: -3 };
+      const tzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
+      const tzMs = tzOffset * 3600 * 1000;
+      const nowLocal = new Date(Date.now() + tzMs);
+      const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const dayIdx = nowLocal.getUTCDay();
+      const dateStr = `${DAY_NAMES[dayIdx]}, ${MONTH_NAMES[nowLocal.getUTCMonth()]} ${nowLocal.getUTCDate()}, ${nowLocal.getUTCFullYear()}`;
+      const hh = nowLocal.getUTCHours(), mm = nowLocal.getUTCMinutes();
+      const timeStr = `${hh % 12 || 12}:${mm.toString().padStart(2,'0')} ${hh >= 12 ? 'PM' : 'AM'}`;
+      const tzLabel = tzOffset === 5.5 ? 'IST' : `UTC${tzOffset >= 0 ? '+' : ''}${tzOffset}`;
+      
+      const FRIDAY_SAT_WEEKEND = ['AE', 'SA', 'QA', 'BH', 'KW', 'OM', 'AF', 'IR'];
+      let isWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry) ? dayIdx === 5 || dayIdx === 6 : dayIdx === 0 || dayIdx === 6;
+
+      let scheduleOverrideNote: string | undefined;
+      if (workingMemories.length > 0) {
+        const todayName = DAY_NAMES[dayIdx].toLowerCase();
+        for (const wm of workingMemories) {
+          const val = wm.value.toLowerCase();
+          if (val.includes(todayName) && (val.includes('working') || val.includes('work day') || val.includes('office'))) { isWeekend = false; break; }
+          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off')) && val.includes(todayName)) { isWeekend = true; break; }
+          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off'))) {
+            const DAYS_LC = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+            const weekoffDay = DAYS_LC.find(d => val.includes(d));
+            if (weekoffDay && weekoffDay !== todayName) { isWeekend = false; break; }
+          }
+        }
+        const calendarIsWeekend = FRIDAY_SAT_WEEKEND.includes(userCountry) ? dayIdx === 5 || dayIdx === 6 : dayIdx === 0 || dayIdx === 6;
+        if (calendarIsWeekend !== isWeekend) {
+          scheduleOverrideNote = !isWeekend ? `⚠️ SCHEDULE OVERRIDE: The calendar says today (${DAY_NAMES[dayIdx]}) is a weekend, BUT the user's actual work schedule says they are WORKING today. Treat today as a NORMAL WORKING DAY.` : `⚠️ SCHEDULE OVERRIDE: The user's memory says today (${DAY_NAMES[dayIdx]}) is their WEEKOFF / day off. Treat today as a rest day.`;
+        }
+      }
+
+      let gapMinutes: number | null = null;
+      if (lastMsgResult.data?.created_at) gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;
+
+      if (gapMinutes !== null) {
+        if (gapMinutes > 1440) {
+          activeConversationId = crypto.randomUUID();
+          if (!is_proactive && userMessageId && !userMessageId.startsWith('msg_')) supabaseAdmin.from('chat_history').update({ conversation_id: activeConversationId }).eq('id', userMessageId).then(res => res);
+          recentMessages = recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user' ? [recentMessages[recentMessages.length - 1]] : [];
+        } else if (gapMinutes > 360) {
+          recentMessages = recentMessages.slice(-3);
+        }
+      }
+
+      const userPresence = presenceResult.data ? { status: presenceResult.data.status || 'offline', last_active_at: presenceResult.data.last_active_at, last_typing_at: presenceResult.data.last_typing_at } : null;
+
+      const situationCtx = {
+        nowLocal, tzLabel, country: userCountry, gapMinutes,
+        latestEmotion: emotionResult.data, recentEpisodes: episodicResult.data || [],
+        latestReflection: reflectionResult.data, isWeekend, scheduleOverrideNote, dayName: DAY_NAMES[dayIdx],
+        dateStr, timeStr, lastUserMessage: effectiveMessage, upcomingReminders,
+        currentVisualContext: profile?.current_visual_context, userPresence,
+        unreadNovaMessages: unreadResult.count || 0, behaviorPattern: behaviorPatternResult.pattern !== 'UNKNOWN' ? `${behaviorPatternResult.pattern} (${behaviorPatternResult.description})` : null,
+        totalMemoriesCount: totalMemoriesResult.count || 0,
+      };
+      situationBrief = situationalAwareness.buildBrief(situationCtx);
+
+      let temporalContextBlock = '';
+      if (temporalResult.data && temporalResult.data.length > 0) {
+        const lines = temporalResult.data.reverse().map((m: any) => {
+          const d = new Date(new Date(m.created_at).getTime() + tzMs);
+          const tStr = `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()]}, ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')} ${tzLabel}`;
+          return `[${tStr}] ${m.role === 'assistant' ? 'Nova' : 'You'}: ${m.content.substring(0, 300)}${m.content.length > 300 ? '...' : ''}`;
+        });
+        temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n') + '\n\nCRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory.';
+      }
+
+      let remindersContext = '';
+      if (upcomingDbResult.data && upcomingDbResult.data.length > 0) {
+        remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\nThe user currently has these reminders active:\n' + upcomingDbResult.data.map((r: any) => {
+          const when = r.trigger_at ? (() => { const d = new Date(new Date(r.trigger_at).getTime() + tzMs); return `at ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()]}, ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')} ${tzLabel}`; })() : `on event "${r.event_trigger || 'unknown event'}"`;
+          return `- [ID: "${r.id}"] ${r.text || r.title} ${when}${r.recurrence_interval ? ` (repeats every ${r.recurrence_interval} ${r.recurrence_type || 'time(s)'})` : ''}${r.active_days?.length ? ` [only on: ${r.active_days.join(', ')}]` : ''}${r.active_months?.length ? ` [only in: ${r.active_months.join(', ')}${r.active_year ? ' ' + r.active_year : ''}]` : ''}${r.urgency && r.urgency !== 'medium' ? ` [${r.urgency} urgency]` : ''}${r.purpose ? ` — ${r.purpose}` : ''}${r.is_auto ? ' [auto-detected]' : ''}`;
         }).join('\n') + '\n\nCRITICAL ANTI-HALLUCINATION RULE: This list is the absolute source of truth. If past chat history says a reminder was cancelled but it appears here, it is STILL ACTIVE. Do not contradict this list. Do NOT invent or guess about reminders not in this list. If the user asks about a reminder, rely strictly on these IDs and descriptions.';
       } else {
         remindersContext = '\n\n## ACTIVE REMINDERS (SOURCE OF TRUTH)\n[EMPTY LIST] The user currently has NO active reminders.\nCRITICAL ANTI-HALLUCINATION RULE: If the user asks for their reminders, you MUST tell them they have no active reminders. NEVER invent or hallucinate reminders. Do NOT guess from past conversation. If this list is empty, they have NO reminders.';
       }
 
-      // === MEMORY RETRIEVAL (REUSE ALREADY-FETCHED DATA) ===
-      let memoryContext = '';
-      if (webSearchContext) {
-        memoryContext += webSearchContext;
-      }
-      // NOTE: workingMemories / shortTermMemories / memories are intentionally NOT
-      // re-listed here — promptBuilder.buildSystemPrompt already injects all three
-      // (WORKING MEMORY, SHORT-TERM MEMORY, LONG-TERM MEMORY sections). Duplicating
-      // them in memoryContext made Nova see every fact twice and treat the repeats as
-      // filler. Memory rendering/emphasis now lives in ONE place (promptBuilder).
+      const memoryContext = '';
+      const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
 
       const brainContext = {
         memories,
