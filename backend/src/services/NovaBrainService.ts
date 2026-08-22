@@ -22,6 +22,24 @@ export function sanitizeReply(reply: string): string {
   if (!reply) return '';
   let text = String(reply);
 
+  // ── Extract "Actual Output:" section if model narrates its reasoning ──────────
+  // When the LLM explains what it is doing before giving the reply (e.g. "Note: Since the
+  // response needs to be plain text... Actual Output: <reply>"), strip everything before
+  // the actual output marker and keep only the final spoken text.
+  const actualOutputMatch = text.match(/(?:Actual Output|Final Output|Plain Text Output|WhatsApp Style)[:\s]*([^]*)/i);
+  if (actualOutputMatch) {
+    text = actualOutputMatch[1].trim();
+  }
+
+  // Strip meta-commentary "Note: Since..." blocks that appear before the real reply
+  text = text
+    .replace(/^Note:\s*Since[^\n]*\n?/gi, '')
+    .replace(/^Note:\s*[^\n]*\n?/gi, '')
+    .replace(/^(?:I(?:'ve| have|'m| am)|Since the|Per the|Following the|Based on the)\s+(?:combined|updated|new|given)\s*(?:the )?(?:instructions?|guidelines?|rules?|format)[^\n]*\n?/gi, '')
+    .replace(/^(?:As per|According to) the updated instructions?[^\n]*/gi, '')
+    .replace(/^\[Replying to:[^\]]*\]\s*/gm, '')
+    .trim();
+
   // --- Nuke entire reply if it is clearly a structured menu/report ---------------
   // If the reply has 3+ lines that are bullet/numbered/lettered menu items,
   // it is a structured report, NOT a human text. Kill everything after the first
@@ -52,6 +70,8 @@ export function sanitizeReply(reply: string): string {
     .replace(/\s*\[\s*(?:subconscious_actions|subconscious actions)[^\]]*\]\s*/gi, ' ')
     .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ')
     .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ')
+    // Strip [Replying to: "..."] prefixes echoed into reply text
+    .replace(/^\[Replying to:[^\]]*\]\s*/gm, '')
     // Strip system-text leaks
     .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ')
     .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')
