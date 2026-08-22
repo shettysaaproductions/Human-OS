@@ -88,17 +88,10 @@ export class QueueService {
 
       while (true) {
         const start = Date.now();
-        // IMPORTANT: claim only THIS queue's job types. Without the filter, the first queue
-        // to poll claims ANY pending job — memoryQueue's processor default branch silently
-        // 'completed' stolen daily_reflection jobs, dropping real reflection work.
-        let q = supabaseAdmin
-          .from('background_jobs')
-          .select('id, job_type, payload, attempts, status, created_at')
-          .eq('status', 'pending');
-        if (this.jobTypes && this.jobTypes.length) {
-          q = q.in('job_type', this.jobTypes);
-        }
-        const { data: jobs, error } = await q.order('created_at', { ascending: true }).limit(1);
+        // Use atomic lock-free queue claiming to avoid race conditions across pods/restarts
+        const { data: jobs, error } = await supabaseAdmin.rpc('claim_next_background_job', {
+          p_job_types: this.jobTypes && this.jobTypes.length > 0 ? this.jobTypes : null
+        });
 
         qt.record('poll_pending_job', 'background_jobs', Date.now() - start, jobs?.length ?? 0);
 
@@ -107,12 +100,6 @@ export class QueueService {
         }
 
         const job = jobs[0] as Job;
-
-        // Mark as running
-        await supabaseAdmin
-          .from('background_jobs')
-          .update({ status: 'running', started_at: new Date().toISOString() })
-          .eq('id', job.id);
 
         try {
           await this.processor(job);
