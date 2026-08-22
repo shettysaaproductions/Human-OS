@@ -321,14 +321,19 @@ export class NovaConsciousnessEngine {
     let midSleepWakeNote = '';
     
     // If we're in sleep window but user just came online AND recently chatted → override sleep guard
+    // TIGHTENED: require BOTH fresh presence (< 5min) AND actual recent chat (< 10min)
+    // This prevents stale presence from waking NACE during real sleep hours.
     if (tContext.isSleepWindow && userPresence === 'online') {
       const presenceAge = presenceData?.updated_at 
         ? (Date.now() - new Date(presenceData.updated_at).getTime()) / 60000 : 999;
-      // Only wake up if they actively chatted in the last 15 mins (not just background presence)
-      if (presenceAge < 5 && gapMinutes < 15) {
-        // User is actively online during sleep hours → they're awake
-        midSleepWakeNote = `It's ${tContext.hour}:00 and the user is AWAKE despite it being their sleep window. React naturally — don't act like a chatbot. Maybe they can't sleep, or woke up for something. Be warm and curious. Don't mention you noticed they're up.`;
+      // User must be BOTH recently active on presence AND have sent a message recently
+      if (presenceAge < 5 && gapMinutes < 10) {
+        // User is actively chatting during sleep hours → they're awake
+        midSleepWakeNote = `It's ${tContext.hour}:00 and the user is AWAKE despite it being their sleep window. React naturally - don't act like a chatbot. Maybe they can't sleep, or woke up for something. Be warm and curious. Don't mention you noticed they're up.`;
         isSleepWindowOverridden = true;
+      } else {
+        // Presence is stale — user is probably asleep. Do NOT override sleep window.
+        logger.info('[NACE] Sleep window — presence is stale, NOT overriding. User likely asleep.', { userId, presenceAge: Math.round(presenceAge), gapMinutes: Math.round(gapMinutes) });
       }
     }
 
@@ -666,6 +671,21 @@ ${escalationTone}`;
 
       const message = generated.message;
 
+      // ── PERSISTENT DEDUP via working_memory ─────────────────────────────────
+      // Backup dedup in case nova_outreach_log insert failed on a prior pulse.
+      // This prevents the "same message 3x" bug caused by outreach_log insert errors.
+      const normalize2 = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+      const { data: lastProactiveWm } = await supabaseAdmin
+        .from('working_memory')
+        .select('value')
+        .eq('user_id', userId)
+        .eq('key', 'last_proactive_content')
+        .maybeSingle();
+      if (lastProactiveWm?.value && normalize2(lastProactiveWm.value) === normalize2(message)) {
+        logger.warn('[NACE] 🚫 Working memory dedup — same message as last proactive, skipping', { userId, message: message.substring(0, 60) });
+        return;
+      }
+
       // Save to chat_history so Nova remembers saying this
       const { data: latestChat } = await supabaseAdmin
         .from('chat_history')
@@ -678,15 +698,20 @@ ${escalationTone}`;
 
       await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine');
 
-      // Log to outreach log so MIN_GAP check works correctly.
-      // NOTE: schema columns are outreach_type + created_at (NOT type/sent_at — the old
-      // insert failed every time, so the anti-spam ledger never filled and MIN_GAP could not
-      // throttle outreach).
-      await supabaseAdmin.from('nova_outreach_log').insert({
+      // Log to outreach log so MIN_GAP check works correctly + update working_memory dedup
+      const { error: outreachLogError } = await supabaseAdmin.from('nova_outreach_log').insert({
         user_id: userId,
         message,
         outreach_type: agendaItem ? 'agenda_followup' : 'engagement_checkin',
       });
+      if (outreachLogError) {
+        logger.warn('[NACE] ⚠️ outreach_log insert failed — dedup ledger may be incomplete', { error: outreachLogError.message, userId });
+      }
+      // Always persist to working_memory as backup dedup (even if outreach_log failed)
+      await supabaseAdmin.from('working_memory').upsert(
+        { user_id: userId, key: 'last_proactive_content', value: message, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,key' }
+      );
 
       // Send push notification (only if token exists — message is already saved to DB above)
       if (hasPushToken) {

@@ -10,7 +10,7 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
   content: string;
-  status: 'sending' | 'sent' | 'responded' | 'error';
+  status: 'sending' | 'sent' | 'responded' | 'error' | 'failed';
   timestamp?: string; // ISO string from DB created_at — CRITICAL for sorting and proactive checks
   errorMessage?: string;
   chunkIndex?: number;
@@ -22,6 +22,8 @@ export interface Message {
   image_base64?: string;
   hasThoughts?: boolean;
   thoughts?: Array<{ engine: string; type: string; detail: string; data?: any }>;
+  isSystemMessage?: boolean; // soft-error or system-generated messages (not from LLM or user)
+  created_at?: string;
 }
 
 export interface ChatDiagnostics {
@@ -107,9 +109,22 @@ function startReplyPolling(checkFn: () => Promise<void>) {
       const lastMsg = useChatStore.getState().messages[useChatStore.getState().messages.length - 1];
       if (!lastMsg || lastMsg.role !== 'assistant') {
         useChatStore.getState().set_isTyping(false);
+        // Show a soft-error system message so the user knows what happened
+        const store = useChatStore.getState();
+        const timeoutMsg = {
+          id: `timeout_${Date.now()}`,
+          role: 'assistant' as const,
+          content: 'Connection toh hai yaar, par thoda slow lag raha hai. Ek minute wait kar — reply aa raha hoga. Nahi aya toh dobara bhej dena.',
+          status: 'failed' as const,
+          timestamp: new Date().toISOString(),
+          isSystemMessage: true,
+          created_at: new Date().toISOString(),
+        };
+        store.set({ messages: [...store.messages, timeoutMsg] });
       }
       return;
     }
+
 
     await checkFn();
   }, 2000);
