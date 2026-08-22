@@ -150,11 +150,19 @@ function needsDeepModel(message: string): boolean {
     'interview', 'exam', 'result', 'meeting', 'doctor', 'hospital',
     // Planning
     'plan banao', 'goal', 'todo', 'task list',
-    // Schedule / work / career context — needs 49B for accurate memory recall
-    'schedule', 'weekoff', 'week off', 'working day', 'working saturday', 'working sunday',
-    'saturday work', 'sunday work', 'shift', 'office hours', 'login time', 'logout time',
-    'target', 'selects', 'select karni', 'recruitment', 'joining', 'onboard',
-    'appraisal', 'increment', 'promotion', 'salary', 'hr', 'human resource',
+    // Schedule / work context — user's actual life situation needs 49B for accuracy
+    'schedule', 'weekoff', 'week off', 'working day', 'shift', 'office hours',
+    // Universal career / professional context (any profession)
+    'target', 'deadline', 'joining', 'onboard', 'appraisal', 'increment',
+    'promotion', 'salary', 'raise', 'bonus', 'layoff', 'resign', 'quit job',
+    'new job', 'job offer', 'offer letter', 'notice period',
+    // Client / project / work output (developer, designer, freelancer, sales, any)
+    'client', 'customer', 'project', 'task', 'sprint', 'milestone', 'launch',
+    'release', 'demo', 'pitch', 'presentation', 'proposal', 'contract',
+    // Academic (student, teacher, researcher)
+    'exam', 'test', 'assignment', 'submission', 'result', 'marks', 'grade',
+    // Business (entrepreneur, startup, shop owner)
+    'revenue', 'profit', 'loss', 'investor', 'funding', 'startup',
   ];
 
   // Long messages (>150 chars) likely need deeper reasoning

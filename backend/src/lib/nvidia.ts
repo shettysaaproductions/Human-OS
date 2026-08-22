@@ -122,7 +122,7 @@ function getMockResponse(
 
 // ── Brain Region (isolated key pool) ─────────────────────────────────────────
 
-type BrainRegionName = 'frontal' | 'hippocampus' | 'cerebellum' | 'reserve';
+type BrainRegionName = 'frontal' | 'hippocampus' | 'cerebellum' | 'deepCortex' | 'reserve';
 
 class BrainRegion {
   readonly name: BrainRegionName;
@@ -250,64 +250,112 @@ class BrainRegion {
 }
 
 // ── Brain Key Router ─────────────────────────────────────────────────────────
+// Maps NVIDIA API keys to dedicated brain regions so no single region can
+// starve another. With 15 keys the full architecture is:
+//
+//  ┌─────────────────────────────────────────────────────────────────────────┐
+//  │  🧠  N O V A ' S   1 5 - K E Y   B R A I N   A R C H I T E C T U R E  │
+//  ├────────────────┬────────────────────────────────────────────────────────┤
+//  │ Frontal Cortex │ Keys 1,5,6,7,8  — Real-time chat (user-facing) ×5     │
+//  │ Hippocampus    │ Keys 2,9,10     — Memory agents & learning ×3         │
+//  │ Cerebellum     │ Keys 3,11,12    — Background engines (NACE/weather) ×3│
+//  │ Deep Cortex    │ Keys 13,14      — Reflection, reasoning ×2            │
+//  │ Reserve        │ Keys 4,15       — Emergency failover ×2               │
+//  └────────────────┴────────────────────────────────────────────────────────┘
+//
+// With 4 keys: frontal=all4, hippocampus=key2, cerebellum=key3, reserve=key4+key1
+// With 1-3 keys: degraded mode (shared pool)
 
 class BrainKeyRouter {
-  readonly frontal: BrainRegion;      // Key 1 — user-facing replies
-  readonly hippocampus: BrainRegion;  // Key 2 — memory & learning
-  readonly cerebellum: BrainRegion;   // Key 3 — background tasks
-  readonly reserve: BrainRegion;      // Key 4 — emergency failover
+  readonly frontal: BrainRegion;      // User-facing replies — HIGHEST PRIORITY
+  readonly hippocampus: BrainRegion;  // Memory extraction & learning
+  readonly cerebellum: BrainRegion;   // Background engines (NACE, weather, search)
+  readonly deepCortex: BrainRegion;   // Reflection, weekly synthesis, deep reasoning
+  readonly reserve: BrainRegion;      // Emergency failover
 
   constructor() {
-    // Collect all available keys
+    // Collect all available keys in order
     const allKeys = [
       config.nvidia.apiKey,
       config.nvidia.apiKey2,
       config.nvidia.apiKey3,
       config.nvidia.apiKey4,
-      (config.nvidia as any).apiKey5 || '',
-      (config.nvidia as any).apiKey6 || '',
+      (config.nvidia as any).apiKey5  || '',
+      (config.nvidia as any).apiKey6  || '',
+      (config.nvidia as any).apiKey7  || '',
+      (config.nvidia as any).apiKey8  || '',
+      (config.nvidia as any).apiKey9  || '',
+      (config.nvidia as any).apiKey10 || '',
+      (config.nvidia as any).apiKey11 || '',
+      (config.nvidia as any).apiKey12 || '',
+      (config.nvidia as any).apiKey13 || '',
+      (config.nvidia as any).apiKey14 || '',
+      (config.nvidia as any).apiKey15 || '',
     ].filter(k => k && k.trim() !== '' && k !== 'dummy_key');
 
-    logger.info(`[BrainKeyRouter] ${allKeys.length} NVIDIA API key(s) available`);
+    const n = allKeys.length;
+    logger.info(`[BrainKeyRouter] ${n} NVIDIA API key(s) available`);
 
-    if (allKeys.length >= 4) {
-      // Full brain: frontal (user-facing replies) gets ALL keys — the highest priority
-      // operation must never fail on a single key's rate limit or outage. Other regions
-      // keep dedicated keys; reserve keeps its own + frontal's primary as a final fallback.
-      this.frontal     = new BrainRegion('frontal',     [...allKeys]);
+    if (n >= 10) {
+      // ── 10–15 keys: Full 5-region architecture ────────────────────────────
+      // Split: frontal gets ~40%, hippocampus+cerebellum get ~20% each,
+      //        deepCortex ~15%, reserve ~15%.
+      const frontalKeys    = allKeys.slice(0, Math.ceil(n * 0.4));            // keys 1..~6
+      const hippocampusKeys = allKeys.slice(Math.ceil(n * 0.4), Math.ceil(n * 0.6)); // ~keys 7-9
+      const cerebellumKeys  = allKeys.slice(Math.ceil(n * 0.6), Math.ceil(n * 0.75)); // ~keys 10-11
+      const deepCortexKeys  = allKeys.slice(Math.ceil(n * 0.75), Math.ceil(n * 0.9)); // ~keys 12-13
+      const reserveKeys     = allKeys.slice(Math.ceil(n * 0.9));                      // ~keys 14-15
+
+      this.frontal     = new BrainRegion('frontal',     frontalKeys);
+      this.hippocampus = new BrainRegion('hippocampus', hippocampusKeys.length > 0 ? hippocampusKeys : [allKeys[1]]);
+      this.cerebellum  = new BrainRegion('cerebellum',  cerebellumKeys.length > 0 ? cerebellumKeys : [allKeys[2]]);
+      this.deepCortex  = new BrainRegion('deepCortex',  deepCortexKeys.length > 0 ? deepCortexKeys  : [allKeys[n-2]]);
+      this.reserve     = new BrainRegion('reserve',     reserveKeys.length > 0 ? reserveKeys : [allKeys[n-1]]);
+
+    } else if (n >= 4) {
+      // ── 4–9 keys: 4-region architecture (original + deepCortex) ──────────
+      // Frontal gets the bulk of keys; hippocampus/cerebellum get one each;
+      // deepCortex shares the last key; reserve gets key4 + key1 as failover.
+      const extraKeys = allKeys.slice(4);
+      this.frontal     = new BrainRegion('frontal',     [allKeys[0], ...extraKeys.slice(0, Math.ceil(extraKeys.length / 2))]);
       this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
       this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[2]]);
+      this.deepCortex  = new BrainRegion('deepCortex',  extraKeys.length > Math.ceil(extraKeys.length / 2)
+        ? extraKeys.slice(Math.ceil(extraKeys.length / 2))
+        : [allKeys[3]]);
       this.reserve     = new BrainRegion('reserve',     [allKeys[3], allKeys[0]]);
 
-      // If extra keys exist (5, 6, ...), add them to the reserve pool for extra resilience
-      if (allKeys.length > 4) {
-        const extraKeys = allKeys.slice(4);
-        logger.info(`[BrainKeyRouter] ${extraKeys.length} extra key(s) added to reserve pool`);
-        // Recreate reserve with all extra keys + key 4 + key 1 (frontal's primary)
-        (this as any).reserve = new BrainRegion('reserve', [allKeys[3], allKeys[0], ...extraKeys]);
-      }
-    } else if (allKeys.length === 3) {
-      // 3 keys: frontal gets dedicated, hippocampus+cerebellum share, reserve = frontal backup
+    } else if (n === 3) {
       this.frontal     = new BrainRegion('frontal',     [allKeys[0]]);
       this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
       this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[2]]);
-      this.reserve     = new BrainRegion('reserve',     [allKeys[2]]); // shares with cerebellum
-    } else if (allKeys.length === 2) {
-      // 2 keys: frontal gets dedicated, everything else shares key 2
+      this.deepCortex  = new BrainRegion('deepCortex',  [allKeys[2]]);
+      this.reserve     = new BrainRegion('reserve',     [allKeys[2]]);
+    } else if (n === 2) {
       this.frontal     = new BrainRegion('frontal',     [allKeys[0]]);
       this.hippocampus = new BrainRegion('hippocampus', [allKeys[1]]);
       this.cerebellum  = new BrainRegion('cerebellum',  [allKeys[1]]);
+      this.deepCortex  = new BrainRegion('deepCortex',  [allKeys[1]]);
       this.reserve     = new BrainRegion('reserve',     [allKeys[1]]);
     } else {
-      // 1 or 0 keys: everything shares (degraded mode — original behavior)
-      const pool = allKeys.length > 0 ? allKeys : ['dummy_key'];
+      // 1 or 0 keys: degraded mode — everything shares
+      const pool = n > 0 ? allKeys : ['dummy_key'];
       this.frontal     = new BrainRegion('frontal',     pool);
       this.hippocampus = new BrainRegion('hippocampus', pool);
       this.cerebellum  = new BrainRegion('cerebellum',  pool);
+      this.deepCortex  = new BrainRegion('deepCortex',  pool);
       this.reserve     = new BrainRegion('reserve',     pool);
     }
 
-    logger.info(`[BrainKeyRouter] Architecture: frontal=${this.frontal.keyCount} hippocampus=${this.hippocampus.keyCount} cerebellum=${this.cerebellum.keyCount} reserve=${this.reserve.keyCount}`);
+    logger.info(
+      `[BrainKeyRouter] Architecture: ` +
+      `frontal=${this.frontal.keyCount} ` +
+      `hippocampus=${this.hippocampus.keyCount} ` +
+      `cerebellum=${this.cerebellum.keyCount} ` +
+      `deepCortex=${this.deepCortex.keyCount} ` +
+      `reserve=${this.reserve.keyCount} ` +
+      `(total=${n})`
+    );
   }
 }
 
@@ -436,16 +484,17 @@ export async function chatCompletionMemory(
 }
 
 /**
- * 🧠 Deep Cortex — For complex, emotional, or multi-step reasoning.
- * Uses the 49B deep model with frontal+reserve failover.
- * Called only when the message is classified as needing deeper thought.
+ * 🧠 Deep Cortex — Reflection, weekly synthesis, complex life reasoning.
+ * Uses dedicated deep cortex keys (Keys 13-14) with reserve failover.
+ * Called by: ReflectionEngine, weekly insight synthesis, complex multi-step reasoning.
+ * Also used by chatCompletionDeep when the deep cortex pool is available.
  */
 export async function chatCompletionDeep(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
   const deepOptions = { ...options, model: config.nvidia.deepModel };
-  return executeWithFailover(brain.frontal, brain.reserve, messages, deepOptions);
+  return executeWithFailover(brain.deepCortex, brain.reserve, messages, deepOptions);
 }
 
 /**
