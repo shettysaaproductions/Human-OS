@@ -77,10 +77,11 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 - ✅ **Aug 22 Session — Phase 1 Latency Optimization (Parallel Fetch):**
   - **`chat.ts` Sequential Block Destroyed:** Replaced 5 sequential blocking asynchronous calls (Profile, Chat History, Memory Contexts, Web Search, External DB Services) with a single unified `Promise.all` parallel fetch block.
   - **Result:** Context assembly dropped from 2.5s down to <0.5s.
-- ✅ **Aug 22 Session — Phase 2 Latency Optimization (Subconscious Path / Layer 2):**
-  - **`NovaBrainService.ts` & `chat.ts` decoupled:** Moved the 8B JSON extraction model (Call 2) out of the critical path into a detached background Promise.
-  - **Removed synchronous retry:** The "REMINDER HONESTY CHECK" retry loop in `chat.ts` was safely removed since the 8B model perfectly extracts reminders from plain text.
-  - **Result:** True "WhatsApp-style" Layer 1 reflex latency achieved. The 49B text response returns immediately, saving an additional 3-6 seconds per message, while memory and action extraction happens silently in the background.
+- ✅ **Aug 22 Session — Phase 2 Latency Optimization & Hardening (Durable Subconscious Processing):**
+  - **`NovaBrainService.ts` & `chat.ts` decoupled:** Moved the 8B JSON extraction model (Call 2) out of the critical path into `subconsciousQueue` (durable queue worker).
+  - **Deterministic Critical Action Path:** Added `isCriticalAction()` (regex + state-changing classifier) in `NovaBrainService`. For reminders/tasks/alarms, actions are extracted and persisted synchronously BEFORE Nova gives a truthful confirmation.
+  - **Idempotency Safeguard:** Added message hash caching in `BackgroundActionService` with a 1-min TTL to prevent duplicate reminders during rapid retries.
+  - **Result:** True "WhatsApp-style" Layer 1 reflex latency achieved with guaranteed semantic truthfulness for state-changing user actions. Fully deployed & published to EAS production branch (Runtime 1.1.0).
 - ✅ **Master Production Fix (Aug 1, 2026):** 
   - NACE (Nova Autonomous Consciousness Engine) now gathers all 7 engines' context (Memories, Conversations, Temporal, Agenda) and feeds them into Tier 1 subconscious decision-making.
   - Added `MessageFormatter` for WhatsApp-style multi-bubble output with contextual emojis.
