@@ -13,6 +13,10 @@ export interface Provider {
   created_at: string;
 }
 
+/**
+ * Dormant Supabase provider-management utility. Runtime NVIDIA routing is owned
+ * exclusively by lib/nvidia.ts / BrainKeyRouter; do not use this for requests.
+ */
 class ModelRouterService {
   /**
    * Returns all active providers sorted by priority desc, created_at asc

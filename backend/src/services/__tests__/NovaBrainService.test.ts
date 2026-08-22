@@ -1,12 +1,18 @@
 import { NovaBrainService, sanitizeReply } from '../NovaBrainService';
-import { chatCompletion, chatCompletionBackground, chatCompletionStream } from '../../lib/nvidia';
+import { complete, stream } from '../../lib/nvidia';
 import { promptBuilder } from '../promptBuilder';
 import { logger } from '../../lib/logger';
 
+// Legacy test aliases keep the behavioral assertions compact while production
+// code now calls the profile API.
+const chatCompletion = complete;
+const chatCompletionBackground = complete;
+const chatCompletionStream = stream;
+
 jest.mock('../../lib/nvidia', () => ({
-  chatCompletion: jest.fn(),
-  chatCompletionBackground: jest.fn(),
-  chatCompletionStream: jest.fn()
+  complete: jest.fn(),
+  determineUserProfile: jest.fn((message: string) => message.length > 90 ? 'USER_DEEP' : 'USER_FAST'),
+  stream: jest.fn()
 }));
 
 jest.mock('../../lib/logger', () => ({
@@ -33,7 +39,7 @@ describe('NovaBrainService', () => {
 
   describe('4.1 Memory Retrieval', () => {
     it('should pass memories into the system prompt via promptBuilder', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      (complete as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
       const memories = [{ id: 'mem-1', content: 'User wants to learn guitar' }];
       await service.processInteraction('u1', 'hi', { memories });
       // 2nd arg is memories
@@ -52,7 +58,7 @@ describe('NovaBrainService', () => {
     });
 
     it('should pass workingMemories into the system prompt', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      (complete as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
       const workingMemories = ['work1'];
       await service.processInteraction('u1', 'hi', { workingMemories });
       // 3rd arg is workingMemories
@@ -71,7 +77,7 @@ describe('NovaBrainService', () => {
     });
 
     it('should pass shortTermMemories into the system prompt', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      (complete as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
       const shortTermMemories = ['short1'];
       await service.processInteraction('u1', 'hi', { shortTermMemories });
       // 6th arg is shortTermMemories
@@ -90,7 +96,7 @@ describe('NovaBrainService', () => {
     });
 
     it('should pass profile data', async () => {
-      (chatCompletion as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
+      (complete as jest.Mock).mockResolvedValue('<reply>Hello</reply>');
       const profile = { preferred_name: 'Bhai', companion_personality: 'sarcastic' };
       await service.processInteraction('u1', 'hi', { profile });
       expect(promptBuilder.buildSystemPrompt).toHaveBeenCalledWith(
@@ -112,7 +118,7 @@ describe('NovaBrainService', () => {
       const context = { memoryContext: 'Some memory context', lengthInstruction: 'Be very brief' };
       await service.processInteraction('u1', 'hi', context);
 
-      const args = (chatCompletion as jest.Mock).mock.calls[0][0];
+      const args = (chatCompletion as jest.Mock).mock.calls[0][1];
       const systemMsg = args.find((m: any) => m.role === 'system').content;
       expect(systemMsg).toContain('Some memory context');
       expect(systemMsg).toContain('Be very brief');
@@ -127,7 +133,7 @@ describe('NovaBrainService', () => {
       };
       await service.processInteraction('u1', 'hi', context);
 
-      const args = (chatCompletion as jest.Mock).mock.calls[0][0];
+      const args = (chatCompletion as jest.Mock).mock.calls[0][1];
       const systemMsg = args.find((m: any) => m.role === 'system').content;
       expect(systemMsg).toContain('## WHAT WAS SAID RECENTLY');
       expect(systemMsg).toContain('told you about the trip');
@@ -158,7 +164,8 @@ describe('NovaBrainService', () => {
         `<reply>Got it!</reply>\n<subconscious_actions>\n[{"tool":"MomentEngine","action":"extract"}, {"tool":"MemoryRepository"}]\n</subconscious_actions>`
       );
       const result = await service.processInteraction('u1', 'hi', {});
-      expect(result.subconscious_actions.length).toBe(2);
+      // Layer 2 actions are now durably queued rather than returned inline.
+      expect(result.subconscious_actions).toEqual([]);
     });
 
     it('should return empty array when no subconscious actions', async () => {
@@ -175,7 +182,7 @@ describe('NovaBrainService', () => {
       );
       const result = await service.processInteraction('u1', 'hi', {});
       expect(result.subconscious_actions).toEqual([]);
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to parse subconscious actions JSON'), expect.any(Object));
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Failed to parse subconscious actions JSON'), expect.any(Object));
     });
 
     it('should handle missing subconscious_actions tag', async () => {
@@ -250,7 +257,7 @@ describe('NovaBrainService', () => {
       result = next.value; 
 
       expect(chunks.join('')).toContain('chunk1chunk2');
-      expect(result).toEqual({ subconscious_actions: [{ tool: 'A' }] });
+      expect(result).toEqual({ subconscious_actions: [] });
     });
   });
 
@@ -266,14 +273,14 @@ describe('NovaBrainService', () => {
       const result = await service.evaluateConsciousnessTier2('ctx');
       expect(result.message).toBeDefined();
       expect(result.tone).toBeDefined();
-      expect(chatCompletionBackground).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ temperature: 0.85, maxTokens: 200 }));
+      expect(chatCompletionBackground).toHaveBeenCalledWith('PROACTIVE', expect.any(Array), expect.objectContaining({ temperature: 0.85, maxTokens: 200 }));
     });
 
     it('evaluateGoalFollowup: should include preferred name and avoid past IDs', async () => {
       (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ shouldNotify: true }));
       await service.evaluateGoalFollowup('Alex', ['goal1'], ['past1']);
       
-      const args = (chatCompletionBackground as jest.Mock).mock.calls[0][0];
+      const args = (chatCompletionBackground as jest.Mock).mock.calls[0][1];
       const userMsg = args.find((m: any) => m.role === 'user').content;
       
       expect(userMsg).toContain('Alex');
@@ -297,7 +304,7 @@ describe('NovaBrainService', () => {
       (chatCompletionBackground as jest.Mock).mockResolvedValue(JSON.stringify({ title: 't', body: 'b' }));
       await service.refineMoment('test_type', { foo: 'bar' });
       
-      const args = (chatCompletionBackground as jest.Mock).mock.calls[0][0];
+      const args = (chatCompletionBackground as jest.Mock).mock.calls[0][1];
       const userMsg = args.find((m: any) => m.role === 'user').content;
       
       expect(userMsg).toContain('Do NOT make up');

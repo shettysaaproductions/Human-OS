@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { chatCompletionBackground } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import axios from 'axios';
 
 // Interface for Open-Meteo Geocoding
@@ -102,7 +102,7 @@ Notable: ${isRaining ? 'Raining' : ''} ${isThunderstorm ? 'Thunderstorm' : ''} $
 
 Write a very short, casual text message warning them or checking in. (e.g., "hey, looks like it's raining heavily out there, stay dry!" or "40 degrees today, stay hydrated!"). No emojis, no robotic phrasing. Keep it to 1 sentence.`;
 
-      const alertMessage = await chatCompletionBackground([{ role: 'system', content: prompt }], { maxTokens: 50 });
+      const alertMessage = await complete('PROACTIVE', [{ role: 'system', content: prompt }], { maxTokens: 50 });
 
       // ── QUOTE STRIPPING (Fix #4) ───────────────────────────────────────────
       // LLM sometimes wraps the output in quotation marks. Strip them.

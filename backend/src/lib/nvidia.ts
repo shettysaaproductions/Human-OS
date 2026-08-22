@@ -97,6 +97,27 @@ export interface ChatOptions {
   tool_choice?: 'auto' | 'none' | { type: 'function', function: { name: string } };
 }
 
+/**
+ * Runtime capabilities are the only supported way for production code to select
+ * an NVIDIA model/brain region.  They intentionally describe the work, never a
+ * key or client.  BrainKeyRouter remains the sole key-management authority.
+ */
+export type RoutingProfile =
+  | 'USER_FAST'
+  | 'USER_DEEP'
+  | 'SUBCONSCIOUS'
+  | 'MEMORY'
+  | 'LEARNING'
+  | 'PROACTIVE'
+  | 'CRITICAL_ACTION'
+  | 'TIMEOUT_FALLBACK';
+
+export interface RoutingDecision {
+  profile: RoutingProfile;
+  region: BrainRegionName;
+  model: string;
+}
+
 function getMockResponse(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions
@@ -361,6 +382,74 @@ class BrainKeyRouter {
 
 const brain = new BrainKeyRouter();
 
+/** Cheap, deterministic user-message routing. No network or database access. */
+export function determineUserProfile(message: string): RoutingProfile {
+  const text = message.trim();
+  const lower = text.toLowerCase();
+  const words = text.split(/\s+/).filter(Boolean);
+
+  // Reflexes and acknowledgements should never consume the deep pool.
+  if (text.length < 24 || /^(hi+|hello|hey+|ok(ay)?|hmm|hm|thanks|thx|yes|no|bye|gn|lol|haha|😂|👍|❤️)$/i.test(text)) {
+    return 'USER_FAST';
+  }
+
+  const explicitDeep = /\b(analy[sz]e|analysis|compare|trade[- ]?off|explain (why|how|in detail)|step[- ]by[- ]step|strategy|diagnos[ei]s|evaluate|pros and cons|decision framework)\b/i.test(lower);
+  const emotionalSupport = /\b(depressed|panic|anxious|heartbreak|suicid|self harm|overwhelmed|crying)\b/i.test(lower);
+  const questionCount = (text.match(/[?]/g) || []).length;
+  const enumeratedRequests = (text.match(/(?:^|\n|\s)(?:\d+[.)]|[-•])/g) || []).length;
+  const multiStep = /\b(first|then|after that|before that|next|also|and then|if .* then)\b/i.test(lower);
+
+  // Length alone is deliberately conservative: a long story is not automatically
+  // deep reasoning. It needs another reasoning/ambiguity signal to escalate.
+  const longAndDemanding = words.length > 90 && (questionCount > 0 || multiStep || explicitDeep);
+  const operationHeavy = (questionCount >= 2 && words.length > 35) || enumeratedRequests >= 2 || (multiStep && words.length > 45);
+
+  return explicitDeep || emotionalSupport || longAndDemanding || operationHeavy
+    ? 'USER_DEEP'
+    : 'USER_FAST';
+}
+
+export function resolveRoutingProfile(profile: RoutingProfile): RoutingDecision {
+  switch (profile) {
+    case 'USER_DEEP':
+      return { profile, region: 'deepCortex', model: config.nvidia.deepModel };
+    case 'MEMORY':
+      return { profile, region: 'hippocampus', model: EXTRACTION_MODEL };
+    case 'LEARNING':
+      return { profile, region: 'hippocampus', model: config.nvidia.chatModel };
+    case 'SUBCONSCIOUS':
+    case 'CRITICAL_ACTION':
+    case 'TIMEOUT_FALLBACK':
+      return { profile, region: 'cerebellum', model: EXTRACTION_MODEL };
+    case 'PROACTIVE':
+      return { profile, region: 'cerebellum', model: config.nvidia.chatModel };
+    case 'USER_FAST':
+      return { profile, region: 'frontal', model: config.nvidia.chatModel };
+  }
+}
+
+/** Safe for public health reporting: no keys, inference, or provider probes. */
+export function getNvidiaRoutingStatus() {
+  return {
+    configured: brain.frontal.keyCount > 0 && config.nvidia.apiKey !== '',
+    regions: {
+      frontal: brain.frontal.keyCount,
+      hippocampus: brain.hippocampus.keyCount,
+      cerebellum: brain.cerebellum.keyCount,
+      deepCortex: brain.deepCortex.keyCount,
+      reserve: brain.reserve.keyCount,
+    },
+  };
+}
+
+function getRegion(name: BrainRegionName): BrainRegion {
+  return brain[name];
+}
+
+function getFallback(name: BrainRegionName): BrainRegion | null {
+  return name === 'frontal' || name === 'deepCortex' ? brain.reserve : null;
+}
+
 // ── Payload Builder ──────────────────────────────────────────────────────────
 
 function buildPayload(messages: any[], options?: ChatOptions, attempt: number = 0) {
@@ -435,6 +524,24 @@ async function executeWithFailover(
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+export async function complete(
+  profile: RoutingProfile,
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: Omit<ChatOptions, 'model'>,
+): Promise<string> {
+  const decision = resolveRoutingProfile(profile);
+  logger.info('[NVIDIA] Routing completion', {
+    profile: decision.profile,
+    region: decision.region,
+    model: decision.model,
+    streaming: false,
+  });
+  return executeWithFailover(getRegion(decision.region), getFallback(decision.region), messages, {
+    ...options,
+    model: decision.model,
+  });
+}
+
 /**
  * 🗣️ Frontal Cortex — Real-time user-facing chat reply.
  * Uses Key 1 with automatic failover to Key 4 (Reserve).
@@ -444,7 +551,8 @@ export async function chatCompletion(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  return executeWithFailover(brain.frontal, brain.reserve, messages, options);
+  // Legacy compatibility only. Production callers should use complete(USER_FAST, ...).
+  return complete('USER_FAST', messages, options);
 }
 
 /**
@@ -456,7 +564,7 @@ export async function chatCompletionBackground(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  return executeWithFailover(brain.cerebellum, null, messages, options);
+  return complete('PROACTIVE', messages, options);
 }
 
 /**
@@ -468,7 +576,7 @@ export async function chatCompletionLearning(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  return executeWithFailover(brain.hippocampus, null, messages, options);
+  return complete('LEARNING', messages, options);
 }
 
 /**
@@ -480,7 +588,7 @@ export async function chatCompletionMemory(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  return executeWithFailover(brain.hippocampus, null, messages, options);
+  return complete('MEMORY', messages, options);
 }
 
 /**
@@ -493,8 +601,7 @@ export async function chatCompletionDeep(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
-  const deepOptions = { ...options, model: config.nvidia.deepModel };
-  return executeWithFailover(brain.deepCortex, brain.reserve, messages, deepOptions);
+  return complete('USER_DEEP', messages, options);
 }
 
 /**
@@ -505,20 +612,36 @@ export async function* chatCompletionStream(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): AsyncGenerator<string, void, unknown> {
-  
-  const payload = buildPayload(messages, options, 0);
+  yield* stream('USER_FAST', messages, options);
+}
+
+export async function* stream(
+  profile: RoutingProfile,
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: Omit<ChatOptions, 'model'>,
+): AsyncGenerator<string, void, unknown> {
+  const decision = resolveRoutingProfile(profile);
+  logger.info('[NVIDIA] Routing stream', {
+    profile: decision.profile,
+    region: decision.region,
+    model: decision.model,
+    streaming: true,
+  });
+  const payload = buildPayload(messages, { ...options, model: decision.model }, 0);
   payload.stream = true;
 
-  // Try frontal first, then reserve
+  const primary = getRegion(decision.region);
+  const fallback = getFallback(decision.region);
   let stream: any;
   try {
-    stream = await brain.frontal.execute(async (client, signal) => {
+    stream = await primary.execute(async (client, signal) => {
       return await client.chat.completions.create(payload, { signal }) as any;
     });
   } catch (frontalErr: any) {
-    logger.warn(`[Brain:frontal] Streaming failed, falling over to reserve`, { error: frontalErr.message });
+    if (!fallback) throw frontalErr;
+    logger.warn(`[Brain:${primary.name}] Streaming failed, falling over to reserve`, { error: frontalErr.message });
     try {
-      stream = await brain.reserve.execute(async (client, signal) => {
+      stream = await fallback.execute(async (client, signal) => {
         return await client.chat.completions.create(payload, { signal }) as any;
       });
     } catch (reserveErr: any) {

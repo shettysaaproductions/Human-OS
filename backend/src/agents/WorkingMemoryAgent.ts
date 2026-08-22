@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { WorkingMemory } from '../types/memory';
 
@@ -12,7 +12,7 @@ export class WorkingMemoryAgent extends BaseAgent {
   protected async execute(job: Job): Promise<number> {
     const { userId, message } = job.payload;
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Working Memory Agent for HumanOS.
@@ -36,7 +36,6 @@ If there is no short-term context, return {"working_memories": []}.`
         content: message
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });

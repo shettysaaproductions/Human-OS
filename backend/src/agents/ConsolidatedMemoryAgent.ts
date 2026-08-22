@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { memoryRepository } from '../services/memoryRepository';
 import { cache, CACHE_NS } from '../lib/cache';
@@ -53,7 +53,7 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
       return this.persistExtraction(userId, messageId, cached);
     }
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Unified Memory Extraction Agent for HumanOS.
@@ -132,7 +132,6 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
         content: message
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1
     });

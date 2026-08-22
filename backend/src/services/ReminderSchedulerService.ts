@@ -309,7 +309,7 @@ export class ReminderSchedulerService {
     const text = reminder.text || 'kuch kaam tha';
     
     try {
-      const { chatCompletionLearning } = await import('../lib/nvidia');
+      const { complete } = await import('../lib/nvidia');
       const prompt = `You are Nova, an AI companion texting your friend. 
 You need to remind them to do this: "${text}". 
 Generate a SINGLE short, warm, and highly conversational Hinglish text message (max 1-2 lines). 
@@ -321,7 +321,7 @@ Example 3: "Oye uth ja, 10 baj gaye!"
 
 Output ONLY the raw text message. No markdown, no quotes, no labels.`;
 
-      const result = await chatCompletionLearning([
+      const result = await complete('LEARNING', [
         { role: 'system', content: prompt }
       ], {
         temperature: 0.7,

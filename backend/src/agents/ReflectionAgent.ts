@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
@@ -43,7 +43,7 @@ export class ReflectionAgent extends BaseAgent {
       working.forEach(w => { contextStr += `- ${w.key}: ${w.value}\n`; });
     }
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are Nova's Reflection Engine. 
@@ -62,7 +62,6 @@ Return ONLY a valid JSON object:
         content: `Synthesize this day (${date}):\n\n${contextStr}`
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.2
     });

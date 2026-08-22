@@ -1,6 +1,6 @@
 import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
-import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';
+import { complete } from '../lib/nvidia';
 import { memoryRepository } from '../services/memoryRepository';
 import { ExtractedMemory } from '../types/memory';
 
@@ -12,7 +12,7 @@ export class SemanticAgent extends BaseAgent {
   protected async execute(job: Job): Promise<number> {
     const { messageId, userId, message } = job.payload;
 
-    const response = await chatCompletionMemory([
+    const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Semantic Memory Agent for HumanOS.
@@ -50,7 +50,6 @@ If there are no semantic facts to extract, return {"semantic_memories": []}.`
         content: message
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });
