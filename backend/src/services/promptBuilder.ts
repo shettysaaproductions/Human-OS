@@ -510,8 +510,12 @@ Available actions (emit only what is genuinely needed):
 
 1. Save long-term fact:
 {"tool":"MemoryRepository","action":"save","data":{"key":"category_name","value":"the fact"}}
-Only meaningful long-term facts (name, job, family, goals, likes/dislikes). NOT chat filler.
-One fact per action only. Atomic saves.
+Only meaningful long-term facts the USER revealed (name, job, family members, goals, likes/dislikes).
+CRITICAL RULES:
+- ONLY save facts FROM THE USER'S MESSAGE. Never save facts from Nova's reply.
+- NEVER save: conversational filler, greetings, acknowledgments ("Sab thik bhai", "Ok", "Haan"), questions Nova asked, Nova's own statements.
+- NEVER use keys like "user_response", "user_greeting", "nova_reply", "conversation_turn".
+- One specific fact per action. Atomic saves.
 
 2. Schedule reminder (one-time):
 {"tool":"ReminderEngine","action":"schedule","data":{"title":"what","time_phrase":"in 10 minutes","purpose":"why"}}
@@ -542,6 +546,11 @@ Do NOT queue if user said bye/gn/busy/sleeping.
 8. Fire event trigger:
 {"tool":"EventDetector","action":"fire","data":{"event":"wake_up"}}
 Only when user signals an event matching an active event-triggered reminder.
+
+FINAL CHECK before outputting:
+- Does every MemoryRepository save contain a fact the USER revealed (not Nova)?
+- Are you saving greetings, acknowledgments, or Nova's questions? If yes, REMOVE them.
+- Are all reminder schedules confirmed by Nova's actual reply? If not, REMOVE them.
 
 Output ONLY the JSON array. If nothing needed: []`;
   }
