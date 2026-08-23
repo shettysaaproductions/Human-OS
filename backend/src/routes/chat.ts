@@ -150,8 +150,25 @@ function shouldExtractShortTermMemory(message: string): boolean {
 
 export const chatRouter: import('express').Router = Router();
 
-const ChatSchema = z.object({
+const ChatMessageSchema = z.object({
   message: z.string().min(1).max(4000),
+  client_message_id: z.string().optional(),
+  reply_to_id: z.string().optional(),
+  reply_to_content: z.string().optional(),
+  image_base64: z.string().optional(),
+});
+
+export interface ChatMessageInput {
+  message: string;
+  client_message_id?: string;
+  reply_to_id?: string;
+  reply_to_content?: string;
+  image_base64?: string;
+}
+
+const ChatSchema = z.object({
+  message: z.string().min(1).max(4000).optional(),
+  messages: z.array(ChatMessageSchema).optional(),
   conversation_id: z.string().uuid().optional(),
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
   is_proactive: z.boolean().optional().default(false),
@@ -160,6 +177,8 @@ const ChatSchema = z.object({
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
   client_message_id: z.string().optional(),
+}).refine(data => data.message || (data.messages && data.messages.length > 0), {
+  message: "Either 'message' or 'messages' must be provided",
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -481,19 +500,42 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, conversation_id, is_proactive, async_mode, reply_to_content, image_base64 } = parseResult.data;
+      const { message, messages, conversation_id, is_proactive, async_mode, reply_to_content, image_base64 } = parseResult.data;
       let { reply_to_id, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
       
       const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (reply_to_id && !UUID_REGEX.test(reply_to_id)) {
-        logger.warn('[Chat] Stripping malformed legacy reply_to_id', { reply_to_id, userId });
-        reply_to_id = undefined;
+
+      // ── NORMALIZATION ────────────────────────────────────────────────────────
+      let normalizedMessages: ChatMessageInput[] = [];
+      if (messages && messages.length > 0) {
+        normalizedMessages = messages;
+      } else if (message) {
+        normalizedMessages = [{
+          message,
+          client_message_id,
+          reply_to_id,
+          reply_to_content,
+          image_base64
+        }];
+      } else {
+        throw new ValidationError("Either 'message' or 'messages' must be provided");
       }
-      if (client_message_id && !UUID_REGEX.test(client_message_id)) {
-        logger.warn('[Chat] Stripping malformed legacy client_message_id', { client_message_id, userId });
-        client_message_id = undefined;
+
+      for (const msg of normalizedMessages) {
+        if (msg.reply_to_id && !UUID_REGEX.test(msg.reply_to_id)) {
+          logger.warn('[Chat] Stripping malformed legacy reply_to_id', { reply_to_id: msg.reply_to_id, userId });
+          msg.reply_to_id = undefined;
+        }
+        if (msg.client_message_id && !UUID_REGEX.test(msg.client_message_id)) {
+          logger.warn('[Chat] Stripping malformed legacy client_message_id', { client_message_id: msg.client_message_id, userId });
+          msg.client_message_id = undefined;
+        }
       }
+
+      // Legacy extraction for the primary message (used for logging and some logic)
+      const primaryMessage = normalizedMessages[normalizedMessages.length - 1].message;
+      client_message_id = normalizedMessages[normalizedMessages.length - 1].client_message_id;
 
       const request_received_ms = Date.now();
       let context_started_ms: number | null = null;
@@ -504,7 +546,7 @@ chatRouter.post(
       let response_sent_ms: number | null = null;
       
       const requestId = client_message_id || crypto.randomUUID();
-      logger.info('[Chat] Request started', { requestId, userId, messageLength: message.length, isAsync: async_mode, isProactive: is_proactive });
+      logger.info('[Chat] Request started', { requestId, userId, messageLength: primaryMessage.length, isAsync: async_mode, isProactive: is_proactive });
       let activeConversationId = conversation_id || crypto.randomUUID();
 
       const isStreaming = req.headers.accept === 'text/event-stream';
@@ -521,35 +563,41 @@ chatRouter.post(
       // Lock will be acquired after user message is inserted
 
       const isDegraded = dbHealthService.isDegraded();
-      // For proactive triggers, rewrite the message to a natural system instruction
-      let effectiveMessage = is_proactive
-        ? '[SYSTEM: The user has not messaged in a while. Open a warm, short, casual conversation. Reference something from your recent memory if possible. Do NOT say you were checking in — just talk naturally like a friend who thought of them.]'
-        : message;
-
-      if (reply_to_content && !is_proactive) {
-        effectiveMessage = `[Replying to: "${reply_to_content}"]\n\n${effectiveMessage}`;
-      }
-
-      if (image_base64) {
-        const imageDesc = await visionService.describeSharedImage(image_base64);
-        if (imageDesc) {
-          // Check if vision was degraded (no Gemini key)
-          if (imageDesc.includes('vision analysis unavailable')) {
-            effectiveMessage = `[User just shared an image but vision analysis is unavailable. You MUST ask them what is in it — e.g., "Dikha na kya hai isme!" or "Kya bheja hai bhai?"]\n\n${effectiveMessage}`;
-          } else {
-            effectiveMessage = `[User attached an image showing: ${imageDesc}]\n\n${effectiveMessage}`;
+      
+      // ── Build effectiveMessage ─────────────
+      let effectiveMessage = '';
+      if (is_proactive) {
+        effectiveMessage = '[SYSTEM: The user has not messaged in a while. Open a warm, short, casual conversation. Reference something from your recent memory if possible. Do NOT say you were checking in — just talk naturally like a friend who thought of them.]';
+        normalizedMessages[normalizedMessages.length - 1].message = effectiveMessage;
+      } else {
+        for (const msg of normalizedMessages) {
+          let text = msg.message;
+          if (msg.reply_to_content) {
+            text = `[Replying to: "${msg.reply_to_content}"]\n\n${text}`;
           }
+          if (msg.image_base64) {
+            const imageDesc = await visionService.describeSharedImage(msg.image_base64);
+            if (imageDesc) {
+              if (imageDesc.includes('vision analysis unavailable')) {
+                text = `[User just shared an image but vision analysis is unavailable. You MUST ask them what is in it — e.g., "Dikha na kya hai isme!" or "Kya bheja hai bhai?"]\n\n${text}`;
+              } else {
+                text = `[User attached an image showing: ${imageDesc}]\n\n${text}`;
+              }
+            }
+          }
+          msg.message = text;
         }
+        effectiveMessage = normalizedMessages.map(m => m.message).join('\n\n');
       }
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────
       if (isDegraded) {
         logger.warn('Chat running in DEGRADED mode', { userId });
-        degradedMode.appendMessage(userId, 'user', message);
+        degradedMode.appendMessage(userId, 'user', primaryMessage);
         const recentMessages = degradedMode.getRecentMessages(userId);
 
         let rawReply: string;
-        if (isExcessiveRequest(message)) {
+        if (isExcessiveRequest(primaryMessage)) {
           rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
         } else {
           try {
@@ -567,10 +615,10 @@ chatRouter.post(
           }
         }
 
-        const messages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
-        const reply = messages.join('\n\n');
+        const messagesResponse = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
+        const reply = messagesResponse.join('\n\n');
 
-        const textChunks = messages.flatMap(m => chunkResponse(m));
+        const textChunks = messagesResponse.flatMap(m => chunkResponse(m));
         const totalChunks = textChunks.length;
         const chunks = textChunks.map((content, idx) => ({
           index: idx + 1,
@@ -581,7 +629,7 @@ chatRouter.post(
         degradedMode.appendMessage(userId, 'assistant', reply);
 
         // Queue DB writes for later drain
-        degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, created_at: new Date().toISOString() } });
+        degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'user', content: primaryMessage, created_at: new Date().toISOString() } });
         degradedMode.enqueue({ table: 'chat_history', operation: 'insert', data: { user_id: userId, conversation_id: activeConversationId, role: 'assistant', content: reply, created_at: new Date().toISOString() } });
 
         if (isStreaming) {
@@ -590,63 +638,69 @@ chatRouter.post(
           res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
           res.end();
         } else {
-          res.status(200).json({ reply, messages, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
+          res.status(200).json({ reply, messages: messagesResponse, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
         }
         return;
       }
 
       // 1. Save user message IMMEDIATELY so it's in the DB
       // We skip for proactive triggers (no phantom user message in history)
-      const userMsgResult = is_proactive
-        ? { data: { id: 'proactive_' + Date.now() }, error: null }
-        : await qt.track('save_user_message', 'chat_history', () =>
+      const savedMessages: { id: string; client_message_id?: string; error: any }[] = [];
+      if (is_proactive) {
+        savedMessages.push({ id: 'proactive_' + Date.now(), error: null });
+      } else {
+        for (const msg of normalizedMessages) {
+          const result = await qt.track('save_user_message', 'chat_history', () =>
             supabaseAdmin.from('chat_history')
-              .insert({ user_id: userId, conversation_id: activeConversationId, role: 'user', content: message, reply_to_id, reply_to_content })
+              .insert({ 
+                user_id: userId, 
+                conversation_id: activeConversationId, 
+                role: 'user', 
+                content: msg.message, 
+                reply_to_id: msg.reply_to_id, 
+                reply_to_content: msg.reply_to_content,
+                ...(msg.client_message_id && UUID_REGEX.test(msg.client_message_id) ? { id: msg.client_message_id } : {})
+              })
               .select('id').single()
           );
-
-      if (userMsgResult.error) {
-        logger.error('[Chat] FAILED to save user message to DB', { 
-          requestId, 
-          userId, 
-          error: userMsgResult.error.message || userMsgResult.error,
-          errorCode: userMsgResult.error.code,
-          messageLength: message.length 
-        });
-      } else if (userMsgResult.data) {
-        logger.info('[Chat] User message saved to DB', { requestId, userId, messageId: userMsgResult.data.id });
-        
-        // 1.1 If there was an image, save the description as a hidden context message
-        // This ensures the LLM remembers the image in future turns, but the UI ignores it.
-        if (image_base64) {
-          // We already called describeSharedImage above and it modified effectiveMessage.
-          // Now we just save that extracted text to DB if it exists.
-          const imageDescMatch = effectiveMessage.match(/\[User attached an image showing: (.*?)\]/);
-          if (imageDescMatch && imageDescMatch[1]) {
-            try {
-              await supabaseAdmin.from('chat_history')
-                .insert({
-                  user_id: userId,
-                  conversation_id: activeConversationId,
-                  role: 'user',
-                  content: `[HIDDEN_CONTEXT] User shared an image showing: ${imageDescMatch[1]}`
-                });
-            } catch (e) {
-              logger.warn('[Chat] Failed to save hidden image context', { error: e });
+          savedMessages.push({
+            id: result.data?.id || msg.client_message_id || 'msg_' + Date.now(),
+            client_message_id: msg.client_message_id,
+            error: result.error
+          });
+          
+          if (result.error) {
+            logger.error('[Chat] DB: Failed to save user message (continuing in memory)', { error: result.error, userId, is_proactive });
+          } else if (result.data) {
+            // 1.1 Hidden context for image
+            if (msg.image_base64 && msg.message.includes('[User attached an image showing:')) {
+              const imageDescMatch = msg.message.match(/\[User attached an image showing: (.*?)\]/);
+              if (imageDescMatch && imageDescMatch[1]) {
+                try {
+                  await supabaseAdmin.from('chat_history')
+                    .insert({
+                      user_id: userId,
+                      conversation_id: activeConversationId,
+                      role: 'user',
+                      content: `[HIDDEN_CONTEXT] User shared an image showing: ${imageDescMatch[1]}`
+                    });
+                } catch (e) {
+                  logger.warn('[Chat] Failed to save hidden image context', { error: e });
+                }
+              }
             }
           }
         }
-      } else {
-        logger.warn('[Chat] User message save returned no data and no error', { requestId, userId });
       }
-      const userMessageId = userMsgResult.data?.id || 'msg_' + Date.now();
+
+      const userMessageId = savedMessages[savedMessages.length - 1].id;
 
       // If the user signalled sleep/unavailability, write the DB lock IMMEDIATELY so
       // NACE + follow-up engines stay silent — don't wait for the reactive sleep-guard.
       // Otherwise cancel any pending follow-ups since the user replied.
       if (!is_proactive) {
         import('../services/NovaFollowupService').then(({ novaFollowupService, classifyUnavailability }) => {
-          const unavailability = classifyUnavailability(message);
+          const unavailability = classifyUnavailability(primaryMessage);
           if (unavailability) {
             novaFollowupService.recordUnavailability(userId, unavailability.hours)
               .catch(e => logger.warn('Failed to write unavailability lock', { error: e }));
@@ -677,7 +731,7 @@ chatRouter.post(
       // check if it's a correction and auto-generate a behavioral patch.
       if (reply_to_content && !is_proactive) {
         import('../services/NovaRealtimeLearningService').then(({ novaRealtimeLearning }) => {
-          novaRealtimeLearning.analyzeCorrection(userId, message, reply_to_content)
+          novaRealtimeLearning.analyzeCorrection(userId, primaryMessage, reply_to_content)
             .catch(e => logger.warn('[REALTIME LEARNING] Background correction analysis failed', { error: e }));
         });
       }
@@ -1036,7 +1090,7 @@ chatRouter.post(
         remindersContext,
         recentMessages,
         memoryContext,
-        lengthInstruction: message.length < 20
+        lengthInstruction: primaryMessage.length < 20
           ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
           : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN',
@@ -1070,7 +1124,7 @@ chatRouter.post(
             res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
             
             const { novaBrain } = await import('../services/NovaBrainService');
-            const stream = novaBrain.streamInteraction(userId, effectiveMessage, brainContext);
+            const stream = novaBrain.streamInteraction(userId, normalizedMessages, brainContext);
             const iterator = stream[Symbol.asyncIterator]();
             
             const STREAM_CHUNK_TIMEOUT_MS = 60_000; // 60s — allows for slow TTFT on 49B Nemotron
@@ -1104,7 +1158,7 @@ chatRouter.post(
                   });
                   try {
                     const retryResult = await Promise.race([
-                      novaBrain.processInteraction(userId, effectiveMessage, brainContext),
+                      novaBrain.processInteraction(userId, normalizedMessages, brainContext),
                       retryTimeoutPromise,
                     ]);
                     if (retryResult.reply) {
@@ -1169,7 +1223,7 @@ chatRouter.post(
             
             const LLM_TIMEOUT_MS = 55_000; // 55s — must match NVIDIA client timeout (49B model needs 20-40s)
 
-            const llmPromise = novaBrain.processInteraction(userId, effectiveMessage, brainContext);
+            const llmPromise = novaBrain.processInteraction(userId, normalizedMessages, brainContext);
             let llmTimeoutId: NodeJS.Timeout | null = null;
             const timeoutPromise = new Promise<never>((_, reject) => {
               llmTimeoutId = setTimeout(() => reject(new Error('LLM_TIMEOUT')), LLM_TIMEOUT_MS);
@@ -1195,7 +1249,7 @@ HINGLISH RULES:
 - Question at END: "Kahan ja raha hai tu?", "Kya chal raha hai?".
 - Use: "yaar", "bhai", "sahi hai", "mast", "tension mat le", "scene kya hai", "kya chal raha hai", "jhakaas", "bakwas", "chill", "full on", "top", "solid".
 - NO bullet points, NO bold, NO markdown. Plain text only.` },
-                    { role: 'user' as const, content: message }
+                    { role: 'user' as const, content: primaryMessage }
                   ];
                   const fastReply = await complete('TIMEOUT_FALLBACK', fastRetryMessages, {
                     maxTokens: 256,
@@ -1524,7 +1578,7 @@ HINGLISH RULES:
           // 'proactive_<ts>' id (it is not a uuid and the reply_to_id column is uuid),
           // which otherwise makes every insert fail and fall into the emergency path.
           const replyTargetId = is_proactive ? null : userMessageId;
-          const replyTargetContent = is_proactive ? null : message.substring(0, 100);
+          const replyTargetContent = is_proactive ? null : primaryMessage.substring(0, 100);
 
           const rowData = {
             user_id: userId,
@@ -1630,17 +1684,17 @@ HINGLISH RULES:
       }
 
       // 8. Also buffer to in-memory (for degraded mode recovery continuity)
-      degradedMode.appendMessage(userId, 'user', message);
+      degradedMode.appendMessage(userId, 'user', primaryMessage);
       degradedMode.appendMessage(userId, 'assistant', reply);
 
       // 9. Background extraction — skipped when DISABLE_MEMORY=true
       // OPTIMIZED: All 7 memory types are extracted in ONE LLM call via ConsolidatedMemoryAgent.
       // This reduces per-message LLM load from ~7 calls to ~2 (1 main + 1 consolidated extraction).
       if (process.env.DISABLE_MEMORY !== 'true') {
-        const isFiller = message.length < 10 && !shouldExtractShortTermMemory(message);
+        const isFiller = primaryMessage.length < 10 && !shouldExtractShortTermMemory(primaryMessage);
 
         if (!isFiller) {
-          const payload = { userId, messageId: userMessageId, message };
+          const payload = { userId, messageId: userMessageId, message: primaryMessage };
           memoryQueue.add('extract_all_memories', payload).catch(err => {
             logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });
           });

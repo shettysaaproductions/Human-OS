@@ -11,6 +11,14 @@ import { backgroundActions } from './BackgroundActionService';
  */
 export const NOVA_EMPTY_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
 
+export interface NormalizedMessage {
+  message: string;
+  client_message_id?: string;
+  reply_to_id?: string;
+  reply_to_content?: string;
+  image_base64?: string;
+}
+
 /**
  * Sanitizes a Nova conversational reply before it reaches the user:
  * - strips bold markdown (**text**), markdown headings and list bullets
@@ -142,18 +150,6 @@ function buildMessages(
  * Critical actions: explicit reminders, alarms, scheduling, tasks.
  * Non-critical: "I have a plan", "What tasks?", etc.
  */
-function isCriticalAction(message: string): boolean {
-  const m = message.toLowerCase().trim();
-  // We only match explicit intent to set/create/schedule an actionable item, rejecting conversational queries.
-  // "remind me" must be followed by an actionable preposition/time.
-  const hasGenericRemind = /\bremind me\b/i.test(m);
-  const hasSpecificRemind = /\bremind me\s+(?:to|at|in|on|tomorrow|tonight|next)\b/i.test(m);
-  if (hasGenericRemind && !hasSpecificRemind) {
-    return false; // Rejects "Can you remind me why I started this?"
-  }
-  return /\b(remind me\s+(?:to|at|in|on|tomorrow|tonight|next)|set (?:a|another|an )?reminder|create (?:a |new )?task|set (?:an )?alarm|schedule (?:this|it|that|for))\b/i.test(m);
-}
-
 /**
  * Extracts ONLY critical actions directly from the user's message (without seeing Nova's reply).
  * Strict schema matching to prevent hallucinations.
@@ -216,10 +212,28 @@ export class NovaBrainService {
    */
   async processInteraction(
     _userId: string,
-    message: string,
+    messages: NormalizedMessage[],
     context: any // Aggregated context from Temporal, Situational, Memory engines
   ): Promise<{ reply: string; subconscious_actions: any[] }> {
-    // ── CALL 1: Conversation Reply ────────────────────────────────────────────
+    
+    const criticalActionSuccessContext = ''; // No more LLM-blocking critical action evaluation
+    
+    for (const msg of messages) {
+        if (!msg.client_message_id) continue;
+        
+        // Critical Actions (synchronous, but we use the result directly without blocking the LLM)
+        try {
+            const actions = await extractCriticalAction(msg.message);
+            if (actions && actions.length > 0) {
+                await backgroundActions.processCriticalActions(_userId, msg.client_message_id, actions, context.userCountry || 'IN');
+                logger.info('[NOVA BRAIN] Synced critical reminder action.', { userId: _userId, messageId: msg.client_message_id });
+            }
+        } catch (e) {
+            logger.error(`[NOVA BRAIN] Sync critical action failed for ${msg.client_message_id}`, { error: e });
+        }
+    }
+
+    // ── CALL 2: Subconscious Action Engine ────────────────────────────────────────────
     // The 49B model's ONLY job: be Nova. No tool JSON. No XML tags.
     const conversationSystemPrompt = promptBuilder.buildSystemPrompt(
       context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
@@ -234,31 +248,6 @@ export class NovaBrainService {
       context.situationBrief
     );
 
-    const isCritical = isCriticalAction(message);
-    let criticalActionSuccessContext = '';
-
-    if (isCritical) {
-      logger.info('[NOVA BRAIN] Critical action detected. Extracting intent synchronously.');
-      const criticalActions = await extractCriticalAction(message);
-      
-      if (criticalActions.length > 0) {
-        const result = await backgroundActions.processCriticalActions(
-          _userId,
-          context.requestId || crypto.randomUUID(),
-          criticalActions,
-          context.userCountry || 'IN'
-        );
-        
-        if (result.success) {
-          criticalActionSuccessContext = `\n[SYSTEM NOTICE: The user's requested action (Type: ${result.actionType}) was just successfully saved to the database. You can now confirm to them that it is done.]\n`;
-        } else {
-          logger.warn(`[NOVA BRAIN] Bypassing LLM due to critical action failure: ${result.error}`);
-          const fallbackReply = `I'm really sorry, but I ran into a system issue and couldn't save that ${result.actionType.includes('schedule') ? 'reminder' : 'action'}. Could you try again in a moment?`;
-          return { reply: fallbackReply, subconscious_actions: [] };
-        }
-      }
-    }
-
     const conversationFullPrompt = [
       conversationSystemPrompt,
       context.memoryContext || '',
@@ -269,16 +258,18 @@ export class NovaBrainService {
       '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
     ].filter(Boolean).join('\n');
 
-    const conversationMessages = buildMessages(conversationFullPrompt, context.recentMessages, message);
+    const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
+
+    const convoMessages = buildMessages(conversationFullPrompt, context.recentMessages, combinedUserMessage);
 
     let reply = NOVA_EMPTY_REPLY;
 
     try {
-      const profile = determineUserProfile(message);
+      const profile = determineUserProfile(combinedUserMessage);
       const maxTok = profile === 'USER_DEEP' ? 512 : 256;
-      logger.info('[NOVA BRAIN] Call 1 (Conversation)', { profile, maxTokens: maxTok, messageLength: message.length });
+      logger.info('[NOVA BRAIN] Call 1 (Conversation)', { profile, maxTokens: maxTok, messageLength: combinedUserMessage.length });
 
-      const rawReply = await complete(profile, conversationMessages, {
+      const rawReply = await complete(profile, convoMessages, {
         temperature: 0.85,
         maxTokens: maxTok,
       });
@@ -301,25 +292,22 @@ export class NovaBrainService {
     }
 
     // ── CALL 2: Background Extraction (Decoupled to Layer 2) ────────────────
-    // We only extract non-critical subconscious actions here (memories, habits, preferences).
     // The queue will durably process this in the background to ensure at-least-once extraction.
-    if (!isCritical) {
-      logger.info('[NOVA BRAIN] Enqueuing non-critical subconscious extraction job');
-      const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
-      import('./QueueService').then(({ subconsciousQueue }) => {
-        subconsciousQueue.add('extract_subconscious_actions', {
-          userId: _userId,
-          messageId: jobMessageId,
-          conversationId: context.conversationId || '',
-          message,
-          userMessage: message,
-          novaReply: reply,
-          userCountry: context.userCountry || 'IN'
-        });
-      }).catch(err => {
-        logger.error('[NOVA BRAIN] Failed to enqueue subconscious extraction', { error: err });
+    logger.info('[NOVA BRAIN] Enqueuing non-critical subconscious extraction job');
+    const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
+    import('./QueueService').then(({ subconsciousQueue }) => {
+      subconsciousQueue.add('extract_subconscious_actions', {
+        userId: _userId,
+        messageId: jobMessageId,
+        conversationId: context.conversationId || '',
+        message: combinedUserMessage,
+        userMessage: combinedUserMessage,
+        novaReply: reply,
+        userCountry: context.userCountry || 'IN'
       });
-    }
+    }).catch(err => {
+      logger.error('[NOVA BRAIN] Failed to enqueue subconscious extraction', { error: err });
+    });
 
     logger.info(`[NOVA BRAIN] Done — reply returned instantly (Layer 1).`);
     return { reply, subconscious_actions: [] };
@@ -331,7 +319,7 @@ export class NovaBrainService {
    */
   async *streamInteraction(
     _userId: string,
-    message: string,
+    messages: NormalizedMessage[],
     context: any
   ): AsyncGenerator<string, { subconscious_actions: any[] }, unknown> {
     
@@ -348,30 +336,18 @@ export class NovaBrainService {
       context.situationBrief
     );
 
-    const isCritical = isCriticalAction(message);
-    let criticalActionSuccessContext = '';
-
-    if (isCritical) {
-      logger.info('[NOVA BRAIN] Stream: Critical action detected. Extracting intent synchronously.');
-      const criticalActions = await extractCriticalAction(message);
-      
-      if (criticalActions.length > 0) {
-        const result = await backgroundActions.processCriticalActions(
-          _userId,
-          context.requestId || crypto.randomUUID(),
-          criticalActions,
-          context.userCountry || 'IN'
-        );
-        
-        if (result.success) {
-          criticalActionSuccessContext = `\n[SYSTEM NOTICE: The user's requested action (Type: ${result.actionType}) was just successfully saved to the database. You can now confirm to them that it is done.]\n`;
-        } else {
-          logger.warn(`[NOVA BRAIN] Stream: Bypassing LLM due to critical action failure: ${result.error}`);
-          const fallbackReply = `I'm really sorry, but I ran into a system issue and couldn't save that ${result.actionType.includes('schedule') ? 'reminder' : 'action'}. Could you try again in a moment?`;
-          yield fallbackReply;
-          return { subconscious_actions: [] };
+    const criticalActionSuccessContext = ''; // No more LLM-blocking critical action evaluation
+    
+    for (const msg of messages) {
+        if (!msg.client_message_id) continue;
+        try {
+            const actions = await extractCriticalAction(msg.message);
+            if (actions && actions.length > 0) {
+                 await backgroundActions.processCriticalActions(_userId, msg.client_message_id, actions, context.userCountry || 'IN');
+            }
+        } catch (e) {
+            logger.error(`[NOVA BRAIN] Stream sync critical action failed`, { error: e });
         }
-      }
     }
 
     const fullPrompt = [
@@ -384,10 +360,12 @@ export class NovaBrainService {
       '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
     ].filter(Boolean).join('\n');
 
-    const messages = buildMessages(fullPrompt, context.recentMessages, message);
+    const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
 
-    const profile = determineUserProfile(message);
-    const responseStream = stream(profile, messages, {
+    const convoMessages = buildMessages(fullPrompt, context.recentMessages, combinedUserMessage);
+
+    const profile = determineUserProfile(combinedUserMessage);
+    const responseStream = stream(profile, convoMessages, {
       temperature: 0.85,
       maxTokens: profile === 'USER_DEEP' ? 512 : 256,
     });
@@ -447,24 +425,22 @@ export class NovaBrainService {
 
     // ── CALL 2: Background Extraction (Decoupled to Layer 2) ────────────────
     // The text stream finishes and returns instantly.
-    // If it's non-critical, we enqueue the extraction job.
-    if (!isCritical) {
-      logger.info('[NOVA BRAIN] Stream: Enqueuing non-critical subconscious extraction job');
+    // We enqueue the extraction job for all interactions.
+    logger.info('[NOVA BRAIN] Stream: Enqueuing subconscious extraction job');
       const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
       import('./QueueService').then(({ subconsciousQueue }) => {
         subconsciousQueue.add('extract_subconscious_actions', {
           userId: _userId,
           messageId: jobMessageId,
           conversationId: context.conversationId || '',
-          message,
-          userMessage: message,
+          message: messages.map(m => m.message).join('\n\n'),
+          userMessage: messages.map(m => m.message).join('\n\n'),
           novaReply: replyStreamed || fallbackReply || NOVA_EMPTY_REPLY,
           userCountry: context.userCountry || 'IN'
         });
       }).catch(err => {
         logger.error('[NOVA BRAIN] Stream: Failed to enqueue subconscious extraction', { error: err });
       });
-    }
 
     logger.info(`[NOVA BRAIN] Stream finished (Layer 1).`);
     return { subconscious_actions: [] };
