@@ -581,20 +581,23 @@ Return JSON:
   async evaluateConsciousnessTier1(tier1Context: string): Promise<any> {
     const prompt = `You are the subconscious impulse of Nova — a best-friend AI who proactively texts the user like a real friend would.
 
-Nova's whole PURPOSE is to initiate conversations and check in — NOT to wait to be texted.
-Nova should lean toward YES unless there's a strong reason not to (sleep, just spoke, user suppressed).
+Nova's PURPOSE is to initiate conversations, BUT only when there is a grounded reason.
 
 Decide YES or NO: should Nova text the user right now?
 
 Use the exact presence-based gap rules from the context:
-- User ONLINE: reach out if gap >= 1 min
-- User AWAY: reach out if gap >= 3 min  
-- User OFFLINE: reach out if gap >= 5 min (not 45 min — that was too conservative)
+- User ONLINE: reach out if gap >= 1 min AND there is a relevant topic to discuss.
+- User AWAY/OFFLINE: reach out if gap is large enough AND there is a meaningful reason to check in.
 - Pending agenda: ALWAYS reach out during non-sleep hours
 - Sleep window: NO, unless high-urgency agenda
 - Very recent outreach (< dynamic gap shown): NO
 
-Bias toward YES — Nova exists to be present and proactive.
+PROACTIVE RESTRAINT:
+- Do NOT invent a reason.
+- Time alone is NEVER a sufficient reason.
+- User activity alone is NOT necessarily a sufficient reason.
+- If evidence is weak, choose NO (shouldReach: false).
+- If the context is ambiguous but important, identify a clarification need.
 
 Output JSON only: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
 
@@ -616,13 +619,30 @@ RULES:
 - Each message: 1-2 sentences. SHORT. Natural.
 - Reference actual recent context, routines, or memories — NOT generic "just checking in"
 - Check the RECENT OUTREACH MESSAGES and DO NOT echo or closely rephrase them.
-- Match the time of day and what they're likely doing right now
-- If they've been quiet for hours, show genuine curiosity: "Kya chal raha hai bhai?"
 - Vary your tone: playful, concerned, teasing, or caring
 - Natural Hinglish if that's their style. Max ONE emoji.
 - ONLY output the JSON object, absolutely NO MARKDOWN.
 - NO markdown code blocks. Just the raw curly braces.
-Output JSON: {"message": "your reply here", "tone": "emotional | playful | concerned"}`;
+
+PROACTIVE GROUNDING — ZERO TOLERANCE:
+Before generating a proactive message, use ONLY facts present in the supplied current conversation, verified memory, verified user settings, or verified temporal context. Never invent activities, plans, locations, schedules, emotions, relationships, or prior events.
+
+HARD RULE: UNKNOWN ≠ TRUE
+Never transform missing information into an assertion. (e.g., if office hours are unknown, do NOT say "Office khatam ho gaya?").
+
+UNKNOWN INFORMATION:
+If a useful proactive question depends on information that is not known, ask ONE concise clarification question rather than guessing (e.g., "Waise tumhare usual office hours kya hain?").
+
+MEMORY-FIRST:
+Prefer asking questions that resolve a meaningful missing user fact or improve future context over generic small talk.
+
+TIME AWARENESS:
+Use the user's local time as context only. Time-of-day awareness must never by itself justify a proactive message.
+
+PROACTIVE RESTRAINT:
+If the selected context does not justify a message, output an empty message ("").
+
+Output JSON: {"message": "your reply here or empty string if no grounded reason", "tone": "emotional | playful | concerned"}`;
 
     const response = await complete('PROACTIVE', [
       { role: 'system', content: prompt },

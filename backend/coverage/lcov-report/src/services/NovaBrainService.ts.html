@@ -736,7 +736,27 @@
 <a name='L671'></a><a href='#L671'>671</a>
 <a name='L672'></a><a href='#L672'>672</a>
 <a name='L673'></a><a href='#L673'>673</a>
-<a name='L674'></a><a href='#L674'>674</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
+<a name='L674'></a><a href='#L674'>674</a>
+<a name='L675'></a><a href='#L675'>675</a>
+<a name='L676'></a><a href='#L676'>676</a>
+<a name='L677'></a><a href='#L677'>677</a>
+<a name='L678'></a><a href='#L678'>678</a>
+<a name='L679'></a><a href='#L679'>679</a>
+<a name='L680'></a><a href='#L680'>680</a>
+<a name='L681'></a><a href='#L681'>681</a>
+<a name='L682'></a><a href='#L682'>682</a>
+<a name='L683'></a><a href='#L683'>683</a>
+<a name='L684'></a><a href='#L684'>684</a>
+<a name='L685'></a><a href='#L685'>685</a>
+<a name='L686'></a><a href='#L686'>686</a>
+<a name='L687'></a><a href='#L687'>687</a>
+<a name='L688'></a><a href='#L688'>688</a>
+<a name='L689'></a><a href='#L689'>689</a>
+<a name='L690'></a><a href='#L690'>690</a>
+<a name='L691'></a><a href='#L691'>691</a>
+<a name='L692'></a><a href='#L692'>692</a>
+<a name='L693'></a><a href='#L693'>693</a>
+<a name='L694'></a><a href='#L694'>694</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
@@ -1336,17 +1356,37 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1992,20 +2032,23 @@ Return JSON:
   async evaluateConsciousnessTier1(tier1Context: string): Promise&lt;any&gt; {
     const prompt = `You are the subconscious impulse of Nova — a best-friend AI who proactively texts the user like a real friend would.
 &nbsp;
-Nova's whole PURPOSE is to initiate conversations and check in — NOT to wait to be texted.
-Nova should lean toward YES unless there's a strong reason not to (sleep, just spoke, user suppressed).
+Nova's PURPOSE is to initiate conversations, BUT only when there is a grounded reason.
 &nbsp;
 Decide YES or NO: should Nova text the user right now?
 &nbsp;
 Use the exact presence-based gap rules from the context:
-- User ONLINE: reach out if gap &gt;= 1 min
-- User AWAY: reach out if gap &gt;= 3 min  
-- User OFFLINE: reach out if gap &gt;= 5 min (not 45 min — that was too conservative)
+- User ONLINE: reach out if gap &gt;= 1 min AND there is a relevant topic to discuss.
+- User AWAY/OFFLINE: reach out if gap is large enough AND there is a meaningful reason to check in.
 - Pending agenda: ALWAYS reach out during non-sleep hours
 - Sleep window: NO, unless high-urgency agenda
 - Very recent outreach (&lt; dynamic gap shown): NO
 &nbsp;
-Bias toward YES — Nova exists to be present and proactive.
+PROACTIVE RESTRAINT:
+- Do NOT invent a reason.
+- Time alone is NEVER a sufficient reason.
+- User activity alone is NOT necessarily a sufficient reason.
+- If evidence is weak, choose NO (shouldReach: false).
+- If the context is ambiguous but important, identify a clarification need.
 &nbsp;
 Output JSON only: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
 &nbsp;
@@ -2027,13 +2070,30 @@ RULES:
 - Each message: 1-2 sentences. SHORT. Natural.
 - Reference actual recent context, routines, or memories — NOT generic "just checking in"
 - Check the RECENT OUTREACH MESSAGES and DO NOT echo or closely rephrase them.
-- Match the time of day and what they're likely doing right now
-- If they've been quiet for hours, show genuine curiosity: "Kya chal raha hai bhai?"
 - Vary your tone: playful, concerned, teasing, or caring
 - Natural Hinglish if that's their style. Max ONE emoji.
 - ONLY output the JSON object, absolutely NO MARKDOWN.
 - NO markdown code blocks. Just the raw curly braces.
-Output JSON: {"message": "your reply here", "tone": "emotional | playful | concerned"}`;
+&nbsp;
+PROACTIVE GROUNDING — ZERO TOLERANCE:
+Before generating a proactive message, use ONLY facts present in the supplied current conversation, verified memory, verified user settings, or verified temporal context. Never invent activities, plans, locations, schedules, emotions, relationships, or prior events.
+&nbsp;
+HARD RULE: UNKNOWN ≠ TRUE
+Never transform missing information into an assertion. (e.g., if office hours are unknown, do NOT say "Office khatam ho gaya?").
+&nbsp;
+UNKNOWN INFORMATION:
+If a useful proactive question depends on information that is not known, ask ONE concise clarification question rather than guessing (e.g., "Waise tumhare usual office hours kya hain?").
+&nbsp;
+MEMORY-FIRST:
+Prefer asking questions that resolve a meaningful missing user fact or improve future context over generic small talk.
+&nbsp;
+TIME AWARENESS:
+Use the user's local time as context only. Time-of-day awareness must never by itself justify a proactive message.
+&nbsp;
+PROACTIVE RESTRAINT:
+If the selected context does not justify a message, output an empty message ("").
+&nbsp;
+Output JSON: {"message": "your reply here or empty string if no grounded reason", "tone": "emotional | playful | concerned"}`;
 &nbsp;
     const response = await complete('PROACTIVE', [
       { role: 'system', content: prompt },
@@ -2089,7 +2149,7 @@ export const novaBrain = new NovaBrainService();
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T18:35:45.242Z
+                at 2026-08-23T20:49:51.253Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -293,16 +293,12 @@ export class NovaConsciousnessEngine {
     const ignoredCount = unrepliedOutreaches?.length || 0;
 
     // Escalation gap table — increases after each ignored message (Exponential backoff for offline)
-    // Spec: 1 min → 2 → 4 → 8 → 16 min, then every 3/4 hours (180-240 min)
     const getEscalatedGap = (ignored: number): number => {
-      if (ignored <= 1) return 1;         // 1 min (1st ignored)
-      if (ignored === 2) return 2;        // 2 mins
-      if (ignored === 3) return 4;        // 4 mins
-      if (ignored === 4) return 8;        // 8 mins
-      if (ignored === 5) return 16;       // 16 mins
-      if (ignored === 6) return 180;      // 3 hours
-      if (ignored === 7) return 240;      // 4 hours
-      return 240;                         // 4 hours ongoing (3/4 hours target)
+      if (ignored <= 0) return 1;
+      if (ignored === 1) return 60;       // 1 hour after first ignored
+      if (ignored === 2) return 180;      // 3 hours after second ignored
+      if (ignored === 3) return 360;      // 6 hours
+      return 720;                         // 12 hours ongoing
     };
 
     const escalationGap = getEscalatedGap(ignoredCount);
@@ -441,6 +437,17 @@ export class NovaConsciousnessEngine {
 
     const memorySummary = (recentMemories || []).map(m => `[${m.memory_type}] ${m.key}: ${m.value}`).join('\n');
     
+    // Fetch Working Memory (facts, schedules, routines) to ground proactive questions
+    const { data: workingMemories } = await supabaseAdmin
+      .from('working_memory')
+      .select('key, value')
+      .eq('user_id', userId)
+      .not('key', 'in', '("last_proactive_content","silent_visit_count","followup_suppressed_until","user_busy_until")')
+      .order('updated_at', { ascending: false })
+      .limit(10);
+      
+    const workingMemorySummary = (workingMemories || []).map(m => `${m.key}: ${m.value}`).join('\n');
+    
     // Fetch last 6 chat messages for TIER2 context (so outreach is grounded in real conversation)
     const { data: lastConversation } = await supabaseAdmin
       .from('chat_history')
@@ -461,6 +468,22 @@ export class NovaConsciousnessEngine {
       .order('created_at', { ascending: false })
       .limit(10);
     const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
+
+    // ── DETERMINISTIC RELEVANCE GATE ─────────────────────────────────────────
+    // Before invoking Tier 1, ensure there is SOME valid context to speak about.
+    // Time alone is NOT a reason. If there is absolutely no recent memory, no working memory,
+    // no active chat history, and no agenda, do NOT send a proactive message.
+    const hasGroundedReason = !!agendaItem || 
+                              shouldReachSilentVisit || 
+                              isSleepWindowOverridden || 
+                              (recentMemories && recentMemories.length > 0) || 
+                              (workingMemories && workingMemories.length > 0) || 
+                              (lastConversation && lastConversation.length > 0);
+
+    if (!hasGroundedReason) {
+      logger.info('[NACE] Deterministic Gate: Skipping — no grounded reason (no agenda, no memory, no chat context)', { userId });
+      return;
+    }
 
     // ── EXACT-MATCH DEDUP: Never send the same proactive message twice ──────
     // This prevents the bug where "Arey, busy hai kya?" was sent at 12:01 AM and again at 2:10 AM
@@ -490,6 +513,7 @@ Min Gap Allowed Right Now: ${effectiveMinGap} minutes (based on presence)
 Dynamic Situational Gap: ${dynamicGap} minutes
 Pending Agenda Item: ${agendaItem ? agendaItem.event_description + ' [urgency: ' + agendaItem.urgency + ']' : 'None'}
 Recent Memories: ${memorySummary || 'None'}
+Working Memory: ${workingMemorySummary || 'None'}
 Last Conversation Snippet: ${lastConvSnippet || 'None'}
 ${abandonmentNote}
 ${spontaneousThoughtNote}
@@ -497,12 +521,12 @@ ${spontaneousThoughtNote}
 DECISION RULES (use actual gap values above, not hardcoded numbers):
 - User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately — enable back-to-back messaging.
 - User is AWAY: reach out if gap >= 3 min. They stepped away but will see it soon.
-- User is OFFLINE: reach out if gap >= 1 min initially (exponential backoff: 1→2→4→8→16→3h→4h). They're not active right now.
+- User is OFFLINE: reach out if gap >= 1 min initially (exponential backoff applies). They're not active right now.
 - High urgency agenda item: ALWAYS reach out during non-sleep hours.
 - Morning/afternoon work hours without agenda: only reach if gap > 20 min.
 - Evening/night with no agenda: reach out freely if gap >= dynamic gap.
 - Sleep window: only high-urgency agenda. Otherwise NO.
-- NEVER refuse because of a fixed 45-minute rule — use the presence-based gap above.`;
+- PROACTIVE RESTRAINT: If there is no specific, grounded reason to message (e.g. no agenda, no recent context to follow up on, no missing fact to ask about), choose NO. Time of day alone is NOT a sufficient reason to check in.`;
 
     let shouldReach = false;
     let triggerType = 'engagement';
@@ -607,6 +631,7 @@ Silence Duration: ${Math.round(gapMinutes / 60)} hours
 Trigger: ${triggerType}
 Agenda Context: ${agendaItem ? agendaItem.follow_up_question : 'N/A'}
 Recent Memories: ${memorySummary}
+Working Memory: ${workingMemorySummary || 'None.'}
 
 RECENT OUTREACH MESSAGES (Do NOT repeat or closely rephrase these):
 ${recentOutreachSnippet || 'None.'}
