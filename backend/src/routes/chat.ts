@@ -1080,7 +1080,7 @@ chatRouter.post(
       const memoryContext = '';
       const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
 
-      const turnAnalysis = TurnAnalyzer.analyze(normalizedMessages);
+      const turnAnalysis = TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // Dispatch durable fact persistence immediately for deterministic facts & corrections

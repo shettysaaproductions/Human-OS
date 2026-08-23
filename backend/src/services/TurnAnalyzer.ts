@@ -17,6 +17,8 @@ export interface SemanticUnit {
   actionCandidate: boolean;
   factKey?: string;
   factValue?: string;
+  oldValue?: string;
+  relationship?: string;
   isProtected?: boolean;
   factClass?: FactClassification;
 }
@@ -38,8 +40,17 @@ export interface ExtractedFact {
   factClass: FactClassification;
 }
 
+export interface TurnContext {
+  recentMessages?: Array<{ role?: string; content?: string } | string>;
+  memories?: Array<{ key?: string; value?: string; memory_type?: string }>;
+}
+
+const FEMININE_RELATIONS = ['mother_name', 'sister_name', 'wife_name', 'daughter_name', 'grandmother_name'];
+const MASCULINE_RELATIONS = ['father_name', 'brother_name', 'husband_name', 'son_name', 'grandfather_name'];
+const ALL_PERSON_RELATIONS = [...FEMININE_RELATIONS, ...MASCULINE_RELATIONS];
+
 export class TurnAnalyzer {
-  public static analyze(messages: ChatMessageInput[]): TurnAnalysisResult {
+  public static analyze(messages: ChatMessageInput[], context?: TurnContext): TurnAnalysisResult {
     const units: SemanticUnit[] = [];
     let order = 0;
 
@@ -62,7 +73,21 @@ export class TurnAnalyzer {
         const isCorrection = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
 
         if (isCorrection) {
-          const firstFact = extractedFacts[0];
+          let resolvedKey: string | undefined = extractedFacts[0]?.key;
+          let resolvedVal: string | undefined = extractedFacts[0]?.value || this.extractNameFromCorrection(lower);
+          let oldValue: string | undefined;
+          let relationship: string | undefined;
+
+          // If no specific relation key was extracted or it is UNKNOWN_RELATION, attempt antecedent resolution
+          if (!resolvedKey || resolvedKey === 'UNKNOWN_RELATION') {
+            const antecedent = this.resolveAntecedent(clause, units, context);
+            if (antecedent) {
+              resolvedKey = antecedent.factKey;
+              oldValue = antecedent.oldValue;
+              relationship = antecedent.relationship;
+            }
+          }
+
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,
@@ -74,8 +99,10 @@ export class TurnAnalyzer {
             acknowledgementPreferred: true,
             memoryCandidate: true,
             actionCandidate: false,
-            factKey: firstFact?.key || (lower.includes('her name') ? 'mother_name' : (lower.includes('his name') ? 'father_name' : undefined)),
-            factValue: firstFact?.value || this.extractNameFromCorrection(lower),
+            factKey: resolvedKey,
+            factValue: resolvedVal,
+            oldValue,
+            relationship,
             isProtected: isExplicitRemember,
             factClass: isExplicitRemember ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT'
           });
@@ -84,6 +111,19 @@ export class TurnAnalyzer {
         else if (extractedFacts.length > 0) {
           for (let i = 0; i < extractedFacts.length; i++) {
             const fact = extractedFacts[i];
+            let factKey = fact.key;
+            let oldValue: string | undefined;
+            let relationship: string | undefined;
+
+            if (factKey === 'UNKNOWN_RELATION') {
+              const antecedent = this.resolveAntecedent(clause, units, context);
+              if (antecedent) {
+                factKey = antecedent.factKey;
+                oldValue = antecedent.oldValue;
+                relationship = antecedent.relationship;
+              }
+            }
+
             units.push({
               unitId: crypto.randomUUID(),
               sourceMessageId,
@@ -95,8 +135,10 @@ export class TurnAnalyzer {
               acknowledgementPreferred: true,
               memoryCandidate: true,
               actionCandidate: false,
-              factKey: fact.key,
+              factKey,
               factValue: fact.value,
+              oldValue,
+              relationship,
               isProtected: fact.isProtected,
               factClass: fact.factClass
             });
@@ -135,7 +177,7 @@ export class TurnAnalyzer {
           });
         }
         // 5. Actions / Plans
-        else if (/\b(plan|tomorrow|going to|will do|karunga|kal|meeting|gym|office|flight|trip|doctor|task)\b/i.test(lower)) {
+        else if (/\b(plan|tomorrow|going to|will do|karunga|kal|meeting|gym|office|flight|trip|doctor|task|tell him|tell her|call him|call her|remind me to)\b/i.test(lower)) {
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,
@@ -198,6 +240,85 @@ export class TurnAnalyzer {
       result.push(p);
     }
     return result.length > 0 ? result : [text];
+  }
+
+  public static resolveAntecedent(
+    clause: string,
+    unitsSoFar: SemanticUnit[],
+    context?: TurnContext
+  ): { factKey: string; oldValue?: string; relationship: string } | null {
+    const lower = clause.toLowerCase();
+    
+    const isFem = /\b(her|hers|uski|iski)\b/i.test(lower);
+    const isMasc = /\b(him|his|uske)\b/i.test(lower);
+    const isNeutral = /\b(their|unka|unki|iska|woh|uska)\b/i.test(lower);
+    const isGenericCorrection = /\b(actually|instead|correction:?|galat|nahi yaar)\b/i.test(lower);
+
+    if (!isFem && !isMasc && !isNeutral && !isGenericCorrection) {
+      return null;
+    }
+
+    // 1. Search backwards in current turn's already processed units
+    for (let i = unitsSoFar.length - 1; i >= 0; i--) {
+      const u = unitsSoFar[i];
+      if (u.factKey && ALL_PERSON_RELATIONS.includes(u.factKey)) {
+        if (isFem && FEMININE_RELATIONS.includes(u.factKey)) {
+          return { factKey: u.factKey, oldValue: u.factValue, relationship: u.factKey.replace(/_name/g, '') };
+        }
+        if (isMasc && MASCULINE_RELATIONS.includes(u.factKey)) {
+          return { factKey: u.factKey, oldValue: u.factValue, relationship: u.factKey.replace(/_name/g, '') };
+        }
+        if ((isNeutral || (!isFem && !isMasc)) && ALL_PERSON_RELATIONS.includes(u.factKey)) {
+          return { factKey: u.factKey, oldValue: u.factValue, relationship: u.factKey.replace(/_name/g, '') };
+        }
+      }
+    }
+
+    // 2. Search backwards in context.recentMessages
+    if (context?.recentMessages && Array.isArray(context.recentMessages)) {
+      for (let i = context.recentMessages.length - 1; i >= 0; i--) {
+        const msg = context.recentMessages[i];
+        const text = typeof msg === 'string' ? msg : (msg.content || '');
+        if (!text) continue;
+        
+        const facts = this.extractFacts(text);
+        for (const f of facts) {
+          if (f.key && ALL_PERSON_RELATIONS.includes(f.key)) {
+            if (isFem && FEMININE_RELATIONS.includes(f.key)) {
+              return { factKey: f.key, oldValue: f.value, relationship: f.key.replace(/_name/g, '') };
+            }
+            if (isMasc && MASCULINE_RELATIONS.includes(f.key)) {
+              return { factKey: f.key, oldValue: f.value, relationship: f.key.replace(/_name/g, '') };
+            }
+            if ((isNeutral || (!isFem && !isMasc)) && ALL_PERSON_RELATIONS.includes(f.key)) {
+              return { factKey: f.key, oldValue: f.value, relationship: f.key.replace(/_name/g, '') };
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Search in context.memories
+    if (context?.memories && Array.isArray(context.memories)) {
+      if (isFem) {
+        const match = context.memories.find(m => m.key && FEMININE_RELATIONS.includes(m.key));
+        if (match && match.key) {
+          return { factKey: match.key, oldValue: match.value, relationship: match.key.replace(/_name/g, '') };
+        }
+      } else if (isMasc) {
+        const match = context.memories.find(m => m.key && MASCULINE_RELATIONS.includes(m.key));
+        if (match && match.key) {
+          return { factKey: match.key, oldValue: match.value, relationship: match.key.replace(/_name/g, '') };
+        }
+      } else {
+        const match = context.memories.find(m => m.key && ALL_PERSON_RELATIONS.includes(m.key));
+        if (match && match.key) {
+          return { factKey: match.key, oldValue: match.value, relationship: match.key.replace(/_name/g, '') };
+        }
+      }
+    }
+
+    return null;
   }
 
   public static extractFacts(text: string): ExtractedFact[] {
@@ -275,6 +396,15 @@ export class TurnAnalyzer {
     m = lower.match(/\b(?:mera naam|my name is)\s+([a-zA-Z]+)\b/i);
     if (m) facts.push({ key: 'user_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
+    // Ambiguous Name (No relationship specified)
+    if (facts.length === 0) {
+      m = lower.match(/\b(?:her|his|unka|unki|iska|iski|their)?\s*(?:name|naam|nam)\s+(?:is|hai)\s+([a-zA-Z]+)\b/i) || 
+          lower.match(/\b(?:actually|instead|correction:?)\s+([a-zA-Z]+)\b/i);
+      if (m && !lower.includes('my name') && !lower.includes('mera naam')) {
+        facts.push({ key: 'UNKNOWN_RELATION', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
     return facts;
   }
 
@@ -299,13 +429,33 @@ export class TurnAnalyzer {
     let requiredCount = 0;
     for (const unit of analysis.units) {
       if (unit.responseRequired || unit.acknowledgementPreferred || unit.type === 'fact' || unit.type === 'correction') {
+        const isUnknownRelation = unit.factKey === 'UNKNOWN_RELATION' || (!unit.factKey && unit.factValue);
+        const relation = unit.relationship || (unit.factKey && !isUnknownRelation ? unit.factKey.replace(/_name/g, '') : '');
+        
         prompt += `- [${unit.type.toUpperCase()}] "${unit.text}" -> `;
-        if (unit.type === 'question') prompt += `Must provide an answer.`;
-        else if (unit.type === 'correction') prompt += `Must explicitly acknowledge and accept the correction (e.g. "Got it, ${unit.factValue || 'updated'}!").`;
-        else if (unit.type === 'fact') prompt += `Must acknowledge this fact (${unit.factKey || 'detail'}: ${unit.factValue || unit.text}) warmly.`;
-        else if (unit.type === 'emotion') prompt += `Must validate this emotion first.`;
-        else if (unit.type === 'action') prompt += `Acknowledge this action/plan.`;
-        else prompt += `Address naturally.`;
+        
+        if (unit.type === 'question') {
+          prompt += `Must provide an answer.`;
+        } else if (unit.type === 'correction') {
+          if (isUnknownRelation) {
+            prompt += `[RELATIONSHIP: UNKNOWN -> Do NOT guess. If the missing relationship materially affects your response, ask the user directly in normal chat (e.g., "Who is ${unit.factValue} — your sister, friend, or someone else?"). If not strictly necessary, use neutral wording without asking.] Must explicitly acknowledge and accept the correction concisely (logical_key = UNKNOWN, new_value = ${unit.factValue}, event = correction).`;
+          } else {
+            const oldValStr = unit.oldValue ? `, old_value = ${unit.oldValue}` : '';
+            prompt += `[RELATIONSHIP: KNOWN -> Inherited from antecedent (${relation}). Use exact relationship '${relation}'. Do NOT guess gender/title (e.g. no 'bhaiya'). No clarification needed.] Must explicitly acknowledge and accept the correction concisely (logical_key = ${unit.factKey}, relationship = ${relation}${oldValStr}, new_value = ${unit.factValue}, event = correction).`;
+          }
+        } else if (unit.type === 'fact') {
+          if (isUnknownRelation) {
+            prompt += `[RELATIONSHIP: UNKNOWN -> Do NOT guess. If the missing relationship materially affects your response, ask the user directly in normal chat (e.g., "Who is ${unit.factValue} — your sister, friend, or someone else?"). If not strictly necessary, use neutral wording without asking.] Must acknowledge this fact warmly.`;
+          } else {
+            prompt += `[RELATIONSHIP: KNOWN -> Use exact relationship '${relation}'. Do NOT guess gender/title (e.g. no 'bhaiya'). No clarification needed.] Must acknowledge this fact (${relation}: ${unit.factValue || unit.text}) warmly.`;
+          }
+        } else if (unit.type === 'emotion') {
+          prompt += `Must validate this emotion first.`;
+        } else if (unit.type === 'action') {
+          prompt += `Acknowledge this action/plan. [CLARIFICATION GUARD: If an action is missing a critical parameter (e.g., WHO 'him' refers to, WHERE to go) and it cannot be resolved from context, ask the user directly in normal chat who 'him' refers to.]`;
+        } else {
+          prompt += `Address naturally.`;
+        }
         prompt += `\n`;
         requiredCount++;
       }
@@ -352,3 +502,4 @@ export class TurnAnalyzer {
     return uncovered;
   }
 }
+
