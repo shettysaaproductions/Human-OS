@@ -902,6 +902,7 @@ chatRouter.post(
       const behaviorPatternPromise = presencePatternService.getBehaviorPattern(userId).catch(err => {
         logger.warn('[SituationalAwareness] Behavior pattern fetch failed', { error: err instanceof Error ? err.message : String(err) }); return { pattern: 'UNKNOWN', description: '' };
       });
+      const lifeThreadsPromise = qt.track('get_life_threads', 'life_threads', () => supabaseAdmin.from('life_threads').select('id, topic, state, priority, provenance, last_relevant_at').eq('user_id', userId).in('state', ['active', 'waiting', 'blocked']).order('last_relevant_at', { ascending: false }).limit(5)).then(res => res).catch(() => ({ data: [] }));
 
       const TEMPORAL_KEYWORDS = [
         'yesterday', 'days ago', 'last week', 'last month', 'do you remember',
@@ -922,10 +923,10 @@ chatRouter.post(
       // TIER 1: CRITICAL CONTEXT (Await immediately to start LLM)
       const [
         profileResult, historyResult, crossSessionResult, wmResult, memoriesResult, stmResult, searchData,
-        lastMsgResult, presenceResult, unreadResult, upcomingReminders
+        lastMsgResult, presenceResult, unreadResult, upcomingReminders, lifeThreadsResult
       ] = await Promise.all([
         profilePromise, historyPromise, crossSessionPromise, wmPromise, memoriesPromise, stmPromise, searchPromise,
-        lastMsgPromise, presencePromise, unreadPromise, remindersPromise
+        lastMsgPromise, presencePromise, unreadPromise, remindersPromise, lifeThreadsPromise
       ]);
       
       // TIER 2: BACKGROUND CONTEXT (Start but do not await)
@@ -1054,6 +1055,7 @@ chatRouter.post(
         unreadNovaMessages: unreadResult.count || 0, behaviorPattern: behaviorPatternResult.pattern !== 'UNKNOWN' ? `${behaviorPatternResult.pattern} (${behaviorPatternResult.description})` : null,
         totalMemoriesCount: totalMemoriesResult.count || 0,
         goalMemories: memories.filter((m: any) => m.memory_type === 'goals'),
+        activeLifeThreads: lifeThreadsResult.data || [],
       };
       situationBrief = situationalAwareness.buildBrief(situationCtx);
 

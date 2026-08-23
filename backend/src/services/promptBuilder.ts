@@ -560,7 +560,7 @@ When user mentions time-bound activity: bathing=20m, eating=30m, gym=60m, sleep=
 6. Queue follow-up:
 {"tool":"NovaFollowupService","action":"queue","data":{"question":"follow-up text","delay_hours":1.0}}
 Only when conversation is genuinely open. Delays: emotional=0.5, personal=1.0, casual=2.0-4.0. Never below 0.5.
-Do NOT queue if user said bye/gn/busy/sleeping.
+Do NOT queue if user said bye/gn/busy/sleeping. Do NOT schedule follow-ups for topics or tasks the user has already marked as completed.
 
 7. Log life event:
 {"tool":"LifeEventExtractor","action":"event","data":{"description":"what","expected_time":"ISO 8601","follow_up_question":"...","follow_up_after_minutes":60,"urgency":"medium","is_recurring":false}}

@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/957</span>
+                <span class='fraction'>0/961</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/718</span>
+                <span class='fraction'>0/720</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/155</span>
+                <span class='fraction'>0/158</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/827</span>
+                <span class='fraction'>0/828</span>
             </div>
         
             
@@ -2088,7 +2088,9 @@
 <a name='L2023'></a><a href='#L2023'>2023</a>
 <a name='L2024'></a><a href='#L2024'>2024</a>
 <a name='L2025'></a><a href='#L2025'>2025</a>
-<a name='L2026'></a><a href='#L2026'>2026</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L2026'></a><a href='#L2026'>2026</a>
+<a name='L2027'></a><a href='#L2027'>2027</a>
+<a name='L2028'></a><a href='#L2028'>2028</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -2992,6 +2994,7 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -3144,6 +3147,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -5017,6 +5021,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       const behaviorPatternPromise = <span class="cstat-no" title="statement not covered" >presencePatternService.getBehaviorPattern(userId).catch(<span class="fstat-no" title="function not covered" >err </span>=&gt; {</span>
 <span class="cstat-no" title="statement not covered" >        logger.warn('[SituationalAwareness] Behavior pattern fetch failed', { error: err instanceof Error ? err.message : String(err) }); <span class="cstat-no" title="statement not covered" ></span>return { pattern: 'UNKNOWN', description: '' };</span>
       });
+      const lifeThreadsPromise = <span class="cstat-no" title="statement not covered" >qt.track('get_life_threads', 'life_threads', <span class="fstat-no" title="function not covered" >() =</span>&gt; <span class="cstat-no" title="statement not covered" >supabaseAdmin.from('life_threads').select('id, topic, state, priority, provenance, last_relevant_at').eq('user_id', userId).in('state', ['active', 'waiting', 'blocked']).order('last_relevant_at', { ascending: false }).limit(5))</span>.then(<span class="fstat-no" title="function not covered" >res </span>=&gt; <span class="cstat-no" title="statement not covered" >res)</span>.catch(<span class="fstat-no" title="function not covered" >() =</span>&gt; (<span class="cstat-no" title="statement not covered" >{ data: [] })</span>);</span>
 &nbsp;
       const TEMPORAL_KEYWORDS = <span class="cstat-no" title="statement not covered" >[</span>
         'yesterday', 'days ago', 'last week', 'last month', 'do you remember',
@@ -5037,10 +5042,10 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       // TIER 1: CRITICAL CONTEXT (Await immediately to start LLM)
       const [
         profileResult, historyResult, crossSessionResult, wmResult, memoriesResult, stmResult, searchData,
-        lastMsgResult, presenceResult, unreadResult, upcomingReminders
+        lastMsgResult, presenceResult, unreadResult, upcomingReminders, lifeThreadsResult
       ] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
         profilePromise, historyPromise, crossSessionPromise, wmPromise, memoriesPromise, stmPromise, searchPromise,
-        lastMsgPromise, presencePromise, unreadPromise, remindersPromise
+        lastMsgPromise, presencePromise, unreadPromise, remindersPromise, lifeThreadsPromise
       ]);
       
       // TIER 2: BACKGROUND CONTEXT (Start but do not await)
@@ -5169,6 +5174,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
         unreadNovaMessages: unreadResult.count || 0, behaviorPattern: behaviorPatternResult.pattern !== 'UNKNOWN' ? `${behaviorPatternResult.pattern} (${behaviorPatternResult.description})` : null,
         totalMemoriesCount: totalMemoriesResult.count || 0,
         goalMemories: memories.filter(<span class="fstat-no" title="function not covered" >(m</span>: any) =&gt; <span class="cstat-no" title="statement not covered" >m.memory_type === 'goals')</span>,
+        activeLifeThreads: lifeThreadsResult.data || [],
       };
 <span class="cstat-no" title="statement not covered" >      situationBrief = situationalAwareness.buildBrief(situationCtx);</span>
 &nbsp;
@@ -6145,7 +6151,7 @@ HINGLISH RULES:
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T20:49:51.253Z
+                at 2026-08-23T21:19:26.501Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

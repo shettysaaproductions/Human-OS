@@ -207,7 +207,7 @@ export const MEMORY_JOB_TYPES = [
 ] as const;
 export const memoryQueue = new QueueService('memoryQueue', [...MEMORY_JOB_TYPES], 'MEMORY');
 export const reflectionQueue = new QueueService('reflectionQueue', ['daily_reflection'], 'USER_DEEP');
-export const subconsciousQueue = new QueueService('subconsciousQueue', ['extract_subconscious_actions'], 'SUBCONSCIOUS');
+export const subconsciousQueue = new QueueService('subconsciousQueue', ['extract_subconscious_actions', 'extract_life_threads'], 'SUBCONSCIOUS');
 export const maintenanceQueue = new QueueService('maintenanceQueue', [
   'compact_chat_history', 'compact_episodes', 'reconcile_facts', 
   'cleanup_completed_jobs', 'cleanup_failed_jobs', 'compress_long_term_memory', 'health_snapshot'

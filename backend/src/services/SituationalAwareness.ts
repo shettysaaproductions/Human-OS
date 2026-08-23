@@ -38,6 +38,7 @@ export interface SituationContext {
   unreadNovaMessages?: number;   // assistant messages the user has not opened/read yet
   totalMemoriesCount?: number | null; // count of long-term memories
   goalMemories?: { key: string; value: string; memory_type?: string }[];
+  activeLifeThreads?: { id: string; topic: string; state: string; priority: string; provenance?: string; last_relevant_at?: string }[]; // Phase 8 Life Threads
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -113,6 +114,16 @@ export class SituationalAwareness {
 
     if (ctx.totalMemoriesCount !== undefined && ctx.totalMemoriesCount !== null && ctx.totalMemoriesCount < 15) {
       lines.push(`- 🚀 DISCOVERY PHASE (INTERNAL LOGIC - DO NOT MENTION TO USER): You barely know this user (only ${ctx.totalMemoriesCount} facts saved). Your main goal right now is to understand their life, daily routine, goals, and current situation. Do NOT make random guesses about their life (like asking if they are at the cinema). Instead, ask 1-2 warm, curious get-to-know-you questions!`);
+    }
+
+    // ── Life Threads (Phase 8) ──
+    if (ctx.activeLifeThreads && ctx.activeLifeThreads.length > 0) {
+      lines.push(`- 🧶 ACTIVE LIFE THREADS (Open Loops/Ongoing Goals):`);
+      ctx.activeLifeThreads.forEach(thread => {
+        lines.push(`  * Topic: "${thread.topic}" | State: ${thread.state} | Priority: ${thread.priority}`);
+        if (thread.provenance) lines.push(`    Context: ${thread.provenance}`);
+      });
+      lines.push(`  (Do NOT force these topics unless relevant, but use them to contextualize the user's ongoing life.)`);
     }
 
     // ── User Presence / Last-Seen (read-receipt awareness) ──

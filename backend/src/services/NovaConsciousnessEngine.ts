@@ -469,6 +469,16 @@ export class NovaConsciousnessEngine {
       .limit(10);
     const recentOutreachSnippet = (recentOutreaches || []).map(o => `- "${o.message}"`).join('\n');
 
+    // Fetch Life Threads (Phase 8) to ground proactive follow-ups
+    const { data: lifeThreads } = await supabaseAdmin
+      .from('life_threads')
+      .select('topic, state, priority, provenance')
+      .eq('user_id', userId)
+      .in('state', ['active', 'waiting', 'blocked'])
+      .order('last_relevant_at', { ascending: false })
+      .limit(5);
+    const lifeThreadSummary = (lifeThreads || []).map(t => `[${t.state.toUpperCase()}] ${t.topic}: ${t.provenance || ''}`).join('\n');
+
     // ── DETERMINISTIC RELEVANCE GATE ─────────────────────────────────────────
     // Before invoking Tier 1, ensure there is SOME valid context to speak about.
     // Time alone is NOT a reason. If there is absolutely no recent memory, no working memory,
@@ -478,10 +488,11 @@ export class NovaConsciousnessEngine {
                               isSleepWindowOverridden || 
                               (recentMemories && recentMemories.length > 0) || 
                               (workingMemories && workingMemories.length > 0) || 
-                              (lastConversation && lastConversation.length > 0);
+                              (lastConversation && lastConversation.length > 0) ||
+                              (lifeThreads && lifeThreads.length > 0);
 
     if (!hasGroundedReason) {
-      logger.info('[NACE] Deterministic Gate: Skipping — no grounded reason (no agenda, no memory, no chat context)', { userId });
+      logger.info('[NACE] Deterministic Gate: Skipping — no grounded reason (no agenda, no memory, no chat context, no open threads)', { userId });
       return;
     }
 
@@ -515,6 +526,7 @@ Pending Agenda Item: ${agendaItem ? agendaItem.event_description + ' [urgency: '
 Recent Memories: ${memorySummary || 'None'}
 Working Memory: ${workingMemorySummary || 'None'}
 Last Conversation Snippet: ${lastConvSnippet || 'None'}
+Active Life Threads: ${lifeThreadSummary || 'None'}
 ${abandonmentNote}
 ${spontaneousThoughtNote}
 
@@ -632,6 +644,7 @@ Trigger: ${triggerType}
 Agenda Context: ${agendaItem ? agendaItem.follow_up_question : 'N/A'}
 Recent Memories: ${memorySummary}
 Working Memory: ${workingMemorySummary || 'None.'}
+Active Life Threads: ${lifeThreadSummary || 'None.'}
 
 RECENT OUTREACH MESSAGES (Do NOT repeat or closely rephrase these):
 ${recentOutreachSnippet || 'None.'}

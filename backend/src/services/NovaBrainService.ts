@@ -307,6 +307,16 @@ export class NovaBrainService {
         novaReply: reply,
         userCountry: context.userCountry || 'IN'
       });
+      
+      subconsciousQueue.add('extract_life_threads', {
+        user_id: _userId,
+        turn_context: {
+          messageId: jobMessageId,
+          conversationId: context.conversationId || '',
+          userMessage: combinedUserMessage,
+          novaReply: reply
+        }
+      });
     }).catch(err => {
       logger.error('[NOVA BRAIN] Failed to enqueue subconscious extraction', { error: err });
     });

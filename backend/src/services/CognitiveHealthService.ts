@@ -15,6 +15,9 @@ export interface CognitiveHealthMetrics {
   jobs_failed_count: number | null;
   is_maintenance_required: boolean;
   retention_lag_days: number | null;
+  active_life_threads?: number | null;
+  completed_threads?: number | null;
+  abandoned_threads?: number | null;
 }
 
 export class CognitiveHealthService {
@@ -42,11 +45,30 @@ export class CognitiveHealthService {
         jobs_pending_count: null,
         jobs_failed_count: null,
         is_maintenance_required: false,
-        retention_lag_days: null
+        retention_lag_days: null,
+        active_life_threads: null,
+        completed_threads: null,
+        abandoned_threads: null
       };
     }
     
-    return metricsData as CognitiveHealthMetrics;
+    // Fetch life_threads counts manually (avoiding schema migration for a read-only metric)
+    const metrics = metricsData as CognitiveHealthMetrics;
+    try {
+      const { data: threadStats } = await supabaseAdmin
+        .from('life_threads')
+        .select('state');
+        
+      if (threadStats) {
+        metrics.active_life_threads = threadStats.filter(t => t.state === 'active' || t.state === 'waiting' || t.state === 'blocked').length;
+        metrics.completed_threads = threadStats.filter(t => t.state === 'completed').length;
+        metrics.abandoned_threads = threadStats.filter(t => t.state === 'abandoned').length;
+      }
+    } catch (e) {
+      logger.warn('Failed to fetch life_threads metrics for cognitive health', { error: e });
+    }
+    
+    return metrics;
   }
 
   /**

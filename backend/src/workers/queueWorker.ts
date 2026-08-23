@@ -3,6 +3,7 @@ import { consolidatedMemoryAgent } from '../agents/ConsolidatedMemoryAgent';
 import { shortTermMemoryAgent } from '../agents/ShortTermMemoryAgent';
 import { reflectionAgent } from '../agents/ReflectionAgent';
 import { subconsciousAgent } from '../agents/SubconsciousAgent';
+import { lifeThreadAgent } from '../agents/LifeThreadAgent';
 import { deterministicFactAgent } from '../agents/DeterministicFactAgent';
 import { logger } from '../lib/logger';
 import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
@@ -107,12 +108,12 @@ export function startWorkers() {
   });
 
   subconsciousQueue.process(async (job) => {
-    switch (job.job_type) {
-      case 'extract_subconscious_actions':
-        await processWithBackoff(job, subconsciousAgent.processJob.bind(subconsciousAgent), 'extract_subconscious_actions');
-        break;
-      default:
-        logger.warn(`Unknown subconscious job type: ${job.job_type}`);
+    if (job.job_type === 'extract_subconscious_actions') {
+      await processWithBackoff(job, subconsciousAgent.processJob.bind(subconsciousAgent), 'extract_subconscious_actions');
+    } else if (job.job_type === 'extract_life_threads') {
+      await processWithBackoff(job, lifeThreadAgent.processJob.bind(lifeThreadAgent), 'extract_life_threads');
+    } else {
+      logger.warn(`Unknown subconscious job type: ${job.job_type}`);
     }
   });
 
