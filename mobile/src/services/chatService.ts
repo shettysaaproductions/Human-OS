@@ -41,15 +41,15 @@ export const chatService = {
     return response.data;
   },
 
-  async sendMessageAsync(message: string, conversationId?: string, replyToId?: string, replyToContent?: string, imageBase64?: string, clientMessageId?: string): Promise<{ conversation_id: string, user_message_id?: string } | null> {
-    const payload: any = { message, async_mode: true };
+  async sendMessageAsync(messages: { message: string, reply_to_id?: string, reply_to_content?: string, image_base64?: string, client_message_id?: string }[], conversationId?: string): Promise<{ conversation_id: string, user_message_id?: string } | null> {
+    // Fill in default IDs for any message missing one (to match backend fallback)
+    const formattedMessages = messages.map(m => ({
+      ...m,
+      client_message_id: m.client_message_id || Crypto.randomUUID()
+    }));
+
+    const payload: any = { messages: formattedMessages, async_mode: true };
     if (conversationId) payload.conversation_id = conversationId;
-    if (replyToId) payload.reply_to_id = replyToId;
-    if (replyToContent) payload.reply_to_content = replyToContent;
-    if (imageBase64) payload.image_base64 = imageBase64;
-    
-    if (clientMessageId) payload.client_message_id = clientMessageId;
-    else payload.client_message_id = Crypto.randomUUID();
 
     // We use the native fetch API with keepalive: true so that the OS
     // completes the HTTP request even if the JS thread is suspended immediately after.

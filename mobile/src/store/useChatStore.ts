@@ -121,7 +121,7 @@ function startReplyPolling(checkFn: () => Promise<void>) {
           isSystemMessage: true,
           created_at: new Date().toISOString(),
         };
-        store.set({ messages: [...store.messages, timeoutMsg] });
+        useChatStore.setState({ messages: [...store.messages, timeoutMsg] });
       }
       return;
     }
@@ -389,19 +389,21 @@ export const useChatStore = create<ChatState>((set, get) => {
         let retryDelay = 3000;
         let succeeded = false;
 
-        const combinedContent = batch.map(b => b.content).join('\n');
+        const formattedBatch = batch.map(b => ({
+          message: b.content,
+          reply_to_id: b.replyToId,
+          reply_to_content: b.replyToContent,
+          image_base64: b.imageBase64,
+          client_message_id: b.id
+        }));
 
         // FIRE IMMEDIATELY: Hand off to native OkHttp instantly
         // This ensures the request leaves the phone even if minimized 10ms later
         while (!succeeded) {
           try {
             const data = await chatService.sendMessageAsync(
-              combinedContent,
-              get().conversationId || undefined,
-              batch[0].replyToId,
-              batch[0].replyToContent,
-              batch[0].imageBase64,
-              primaryId
+              formattedBatch,
+              get().conversationId || undefined
             );
             console.log(`[PROCESS_QUEUE] Delivered message ${primaryId} to DB/backend`);
             const convId: string = data?.conversation_id || get().conversationId || '';
@@ -412,7 +414,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               isTyping: true, // Keep true until reply arrives
               messages: s.messages.map(m =>
                 batch.some(b => b.id === m.id) 
-                  ? { ...m, status: 'sent' as const, id: m.id === primaryId ? (data?.user_message_id || m.id) : m.id } 
+                  ? { ...m, status: 'sent' as const } 
                   : m
               ),
             }));
@@ -805,8 +807,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       startQueueWatchdog(processQueue);
 
       if (_queueTimeout) clearTimeout(_queueTimeout);
-      // Fire immediately so Android doesn't suspend the app before the request leaves
-      get().processQueue();
+      _queueTimeout = setTimeout(() => {
+        get().processQueue();
+      }, 500);
     },
 
     retryMessage: async (messageId: string) => {

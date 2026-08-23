@@ -39,7 +39,12 @@ TaskManager.defineTask(NOVA_QUEUE_FLUSH_TASK, async () => {
     // 3. Process items
     for (const item of toProcess) {
       try {
-        await chatService.sendMessageAsync(item.content, undefined, item.replyToId, item.replyToContent);
+        await chatService.sendMessageAsync([{
+          message: item.content,
+          reply_to_id: item.replyToId,
+          reply_to_content: item.replyToContent,
+          client_message_id: item.id
+        }]);
         // Mark as delivered
         deliveredArr.push({ id: item.id, ts: Date.now() });
         anySuccess = true;
