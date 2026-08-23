@@ -27,6 +27,12 @@ export interface TurnAnalysisResult {
   hasCorrections: boolean;
 }
 
+export interface ExtractedFact {
+  key: string;
+  value: string;
+  text: string;
+}
+
 export class TurnAnalyzer {
   public static analyze(messages: ChatMessageInput[]): TurnAnalysisResult {
     const units: SemanticUnit[] = [];
@@ -35,130 +41,224 @@ export class TurnAnalyzer {
     for (const msg of messages) {
       if (!msg.message) continue;
       const sourceMessageId = msg.client_message_id || crypto.randomUUID();
-      
-      // Basic sentence splitting (handles typical English and Hinglish punctuation)
-      // Also preserves the whole message if no punctuation exists.
-      const sentences = msg.message.split(/(?<=[.!?\n])\s+/).map(s => s.trim()).filter(s => s.length > 0);
-      
-      for (const sentence of sentences) {
+      const rawText = msg.message.trim();
+      if (!rawText) continue;
+
+      // Split into clauses by sentence-ending punctuation or comma/conjunction boundaries when multiple clauses exist
+      const clauses = this.splitIntoClauses(rawText);
+
+      for (const clause of clauses) {
         order++;
-        const lower = sentence.toLowerCase();
-        
-        let type: SemanticUnitType = 'casual';
-        let importance = 1;
-        let responseRequired = false;
-        let acknowledgementPreferred = true;
-        let memoryCandidate = false;
-        let actionCandidate = false;
-        let factKey: string | undefined;
-        let factValue: string | undefined;
+        const lower = clause.toLowerCase();
+        const extractedFacts = this.extractFacts(clause);
 
-        // 1. Correction Patterns
-        if (/\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no)\b/.test(lower)) {
-           type = 'correction';
-           importance = 9;
-           responseRequired = true;
-           memoryCandidate = true;
+        // 1. Check for explicit correction
+        const isCorrection = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
+
+        if (isCorrection) {
+          const firstFact = extractedFacts[0];
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'correction',
+            text: clause,
+            importance: 9,
+            responseRequired: true,
+            acknowledgementPreferred: true,
+            memoryCandidate: true,
+            actionCandidate: false,
+            factKey: firstFact?.key || (lower.includes('her name') ? 'mother_name' : (lower.includes('his name') ? 'father_name' : undefined)),
+            factValue: firstFact?.value || this.extractNameFromCorrection(lower)
+          });
         }
-        // 2. Questions
-        else if (/\?/.test(lower) || /\b(kya|kahan|kab|kaise|kyun|kaun|who|why|what|where|when|how)\b/.test(lower)) {
-           type = 'question';
-           importance = 7;
-           responseRequired = true;
+        // 2. Check for extracted facts
+        else if (extractedFacts.length > 0) {
+          for (let i = 0; i < extractedFacts.length; i++) {
+            const fact = extractedFacts[i];
+            units.push({
+              unitId: crypto.randomUUID(),
+              sourceMessageId,
+              order: i === 0 ? order : ++order,
+              type: 'fact',
+              text: fact.text,
+              importance: 8,
+              responseRequired: false,
+              acknowledgementPreferred: true,
+              memoryCandidate: true,
+              actionCandidate: false,
+              factKey: fact.key,
+              factValue: fact.value
+            });
+          }
         }
-        // 3. Explicit Facts (Family, Name, Job)
+        // 3. Check for questions
+        else if (/\?/.test(clause) || /\b(kya|kahan|kab|kaise|kyun|kaun|who|why|what|where|when|how|can you|will you|tell me)\b/i.test(lower)) {
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'question',
+            text: clause,
+            importance: 7,
+            responseRequired: true,
+            acknowledgementPreferred: true,
+            memoryCandidate: false,
+            actionCandidate: false
+          });
+        }
+        // 4. Check for emotions
+        else if (/\b(feel|sad|happy|angry|tension|stress|ro raha|dukhi|pareshan|gussa|thaka|tired|upset|exhausted|depressed|anxious|excited)\b/i.test(lower)) {
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'emotion',
+            text: clause,
+            importance: 8,
+            responseRequired: false,
+            acknowledgementPreferred: true,
+            memoryCandidate: false,
+            actionCandidate: false
+          });
+        }
+        // 5. Actions / Plans
+        else if (/\b(plan|tomorrow|going to|will do|karunga|kal|meeting|gym|office|flight|trip|doctor|task)\b/i.test(lower)) {
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'action',
+            text: clause,
+            importance: 6,
+            responseRequired: false,
+            acknowledgementPreferred: true,
+            memoryCandidate: true,
+            actionCandidate: true
+          });
+        }
+        // 6. Casual
         else {
-           const factMatch = this.extractFact(lower, sentence);
-           if (factMatch) {
-             type = 'fact';
-             importance = 8;
-             memoryCandidate = true;
-             acknowledgementPreferred = true;
-             factKey = factMatch.key;
-             factValue = factMatch.value;
-           }
-           // 4. Emotions
-           else if (/\b(feel|sad|happy|angry|tension|stress|ro raha|dukhi|pareshan|gussa|thaka|tired)\b/i.test(lower)) {
-             type = 'emotion';
-             importance = 8;
-             acknowledgementPreferred = true;
-           }
-           // 5. Actions / Plans
-           else if (/\b(plan|tomorrow|going to|will do|karunga|kal|meeting|gym|office)\b/i.test(lower)) {
-             type = 'action';
-             importance = 6;
-             actionCandidate = true;
-           }
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'casual',
+            text: clause,
+            importance: 1,
+            responseRequired: false,
+            acknowledgementPreferred: false,
+            memoryCandidate: false,
+            actionCandidate: false
+          });
         }
-
-        units.push({
-          unitId: crypto.randomUUID(),
-          sourceMessageId,
-          order,
-          type,
-          text: sentence,
-          importance,
-          responseRequired,
-          acknowledgementPreferred,
-          memoryCandidate,
-          actionCandidate,
-          factKey,
-          factValue
-        });
       }
     }
 
     return {
       units,
       hasQuestions: units.some(u => u.type === 'question'),
-      hasFacts: units.some(u => u.type === 'fact'),
+      hasFacts: units.some(u => u.type === 'fact' || (u.type === 'correction' && !!u.factKey)),
       hasEmotions: units.some(u => u.type === 'emotion'),
       hasActions: units.some(u => u.type === 'action'),
       hasCorrections: units.some(u => u.type === 'correction')
     };
   }
 
-  private static extractFact(lower: string, _original: string): { key: string, value: string } | null {
-    // Mother
-    let m = lower.match(/\b(meri|mere|mara|my)\s+(mummy|mom|mother|maa|mata)\s+(ka naam|is|nam|name is|hai)\s+([a-z]+)\b/i);
-    if (m) return { key: 'mother_name', value: m[4] };
-    
-    // Father
-    m = lower.match(/\b(meri|mere|mara|my)\s+(papa|dad|father|baap|pita)\s+(ka naam|is|nam|name is|hai)\s+([a-z]+)\b/i);
-    if (m) return { key: 'father_name', value: m[4] };
+  private static splitIntoClauses(text: string): string[] {
+    // Split on sentence terminators first
+    const primary = text.split(/(?<=[.!?\n])\s+/).map(s => s.trim()).filter(Boolean);
+    const result: string[] = [];
 
-    // Wife
-    m = lower.match(/\b(meri|mere|mara|my)\s+(biwi|wife|patni)\s+(ka naam|is|nam|name is|hai)\s+([a-z]+)\b/i);
-    if (m) return { key: 'wife_name', value: m[4] };
+    for (const p of primary) {
+      // If the sentence contains multiple distinct fact clauses separated by commas / 'and'
+      if (p.includes(',') || /\band\b/i.test(p)) {
+        const parts = p.split(/,\s*(?:and\s+)?|\s+and\s+/i).map(s => s.trim()).filter(Boolean);
+        if (parts.length > 1 && parts.some(part => this.extractFacts(part).length > 0)) {
+          result.push(...parts);
+          continue;
+        }
+      }
+      result.push(p);
+    }
+    return result.length > 0 ? result : [text];
+  }
 
-    // Husband
-    m = lower.match(/\b(meri|mere|mara|my)\s+(shauhar|husband|pati)\s+(ka naam|is|nam|name is|hai)\s+([a-z]+)\b/i);
-    if (m) return { key: 'husband_name', value: m[4] };
+  public static extractFacts(text: string): ExtractedFact[] {
+    const lower = text.toLowerCase();
+    const facts: ExtractedFact[] = [];
 
-    // Sister
-    m = lower.match(/\b(meri|mere|mara|my)\s+(behen|sister)\s+(ka naam|is|nam|name is|hai)\s+([a-z]+)\b/i);
-    if (m) return { key: 'sister_name', value: m[4] };
+    // Mother name
+    let m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
+    if (m) {
+      facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text });
+    } else {
+      m = lower.match(/\b(?:my|meri)\s+(?:mummy|mom|mother|maa)\s+(?:is|hai)\s+([a-zA-Z]+)\b/i);
+      if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text });
+    }
 
-    // Brother
-    m = lower.match(/\b(mera|mere|mara|my)\s+(bhai|brother)\s+(ka naam|is|nam|name is|hai)\s+([a-z]+)\b/i);
-    if (m) return { key: 'brother_name', value: m[4] };
+    // Father name
+    m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
+    if (m) {
+      facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text });
+    } else {
+      m = lower.match(/\b(?:my|mere)\s+(?:papa|dad|father|pita)\s+(?:is|hai)\s+([a-zA-Z]+)\b/i);
+      if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text });
+    }
 
-    // Company / Job / Business
-    m = lower.match(/\b(meri|mere|my)\s+(company|office|business|startup|agency)\s+(ka naam|is|name is|hai)\s+([a-z0-9\s]+)\b/i);
-    if (m) return { key: 'company_name', value: m[4].trim() };
+    // Wife name
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
+    if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text });
 
-    m = lower.match(/\b(kaam karta|karti hoon|work at|working at|job at|employed at|started a company called)\s+([a-z0-9\s]+)\b/i);
-    if (m) return { key: 'company_name', value: m[2].trim() };
+    // Husband name
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
+    if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text });
+
+    // Sister name
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
+    if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text });
+
+    // Brother name
+    m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
+    if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text });
+
+    // Company / Job
+    m = lower.match(/\b(?:started|founded|created|built)\s+(?:a\s+)?(?:company|startup|agency|firm|business)(?:\s+(?:called|named))?\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
+    if (m) {
+      facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text });
+    } else {
+      m = lower.match(/\b(?:meri|mere|my)\s+(?:company|office|business|startup|agency)(?:'s)?\s+(?:ka\s+naam|is|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
+      if (m) {
+        facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text });
+      } else {
+        m = lower.match(/\b(?:kaam karta|karti hoon|work at|working at|job at|employed at)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
+        if (m) facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text });
+      }
+    }
 
     // City / Location
-    m = lower.match(/\b(rehta hoon|rehti hoon|live in|living in|from)\s+([a-z]+)\b/i);
-    if (m) return { key: 'city', value: m[2] };
+    m = lower.match(/\b(?:rehta hoon|rehti hoon|live in|living in|i am from|from|stay in|staying in)\s+([a-zA-Z]+)\b/i);
+    if (m && !['a', 'the', 'my', 'home', 'here'].includes(m[1].toLowerCase())) {
+      facts.push({ key: 'city', value: this.cleanValue(m[1]), text });
+    }
 
     // Name
-    m = lower.match(/\b(mera naam|my name is)\s+([a-z]+)\b/i);
-    if (m) return { key: 'user_name', value: m[2] };
+    m = lower.match(/\b(?:mera naam|my name is)\s+([a-zA-Z]+)\b/i);
+    if (m) facts.push({ key: 'user_name', value: this.cleanValue(m[1]), text });
 
-    return null;
+    return facts;
+  }
+
+  private static extractNameFromCorrection(lower: string): string | undefined {
+    const m = lower.match(/\b(?:her|his|unka|unki|iska|iski|their|actual)?\s*name\s+is\s+([a-zA-Z]+)\b/i) ||
+              lower.match(/\b(?:naam|nam)\s+(?:hai|is)\s+([a-zA-Z]+)\b/i) ||
+              lower.match(/\b(?:actually|instead|correction:?)\s+([a-zA-Z]+)\b/i);
+    return m ? this.cleanValue(m[1]) : undefined;
+  }
+
+  private static cleanValue(val: string): string {
+    const trimmed = val.trim().replace(/[.,;!?]+$/, '');
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
   }
 
   public static buildTurnAnalysisPrompt(analysis: TurnAnalysisResult): string {
@@ -166,14 +266,14 @@ export class TurnAnalyzer {
 
     let prompt = `\n\n## 🔍 TURN ANALYSIS (CRITICAL RESPONSIVENESS CONSTRAINT)\n`;
     prompt += `The user's turn contains multiple semantic units. You MUST explicitly cover ALL required points below in your response.\n`;
-    
+
     let requiredCount = 0;
     for (const unit of analysis.units) {
       if (unit.responseRequired || unit.acknowledgementPreferred || unit.type === 'fact' || unit.type === 'correction') {
         prompt += `- [${unit.type.toUpperCase()}] "${unit.text}" -> `;
         if (unit.type === 'question') prompt += `Must provide an answer.`;
-        else if (unit.type === 'correction') prompt += `Must acknowledge and accept the correction.`;
-        else if (unit.type === 'fact') prompt += `Must briefly acknowledge this fact warmly.`;
+        else if (unit.type === 'correction') prompt += `Must explicitly acknowledge and accept the correction (e.g. "Got it, ${unit.factValue || 'updated'}!").`;
+        else if (unit.type === 'fact') prompt += `Must acknowledge this fact (${unit.factKey || 'detail'}: ${unit.factValue || unit.text}) warmly.`;
         else if (unit.type === 'emotion') prompt += `Must validate this emotion first.`;
         else if (unit.type === 'action') prompt += `Acknowledge this action/plan.`;
         else prompt += `Address naturally.`;
@@ -189,26 +289,37 @@ export class TurnAnalyzer {
   public static getUncoveredUnits(analysis: TurnAnalysisResult, finalReply: string): SemanticUnit[] {
     const uncovered: SemanticUnit[] = [];
     const lowerReply = finalReply.toLowerCase();
-    
+
     for (const unit of analysis.units) {
-      if (unit.responseRequired) {
-        // Very basic bounded coverage check:
-        // Did we answer the question or acknowledge the correction?
-        // Since we don't want an LLM call here, we just check if it's completely missing
-        // It's hard to do deterministically without NLP.
-        // Let's assume the LLM covers questions. We can check if ANY response was given.
-        // If the reply is extremely short and there were multiple questions, maybe one was missed.
-        // For facts, maybe we check if the factValue is in the reply? No, LLM might rephrase.
-        // For now, if the reply is too short to cover the required units, flag it?
-        // Actually, the user asked for a "lightweight bounded repair/recomposition".
-        // Let's do a naive keyword overlap. If there's 0 overlap in keywords, it's uncovered.
+      // Questions require an answer or substantive coverage
+      if (unit.type === 'question' && unit.responseRequired) {
+        // If the reply is an exact repetition/echo of the question, it's not covered
+        const lowerQuestion = unit.text.toLowerCase().replace(/[?.,!]/g, '').trim();
+        const isEcho = lowerReply.replace(/[?.,!]/g, '').trim() === lowerQuestion;
+        if (isEcho || lowerReply.length < 10) {
+          uncovered.push(unit);
+        }
+      }
+      // Corrections require explicit acknowledgment
+      else if (unit.type === 'correction' && unit.responseRequired) {
+        const valueAcknowledged = unit.factValue && lowerReply.includes(unit.factValue.toLowerCase());
+        const correctionAcknowledged = /\b(sorry|oh|got it|noted|theek|sahi|achha|acha|update|samajh|my bad|arrey|aree)\b/i.test(lowerReply);
+        if (!valueAcknowledged && !correctionAcknowledged) {
+          uncovered.push(unit);
+        }
+      }
+      // Facts with high importance: check if acknowledged
+      else if (unit.type === 'fact' && unit.factValue) {
+        const valLower = unit.factValue.toLowerCase();
+        const valuePresent = lowerReply.includes(valLower);
+        const acknowledged = /\b(nice|sweet|great|badhiya|mast|sahi|noted|got it|cool|kya baat|congrats|mubarak|shandar|superb)\b/i.test(lowerReply);
+        // If the fact was neither mentioned nor acknowledged at all in a non-empty response
+        if (!valuePresent && !acknowledged && lowerReply.length < 15) {
+          uncovered.push(unit);
+        }
       }
     }
-    // As a simple heuristic, if the reply is < 15 characters and there were required units, we assume they are uncovered.
-    if (lowerReply.length < 15 && analysis.units.some(u => u.responseRequired)) {
-      return analysis.units.filter(u => u.responseRequired);
-    }
-    
+
     return uncovered;
   }
 }

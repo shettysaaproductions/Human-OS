@@ -1083,13 +1083,22 @@ chatRouter.post(
       const turnAnalysis = TurnAnalyzer.analyze(normalizedMessages);
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
-      // Dispatch durable fact persistence immediately for deterministic facts
-      const explicitFacts = turnAnalysis.units.filter(u => u.type === 'fact' && u.factKey);
+      // Dispatch durable fact persistence immediately for deterministic facts & corrections
+      const explicitFacts = turnAnalysis.units.filter(u => (u.type === 'fact' || u.type === 'correction') && u.factKey && u.factValue);
       if (explicitFacts.length > 0) {
-        const payloadFacts = explicitFacts.map(f => ({ key: f.factKey, value: f.factValue }));
-        memoryQueue.add('extract_deterministic_fact', { userId, facts: payloadFacts, sourceMessage: effectiveMessage }).catch(e => {
+        const factMap = new Map<string, string>();
+        for (const f of explicitFacts) {
+          if (f.factKey && f.factValue) {
+            factMap.set(f.factKey, f.factValue);
+          }
+        }
+        const payloadFacts = Array.from(factMap.entries()).map(([key, value]) => ({ key, value }));
+        try {
+          await memoryQueue.add('extract_deterministic_fact', { userId, facts: payloadFacts, sourceMessage: effectiveMessage });
+          logger.info('[Chat] Durable fact persistence intent queued', { userId, count: payloadFacts.length, facts: payloadFacts });
+        } catch (e) {
           logger.error('[Chat] Failed to queue deterministic facts', { error: e instanceof Error ? e.message : String(e) });
-        });
+        }
       }
 
       const brainContext = {
@@ -1341,6 +1350,7 @@ HINGLISH RULES:
       }
 
       // Coverage Check and Fast Repair
+      let coverage_repair_invoked = false;
       const uncoveredUnits = TurnAnalyzer.getUncoveredUnits(turnAnalysis, rawReply);
       if (uncoveredUnits.length > 0 && rawReply !== FALLBACK_REPLY) {
         logger.warn('[Chat] Uncovered required units detected, injecting repair bubble', { uncoveredUnits });
@@ -1353,6 +1363,8 @@ HINGLISH RULES:
           ], { maxTokens: 100, temperature: 0.7 });
           
           if (fastRepair && fastRepair.trim().length > 0) {
+             coverage_repair_invoked = true;
+             logger.info('[Chat] Metric coverage_repair_invoked', { userId, uncoveredUnitsCount: uncoveredUnits.length });
              const repairBubble = '\n<NOVA_MESSAGE_BREAK>\n' + fastRepair.trim();
              rawReply += repairBubble;
              if (isStreaming) {
@@ -1443,7 +1455,7 @@ HINGLISH RULES:
             chunks: [],
             conversation_id: activeConversationId,
             user_message_id: userMessageId,
-            meta: { blank_reply: true, degraded: false }
+            meta: { blank_reply: true, degraded: false, coverage_repair_invoked: false }
           });
           return;
         }
@@ -1630,7 +1642,8 @@ HINGLISH RULES:
               situationBrief: situationBrief || null,
               subconsciousActions: extractedActions,
               options: optionsArray,
-              hasThoughts: thoughts.length > 0
+              hasThoughts: thoughts.length > 0,
+              coverage_repair_invoked
             } : null
           };
           

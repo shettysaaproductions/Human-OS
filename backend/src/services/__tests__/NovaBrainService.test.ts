@@ -59,6 +59,8 @@ describe('NovaBrainService', () => {
         'auto',
         undefined,
         'HUMAN_CHAT',
+        undefined,
+        undefined,
         undefined
       );
     });
@@ -78,6 +80,8 @@ describe('NovaBrainService', () => {
         'auto',
         undefined,
         'HUMAN_CHAT',
+        undefined,
+        undefined,
         undefined
       );
     });
@@ -97,6 +101,8 @@ describe('NovaBrainService', () => {
         'auto',
         undefined,
         'HUMAN_CHAT',
+        undefined,
+        undefined,
         undefined
       );
     });
@@ -115,6 +121,8 @@ describe('NovaBrainService', () => {
         'auto',
         undefined,
         'HUMAN_CHAT',
+        undefined,
+        undefined,
         undefined
       );
     });
@@ -161,6 +169,8 @@ describe('NovaBrainService', () => {
         'auto',
         undefined,
         'HUMAN_CHAT',
+        undefined,
+        undefined,
         undefined
       );
     });
