@@ -1084,11 +1084,11 @@ chatRouter.post(
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // Dispatch durable fact persistence immediately for deterministic facts & corrections
-      const explicitFacts = turnAnalysis.units.filter(u => (u.type === 'fact' || u.type === 'correction') && u.factKey && u.factValue);
+      const explicitFacts = turnAnalysis.units.filter(u => (u.type === 'fact' || u.type === 'correction') && u.factKey && u.factKey !== 'UNKNOWN_RELATION' && u.factValue);
       if (explicitFacts.length > 0) {
         const factMap = new Map<string, { value: string, is_protected?: boolean, factClass?: string }>();
         for (const f of explicitFacts) {
-          if (f.factKey && f.factValue) {
+          if (f.factKey && f.factKey !== 'UNKNOWN_RELATION' && f.factValue) {
             factMap.set(f.factKey, {
               value: f.factValue,
               is_protected: f.isProtected || false,

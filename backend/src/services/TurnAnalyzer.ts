@@ -249,9 +249,9 @@ export class TurnAnalyzer {
   ): { factKey: string; oldValue?: string; relationship: string } | null {
     const lower = clause.toLowerCase();
     
-    const isFem = /\b(her|hers|uski|iski)\b/i.test(lower);
-    const isMasc = /\b(him|his|uske)\b/i.test(lower);
-    const isNeutral = /\b(their|unka|unki|iska|woh|uska)\b/i.test(lower);
+    const isFem = /\b(she|her|hers|uski|iski)\b/i.test(lower);
+    const isMasc = /\b(he|him|his|uske|iska)\b/i.test(lower);
+    const isNeutral = /\b(they|them|their|unka|unki|woh|uska)\b/i.test(lower);
     const isGenericCorrection = /\b(actually|instead|correction:?|galat|nahi yaar)\b/i.test(lower);
 
     if (!isFem && !isMasc && !isNeutral && !isGenericCorrection) {
@@ -274,7 +274,7 @@ export class TurnAnalyzer {
       }
     }
 
-    // 2. Search backwards in context.recentMessages
+    // 2. Search backwards in context.recentMessages (immediate conversation context ONLY)
     if (context?.recentMessages && Array.isArray(context.recentMessages)) {
       for (let i = context.recentMessages.length - 1; i >= 0; i--) {
         const msg = context.recentMessages[i];
@@ -298,26 +298,8 @@ export class TurnAnalyzer {
       }
     }
 
-    // 3. Search in context.memories
-    if (context?.memories && Array.isArray(context.memories)) {
-      if (isFem) {
-        const match = context.memories.find(m => m.key && FEMININE_RELATIONS.includes(m.key));
-        if (match && match.key) {
-          return { factKey: match.key, oldValue: match.value, relationship: match.key.replace(/_name/g, '') };
-        }
-      } else if (isMasc) {
-        const match = context.memories.find(m => m.key && MASCULINE_RELATIONS.includes(m.key));
-        if (match && match.key) {
-          return { factKey: match.key, oldValue: match.value, relationship: match.key.replace(/_name/g, '') };
-        }
-      } else {
-        const match = context.memories.find(m => m.key && ALL_PERSON_RELATIONS.includes(m.key));
-        if (match && match.key) {
-          return { factKey: match.key, oldValue: match.value, relationship: match.key.replace(/_name/g, '') };
-        }
-      }
-    }
-
+    // Note: Do NOT search long-term memories for conversational pronouns (her/him/she/he).
+    // An antecedent must be established in the active conversation turn or recent messages.
     return null;
   }
 
@@ -429,7 +411,7 @@ export class TurnAnalyzer {
     let requiredCount = 0;
     for (const unit of analysis.units) {
       if (unit.responseRequired || unit.acknowledgementPreferred || unit.type === 'fact' || unit.type === 'correction') {
-        const isUnknownRelation = unit.factKey === 'UNKNOWN_RELATION' || (!unit.factKey && unit.factValue);
+        const isUnknownRelation = unit.factKey === 'UNKNOWN_RELATION' || (!unit.factKey && !!unit.factValue);
         const relation = unit.relationship || (unit.factKey && !isUnknownRelation ? unit.factKey.replace(/_name/g, '') : '');
         
         prompt += `- [${unit.type.toUpperCase()}] "${unit.text}" -> `;
@@ -438,16 +420,16 @@ export class TurnAnalyzer {
           prompt += `Must provide an answer.`;
         } else if (unit.type === 'correction') {
           if (isUnknownRelation) {
-            prompt += `[RELATIONSHIP: UNKNOWN -> Do NOT guess. If the missing relationship materially affects your response, ask the user directly in normal chat (e.g., "Who is ${unit.factValue} — your sister, friend, or someone else?"). If not strictly necessary, use neutral wording without asking.] Must explicitly acknowledge and accept the correction concisely (logical_key = UNKNOWN, new_value = ${unit.factValue}, event = correction).`;
+            prompt += `[RELATIONSHIP_STATE = UNKNOWN, RELATIONSHIP_VALUE = NONE, ANTECEDENT = NONE]\n  * CRITICAL MANDATORY CONSTRAINT: The relationship of '${unit.factValue}' is completely UNKNOWN.\n  * You MUST NOT guess or assume any relationship (do NOT assume sister, brother, mother, friend, colleague, etc.).\n  * You MUST NOT append relationship titles (no 'didi', 'bhaiya', 'aunty', 'sir').\n  * You MUST ask the user directly in natural chat who '${unit.factValue}' is (e.g., "Who is ${unit.factValue} — your sister, friend, or someone else?").\n  * Acknowledge the correction concisely without guessing.`;
           } else {
             const oldValStr = unit.oldValue ? `, old_value = ${unit.oldValue}` : '';
-            prompt += `[RELATIONSHIP: KNOWN -> Inherited from antecedent (${relation}). Use exact relationship '${relation}'. Do NOT guess gender/title (e.g. no 'bhaiya'). No clarification needed.] Must explicitly acknowledge and accept the correction concisely (logical_key = ${unit.factKey}, relationship = ${relation}${oldValStr}, new_value = ${unit.factValue}, event = correction).`;
+            prompt += `[RELATIONSHIP_STATE = KNOWN, RELATIONSHIP = '${relation}', ANTECEDENT = FOUND]\n  * Relationship is confirmed as '${relation}'.\n  * Do NOT guess gender/title (no 'bhaiya'/'didi' unless explicitly used by user). No clarification needed.\n  * Acknowledge the correction cleanly (e.g., "Got it — ${unit.factValue}, your ${relation}. 😊") and continue with real context only. Do NOT invent past conversations or pretend familiarity. (logical_key = ${unit.factKey}, relationship = ${relation}${oldValStr}, new_value = ${unit.factValue}, event = correction).`;
           }
         } else if (unit.type === 'fact') {
           if (isUnknownRelation) {
-            prompt += `[RELATIONSHIP: UNKNOWN -> Do NOT guess. If the missing relationship materially affects your response, ask the user directly in normal chat (e.g., "Who is ${unit.factValue} — your sister, friend, or someone else?"). If not strictly necessary, use neutral wording without asking.] Must acknowledge this fact warmly.`;
+            prompt += `[RELATIONSHIP_STATE = UNKNOWN, RELATIONSHIP_VALUE = NONE, ANTECEDENT = NONE]\n  * CRITICAL MANDATORY CONSTRAINT: The relationship of '${unit.factValue}' is completely UNKNOWN.\n  * You MUST NOT guess or assume any relationship (do NOT assume sister, brother, mother, friend, colleague, etc.).\n  * You MUST NOT append relationship titles (no 'didi', 'bhaiya', 'aunty', 'sir').\n  * You MUST ask the user directly in natural chat who '${unit.factValue}' is (e.g., "Who is ${unit.factValue} — your sister, friend, or someone else?").`;
           } else {
-            prompt += `[RELATIONSHIP: KNOWN -> Use exact relationship '${relation}'. Do NOT guess gender/title (e.g. no 'bhaiya'). No clarification needed.] Must acknowledge this fact (${relation}: ${unit.factValue || unit.text}) warmly.`;
+            prompt += `[RELATIONSHIP_STATE = KNOWN, RELATIONSHIP = '${relation}', ANTECEDENT = FOUND]\n  * Relationship is confirmed as '${relation}'.\n  * Do NOT guess gender/title (no 'bhaiya'/'didi'). No clarification needed.\n  * Acknowledge this fact (${relation}: ${unit.factValue || unit.text}) warmly based ONLY on real conversation context.`;
           }
         } else if (unit.type === 'emotion') {
           prompt += `Must validate this emotion first.`;

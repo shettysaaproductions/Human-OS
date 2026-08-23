@@ -155,40 +155,23 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
   });
 
   describe('3. Phase 7.1 Regression Suite: Relationship-Aware Corrections & History Guard', () => {
-    it('A. Mother correction via pronoun: "My mother is Neeta" -> "Actually her name is Rajeshree"', () => {
+    it('A. Unknown relation: "Her name is Supriya" with no antecedent -> UNKNOWN_RELATION and prompt constraint', () => {
       const turn = TurnAnalyzer.analyze([
-        { message: "My mother is Neeta." },
-        { message: "Actually her name is Rajeshree." }
+        { message: "Her name is Supriya." }
       ]);
-      expect(turn.hasCorrections).toBe(true);
-      const correctionUnit = turn.units.find(u => u.type === 'correction');
-      expect(correctionUnit).toBeDefined();
-      expect(correctionUnit?.factKey).toBe('mother_name');
-      expect(correctionUnit?.factValue).toBe('Rajeshree');
-      expect(correctionUnit?.oldValue).toBe('Neeta');
-      expect(correctionUnit?.relationship).toBe('mother');
-      expect(correctionUnit?.isProtected).toBe(false);
-      expect(correctionUnit?.factClass).toBe('HIGH_CONFIDENCE_DURABLE_FACT');
+      expect(turn.units[0].factKey).toBe('UNKNOWN_RELATION');
+      expect(turn.units[0].factValue).toBe('Supriya');
 
       const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
-      expect(prompt).toContain('logical_key = mother_name, relationship = mother, old_value = Neeta, new_value = Rajeshree, event = correction');
-      expect(prompt).toContain('Inherited from antecedent (mother)');
-      expect(prompt).toContain('No clarification needed');
+      expect(prompt).toContain('RELATIONSHIP_STATE = UNKNOWN');
+      expect(prompt).toContain('RELATIONSHIP_VALUE = NONE');
+      expect(prompt).toContain('ANTECEDENT = NONE');
+      expect(prompt).toContain("The relationship of 'Supriya' is completely UNKNOWN");
+      expect(prompt).toContain('ask the user directly in natural chat who \'Supriya\' is');
+      expect(prompt).not.toContain('<OPTIONS>');
     });
 
-    it('A2. Mother correction via pronoun across turns with context', () => {
-      const turn = TurnAnalyzer.analyze(
-        [{ message: "Actually her name is Rajeshree." }],
-        { recentMessages: [{ role: 'user', content: "My mother is Neeta." }] }
-      );
-      expect(turn.hasCorrections).toBe(true);
-      expect(turn.units[0].factKey).toBe('mother_name');
-      expect(turn.units[0].factValue).toBe('Rajeshree');
-      expect(turn.units[0].oldValue).toBe('Neeta');
-      expect(turn.units[0].relationship).toBe('mother');
-    });
-
-    it('B. Sister correction via pronoun: "My sister is Soni" -> "Actually her name is Supriya"', () => {
+    it('B. Known correction: "My sister is Soni" -> "Actually her name is Supriya" -> sister_name = Supriya, no clarification', () => {
       const turn = TurnAnalyzer.analyze([
         { message: "My sister is Soni." },
         { message: "Actually her name is Supriya." }
@@ -201,12 +184,67 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(correctionUnit?.relationship).toBe('sister');
 
       const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
-      expect(prompt).toContain('logical_key = sister_name, relationship = sister, old_value = Soni, new_value = Supriya, event = correction');
-      expect(prompt).toContain('Inherited from antecedent (sister)');
+      expect(prompt).toContain('RELATIONSHIP_STATE = KNOWN');
+      expect(prompt).toContain("RELATIONSHIP = 'sister'");
+      expect(prompt).toContain('ANTECEDENT = FOUND');
       expect(prompt).toContain('No clarification needed');
     });
 
-    it('C. Brother correction via pronoun: "My brother is Amit" -> "Actually his name is Arjun"', () => {
+    it('C. Known correction with business context: "My sister handles finance" -> "Actually her name is Supriya"', () => {
+      const turn = TurnAnalyzer.analyze(
+        [{ message: "Actually her name is Supriya." }],
+        { recentMessages: [{ role: 'user', content: "My sister is Soni and she handles finance for my cloud kitchen." }] }
+      );
+      expect(turn.hasCorrections).toBe(true);
+      const unit = turn.units[0];
+      expect(unit.factKey).toBe('sister_name');
+      expect(unit.factValue).toBe('Supriya');
+      expect(unit.relationship).toBe('sister');
+
+      const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
+      expect(prompt).toContain('RELATIONSHIP_STATE = KNOWN');
+      expect(prompt).toContain("RELATIONSHIP = 'sister'");
+    });
+
+    it('D. Name-only message: "Supriya" -> does not infer relationship', () => {
+      const turn = TurnAnalyzer.analyze([
+        { message: "Supriya" }
+      ]);
+      expect(turn.units[0].type).toBe('casual');
+      expect(turn.units[0].factKey).toBeUndefined();
+      expect(turn.units[0].relationship).toBeUndefined();
+    });
+
+    it('E. Legitimate antecedent: "My sister is Supriya" -> "She handles finance" -> resolves she to sister', () => {
+      const turn = TurnAnalyzer.analyze([
+        { message: "My sister is Supriya." },
+        { message: "She handles finance." }
+      ]);
+      expect(turn.units[0].factKey).toBe('sister_name');
+      expect(turn.units[0].factValue).toBe('Supriya');
+
+      const antecedent = TurnAnalyzer.resolveAntecedent("She handles finance.", [turn.units[0]]);
+      expect(antecedent).not.toBeNull();
+      expect(antecedent?.relationship).toBe('sister');
+      expect(antecedent?.oldValue).toBe('Supriya');
+    });
+
+    it('F. Pronoun with no antecedent does NOT pull from long-term memory', () => {
+      const turn = TurnAnalyzer.analyze(
+        [{ message: "Her name is Supriya." }],
+        {
+          memories: [
+            { key: 'sister_name', value: 'Soni' },
+            { key: 'mother_name', value: 'Neeta' }
+          ]
+        }
+      );
+      // Isolated "Her name is Supriya" with no antecedent in recentMessages must remain UNKNOWN
+      expect(turn.units[0].factKey).toBe('UNKNOWN_RELATION');
+      expect(turn.units[0].relationship).toBeUndefined();
+    });
+
+    it('G. Brother correction via pronoun: "My brother is Amit" -> "Actually his name is Arjun"', () => {
       const turn = TurnAnalyzer.analyze([
         { message: "My brother is Amit." },
         { message: "Actually his name is Arjun." }
@@ -219,25 +257,12 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(correctionUnit?.relationship).toBe('brother');
 
       const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
-      expect(prompt).toContain('logical_key = brother_name, relationship = brother, old_value = Amit, new_value = Arjun, event = correction');
-      expect(prompt).toContain('Inherited from antecedent (brother)');
+      expect(prompt).toContain('RELATIONSHIP_STATE = KNOWN');
+      expect(prompt).toContain("RELATIONSHIP = 'brother'");
       expect(prompt).toContain('No clarification needed');
     });
 
-    it('D. Unknown "her" with no antecedent: "Her name is Supriya"', () => {
-      const turn = TurnAnalyzer.analyze([
-        { message: "Her name is Supriya." }
-      ]);
-      expect(turn.units[0].factKey).toBe('UNKNOWN_RELATION');
-      expect(turn.units[0].factValue).toBe('Supriya');
-
-      const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
-      expect(prompt).toContain('[RELATIONSHIP: UNKNOWN -> Do NOT guess.');
-      expect(prompt).toContain('ask the user directly in normal chat');
-      expect(prompt).not.toContain('<OPTIONS>');
-    });
-
-    it('E. Unknown "him" with no antecedent: "Tell him I will call tomorrow"', () => {
+    it('H. Unknown "him" with no antecedent in action: "Tell him I will call tomorrow"', () => {
       const turn = TurnAnalyzer.analyze([
         { message: "Tell him I will call tomorrow." }
       ]);
@@ -248,18 +273,7 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(prompt).not.toContain('<OPTIONS>');
     });
 
-    it('F. Existing known relationship remains authoritative over name inference', () => {
-      const turn = TurnAnalyzer.analyze([
-        { message: "My sister's name is Supriya." }
-      ]);
-      expect(turn.units[0].factKey).toBe('sister_name');
-      expect(turn.units[0].factValue).toBe('Supriya');
-
-      const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
-      expect(prompt).toContain('[RELATIONSHIP: KNOWN -> Use exact relationship \'sister\'. Do NOT guess gender/title (e.g. no \'bhaiya\'). No clarification needed.]');
-    });
-
-    it('G. Fabricated-history guard and name/gender assumption rules remain intact in promptBuilder', () => {
+    it('I. Anti-robot rules in promptBuilder contain unknown relationship & grounded correction guards', () => {
       const { promptBuilder } = require('../promptBuilder');
       const systemPrompt = promptBuilder.buildSystemPrompt({
         memories: [],
@@ -270,8 +284,9 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
 
       expect(systemPrompt).toContain('ANTI-ROBOT RULE (FABRICATED HISTORY GUARD — ZERO TOLERANCE)');
       expect(systemPrompt).toContain('ANTI-ROBOT RULE (NAME & GENDER ASSUMPTION — ZERO TOLERANCE)');
-      expect(systemPrompt).toContain('NEVER INVENT prior interactions');
-      expect(systemPrompt).toContain('Do NOT infer relationship or gender from a person\'s name alone');
+      expect(systemPrompt).toContain('ANTI-ROBOT RULE (UNKNOWN RELATIONSHIP — ZERO TOLERANCE FOR GUESSING)');
+      expect(systemPrompt).toContain('ANTI-ROBOT RULE (GROUNDED CORRECTION ACKNOWLEDGEMENT)');
+      expect(systemPrompt).toContain('Who is [Name] — your sister, friend, or someone else?');
     });
   });
 
