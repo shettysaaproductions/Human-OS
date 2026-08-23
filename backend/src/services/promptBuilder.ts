@@ -63,7 +63,8 @@ export class PromptBuilder {
     recentCrossSessionContext?: string,
     mode: 'HUMAN_CHAT' | 'LONG_CONTEXT' = 'HUMAN_CHAT',
     situationBrief?: string,
-    grammaticalGender?: string
+    grammaticalGender?: string,
+    turnAnalysisBlock?: string
   ): string {
     let finalPrompt = `${basePrompt}\n`;
     
@@ -495,6 +496,10 @@ PROACTIVE:
 - NEVER send the same greeting twice in a day
 - When reaching out proactively or starting a chat, don't just say "hi". Ask a curious, specific question about their current scene, work, or what they are doing right now (e.g., "Kahan busy hai aaj?", "Scene kaisa chal raha hai?").`;
 
+    }
+
+    if (turnAnalysisBlock && turnAnalysisBlock.trim().length > 0) {
+      finalPrompt += `\n${turnAnalysisBlock}`;
     }
 
     return finalPrompt;

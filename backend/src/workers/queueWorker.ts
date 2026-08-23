@@ -3,6 +3,7 @@ import { consolidatedMemoryAgent } from '../agents/ConsolidatedMemoryAgent';
 import { shortTermMemoryAgent } from '../agents/ShortTermMemoryAgent';
 import { reflectionAgent } from '../agents/ReflectionAgent';
 import { subconsciousAgent } from '../agents/SubconsciousAgent';
+import { deterministicFactAgent } from '../agents/DeterministicFactAgent';
 import { logger } from '../lib/logger';
 import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
 import { cognitiveHealthService } from '../services/CognitiveHealthService';
@@ -76,6 +77,9 @@ export function startWorkers() {
         break;
       case 'extract_short_term':
         await processWithBackoff(job, shortTermMemoryAgent.processJob.bind(shortTermMemoryAgent), 'extract_short_term');
+        break;
+      case 'extract_deterministic_fact':
+        await processWithBackoff(job, deterministicFactAgent.processJob.bind(deterministicFactAgent), 'extract_deterministic_fact');
         break;
       // Legacy job types - kept for backward compatibility during transition
       case 'extract_semantic':

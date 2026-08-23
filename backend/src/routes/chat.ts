@@ -20,6 +20,7 @@ import { reminderService } from '../services/reminderService';
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
+import { TurnAnalyzer } from '../services/TurnAnalyzer';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1079,6 +1080,18 @@ chatRouter.post(
       const memoryContext = '';
       const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
 
+      const turnAnalysis = TurnAnalyzer.analyze(normalizedMessages);
+      const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
+
+      // Dispatch durable fact persistence immediately for deterministic facts
+      const explicitFacts = turnAnalysis.units.filter(u => u.type === 'fact' && u.factKey);
+      if (explicitFacts.length > 0) {
+        const payloadFacts = explicitFacts.map(f => ({ key: f.factKey, value: f.factValue }));
+        memoryQueue.add('extract_deterministic_fact', { userId, facts: payloadFacts, sourceMessage: effectiveMessage }).catch(e => {
+          logger.error('[Chat] Failed to queue deterministic facts', { error: e instanceof Error ? e.message : String(e) });
+        });
+      }
+
       const brainContext = {
         memories,
         workingMemories,
@@ -1090,6 +1103,7 @@ chatRouter.post(
         remindersContext,
         recentMessages,
         memoryContext,
+        turnAnalysisBlock,
         lengthInstruction: primaryMessage.length < 20
           ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
           : "Match the user's depth, but still use short conversational messages.",
@@ -1323,6 +1337,31 @@ HINGLISH RULES:
           }
         } finally {
           llm_completed_ms = Date.now();
+        }
+      }
+
+      // Coverage Check and Fast Repair
+      const uncoveredUnits = TurnAnalyzer.getUncoveredUnits(turnAnalysis, rawReply);
+      if (uncoveredUnits.length > 0 && rawReply !== FALLBACK_REPLY) {
+        logger.warn('[Chat] Uncovered required units detected, injecting repair bubble', { uncoveredUnits });
+        try {
+          const { complete } = await import('../lib/nvidia');
+          const missedPoints = uncoveredUnits.map(u => u.text).join(' | ');
+          const fastRepair = await complete('TIMEOUT_FALLBACK', [
+             { role: 'system', content: 'You are Nova, a casual Hinglish friend. Your previous message forgot to address these points: "' + missedPoints + '". Write a 1-2 sentence quick follow-up to casually cover it. Start with "Oh aur haan," or similar. NO lists, NO emojis.' },
+             { role: 'user', content: 'You missed answering/acknowledging this. Add a quick follow up.' }
+          ], { maxTokens: 100, temperature: 0.7 });
+          
+          if (fastRepair && fastRepair.trim().length > 0) {
+             const repairBubble = '\n<NOVA_MESSAGE_BREAK>\n' + fastRepair.trim();
+             rawReply += repairBubble;
+             if (isStreaming) {
+                res.write(`data: ${JSON.stringify({ type: 'chunk', content: repairBubble })}\n\n`);
+                if (typeof (res as any).flush === 'function') (res as any).flush();
+             }
+          }
+        } catch (repairErr) {
+          logger.error('[Chat] Fast repair failed', { error: repairErr instanceof Error ? repairErr.message : String(repairErr) });
         }
       }
 

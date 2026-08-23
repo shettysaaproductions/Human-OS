@@ -245,7 +245,9 @@ export class NovaBrainService {
       'auto',
       context.recentCrossSessionContext,
       'HUMAN_CHAT',
-      context.situationBrief
+      context.situationBrief,
+      context.profile?.grammatical_gender,
+      context.turnAnalysisBlock
     );
 
     const conversationFullPrompt = [
