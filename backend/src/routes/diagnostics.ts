@@ -227,8 +227,8 @@ diagnosticsRouter.post('/prune-history', async (req: Request, res: Response, nex
       res.status(200).json({ mode: 'single_user', result });
     } else {
       // Run for all users — fire and respond immediately so the HTTP call doesn't time out
-      chatHistoryPruningService.runAll().catch((err) => {
-        console.error('[Manual Prune] Error during runAll:', err);
+      chatHistoryPruningService.processCompaction().catch((err: any) => {
+        console.error('[Manual Prune] Error during processCompaction:', err);
       });
       res.status(202).json({
         mode: 'all_users',

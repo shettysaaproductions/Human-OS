@@ -1,4 +1,4 @@
-import { NovaTriggerEngine } from '../NovaTriggerEngine';
+﻿import { NovaTriggerEngine } from '../NovaTriggerEngine';
 import { supabaseAdmin } from '../../lib/supabase';
 import { sendNovaReplyNotification } from '../../lib/pushNotifications';
 import { logger } from '../../lib/logger';
@@ -269,3 +269,4 @@ describe('NovaTriggerEngine', () => {
     });
   });
 });
+

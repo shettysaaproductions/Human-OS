@@ -12,6 +12,8 @@ export interface Memory {
   emotional_weight: number;
   is_archived: boolean;
   is_user_confirmed: boolean;
+  protection_source?: string;
+  protected_at?: Date;
   source_message?: string;
   last_accessed_at?: Date;
   created_at: Date;
@@ -28,6 +30,8 @@ export interface ExtractedMemory {
   frequency?: number;
   emotional_weight?: number;
   source_message_id?: string;
+  is_protected?: boolean;
+  protection_source?: string;
 }
 
 export interface WorkingMemory {

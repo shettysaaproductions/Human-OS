@@ -1,4 +1,4 @@
-import { ReminderEngine } from '../ReminderEngine';
+﻿import { ReminderEngine } from '../ReminderEngine';
 import { supabaseAdmin } from '../../lib/supabase';
 
 jest.mock('../../lib/supabase', () => {
@@ -17,7 +17,7 @@ jest.mock('../../lib/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
 }));
 
-describe('ReminderEngine — event triggers, purpose/urgency/end_condition, delete', () => {
+describe('ReminderEngine â€” event triggers, purpose/urgency/end_condition, delete', () => {
   let engine: ReminderEngine;
   let mockChain: any;
 
@@ -42,8 +42,8 @@ describe('ReminderEngine — event triggers, purpose/urgency/end_condition, dele
     jest.useRealTimers();
   });
 
-  describe('parse — event_trigger', () => {
-    it('event-triggered reminder → trigger_at null (no fixed time) + fields carried', () => {
+  describe('parse â€” event_trigger', () => {
+    it('event-triggered reminder â†’ trigger_at null (no fixed time) + fields carried', () => {
       const parsed = engine.parse({
         title: 'Take medicine',
         event_trigger: 'wake_up',
@@ -134,14 +134,14 @@ describe('ReminderEngine — event triggers, purpose/urgency/end_condition, dele
   });
 
   describe('formatConfirmation', () => {
-    it('event-triggered reminder → friendly event message, no crash on null trigger_at', () => {
+    it('event-triggered reminder â†’ friendly event message, no crash on null trigger_at', () => {
       const parsed = engine.parse({ title: 'Take meds', event_trigger: 'wake_up' });
       const msg = engine.formatConfirmation(parsed);
       expect(msg).toContain('wake_up');
       expect(msg).not.toContain('NaN');
     });
 
-    it('time-based reminder → normal confirmation', () => {
+    it('time-based reminder â†’ normal confirmation', () => {
       const parsed = engine.parse({ title: 'Call mom', relative_value: 30, relative_unit: 'minutes' });
       const msg = engine.formatConfirmation(parsed);
       expect(msg).toContain('Call mom');
@@ -149,3 +149,4 @@ describe('ReminderEngine — event triggers, purpose/urgency/end_condition, dele
     });
   });
 });
+

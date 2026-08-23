@@ -108,7 +108,7 @@ adminRouter.post('/trigger-reflections-weekly', async (_req: Request, res: Respo
  */
 adminRouter.post('/prune-history', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await chatHistoryPruningService.runAll();
+    await chatHistoryPruningService.processCompaction();
     res.status(200).json({ success: true, message: 'Pruning initiated.' });
   } catch (err) {
     next(err);

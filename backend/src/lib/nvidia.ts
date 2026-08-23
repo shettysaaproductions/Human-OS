@@ -53,6 +53,12 @@ class TokenBucket {
     return false;
   }
 
+  /** Check if tokens are available without consuming them */
+  hasTokens(): boolean {
+    this.refill();
+    return this.tokens >= 1;
+  }
+
   private refill(): void {
     const now = Date.now();
     const elapsed = now - this.lastRefill;
@@ -158,6 +164,9 @@ class BrainRegion {
   private static readonly COOLDOWN_403_MODEL_ACCESS_MS = 60_000; // 1min if 403 looks like model access
   private rateLimiter: TokenBucket;
   private static readonly RPM_LIMIT = 50; // 50 RPM per key (headroom below NVIDIA's 60 RPM free tier)
+  
+  public activeRequests: number = 0;
+  public reservedRequests: number = 0;
 
   constructor(name: BrainRegionName, keys: string[]) {
     this.name = name;
@@ -177,6 +186,20 @@ class BrainRegion {
 
   get keyCount(): number { return this.clients.length; }
 
+  get availableCapacity(): boolean {
+    const now = Date.now();
+    for (let i = 0; i < this.clients.length; i++) {
+      if ((this.cooldowns.get(i) ?? 0) <= now) {
+        if (this.rateLimiter.hasTokens()) return true;
+      }
+    }
+    return false;
+  }
+
+  get totalUtilization(): number {
+    return this.activeRequests + this.reservedRequests;
+  }
+
   /**
    * Execute an operation using this region's key(s).
    * If a key hits 403/429/5xx/timeout, rotates to the next key in this region.
@@ -184,16 +207,18 @@ class BrainRegion {
    * instead of burning a retry on a known-bad key.
    */
   async execute<T>(operation: (client: OpenAI, signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
-    let lastError: any = null;
-    const total = this.clients.length;
-    const now = Date.now();
+    this.activeRequests++;
+    try {
+      let lastError: any = null;
+      const total = this.clients.length;
+      const now = Date.now();
 
-    // Build the rotation order once, starting at the current index.
-    const order: number[] = [];
-    for (let i = 0; i < total; i++) {
-      order.push((this.currentIndex + i) % total);
-    }
-    this.currentIndex = (this.currentIndex + 1) % total;
+      // Build the rotation order once, starting at the current index.
+      const order: number[] = [];
+      for (let i = 0; i < total; i++) {
+        order.push((this.currentIndex + i) % total);
+      }
+      this.currentIndex = (this.currentIndex + 1) % total;
 
     for (let attempt = 0; attempt < total; attempt++) {
       const keyIdx = order[attempt];
@@ -248,6 +273,9 @@ class BrainRegion {
       throw err;
     }
     throw lastError;
+    } finally {
+      this.activeRequests = Math.max(0, this.activeRequests - 1);
+    }
   }
 
   private setCooldown(keyIdx: number, status: number, errorMessage?: string): void {
@@ -669,4 +697,38 @@ export async function* stream(
   if (isToolCall) {
     yield JSON.stringify({ tool_calls: [{ function: { name: toolCallName, arguments: toolCallBuffer } }] });
   }
+}
+
+// ── Capability-Aware Scheduler API ──────────────────────────────────────────
+
+/**
+ * Advisory check to see if a routing profile can be executed right now.
+ * Priority: 0 = interactive (highest), >0 = background (yields under load).
+ */
+export function canRunNvidia(profile: RoutingProfile, priority: number = 0): boolean {
+  const decision = resolveRoutingProfile(profile);
+  const region = getRegion(decision.region);
+  
+  if (priority > 0) {
+    // Background workloads yield to interactive work by leaving concurrency headroom
+    const maxBackgroundConcurrency = Math.max(1, region.keyCount * 2);
+    if (region.totalUtilization >= maxBackgroundConcurrency) {
+      return false;
+    }
+  }
+  
+  return region.availableCapacity;
+}
+
+/** Reserve capacity ahead of execution to prevent thundering herd in background queues */
+export function reserveNvidiaCapacity(profile: RoutingProfile): void {
+  const decision = resolveRoutingProfile(profile);
+  getRegion(decision.region).reservedRequests++;
+}
+
+/** Release ahead-of-time capacity reservations (MUST be called in finally) */
+export function releaseNvidiaCapacity(profile: RoutingProfile): void {
+  const decision = resolveRoutingProfile(profile);
+  const region = getRegion(decision.region);
+  region.reservedRequests = Math.max(0, region.reservedRequests - 1);
 }

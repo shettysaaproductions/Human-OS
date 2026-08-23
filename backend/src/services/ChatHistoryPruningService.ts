@@ -9,7 +9,7 @@ const BATCH_SIZE = 100;
 // -----------------------------------------------------------------------------
 // EMOTION CLASSIFIER
 // Returns the dominant emotion label from the content.
-// Pure keyword heuristics — zero API calls, zero egress impact.
+// Pure keyword heuristics â€” zero API calls, zero egress impact.
 // -----------------------------------------------------------------------------
 const EMOTION_MAP: { emotion: string; keywords: string[] }[] = [
   { emotion: 'grief',     keywords: ['died', 'death', 'funeral', 'passed away', 'lost him', 'lost her', 'missing you', 'miss them', 'loss'] },
@@ -35,28 +35,28 @@ function classifyEmotion(text: string): string {
 
 // -----------------------------------------------------------------------------
 // IMPORTANCE SCORER
-// Returns a score 0.0–1.0.  Pure local heuristics — no external calls.
+// Returns a score 0.0â€“1.0.  Pure local heuristics â€” no external calls.
 //
 // Scoring philosophy:
-//   • High-emotion topics are inherently important (grief, crisis, anxiety)
-//   • Life events (health, family, career, money, goals) matter more than chit-chat
-//   • Longer messages contain more information ? slight length boost
-//   • Short filler messages ("ok", "haan", "thanks") ? low importance
+//   â€¢ High-emotion topics are inherently important (grief, crisis, anxiety)
+//   â€¢ Life events (health, family, career, money, goals) matter more than chit-chat
+//   â€¢ Longer messages contain more information ? slight length boost
+//   â€¢ Short filler messages ("ok", "haan", "thanks") ? low importance
 // -----------------------------------------------------------------------------
 const IMPORTANCE_TOPICS = [
-  // Critical / life events — weight 1.0
+  // Critical / life events â€” weight 1.0
   { weight: 1.0, keywords: ['suicidal', 'want to die', 'died', 'death', 'cancer', 'diagnosed', 'surgery', 'hospital', 'admitted', 'accident', 'abuse', 'assault'] },
-  // High-importance personal events — weight 0.85
+  // High-importance personal events â€” weight 0.85
   { weight: 0.85, keywords: ['breakup', 'divorce', 'fired', 'lost my job', 'got the job', 'promoted', 'pregnant', 'baby', 'marriage', 'engaged', 'heartbroken', 'grief', 'panic attack'] },
-  // Health & medical — weight 0.80
+  // Health & medical â€” weight 0.80
   { weight: 0.80, keywords: ['health', 'sick', 'fever', 'doctor', 'medicine', 'therapy', 'therapist', 'mental health', 'anxiety', 'depression', 'pain', 'blood pressure', 'diabetes'] },
-  // Relationships & family — weight 0.75
+  // Relationships & family â€” weight 0.75
   { weight: 0.75, keywords: ['wife', 'husband', 'mom', 'dad', 'mother', 'father', 'sister', 'brother', 'family', 'friend', 'relationship', 'argument', 'fight with'] },
-  // Career & money — weight 0.70
+  // Career & money â€” weight 0.70
   { weight: 0.70, keywords: ['salary', 'money', 'debt', 'loan', 'investment', 'career', 'exam', 'interview', 'college', 'university', 'marks', 'result', 'business'] },
-  // Goals & personal growth — weight 0.65
+  // Goals & personal growth â€” weight 0.65
   { weight: 0.65, keywords: ['goal', 'habit', 'workout', 'gym', 'meditation', 'learning', 'reading', 'project', 'startup', 'plan', 'schedule', 'routine'] },
-  // Emotions expressed — weight 0.60
+  // Emotions expressed â€” weight 0.60
   { weight: 0.60, keywords: ['feel', 'feeling', 'emotion', 'mood', 'stressed', 'excited', 'worried', 'scared', 'confused', 'hurt', 'angry', 'happy', 'sad'] },
 ];
 
@@ -73,7 +73,7 @@ function scoreImportance(content: string, emotion: string): number {
 
   let score = 0.3; // baseline for any non-filler message
 
-  // Topic matching — take the highest matching weight
+  // Topic matching â€” take the highest matching weight
   for (const { weight, keywords } of IMPORTANCE_TOPICS) {
     if (keywords.some(kw => lower.includes(kw))) {
       score = Math.max(score, weight);
@@ -87,7 +87,7 @@ function scoreImportance(content: string, emotion: string): number {
   };
   score += (emotionBonus[emotion] || 0);
 
-  // Length bonus — longer messages carry more information
+  // Length bonus â€” longer messages carry more information
   if (content.length > 200) score += 0.08;
   if (content.length > 100) score += 0.04;
 
@@ -165,7 +165,7 @@ export const chatHistoryPruningService = {
       // Only archive user messages that carry meaningful content
       if (row.role !== 'user' || !shouldExtractMemory(row.content)) continue;
 
-      // Include Nova's response as context — helps understand the full exchange
+      // Include Nova's response as context â€” helps understand the full exchange
       const next = toDelete[i + 1];
       const novaContext = (next && next.role === 'assistant' && next.content.length > 10)
         ? ` | Nova responded: ${next.content.substring(0, 200)}${next.content.length > 200 ? '...' : ''}`
@@ -206,67 +206,102 @@ export const chatHistoryPruningService = {
       logger.info('[Pruning] Memory importance distribution', { userId, highImportance, midImportance, lowImportance });
     }
 
+    // 1. Identify rows to compact
     const deleteIds = toDelete.map(r => r.id);
-    let totalDeleted = 0;
+    let totalCompacted = 0;
 
+    // 2. Mark them as compaction_pending
+    for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
+      const batch = deleteIds.slice(i, i + BATCH_SIZE);
+      await supabaseAdmin
+        .from('chat_history')
+        .update({ compaction_status: 'compaction_pending' })
+        .in('id', batch);
+    }
+
+    // 3. Perform compaction (extracting memories)
+    if (memoriesToInsert.length > 0) {
+      memoriesToInsert.sort((a, b) => b.importance - a.importance);
+      const { error: memError } = await supabaseAdmin
+        .from('short_term_memories')
+        .insert(memoriesToInsert);
+      if (memError) logger.error('[Pruning] Failed to insert memories', { userId, error: memError.message });
+    }
+
+    // 4. Mark as deletion_eligible (compacted)
+    const now = new Date().toISOString();
     for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
       const batch = deleteIds.slice(i, i + BATCH_SIZE);
       const { error: delError } = await supabaseAdmin
         .from('chat_history')
-        .delete()
+        .update({ 
+          compaction_status: 'deletion_eligible',
+          compacted_at: now
+        })
         .in('id', batch);
       if (delError) {
-        logger.error('[Pruning] Batch delete failed', { userId, batch: i, error: delError.message });
+        logger.error('[Pruning] Batch compaction update failed', { userId, batch: i, error: delError.message });
       } else {
-        totalDeleted += batch.length;
+        totalCompacted += batch.length;
       }
+    }
+    
+    // 5. Hard delete deletion_eligible rows to finish lifecycle
+    for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
+      const batch = deleteIds.slice(i, i + BATCH_SIZE);
+      await supabaseAdmin
+        .from('chat_history')
+        .delete()
+        .in('id', batch)
+        .eq('compaction_status', 'deletion_eligible');
     }
 
     const result: PruneResult = {
       userId, skipped: false,
       charsBefore: totalChars, charsAfter: runningTotal,
-      rowsDeleted: totalDeleted, memoriesExtracted,
+      rowsDeleted: totalCompacted, memoriesExtracted,
     };
-    logger.info('[Pruning] Completed for user', result);
+    logger.info('[Pruning] Completed compaction for user', result);
     return result;
   },
 
-  async runAll(): Promise<void> {
-    logger.info('[Pruning] Starting nightly run for all users');
+  async processCompaction(_payload?: any): Promise<void> {
+    logger.info('[Pruning] Starting compaction sweep');
     const { data: users, error } = await supabaseAdmin
       .from('chat_history')
       .select('user_id')
+      .eq('compaction_status', 'raw')
       .order('user_id');
 
     if (error || !users) {
-      logger.error('[Pruning] Failed to get users list', { error: error?.message });
+      logger.error('[Pruning] Failed to get users list for compaction', { error: error?.message });
       return;
     }
 
     const uniqueUserIds = [...new Set(users.map(u => u.user_id))];
-    logger.info(`[Pruning] Processing ${uniqueUserIds.length} users`);
+    logger.info(`[Pruning] Processing ${uniqueUserIds.length} users for compaction`);
 
-    let totalDeleted = 0;
+    let totalCompacted = 0;
     let totalMemories = 0;
 
     for (const userId of uniqueUserIds) {
       try {
         const result = await this.pruneUser(userId);
         if (!result.skipped) {
-          totalDeleted += result.rowsDeleted;
+          totalCompacted += result.rowsDeleted;
           totalMemories += result.memoriesExtracted;
         }
       } catch (err) {
-        logger.error('[Pruning] Unexpected error for user', {
+        logger.error('[Pruning] Unexpected error during compaction for user', {
           userId,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
 
-    logger.info('[Pruning] Nightly run complete', {
+    logger.info('[Pruning] Compaction sweep complete', {
       usersProcessed: uniqueUserIds.length,
-      totalRowsDeleted: totalDeleted,
+      totalRowsCompacted: totalCompacted,
       totalMemoriesExtracted: totalMemories,
     });
   },

@@ -204,7 +204,7 @@ async function main(): Promise<void> {
         lastNightlyMaintenanceDate = today;
         try {
           logger.info('Scheduler: Triggering nightly chat history pruning and autonomous self-improvement...');
-          await chatHistoryPruningService.runAll();
+          await chatHistoryPruningService.processCompaction();
           await selfImprovementService.runReview();
 
           // Weekly memory decay — free-tier hygiene: never let unimportant long-term

@@ -1,4 +1,4 @@
-import { SituationalAwareness } from '../SituationalAwareness';
+﻿import { SituationalAwareness } from '../SituationalAwareness';
 
 /**
  * Regression tests for the timezone handling in SituationalAwareness.
@@ -7,7 +7,7 @@ import { SituationalAwareness } from '../SituationalAwareness';
  * (e.g. `new Date(Date.now() + tzOffset * 3600 * 1000)`), then reads the
  * shifted clock with `getUTCHours()` / `getUTC*`. The situational-awareness
  * methods receive that SAME shifted `nowLocal`, so they must ALSO read it via
- * the UTC getters — otherwise they fall back to server-local time and
+ * the UTC getters â€” otherwise they fall back to server-local time and
  * completely negate the timezone offset.
  *
  * The assertion strategy: these methods must agree with `nowLocal.getUTCHours()`,
@@ -32,7 +32,7 @@ function makeNow(hourUTCs: number): { base: Date; userLocal: Date } {
 describe('SituationalAwareness timezone handling', () => {
   test('getTimeOfDay reflects the user-local (UTC read) hour, not server hour', () => {
     // base is 10:00 UTC... but the SHIFTED nowLocal for this sample is
-    // whatever its getUTCHours() yields — compute canonical expectation.
+    // whatever its getUTCHours() yields â€” compute canonical expectation.
     const { userLocal } = makeNow(10);
     const h = userLocal.getUTCHours();
     const expected =
@@ -48,7 +48,7 @@ describe('SituationalAwareness timezone handling', () => {
   });
 
   test('SLEEP WINDOW scolding uses the user-local hour', () => {
-    // base 20:00 UTC, shifted +5.5h → user local 01:30 → inside 1–4 AM window.
+    // base 20:00 UTC, shifted +5.5h â†’ user local 01:30 â†’ inside 1â€“4 AM window.
     const { userLocal } = makeNow(20);
     expect(userLocal.getUTCHours()).toBeGreaterThanOrEqual(1);
     expect(userLocal.getUTCHours()).toBeLessThanOrEqual(4);
@@ -63,7 +63,7 @@ describe('SituationalAwareness timezone handling', () => {
   });
 
   test('greeting strategy is chosen from the user-local hour', () => {
-    // base 06:00 UTC, shifted +5.5h → user local 11:30 → "Morning" bucket (5–12).
+    // base 06:00 UTC, shifted +5.5h â†’ user local 11:30 â†’ "Morning" bucket (5â€“12).
     const { userLocal } = makeNow(6);
     const h = userLocal.getUTCHours();
     expect(h).toBeGreaterThanOrEqual(5);
@@ -75,7 +75,7 @@ describe('SituationalAwareness timezone handling', () => {
       latestEmotion: null, recentEpisodes: [], latestReflection: null,
       isWeekend: false,
     });
-    // 180 min gap + morning → the morning greeting branch (after the <120 branch).
+    // 180 min gap + morning â†’ the morning greeting branch (after the <120 branch).
     expect(brief).toContain('good morning');
   });
 });

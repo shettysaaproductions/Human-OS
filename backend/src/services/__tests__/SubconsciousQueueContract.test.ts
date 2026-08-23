@@ -41,7 +41,7 @@ describe('Subconscious Queue Contract & Fast-Fail Validation', () => {
     jest.clearAllMocks();
   });
 
-  describe('Requirement A: Valid subconscious payload → successful processing', () => {
+  describe('Requirement A: Valid subconscious payload â†’ successful processing', () => {
     it('should validate and successfully process a valid subconscious payload and record idempotency', async () => {
       const validPayload = {
         userId: 'user-456',
@@ -99,7 +99,7 @@ describe('Subconscious Queue Contract & Fast-Fail Validation', () => {
     });
   });
 
-  describe('Requirement B: Missing messageId or malformed payload → rejected with SchemaValidationError', () => {
+  describe('Requirement B: Missing messageId or malformed payload â†’ rejected with SchemaValidationError', () => {
     it('should reject payload missing messageId without invoking LLM', async () => {
       const malformedPayload = {
         userId: 'user-456',
@@ -164,7 +164,7 @@ describe('Subconscious Queue Contract & Fast-Fail Validation', () => {
   describe('Requirement C: Producer always includes messageId', () => {
     it('processInteraction should enqueue subconscious extraction with valid messageId', async () => {
       const addSpy = jest.spyOn(subconsciousQueue, 'add').mockResolvedValue(null);
-      (complete as jest.Mock).mockResolvedValueOnce('Nova response');
+      (complete as jest.Mock).mockResolvedValue('Nova response');
 
       const brain = new NovaBrainService();
       const brainContext = {
@@ -173,7 +173,7 @@ describe('Subconscious Queue Contract & Fast-Fail Validation', () => {
         userCountry: 'IN'
       };
 
-      await brain.processInteraction('user-1', 'Hey Nova', brainContext);
+      await brain.processInteraction('user-1', [{ client_message_id: 'persisted-uuid-001', message: 'Hey Nova' }], brainContext);
 
       // Wait a tick for dynamic import and queue.add
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -210,7 +210,7 @@ describe('Subconscious Queue Contract & Fast-Fail Validation', () => {
         userCountry: 'US'
       };
 
-      const generator = brain.streamInteraction('user-stream', 'Streaming test message', brainContext);
+      const generator = brain.streamInteraction('user-stream', [{ client_message_id: 'stream-msg-uuid-999', message: 'Streaming test message' }], brainContext);
       for await (const _chunk of generator) {
         // consume stream
       }
@@ -348,3 +348,4 @@ describe('Subconscious Queue Contract & Fast-Fail Validation', () => {
     });
   });
 });
+

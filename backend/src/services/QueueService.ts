@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
+import { canRunNvidia, reserveNvidiaCapacity, releaseNvidiaCapacity, RoutingProfile } from '../lib/nvidia';
 
 export interface JobOptions {
   attempts?: number;
@@ -28,7 +29,7 @@ export class QueueService {
   private maxConcurrency: number = 5;
   private maxAttempts = 3;
 
-  constructor(queueName: string, private jobTypes?: string[]) {
+  constructor(queueName: string, private jobTypes?: string[], private defaultProfile: RoutingProfile = 'PROACTIVE') {
     this.queueName = queueName;
   }
 
@@ -99,6 +100,12 @@ export class QueueService {
           return;
         }
 
+        // Advisory yield: check NVIDIA capability. Priority 1 means background work.
+        if (!canRunNvidia(this.defaultProfile, 1)) {
+          setTimeout(poll, 5000); // 5s backoff if constrained
+          return;
+        }
+
         const start = Date.now();
         const { data: jobs, error } = await supabaseAdmin.rpc('claim_next_background_job', {
           p_job_types: this.jobTypes && this.jobTypes.length > 0 ? this.jobTypes : null
@@ -133,6 +140,8 @@ export class QueueService {
 
   private async processJob(job: Job) {
     if (!this.processor) return;
+    
+    reserveNvidiaCapacity(this.defaultProfile);
     try {
       await this.processor(job);
       await supabaseAdmin
@@ -149,6 +158,8 @@ export class QueueService {
                           errorMessage.includes('Schema validation failed') ||
                           errorMessage.includes('Invalid payload for');
       await this.handleJobFailure(job, errorMessage, isPermanent);
+    } finally {
+      releaseNvidiaCapacity(this.defaultProfile);
     }
   }
 
@@ -194,6 +205,10 @@ export const MEMORY_JOB_TYPES = [
   'extract_all_memories', 'extract_semantic', 'extract_working_memory', 'extract_episodic',
   'extract_kg', 'extract_emotional', 'extract_milestone', 'extract_short_term'
 ] as const;
-export const memoryQueue = new QueueService('memoryQueue', [...MEMORY_JOB_TYPES]);
-export const reflectionQueue = new QueueService('reflectionQueue', ['daily_reflection']);
-export const subconsciousQueue = new QueueService('subconsciousQueue', ['extract_subconscious_actions']);
+export const memoryQueue = new QueueService('memoryQueue', [...MEMORY_JOB_TYPES], 'MEMORY');
+export const reflectionQueue = new QueueService('reflectionQueue', ['daily_reflection'], 'USER_DEEP');
+export const subconsciousQueue = new QueueService('subconsciousQueue', ['extract_subconscious_actions'], 'SUBCONSCIOUS');
+export const maintenanceQueue = new QueueService('maintenanceQueue', [
+  'compact_chat_history', 'compact_episodes', 'reconcile_facts', 
+  'cleanup_completed_jobs', 'cleanup_failed_jobs', 'compress_long_term_memory', 'health_snapshot'
+], 'PROACTIVE');

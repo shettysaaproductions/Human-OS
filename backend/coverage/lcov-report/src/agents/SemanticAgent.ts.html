@@ -127,7 +127,15 @@
 <a name='L62'></a><a href='#L62'>62</a>
 <a name='L63'></a><a href='#L63'>63</a>
 <a name='L64'></a><a href='#L64'>64</a>
-<a name='L65'></a><a href='#L65'>65</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -142,6 +150,14 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -193,7 +209,7 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js"><span class="cstat-no" title="statement not covered" >import { BaseAgent } from './BaseAgent';</span>
 import { Job } from '../services/QueueService';
-<span class="cstat-no" title="statement not covered" >import { chatCompletionMemory, EXTRACTION_MODEL } from '../lib/nvidia';</span>
+<span class="cstat-no" title="statement not covered" >import { complete } from '../lib/nvidia';</span>
 <span class="cstat-no" title="statement not covered" >import { memoryRepository } from '../services/memoryRepository';</span>
 import { ExtractedMemory } from '../types/memory';
 &nbsp;
@@ -205,7 +221,7 @@ import { ExtractedMemory } from '../types/memory';
   protected <span class="fstat-no" title="function not covered" >async </span>execute(job: Job): Promise&lt;number&gt; {
     const { messageId, userId, message } = <span class="cstat-no" title="statement not covered" >job.payload;</span>
 &nbsp;
-    const response = <span class="cstat-no" title="statement not covered" >await chatCompletionMemory([</span>
+    const response = <span class="cstat-no" title="statement not covered" >await complete('MEMORY', [</span>
       {
         role: 'system',
         content: `You are the Semantic Memory Agent for HumanOS.
@@ -213,14 +229,23 @@ Analyze the user's message and extract ONLY long-term facts, preferences, goals,
 CRITICAL: If the user mentions any important time, date, schedule, or appointment that is worth remembering for a long period (e.g., "my exam is on 15th", "I always wake up at 6 AM", "doctor appointment next Tuesday"), you MUST extract it as an 'important_dates' memory immediately.
 Do NOT extract temporary states or insignificant daily chatter.
 &nbsp;
+ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
+- Each distinct fact MUST be a SEPARATE object in the "semantic_memories" array.
+- NEVER combine two or more distinct facts into a single memory object.
+- If the user says "My wife's name is Sakshi and I love her cooking", that is TWO separate facts:
+  → Object 1: key="wife_name", value="Sakshi"
+  → Object 2: key="likes_wifes_cooking", value="User loves his wife's cooking"
+- Each memory object must contain EXACTLY ONE atomic fact — no compound statements.
+- When in doubt, split it into more objects rather than fewer.
+&nbsp;
 Return ONLY a valid JSON object with the exact key:
 {
   "semantic_memories": [
     {
       "shouldPersist": true,
       "type": "family" | "personal" | "work" | "goals" | "preferences" | "health" | "important_dates",
-      "key": "snake_case_identifier",
-      "value": "string value",
+      "key": "snake_case_identifier_unique_per_fact",
+      "value": "single atomic fact only",
       "importance": 0-100,
       "confidence": 0.0-1.0,
       "emotional_weight": -10 to 10
@@ -234,7 +259,6 @@ If there are no semantic facts to extract, return {"semantic_memories": []}.`
         content: message
       }
     ], {
-      model: EXTRACTION_MODEL,
       response_format: { type: 'json_object' },
       temperature: 0.1 
     });
@@ -262,7 +286,7 @@ export const <span class="cstat-no" title="statement not covered" >semanticAgent
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-15T22:07:14.804Z
+                at 2026-08-23T08:17:08.166Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

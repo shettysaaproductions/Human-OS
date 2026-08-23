@@ -953,3 +953,10 @@ export class NovaFollowupService {
 }
 
 export const novaFollowupService = new NovaFollowupService();
+
+export function _clearFollowupCachesForTest() {
+  dedupCache.clear();
+  ignoredFollowupSent.clear();
+  ignoreEscalationCount.clear();
+  lastProactiveSentAt.clear();
+}

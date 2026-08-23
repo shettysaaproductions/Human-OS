@@ -42,6 +42,10 @@ export class MemoryRepository {
               emotional_weight: memory.emotional_weight ?? existing.emotional_weight ?? 0,
               source_message: sourceMessage,
               updated_at: new Date().toISOString(),
+              ...(memory.is_protected ? {
+                protection_source: memory.protection_source || 'system',
+                protected_at: new Date().toISOString()
+              } : {})
             })
             .eq('id', existing.id)
         );
@@ -61,6 +65,10 @@ export class MemoryRepository {
               emotional_weight: memory.emotional_weight ?? 0,
               source_message: sourceMessage,
               last_accessed_at: new Date().toISOString(),
+              ...(memory.is_protected ? {
+                protection_source: memory.protection_source || 'system',
+                protected_at: new Date().toISOString()
+              } : {})
             })
         );
 
@@ -70,6 +78,53 @@ export class MemoryRepository {
       logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), memory });
       throw err;
     }
+  }
+
+  /**
+   * Explicitly protects a memory from pruning or overwriting
+   */
+  async protectMemory(userId: string, memoryId: string, source: string): Promise<void> {
+    await qt.track('protect_memory', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .update({
+          protection_source: source,
+          protected_at: new Date().toISOString()
+        })
+        .eq('id', memoryId)
+        .eq('user_id', userId)
+    );
+    logger.info('Memory protected', { memoryId, userId, source });
+  }
+
+  /**
+   * Default forget semantics: Archive and redact from active retrieval,
+   * but keep the row for potential system audits or compaction reconciliation.
+   */
+  async forgetMemory(userId: string, memoryId: string): Promise<void> {
+    await qt.track('forget_memory', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .update({ is_archived: true })
+        .eq('id', memoryId)
+        .eq('user_id', userId)
+    );
+    logger.info('Memory forgotten (archived)', { memoryId, userId });
+  }
+
+  /**
+   * Explicit hard delete. Use ONLY when explicitly requested by user for GDPR
+   * or complete purging.
+   */
+  async forgetMemoryCompletely(userId: string, memoryId: string): Promise<void> {
+    await qt.track('forget_memory_completely', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .delete()
+        .eq('id', memoryId)
+        .eq('user_id', userId)
+    );
+    logger.info('Memory forgotten completely (hard delete)', { memoryId, userId });
   }
 
   /**
