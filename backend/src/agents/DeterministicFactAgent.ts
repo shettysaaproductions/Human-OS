@@ -26,22 +26,26 @@ export class DeterministicFactAgent {
     for (const fact of facts) {
       if (!fact.key || !fact.value) continue;
 
+      const isProtected = fact.is_protected === true || fact.factClass === 'PROTECTED_FACT';
+
       try {
         await memoryRepository.upsertMemory(userId, {
           type: getMemoryTypeForKey(fact.key),
           key: fact.key,
           value: fact.value,
-          importance: 80,
+          importance: isProtected ? 90 : 75,
           confidence: 0.95,
           shouldPersist: true,
-          is_protected: true,
-          protection_source: 'TurnAnalyzer'
+          is_protected: isProtected,
+          protection_source: isProtected ? 'user_explicit' : undefined
         }, sourceMessage || 'Direct Fact Extraction');
 
         logger.info('[DeterministicFactAgent] Successfully persisted deterministic fact', {
           userId,
           key: fact.key,
-          value: fact.value
+          value: fact.value,
+          isProtected,
+          factClass: fact.factClass || (isProtected ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT')
         });
       } catch (err) {
         logger.error('[DeterministicFactAgent] Failed to upsert fact', {

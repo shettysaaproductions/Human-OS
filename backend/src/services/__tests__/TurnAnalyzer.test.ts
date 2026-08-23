@@ -14,7 +14,7 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
   });
 
   describe('1. Mandatory 3-Message Turn Regression', () => {
-    it('should detect all 3 facts and semantic units in order', () => {
+    it('should detect all 3 facts and semantic units in order as HIGH_CONFIDENCE_DURABLE_FACT', () => {
       const messages = [
         { message: "My dad's name is Rajesh.", client_message_id: 'msg-1' },
         { message: "My mom's name is Neeta.", client_message_id: 'msg-2' },
@@ -31,18 +31,24 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(result.units[0].factValue).toBe('Rajesh');
       expect(result.units[0].type).toBe('fact');
       expect(result.units[0].order).toBe(1);
+      expect(result.units[0].isProtected).toBe(false);
+      expect(result.units[0].factClass).toBe('HIGH_CONFIDENCE_DURABLE_FACT');
 
       // Verify Unit 2
       expect(result.units[1].factKey).toBe('mother_name');
       expect(result.units[1].factValue).toBe('Neeta');
       expect(result.units[1].type).toBe('fact');
       expect(result.units[1].order).toBe(2);
+      expect(result.units[1].isProtected).toBe(false);
+      expect(result.units[1].factClass).toBe('HIGH_CONFIDENCE_DURABLE_FACT');
 
       // Verify Unit 3
       expect(result.units[2].factKey).toBe('company_name');
       expect(result.units[2].factValue).toBe('Acme');
       expect(result.units[2].type).toBe('fact');
       expect(result.units[2].order).toBe(3);
+      expect(result.units[2].isProtected).toBe(false);
+      expect(result.units[2].factClass).toBe('HIGH_CONFIDENCE_DURABLE_FACT');
     });
 
     it('should handle correction flow: "My mother is Neeta" -> "Actually her name is Rajeshree"', () => {
@@ -51,6 +57,7 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(turn1.units[0].factKey).toBe('mother_name');
       expect(turn1.units[0].factValue).toBe('Neeta');
       expect(turn1.units[0].type).toBe('fact');
+      expect(turn1.units[0].isProtected).toBe(false);
 
       // Turn 2 Correction
       const turn2 = TurnAnalyzer.analyze([{ message: "Actually her name is Rajeshree." }]);
@@ -59,6 +66,7 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(turn2.units[0].factKey).toBe('mother_name');
       expect(turn2.units[0].factValue).toBe('Rajeshree');
       expect(turn2.units[0].responseRequired).toBe(true);
+      expect(turn2.units[0].isProtected).toBe(false);
     });
 
     it('should extract 3 distinct facts from a single composite sentence', () => {
@@ -76,6 +84,19 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(values).toContain('Rajeshree');
       expect(values).toContain('Mumbai');
       expect(values).toContain('Acme');
+    });
+
+    it('should distinguish explicit "remember this" (PROTECTED_FACT) vs transient plans (TRANSIENT_FACT)', () => {
+      // Explicit protected fact
+      const protectedTurn = TurnAnalyzer.analyze([{ message: "Remember this: my passport number is A1234567, do not forget." }]);
+      expect(protectedTurn.units[0].isProtected).toBe(true);
+      expect(protectedTurn.units[0].factClass).toBe('PROTECTED_FACT');
+
+      // Transient fact / action
+      const transientTurn = TurnAnalyzer.analyze([{ message: "Tomorrow I am planning to visit the dentist." }]);
+      expect(transientTurn.units[0].type).toBe('action');
+      expect(transientTurn.units[0].isProtected).toBe(false);
+      expect(transientTurn.units[0].factClass).toBe('TRANSIENT_FACT');
     });
   });
 
@@ -150,14 +171,14 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
   });
 
   describe('4. Deterministic Fact Persistence Worker', () => {
-    it('should durably upsert facts with high confidence and protection', async () => {
+    it('should durably upsert facts with normal decay eligibility when not explicitly protected', async () => {
       const job = {
         payload: {
           userId: 'user-123',
           facts: [
-            { key: 'father_name', value: 'Rajesh' },
-            { key: 'company_name', value: 'Acme' },
-            { key: 'city', value: 'Mumbai' }
+            { key: 'father_name', value: 'Rajesh', is_protected: false, factClass: 'HIGH_CONFIDENCE_DURABLE_FACT' },
+            { key: 'company_name', value: 'Acme', is_protected: false, factClass: 'HIGH_CONFIDENCE_DURABLE_FACT' },
+            { key: 'city', value: 'Mumbai', is_protected: false, factClass: 'HIGH_CONFIDENCE_DURABLE_FACT' }
           ],
           sourceMessage: 'My dad is Rajesh and company is Acme in Mumbai'
         }
@@ -174,8 +195,9 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
           key: 'father_name',
           value: 'Rajesh',
           confidence: 0.95,
-          is_protected: true,
-          protection_source: 'TurnAnalyzer'
+          importance: 75,
+          is_protected: false,
+          protection_source: undefined
         }),
         job.payload.sourceMessage
       );
@@ -187,7 +209,8 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
           key: 'company_name',
           value: 'Acme',
           confidence: 0.95,
-          is_protected: true
+          importance: 75,
+          is_protected: false
         }),
         job.payload.sourceMessage
       );
@@ -199,7 +222,36 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
           key: 'city',
           value: 'Mumbai',
           confidence: 0.95,
-          is_protected: true
+          importance: 75,
+          is_protected: false
+        }),
+        job.payload.sourceMessage
+      );
+    });
+
+    it('should mark facts protected only when explicitly requested by user', async () => {
+      const job = {
+        payload: {
+          userId: 'user-123',
+          facts: [
+            { key: 'passport_number', value: 'A1234567', is_protected: true, factClass: 'PROTECTED_FACT' }
+          ],
+          sourceMessage: 'Remember this: my passport is A1234567'
+        }
+      };
+
+      await deterministicFactAgent.processJob(job);
+
+      expect(memoryRepository.upsertMemory).toHaveBeenCalledWith(
+        'user-123',
+        expect.objectContaining({
+          type: 'personal',
+          key: 'passport_number',
+          value: 'A1234567',
+          confidence: 0.95,
+          importance: 90,
+          is_protected: true,
+          protection_source: 'user_explicit'
         }),
         job.payload.sourceMessage
       );

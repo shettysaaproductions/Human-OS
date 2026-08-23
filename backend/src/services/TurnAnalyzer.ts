@@ -2,6 +2,7 @@ import { ChatMessageInput } from '../routes/chat';
 import crypto from 'crypto';
 
 export type SemanticUnitType = 'question' | 'fact' | 'emotion' | 'action' | 'correction' | 'casual';
+export type FactClassification = 'HIGH_CONFIDENCE_DURABLE_FACT' | 'PROTECTED_FACT' | 'TRANSIENT_FACT';
 
 export interface SemanticUnit {
   unitId: string;
@@ -16,6 +17,8 @@ export interface SemanticUnit {
   actionCandidate: boolean;
   factKey?: string;
   factValue?: string;
+  isProtected?: boolean;
+  factClass?: FactClassification;
 }
 
 export interface TurnAnalysisResult {
@@ -31,6 +34,8 @@ export interface ExtractedFact {
   key: string;
   value: string;
   text: string;
+  isProtected: boolean;
+  factClass: FactClassification;
 }
 
 export class TurnAnalyzer {
@@ -51,6 +56,7 @@ export class TurnAnalyzer {
         order++;
         const lower = clause.toLowerCase();
         const extractedFacts = this.extractFacts(clause);
+        const isExplicitRemember = /\b(remember this|don't forget|do not forget|yaad rakhna|bhoolna mat|hamesha yaad rakh)\b/i.test(lower);
 
         // 1. Check for explicit correction
         const isCorrection = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
@@ -69,7 +75,9 @@ export class TurnAnalyzer {
             memoryCandidate: true,
             actionCandidate: false,
             factKey: firstFact?.key || (lower.includes('her name') ? 'mother_name' : (lower.includes('his name') ? 'father_name' : undefined)),
-            factValue: firstFact?.value || this.extractNameFromCorrection(lower)
+            factValue: firstFact?.value || this.extractNameFromCorrection(lower),
+            isProtected: isExplicitRemember,
+            factClass: isExplicitRemember ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT'
           });
         }
         // 2. Check for extracted facts
@@ -82,13 +90,15 @@ export class TurnAnalyzer {
               order: i === 0 ? order : ++order,
               type: 'fact',
               text: fact.text,
-              importance: 8,
+              importance: fact.isProtected ? 9 : 8,
               responseRequired: false,
               acknowledgementPreferred: true,
               memoryCandidate: true,
               actionCandidate: false,
               factKey: fact.key,
-              factValue: fact.value
+              factValue: fact.value,
+              isProtected: fact.isProtected,
+              factClass: fact.factClass
             });
           }
         }
@@ -104,7 +114,8 @@ export class TurnAnalyzer {
             responseRequired: true,
             acknowledgementPreferred: true,
             memoryCandidate: false,
-            actionCandidate: false
+            actionCandidate: false,
+            isProtected: false
           });
         }
         // 4. Check for emotions
@@ -119,7 +130,8 @@ export class TurnAnalyzer {
             responseRequired: false,
             acknowledgementPreferred: true,
             memoryCandidate: false,
-            actionCandidate: false
+            actionCandidate: false,
+            isProtected: false
           });
         }
         // 5. Actions / Plans
@@ -134,10 +146,12 @@ export class TurnAnalyzer {
             responseRequired: false,
             acknowledgementPreferred: true,
             memoryCandidate: true,
-            actionCandidate: true
+            actionCandidate: true,
+            factClass: 'TRANSIENT_FACT',
+            isProtected: false
           });
         }
-        // 6. Casual
+        // 6. Casual / Explicit Remember without predefined key
         else {
           units.push({
             unitId: crypto.randomUUID(),
@@ -145,11 +159,13 @@ export class TurnAnalyzer {
             order,
             type: 'casual',
             text: clause,
-            importance: 1,
-            responseRequired: false,
-            acknowledgementPreferred: false,
-            memoryCandidate: false,
-            actionCandidate: false
+            importance: isExplicitRemember ? 8 : 1,
+            responseRequired: isExplicitRemember,
+            acknowledgementPreferred: isExplicitRemember,
+            memoryCandidate: isExplicitRemember,
+            actionCandidate: false,
+            isProtected: isExplicitRemember,
+            factClass: isExplicitRemember ? 'PROTECTED_FACT' : undefined
           });
         }
       }
@@ -187,64 +203,77 @@ export class TurnAnalyzer {
   public static extractFacts(text: string): ExtractedFact[] {
     const lower = text.toLowerCase();
     const facts: ExtractedFact[] = [];
+    const isExplicitRemember = /\b(remember this|don't forget|do not forget|yaad rakhna|bhoolna mat|hamesha yaad rakh)\b/i.test(lower);
+    const isTransient = /\b(today|aaj|right now|currently visiting|for now|temporary|filhal|abhi ke liye)\b/i.test(lower);
+    const factClass: FactClassification = isExplicitRemember
+      ? 'PROTECTED_FACT'
+      : isTransient
+      ? 'TRANSIENT_FACT'
+      : 'HIGH_CONFIDENCE_DURABLE_FACT';
 
     // Mother name
     let m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
     if (m) {
-      facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text });
+      facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     } else {
       m = lower.match(/\b(?:my|meri)\s+(?:mummy|mom|mother|maa)\s+(?:is|hai)\s+([a-zA-Z]+)\b/i);
-      if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text });
+      if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
     // Father name
     m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
     if (m) {
-      facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text });
+      facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     } else {
       m = lower.match(/\b(?:my|mere)\s+(?:papa|dad|father|pita)\s+(?:is|hai)\s+([a-zA-Z]+)\b/i);
-      if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text });
+      if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
     // Wife name
     m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
-    if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text });
+    if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Husband name
     m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
-    if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text });
+    if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Sister name
     m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
-    if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text });
+    if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Brother name
     m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z]+)\b/i);
-    if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text });
+    if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Company / Job
     m = lower.match(/\b(?:started|founded|created|built)\s+(?:a\s+)?(?:company|startup|agency|firm|business)(?:\s+(?:called|named))?\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
     if (m) {
-      facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text });
+      facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     } else {
       m = lower.match(/\b(?:meri|mere|my)\s+(?:company|office|business|startup|agency)(?:'s)?\s+(?:ka\s+naam|is|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
       if (m) {
-        facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text });
+        facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       } else {
         m = lower.match(/\b(?:kaam karta|karti hoon|work at|working at|job at|employed at)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
-        if (m) facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text });
+        if (m) facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       }
+    }
+
+    // Passports / Identifiers
+    m = lower.match(/\b(?:my\s+)?(passport|license|email|phone|aadhaar|pan)\s*(?:number|no|id)?\s*(?:is|hai|=|:)?\s*([a-zA-Z0-9]+)\b/i);
+    if (m && !['a', 'the', 'is'].includes(m[2].toLowerCase())) {
+      facts.push({ key: `${m[1].toLowerCase()}_number`, value: m[2].trim(), text, isProtected: isExplicitRemember, factClass });
     }
 
     // City / Location
     m = lower.match(/\b(?:rehta hoon|rehti hoon|live in|living in|i am from|from|stay in|staying in)\s+([a-zA-Z]+)\b/i);
     if (m && !['a', 'the', 'my', 'home', 'here'].includes(m[1].toLowerCase())) {
-      facts.push({ key: 'city', value: this.cleanValue(m[1]), text });
+      facts.push({ key: 'city', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
     // Name
     m = lower.match(/\b(?:mera naam|my name is)\s+([a-zA-Z]+)\b/i);
-    if (m) facts.push({ key: 'user_name', value: this.cleanValue(m[1]), text });
+    if (m) facts.push({ key: 'user_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     return facts;
   }

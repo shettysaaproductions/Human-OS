@@ -1086,13 +1086,22 @@ chatRouter.post(
       // Dispatch durable fact persistence immediately for deterministic facts & corrections
       const explicitFacts = turnAnalysis.units.filter(u => (u.type === 'fact' || u.type === 'correction') && u.factKey && u.factValue);
       if (explicitFacts.length > 0) {
-        const factMap = new Map<string, string>();
+        const factMap = new Map<string, { value: string, is_protected?: boolean, factClass?: string }>();
         for (const f of explicitFacts) {
           if (f.factKey && f.factValue) {
-            factMap.set(f.factKey, f.factValue);
+            factMap.set(f.factKey, {
+              value: f.factValue,
+              is_protected: f.isProtected || false,
+              factClass: f.factClass || 'HIGH_CONFIDENCE_DURABLE_FACT'
+            });
           }
         }
-        const payloadFacts = Array.from(factMap.entries()).map(([key, value]) => ({ key, value }));
+        const payloadFacts = Array.from(factMap.entries()).map(([key, data]) => ({
+          key,
+          value: data.value,
+          is_protected: data.is_protected,
+          factClass: data.factClass
+        }));
         try {
           await memoryQueue.add('extract_deterministic_fact', { userId, facts: payloadFacts, sourceMessage: effectiveMessage });
           logger.info('[Chat] Durable fact persistence intent queued', { userId, count: payloadFacts.length, facts: payloadFacts });

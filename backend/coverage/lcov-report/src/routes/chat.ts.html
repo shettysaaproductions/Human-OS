@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/712</span>
+                <span class='fraction'>0/716</span>
             </div>
         
             
@@ -2079,7 +2079,16 @@
 <a name='L2014'></a><a href='#L2014'>2014</a>
 <a name='L2015'></a><a href='#L2015'>2015</a>
 <a name='L2016'></a><a href='#L2016'>2016</a>
-<a name='L2017'></a><a href='#L2017'>2017</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L2017'></a><a href='#L2017'>2017</a>
+<a name='L2018'></a><a href='#L2018'>2018</a>
+<a name='L2019'></a><a href='#L2019'>2019</a>
+<a name='L2020'></a><a href='#L2020'>2020</a>
+<a name='L2021'></a><a href='#L2021'>2021</a>
+<a name='L2022'></a><a href='#L2022'>2022</a>
+<a name='L2023'></a><a href='#L2023'>2023</a>
+<a name='L2024'></a><a href='#L2024'>2024</a>
+<a name='L2025'></a><a href='#L2025'>2025</a>
+<a name='L2026'></a><a href='#L2026'>2026</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -3173,7 +3182,16 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -5183,13 +5201,22 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       // Dispatch durable fact persistence immediately for deterministic facts &amp; corrections
       const explicitFacts = <span class="cstat-no" title="statement not covered" >turnAnalysis.units.filter(<span class="fstat-no" title="function not covered" >u </span>=&gt; <span class="cstat-no" title="statement not covered" >(u.type === 'fact' || u.type === 'correction') &amp;&amp; u.factKey &amp;&amp; u.factValue)</span>;</span>
 <span class="cstat-no" title="statement not covered" >      if (explicitFacts.length &gt; 0) {</span>
-        const factMap = <span class="cstat-no" title="statement not covered" >new Map&lt;string, string&gt;();</span>
+        const factMap = <span class="cstat-no" title="statement not covered" >new Map&lt;string, { value: string, is_protected?: boolean, factClass?: string }&gt;();</span>
 <span class="cstat-no" title="statement not covered" >        for (const f of explicitFacts) {</span>
 <span class="cstat-no" title="statement not covered" >          if (f.factKey &amp;&amp; f.factValue) {</span>
-<span class="cstat-no" title="statement not covered" >            factMap.set(f.factKey, f.factValue);</span>
+<span class="cstat-no" title="statement not covered" >            factMap.set(f.factKey, {</span>
+              value: f.factValue,
+              is_protected: f.isProtected || false,
+              factClass: f.factClass || 'HIGH_CONFIDENCE_DURABLE_FACT'
+            });
           }
         }
-        const payloadFacts = <span class="cstat-no" title="statement not covered" >Array.from(factMap.entries()).map(<span class="fstat-no" title="function not covered" >([</span>key, value]) =&gt; (<span class="cstat-no" title="statement not covered" >{ key, value })</span>);</span>
+        const payloadFacts = <span class="cstat-no" title="statement not covered" >Array.from(factMap.entries()).map(<span class="fstat-no" title="function not covered" >([</span>key, data]) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
+          key,
+          value: data.value,
+          is_protected: data.is_protected,
+          factClass: data.factClass
+        }));
 <span class="cstat-no" title="statement not covered" >        try {</span>
 <span class="cstat-no" title="statement not covered" >          await memoryQueue.add('extract_deterministic_fact', { userId, facts: payloadFacts, sourceMessage: effectiveMessage });</span>
 <span class="cstat-no" title="statement not covered" >          logger.info('[Chat] Durable fact persistence intent queued', { userId, count: payloadFacts.length, facts: payloadFacts });</span>
@@ -6118,7 +6145,7 @@ HINGLISH RULES:
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T18:26:04.435Z
+                at 2026-08-23T18:35:45.242Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
