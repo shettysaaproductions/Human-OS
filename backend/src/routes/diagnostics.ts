@@ -6,6 +6,8 @@ import { qt } from '../lib/queryTracker';
 import { dbHealthService } from '../services/DatabaseHealthService';
 import { extractKeywords } from '../utils/nlp';
 import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
+import { maintenanceQueue } from '../services/QueueService';
+import { logger } from '../lib/logger';
 
 export const diagnosticsRouter: import('express').Router = Router();
 
@@ -227,8 +229,8 @@ diagnosticsRouter.post('/prune-history', async (req: Request, res: Response, nex
       res.status(200).json({ mode: 'single_user', result });
     } else {
       // Run for all users — fire and respond immediately so the HTTP call doesn't time out
-      chatHistoryPruningService.processCompaction().catch((err: any) => {
-        console.error('[Manual Prune] Error during processCompaction:', err);
+      maintenanceQueue.add('compact_chat_history', { trigger: 'diagnostic' }).catch((err: any) => {
+        logger.error('[Manual Prune] Error enqueueing compaction:', err);
       });
       res.status(202).json({
         mode: 'all_users',

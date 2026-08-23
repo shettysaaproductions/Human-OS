@@ -153,7 +153,10 @@ export const chatHistoryPruningService = {
     let memoriesExtracted = 0;
     const memoriesToInsert: Array<{
       user_id: string;
+      source_message_id: string;
       memory: string;
+      category: string;
+      logical_key: string;
       emotion: string;
       importance: number;
       confidence: number;
@@ -182,7 +185,10 @@ export const chatHistoryPruningService = {
 
       memoriesToInsert.push({
         user_id: userId,
+        source_message_id: row.id,
         memory: memoryText,
+        category: 'chat_archive',
+        logical_key: 'archive',
         emotion,
         importance,
         confidence: importance >= 0.7 ? 0.9 : 0.75, // high-importance ? higher confidence
@@ -196,8 +202,8 @@ export const chatHistoryPruningService = {
 
       const { error: memError } = await supabaseAdmin
         .from('short_term_memories')
-        .insert(memoriesToInsert);
-      if (memError) logger.error('[Pruning] Failed to insert memories', { userId, error: memError.message });
+        .upsert(memoriesToInsert, { onConflict: 'user_id, source_message_id, logical_key', ignoreDuplicates: true });
+      if (memError) throw memError; // If this fails, we do not transition to compacted!
 
       // Log the distribution so you can monitor quality in server logs
       const highImportance = memoriesToInsert.filter(m => m.importance >= 0.75).length;
@@ -210,48 +216,70 @@ export const chatHistoryPruningService = {
     const deleteIds = toDelete.map(r => r.id);
     let totalCompacted = 0;
 
-    // 2. Mark them as compaction_pending
+    // 2. Mark them as compaction_pending BEFORE extraction to claim them
     for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
       const batch = deleteIds.slice(i, i + BATCH_SIZE);
       await supabaseAdmin
         .from('chat_history')
         .update({ compaction_status: 'compaction_pending' })
-        .in('id', batch);
+        .in('id', batch)
+        .eq('compaction_status', 'raw');
     }
 
-    // 3. Perform compaction (extracting memories)
-    if (memoriesToInsert.length > 0) {
-      memoriesToInsert.sort((a, b) => b.importance - a.importance);
-      const { error: memError } = await supabaseAdmin
-        .from('short_term_memories')
-        .insert(memoriesToInsert);
-      if (memError) logger.error('[Pruning] Failed to insert memories', { userId, error: memError.message });
-    }
-
-    // 4. Mark as deletion_eligible (compacted)
+    // 3. Mark as compacted after successful persistence
     const now = new Date().toISOString();
     for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
       const batch = deleteIds.slice(i, i + BATCH_SIZE);
-      const { error: delError } = await supabaseAdmin
+      const { error: compError } = await supabaseAdmin
         .from('chat_history')
         .update({ 
-          compaction_status: 'deletion_eligible',
+          compaction_status: 'compacted',
           compacted_at: now
         })
-        .in('id', batch);
-      if (delError) {
-        logger.error('[Pruning] Batch compaction update failed', { userId, batch: i, error: delError.message });
-      } else {
-        totalCompacted += batch.length;
+        .in('id', batch)
+        .eq('compaction_status', 'compaction_pending');
+      
+      if (compError) {
+        logger.error('[Pruning] Batch compaction update failed', { userId, batch: i, error: compError.message });
+        throw compError;
       }
     }
     
-    // 5. Hard delete deletion_eligible rows to finish lifecycle
+    // 4. Mark as deletion_eligible
     for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
       const batch = deleteIds.slice(i, i + BATCH_SIZE);
       await supabaseAdmin
         .from('chat_history')
-        .delete()
+        .update({ compaction_status: 'deletion_eligible' })
+        .in('id', batch)
+        .eq('compaction_status', 'compacted');
+      totalCompacted += batch.length;
+    }
+    
+    // 5. Soft Delete & Archive (Transition to soft_deleted)
+    for (let i = 0; i < deleteIds.length; i += BATCH_SIZE) {
+      const batch = deleteIds.slice(i, i + BATCH_SIZE);
+      const batchRows = toDelete.slice(i, i + BATCH_SIZE);
+      
+      const archiveRows = batchRows.map(r => ({
+        id: r.id,
+        original_payload: r
+      }));
+      
+      const tombstoneRows = batchRows.map(r => ({
+        id: r.id,
+        table_name: 'chat_history',
+        reason: 'retention_compaction'
+      }));
+
+      // Insert into recovery archive and tombstones
+      await supabaseAdmin.from('recovery_archive').insert(archiveRows);
+      await supabaseAdmin.from('tombstones').insert(tombstoneRows);
+
+      // Transition to soft_deleted instead of physical deletion
+      await supabaseAdmin
+        .from('chat_history')
+        .update({ compaction_status: 'soft_deleted' })
         .in('id', batch)
         .eq('compaction_status', 'deletion_eligible');
     }
@@ -263,6 +291,42 @@ export const chatHistoryPruningService = {
     };
     logger.info('[Pruning] Completed compaction for user', result);
     return result;
+  },
+
+  async restoreMemory(id: string): Promise<boolean> {
+    const { data: success, error } = await supabaseAdmin.rpc('restore_soft_deleted_memory', { p_id: id });
+    
+    if (error) {
+      logger.error('[Restore] RPC failed', { id, error: error.message });
+      return false;
+    }
+
+    if (success) {
+      logger.info('[Restore] Successfully restored memory', { id });
+      return true;
+    }
+
+    logger.warn('[Restore] Memory could not be restored (expired, not found, or physically deleted)', { id });
+    return false;
+  },
+
+  async processPhysicalDeletion(): Promise<void> {
+    // P1: Physical Deletion Safety
+    if (process.env.ENABLE_PHYSICAL_DELETION !== 'true') {
+      logger.info('[Pruning] Physical deletion is globally PAUSED via configuration.');
+      return;
+    }
+
+    const { data: deletedIds, error } = await supabaseAdmin.rpc('process_physical_deletion_batch', { p_batch_size: BATCH_SIZE });
+    
+    if (error) {
+      logger.error('[Pruning] Physical deletion batch failed', { error: error.message });
+      return;
+    }
+
+    if (deletedIds && deletedIds.length > 0) {
+      logger.info('[Pruning] Performed atomic physical deletion batch', { count: deletedIds.length });
+    }
   },
 
   async processCompaction(_payload?: any): Promise<void> {

@@ -1,22 +1,25 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
-import { maintenanceQueue, Job } from './QueueService';
+import { maintenanceQueue } from './QueueService';
 
 export interface CognitiveHealthMetrics {
-  chat_history_raw_count: number;
-  chat_history_compaction_pending_count: number;
-  memories_active_count: number;
-  memories_archived_count: number;
-  jobs_pending_count: number;
-  jobs_failed_count: number;
+  status?: 'healthy' | 'degraded';
+  metric_source?: string;
+  metric_source_error?: string;
+  chat_history_raw_count: number | null;
+  chat_history_compaction_pending_count: number | null;
+  memories_active_count: number | null;
+  memories_archived_count: number | null;
+  jobs_pending_count: number | null;
+  jobs_failed_count: number | null;
   is_maintenance_required: boolean;
-  retention_lag_days: number;
+  retention_lag_days: number | null;
 }
 
 export class CognitiveHealthService {
   constructor() {
-    this.registerMaintenanceProcessor();
+    // Queue processing has been moved to queueWorker.ts
   }
 
   /**
@@ -27,16 +30,19 @@ export class CognitiveHealthService {
     
     if (error) {
       logger.error('Failed to get cognitive health metrics', { error: error.message });
-      // Fallback
+      // P0: Health Failure Must Never Return Fake Zeroes
       return {
-        chat_history_raw_count: 0,
-        chat_history_compaction_pending_count: 0,
-        memories_active_count: 0,
-        memories_archived_count: 0,
-        jobs_pending_count: 0,
-        jobs_failed_count: 0,
+        status: 'degraded',
+        metric_source: 'unavailable',
+        metric_source_error: error.message,
+        chat_history_raw_count: null,
+        chat_history_compaction_pending_count: null,
+        memories_active_count: null,
+        memories_archived_count: null,
+        jobs_pending_count: null,
+        jobs_failed_count: null,
         is_maintenance_required: false,
-        retention_lag_days: 0
+        retention_lag_days: null
       };
     }
     
@@ -50,12 +56,12 @@ export class CognitiveHealthService {
     const metrics = await this.getHealthMetrics();
     
     // Hard limits
-    if (metrics.jobs_pending_count > 5000) {
+    if (metrics.jobs_pending_count !== null && metrics.jobs_pending_count > 5000) {
       logger.error('System overload: Too many pending jobs. Pausing maintenance creation.');
       return;
     }
 
-    if (metrics.chat_history_raw_count > 500) {
+    if (metrics.chat_history_raw_count !== null && metrics.chat_history_raw_count > 500) {
       await maintenanceQueue.add('compact_chat_history', { strategy: 'batch_500' });
     }
 
@@ -63,27 +69,7 @@ export class CognitiveHealthService {
     await maintenanceQueue.add('cleanup_completed_jobs', {});
   }
 
-  private registerMaintenanceProcessor() {
-    maintenanceQueue.process(async (job: Job) => {
-      logger.info(`Starting maintenance job: ${job.job_type}`, { jobId: job.id });
-      
-      switch (job.job_type) {
-        case 'cleanup_completed_jobs':
-          await this.cleanupCompletedJobs();
-          break;
-        case 'cleanup_failed_jobs':
-          await this.cleanupFailedJobs();
-          break;
-        case 'compact_chat_history':
-          // Handled by ChatHistoryPruningService, but routed through here
-          const { ChatHistoryPruningService } = require('./ChatHistoryPruningService');
-          await ChatHistoryPruningService.processCompaction(job.payload);
-          break;
-        default:
-          logger.warn(`Unknown maintenance job type: ${job.job_type}`);
-      }
-    });
-  }
+  // Processing logic moved to queueWorker.ts
 
   /**
    * Prunes successfully completed background jobs older than 24 hours

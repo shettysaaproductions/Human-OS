@@ -1,9 +1,11 @@
-import { memoryQueue, reflectionQueue, subconsciousQueue } from '../services/QueueService';
+import { memoryQueue, reflectionQueue, subconsciousQueue, maintenanceQueue } from '../services/QueueService';
 import { consolidatedMemoryAgent } from '../agents/ConsolidatedMemoryAgent';
 import { shortTermMemoryAgent } from '../agents/ShortTermMemoryAgent';
 import { reflectionAgent } from '../agents/ReflectionAgent';
 import { subconsciousAgent } from '../agents/SubconsciousAgent';
 import { logger } from '../lib/logger';
+import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
+import { cognitiveHealthService } from '../services/CognitiveHealthService';
 
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 5_000; // 5s base backoff
@@ -107,6 +109,26 @@ export function startWorkers() {
         break;
       default:
         logger.warn(`Unknown subconscious job type: ${job.job_type}`);
+    }
+  });
+
+  maintenanceQueue.process(async (job) => {
+    logger.info(`[QueueWorker] Starting maintenance job: ${job.job_type}`, { jobId: job.id });
+    switch (job.job_type) {
+      case 'compact_chat_history':
+        await processWithBackoff(job, chatHistoryPruningService.processCompaction.bind(chatHistoryPruningService), 'compact_chat_history');
+        break;
+      case 'process_physical_deletion':
+        await processWithBackoff(job, chatHistoryPruningService.processPhysicalDeletion.bind(chatHistoryPruningService), 'process_physical_deletion');
+        break;
+      case 'cleanup_completed_jobs':
+        await processWithBackoff(job, cognitiveHealthService.cleanupCompletedJobs.bind(cognitiveHealthService), 'cleanup_completed_jobs');
+        break;
+      case 'cleanup_failed_jobs':
+        await processWithBackoff(job, cognitiveHealthService.cleanupFailedJobs.bind(cognitiveHealthService), 'cleanup_failed_jobs');
+        break;
+      default:
+        logger.warn(`[QueueWorker] Unknown maintenance job type: ${job.job_type}`);
     }
   });
 }

@@ -16,7 +16,7 @@ import { momentEngineService } from './services/MomentEngineService';
 import { reflectionScheduler } from './services/ReflectionSchedulerService';
 import { reminderSchedulerService } from './services/ReminderSchedulerService';
 import { shortTermMemoryCleanupService } from './services/ShortTermMemoryCleanupService';
-import { chatHistoryPruningService } from './services/ChatHistoryPruningService';
+import { maintenanceQueue } from './services/QueueService';
 import { novaFollowupService } from './services/NovaFollowupService';
 import { novaConsciousnessEngine } from './services/NovaConsciousnessEngine';
 import { selfImprovementService } from './services/NovaSelfImprovementService';
@@ -204,7 +204,7 @@ async function main(): Promise<void> {
         lastNightlyMaintenanceDate = today;
         try {
           logger.info('Scheduler: Triggering nightly chat history pruning and autonomous self-improvement...');
-          await chatHistoryPruningService.processCompaction();
+          await maintenanceQueue.add('compact_chat_history', { trigger: 'boot' });
           await selfImprovementService.runReview();
 
           // Weekly memory decay — free-tier hygiene: never let unimportant long-term

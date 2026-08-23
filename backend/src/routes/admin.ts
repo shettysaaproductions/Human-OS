@@ -4,7 +4,7 @@ import { reflectionQueue } from '../services/QueueService';
 import { memoryDecayService } from '../services/MemoryDecayService';
 import { momentEngineService } from '../services/MomentEngineService';
 import { reflectionScheduler } from '../services/ReflectionSchedulerService';
-import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
+import { maintenanceQueue } from '../services/QueueService';
 
 export const adminRouter: import('express').Router = Router();
 
@@ -108,7 +108,7 @@ adminRouter.post('/trigger-reflections-weekly', async (_req: Request, res: Respo
  */
 adminRouter.post('/prune-history', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await chatHistoryPruningService.processCompaction();
+    await maintenanceQueue.add('compact_chat_history', { trigger: 'admin' });
     res.status(200).json({ success: true, message: 'Pruning initiated.' });
   } catch (err) {
     next(err);
