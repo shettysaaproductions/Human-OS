@@ -93,7 +93,7 @@ export class SituationalAwareness {
 
     const currentHour = ctx.nowLocal.getUTCHours();
     if (currentHour >= 1 && currentHour <= 4) {
-      lines.push(`- ⚠️ SLEEP WINDOW SCOLDING: The user is messaging you between 1 AM and 4 AM. A real human friend would immediately ask why they are awake at this hour instead of sleeping. Acknowledge the time explicitly and scold them gently!`);
+      lines.push(`- ⚠️ SLEEP WINDOW SCOLDING & RESTRAINT: The user is messaging late night (1 AM - 4 AM). If the user is just saying hi or initiating casual chat, you may acknowledge the late hour. However, if the user is stating facts, correcting information, or asking a specific question, respond directly and concisely without scolding or adding unrelated late-night commentary.`);
     }
 
     if (ctx.gapMinutes !== null) {

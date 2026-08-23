@@ -167,7 +167,7 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(prompt).toContain('RELATIONSHIP_VALUE = NONE');
       expect(prompt).toContain('ANTECEDENT = NONE');
       expect(prompt).toContain("The relationship of 'Supriya' is completely UNKNOWN");
-      expect(prompt).toContain('ask the user directly in natural chat who \'Supriya\' is');
+      expect(prompt).toContain('Output ONLY ONE concise clarification question');
       expect(prompt).not.toContain('<OPTIONS>');
     });
 
@@ -269,11 +269,11 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(turn.units[0].type).toBe('action');
 
       const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
-      expect(prompt).toContain('[CLARIFICATION GUARD: If an action is missing a critical parameter (e.g., WHO \'him\' refers to, WHERE to go) and it cannot be resolved from context, ask the user directly in normal chat who \'him\' refers to.]');
+      expect(prompt).toContain('[CLARIFICATION GUARD: If an action is missing a critical parameter (e.g., WHO \'him\' refers to, WHERE to go) and it cannot be resolved from context, ask the user directly in normal chat who \'him\' refers to with a single concise question.]');
       expect(prompt).not.toContain('<OPTIONS>');
     });
 
-    it('I. Anti-robot rules in promptBuilder contain unknown relationship & grounded correction guards', () => {
+    it('I. Anti-robot rules in promptBuilder contain unknown relationship, minimal clarification & grounded correction guards', () => {
       const { promptBuilder } = require('../promptBuilder');
       const systemPrompt = promptBuilder.buildSystemPrompt({
         memories: [],
@@ -284,9 +284,31 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
 
       expect(systemPrompt).toContain('ANTI-ROBOT RULE (FABRICATED HISTORY GUARD — ZERO TOLERANCE)');
       expect(systemPrompt).toContain('ANTI-ROBOT RULE (NAME & GENDER ASSUMPTION — ZERO TOLERANCE)');
-      expect(systemPrompt).toContain('ANTI-ROBOT RULE (UNKNOWN RELATIONSHIP — ZERO TOLERANCE FOR GUESSING)');
-      expect(systemPrompt).toContain('ANTI-ROBOT RULE (GROUNDED CORRECTION ACKNOWLEDGEMENT)');
-      expect(systemPrompt).toContain('Who is [Name] — your sister, friend, or someone else?');
+      expect(systemPrompt).toContain('ANTI-ROBOT RULE (UNKNOWN RELATIONSHIP & MINIMAL CLARIFICATION — ZERO TOLERANCE)');
+      expect(systemPrompt).toContain('ANTI-ROBOT RULE (GROUNDED CORRECTION ACKNOWLEDGEMENT — RELEVANCE-FIRST)');
+      expect(systemPrompt).toContain('ANTI-ROBOT RULE (RELEVANCE-FIRST & CONVERSATIONAL RESTRAINT)');
+      expect(systemPrompt).toContain('Output ONLY ONE concise clarification question');
+    });
+
+    it('J. Phase 7.2: Unknown relationship emits concise single-question restraint instructions', () => {
+      const turn = TurnAnalyzer.analyze([
+        { message: "Her name is Supriya." }
+      ]);
+      const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
+      expect(prompt).toContain('Output ONLY ONE concise clarification question');
+      expect(prompt).toContain('RELEVANCE-FIRST & CONVERSATIONAL RESTRAINT: Do NOT guess any relationship');
+      expect(prompt).toContain('Do NOT append time-of-day commentary, speculative emotions, unrelated questions, or generic reassurance');
+    });
+
+    it('K. Phase 7.2: Known correction emits grounded acknowledgement without speculative history', () => {
+      const turn = TurnAnalyzer.analyze([
+        { message: "My sister is Soni." },
+        { message: "Actually her name is Supriya." }
+      ]);
+      const prompt = TurnAnalyzer.buildTurnAnalysisPrompt(turn);
+      expect(prompt).toContain('Acknowledge the correction concisely and cleanly');
+      expect(prompt).toContain('RELEVANCE-FIRST & CONVERSATIONAL RESTRAINT: Continue ONLY with context that genuinely exists');
+      expect(prompt).toContain('Do NOT generate speculative commentary');
     });
   });
 
