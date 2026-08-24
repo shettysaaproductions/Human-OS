@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/32</span>
+                <span class='fraction'>0/24</span>
             </div>
         
             
@@ -401,7 +401,7 @@ class DegradedModeService {
 <span class="fstat-no" title="function not covered" >  appendMessage(</span>userId: string, role: string, content: string): void {
     const existing = <span class="cstat-no" title="statement not covered" >conversationBuffer.get(userId) || [];</span>
 <span class="cstat-no" title="statement not covered" >    existing.push({ role, content });</span>
-<span class="cstat-no" title="statement not covered" >    if (existing.length &gt; MAX_BUFFER_MESSAGES) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (existing.length &gt; MAX_BUFFER_MESSAGES) {</span>
 <span class="cstat-no" title="statement not covered" >      existing.shift(); </span>// Drop oldest
     }
 <span class="cstat-no" title="statement not covered" >    conversationBuffer.set(userId, existing);</span>
@@ -436,7 +436,7 @@ class DegradedModeService {
    */
 <span class="fstat-no" title="function not covered" >  queueSize(</span>): number {
 <span class="cstat-no" title="statement not covered" >    try {</span>
-<span class="cstat-no" title="statement not covered" >      if (!fs.existsSync(QUEUE_FILE)) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!fs.existsSync(QUEUE_FILE)) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
       const lines = <span class="cstat-no" title="statement not covered" >fs.readFileSync(QUEUE_FILE, 'utf-8').split('\n').filter(<span class="fstat-no" title="function not covered" >l </span>=&gt; <span class="cstat-no" title="statement not covered" >l.trim())</span>;</span>
 <span class="cstat-no" title="statement not covered" >      return lines.length;</span>
     } catch {
@@ -448,7 +448,7 @@ class DegradedModeService {
    * Drain the disk queue — called when DB comes back online.
    */
 <span class="fstat-no" title="function not covered" >  async </span>drain(): Promise&lt;{ success: number; failed: number }&gt; {
-<span class="cstat-no" title="statement not covered" >    if (this.draining) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (this.draining) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.info('DegradedMode: drain already in progress, skipping');</span>
 <span class="cstat-no" title="statement not covered" >      return { success: 0, failed: 0 };</span>
     }
@@ -458,7 +458,7 @@ class DegradedModeService {
     let failed = <span class="cstat-no" title="statement not covered" >0;</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    try {</span>
-<span class="cstat-no" title="statement not covered" >      if (!fs.existsSync(QUEUE_FILE)) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!fs.existsSync(QUEUE_FILE)) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.info('DegradedMode: no queue file, nothing to drain');</span>
 <span class="cstat-no" title="statement not covered" >        return { success: 0, failed: 0 };</span>
       }
@@ -466,7 +466,7 @@ class DegradedModeService {
       const raw = <span class="cstat-no" title="statement not covered" >fs.readFileSync(QUEUE_FILE, 'utf-8');</span>
       const lines = <span class="cstat-no" title="statement not covered" >raw.split('\n').filter(<span class="fstat-no" title="function not covered" >l </span>=&gt; <span class="cstat-no" title="statement not covered" >l.trim())</span>;</span>
       
-<span class="cstat-no" title="statement not covered" >      if (lines.length === 0) <span class="cstat-no" title="statement not covered" >return { success: 0, failed: 0 };</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (lines.length === 0) <span class="cstat-no" title="statement not covered" >return { success: 0, failed: 0 };</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >      logger.info(`DegradedMode: draining ${lines.length} queued writes`);</span>
 &nbsp;
@@ -478,12 +478,12 @@ class DegradedModeService {
           
 <span class="cstat-no" title="statement not covered" >          if (write.operation === 'insert') {</span>
             const { error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin.from(write.table).insert(write.data);</span>
-<span class="cstat-no" title="statement not covered" >            if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
-          } else <span class="cstat-no" title="statement not covered" >if (write.operation === 'update' &amp;&amp; write.filter) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+          } else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (write.operation === 'update' &amp;&amp; write.filter) {</span>
             const { error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin.from(write.table)</span>
               .update(write.data)
               .eq(write.filter.column, write.filter.value);
-<span class="cstat-no" title="statement not covered" >            if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
           }
 &nbsp;
 <span class="cstat-no" title="statement not covered" >          success++;</span>
@@ -520,7 +520,7 @@ export const <span class="cstat-no" title="statement not covered" >degradedMode 
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

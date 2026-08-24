@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/71</span>
+                <span class='fraction'>0/64</span>
             </div>
         
             
@@ -387,7 +387,7 @@ async function <span class="fstat-no" title="function not covered" >fetchDeepTel
       .limit(1)
       .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!lastMsg) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!lastMsg) {</span>
 <span class="cstat-no" title="statement not covered" >      console.log('❌ No messages found.');</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -411,8 +411,8 @@ async function <span class="fstat-no" title="function not covered" >fetchDeepTel
       .order('created_at', { ascending: false })
       .limit(100);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (!messages || messages.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!messages || messages.length === 0) {</span>
 <span class="cstat-no" title="statement not covered" >      console.log('No messages found.');</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -447,7 +447,7 @@ async function <span class="fstat-no" title="function not covered" >fetchDeepTel
 &nbsp;
       // Detect internet/search requests
       const lower = <span class="cstat-no" title="statement not covered" >msg.content.toLowerCase();</span>
-<span class="cstat-no" title="statement not covered" >      if (!isNova &amp;&amp; (lower.includes('search') || lower.includes('google') || lower.includes('internet') || </span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isNova &amp;&amp; (lower.includes('search') || lower.includes('google') || lower.includes('internet') || </span>
           lower.includes('news') || lower.includes('weather') || lower.includes('look up') || 
           lower.includes('find out') || lower.includes('latest') || lower.includes('current') ||
           lower.includes('what is') || lower.includes('tell me about'))) {
@@ -455,14 +455,14 @@ async function <span class="fstat-no" title="function not covered" >fetchDeepTel
       }
 &nbsp;
       // Detect vision requests
-<span class="cstat-no" title="statement not covered" >      if (!isNova &amp;&amp; (lower.includes('look') || lower.includes('see') || lower.includes('camera') || </span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isNova &amp;&amp; (lower.includes('look') || lower.includes('see') || lower.includes('camera') || </span>
           lower.includes('photo') || lower.includes('picture') || lower.includes('selfie') ||
           lower.includes('check this') || lower.includes('dekh'))) {
 <span class="cstat-no" title="statement not covered" >        visionRequests.push(`  [${time}] User: ${msg.content.substring(0, 80)}`);</span>
       }
 &nbsp;
       // Nova confusion/failure signals
-<span class="cstat-no" title="statement not covered" >      if (isNova &amp;&amp; (lower.includes("i don't know") || lower.includes("i can't") || </span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isNova &amp;&amp; (lower.includes("i don't know") || lower.includes("i can't") || </span>
           lower.includes("sorry") || lower.includes("i'm not sure") || lower.includes("as an ai") ||
           lower.includes("mujhe nahi pata") || lower.includes("samajh nahi") ||
           lower.includes("access nahi") || lower.includes("pata nahi"))) {
@@ -504,7 +504,7 @@ async function <span class="fstat-no" title="function not covered" >fetchDeepTel
       .order('created_at', { ascending: false })
       .limit(10);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (wm &amp;&amp; wm.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (wm &amp;&amp; wm.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >      console.log(`\n=== WORKING MEMORY (last 10 keys) ===`);</span>
 <span class="cstat-no" title="statement not covered" >      wm.forEach(<span class="fstat-no" title="function not covered" >w </span>=&gt; {</span>
         const expired = <span class="cstat-no" title="statement not covered" >w.expires_at &amp;&amp; new Date(w.expires_at) &lt; new Date() ? ' [EXPIRED]' : '';</span>
@@ -526,7 +526,7 @@ async function <span class="fstat-no" title="function not covered" >fetchDeepTel
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

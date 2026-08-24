@@ -74,6 +74,10 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 24 Session — Phase 8.1 Nova Reliability Pass:**
+  - **Multi-Message Fact Capture:** Upgraded regex and semantic fact extraction in `TurnAnalyzer.ts` for multi-word phrases (e.g., "Sagar shetty"), added explicit son/daughter patterns, and supported conversational location phrases ("Mai Dahisar me rehta hu").
+  - **Presence-Aware Returning User Cognition:** Connected `session_start_cognition` job to `subconsciousQueue` and registered worker handler calling `novaConsciousnessEngine.processUser(userId)`.
+  - **All 13 Test Suites Passing (137 tests).**
 - ✅ **Aug 22 Session — Phase 1 Latency Optimization (Parallel Fetch):**
   - **`chat.ts` Sequential Block Destroyed:** Replaced 5 sequential blocking asynchronous calls (Profile, Chat History, Memory Contexts, Web Search, External DB Services) with a single unified `Promise.all` parallel fetch block.
   - **Result:** Context assembly dropped from 2.5s down to <0.5s.

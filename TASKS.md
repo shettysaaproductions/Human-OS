@@ -13,6 +13,7 @@
 - [ ] Monitor FreeTierGuard logs for any limit warnings
 
 ## ✅ Completed
+- [x] Phase 8.1 — Nova Reliability Pass: Multi-Message Fact Capture + Returning User Cognition
 - [x] Auto Upgrade: Nova Deep Audit & Production Upgrade Plan (8 Phases)
 - [x] Fix NVIDIA fallback, Reminder bugs and anti-robot rules (Auto Upgrade)
 - [x] Delete `backend/test_nvidia.ts`

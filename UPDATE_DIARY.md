@@ -1,4 +1,26 @@
 
+## [2026-08-24] Phase 8.1 — Nova Reliability Pass: Multi-Message Fact Capture + Presence-Aware Proactive Return
+
+### Trigger
+Phase 8.1 reliability pass over multi-message fact ingestion, presence-aware proactive return greeting, and test suite hardening.
+
+### Changes Made
+- **Multi-Message Fact Extraction & Atomicity (`TurnAnalyzer.ts`)**:
+  - Expanded regex patterns in `TurnAnalyzer.extractFacts` for multi-word capture (`[a-zA-Z0-9\s]+?`), added explicit `son_name` / `daughter_name` matching, and expanded location patterns (e.g., "Mai Dahisar me rehta hu", "Mera pura name Sagar shetty hai", "Mere bete ka naam Shresht hai").
+  - Fixed rapid-turn fact normalization in `chat.ts` ensuring all semantic units in multi-message rapid turns are extracted into durable facts without dropping.
+- **Presence-Aware Returning User Cognition (`QueueService.ts`, `queueWorker.ts`, `presence.ts`, `NovaConsciousnessEngine.ts`)**:
+  - Added `session_start_cognition` job type to `subconsciousQueue`.
+  - Registered `session_start_cognition` processor in `queueWorker.ts` invoking `novaConsciousnessEngine.processUser(userId)` with backoff and error safety.
+  - Made `processUser` public on `NovaConsciousnessEngine` and updated `presence.ts` to enqueue `session_start_cognition` directly through `subconsciousQueue.add()`.
+- **Test Suite & Integration Hardening**:
+  - Updated `TurnAnalyzer.test.ts` with 4-message rapid succession regression test validating wife, son, user name, and city extraction.
+  - Hardened `LifeThreadAgent.test.ts` supabase mock for multi-table queries (`life_threads` + `nova_actions`).
+  - Full test suite passed (13 suites, 137 tests passing, 0 errors).
+
+### Status
+- Build passed cleanly (`npm run build` exit 0).
+- All 13 unit test suites passed (137 tests).
+
 ---
 
 

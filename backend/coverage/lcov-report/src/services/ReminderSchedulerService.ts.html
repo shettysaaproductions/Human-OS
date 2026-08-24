@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/116</span>
+                <span class='fraction'>0/99</span>
             </div>
         
             
@@ -915,7 +915,7 @@
       .select('*')
       .single();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 <span class="cstat-no" title="statement not covered" >    return reminder;</span>
   }
 &nbsp;
@@ -923,7 +923,7 @@
    * Check and fire any active reminders that are due
    */
 <span class="fstat-no" title="function not covered" >  async </span>checkAndFireReminders(): Promise&lt;void&gt; {
-<span class="cstat-no" title="statement not covered" >    if (this._isChecking) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (this._isChecking) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn('[Reminder] checkAndFireReminders skipped — previous poll still running');</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -936,12 +936,12 @@
         .eq('status', 'active')
         .lte('trigger_at', now.toISOString());
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.error('Failed to fetch due reminders', { error: error.message });</span>
 <span class="cstat-no" title="statement not covered" >        return;</span>
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (dueReminders &amp;&amp; dueReminders.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (dueReminders &amp;&amp; dueReminders.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.info(`Found ${dueReminders.length} due reminders to process`);</span>
 <span class="cstat-no" title="statement not covered" >        for (const reminder of dueReminders) {</span>
 <span class="cstat-no" title="statement not covered" >          try {</span>
@@ -968,7 +968,7 @@
    */
 <span class="fstat-no" title="function not covered" >  async </span>fireEvent(userId: string, event: string): Promise&lt;number&gt; {
 <span class="cstat-no" title="statement not covered" >    try {</span>
-<span class="cstat-no" title="statement not covered" >      if (!event) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!event) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
       const { data: reminders, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
         .from('reminders')
         .select('id')
@@ -976,11 +976,11 @@
         .eq('status', 'active')
         .ilike('event_trigger', event); // case-insensitive — Nova echoes the stored string
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.error('[ReminderScheduler] Failed to query event reminders', { userId, event, error: error.message });</span>
 <span class="cstat-no" title="statement not covered" >        return 0;</span>
       }
-<span class="cstat-no" title="statement not covered" >      if (!reminders || reminders.length === 0) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!reminders || reminders.length === 0) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >      logger.info(`[ReminderScheduler] Event "${event}" fired — ${reminders.length} reminder(s)`, { userId });</span>
       let fired = <span class="cstat-no" title="statement not covered" >0;</span>
@@ -1017,7 +1017,7 @@
       .eq('status', 'active')
       .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error || !reminder) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error || !reminder) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn('Reminder not found or not active', { reminderId, error });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -1033,7 +1033,7 @@
     const message = <span class="cstat-no" title="statement not covered" >await this.generateReminderMessage(reminder);</span>
 &nbsp;
     // Safety check: if trigger time is in the future, do not fire yet (time-based only)
-<span class="cstat-no" title="statement not covered" >    if (!isEventReminder &amp;&amp; triggerTime &gt; now) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!isEventReminder &amp;&amp; triggerTime &gt; now) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.info('Reminder scheduled for future, skipping fire', { reminderId });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -1066,7 +1066,7 @@
       } catch (insertErr) {
 <span class="cstat-no" title="statement not covered" >        retryCount++;</span>
 <span class="cstat-no" title="statement not covered" >        logger.warn('[Reminder] DB insert failed on fire, retrying...', { attempt: retryCount, error: insertErr instanceof Error ? insertErr.message : String(insertErr) });</span>
-<span class="cstat-no" title="statement not covered" >        if (retryCount &gt;= 2) <span class="cstat-no" title="statement not covered" >throw insertErr;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (retryCount &gt;= 2) <span class="cstat-no" title="statement not covered" >throw insertErr;</span></span>
 <span class="cstat-no" title="statement not covered" >        await new Promise(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >setTimeout(r, 2000))</span>;</span>
       }
     }
@@ -1112,7 +1112,7 @@
 <span class="cstat-no" title="statement not covered" >      completed = true;</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (completed) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (completed) {</span>
 <span class="cstat-no" title="statement not covered" >      await supabaseAdmin</span>
         .from('reminders')
         .update({ status: 'completed', updated_at: new Date().toISOString() })
@@ -1173,7 +1173,7 @@
         .select('push_token')
         .eq('id', reminder.user_id)
         .maybeSingle();
-<span class="cstat-no" title="statement not covered" >      if (profile?.push_token) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (profile?.push_token) {</span>
 <span class="cstat-no" title="statement not covered" >        await sendPushNotification([{</span>
           to: profile.push_token,
           title: '🔔 Nova Reminder',
@@ -1216,7 +1216,7 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
       });
       
       let clean = <span class="cstat-no" title="statement not covered" >result.trim();</span>
-<span class="cstat-no" title="statement not covered" >      if (clean.startsWith('"') &amp;&amp; clean.endsWith('"')) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (clean.startsWith('"') &amp;&amp; clean.endsWith('"')) {</span>
 <span class="cstat-no" title="statement not covered" >        clean = clean.substring(1, clean.length - 1);</span>
       }
 <span class="cstat-no" title="statement not covered" >      return clean || `Arey sun, ${text} ka time ho gaya!`;</span>
@@ -1265,22 +1265,22 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
     let d = <span class="cstat-no" title="statement not covered" >new Date(date);</span>
     let safetyDay = <span class="cstat-no" title="statement not covered" >0;</span>
     // Advance to a valid day
-<span class="cstat-no" title="statement not covered" >    if (activeDays &amp;&amp; activeDays.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (activeDays &amp;&amp; activeDays.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >      while (safetyDay &lt; 14) {</span>
         const dayName = <span class="cstat-no" title="statement not covered" >DAY_NAMES[d.getUTCDay()];</span>
-<span class="cstat-no" title="statement not covered" >        if (activeDays.includes(dayName)) <span class="cstat-no" title="statement not covered" >break;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (activeDays.includes(dayName)) <span class="cstat-no" title="statement not covered" >break;</span></span>
 <span class="cstat-no" title="statement not covered" >        d.setUTCDate(d.getUTCDate() + 1);</span>
 <span class="cstat-no" title="statement not covered" >        safetyDay++;</span>
       }
     }
 &nbsp;
     // Advance to a valid month
-<span class="cstat-no" title="statement not covered" >    if (activeMonths &amp;&amp; activeMonths.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (activeMonths &amp;&amp; activeMonths.length &gt; 0) {</span>
       let safetyMonth = <span class="cstat-no" title="statement not covered" >0;</span>
 <span class="cstat-no" title="statement not covered" >      while (safetyMonth &lt; 24) {</span>
         const monthName = <span class="cstat-no" title="statement not covered" >MONTH_NAMES[d.getUTCMonth()];</span>
         const yearOk = <span class="cstat-no" title="statement not covered" >!activeYear || d.getUTCFullYear() === activeYear;</span>
-<span class="cstat-no" title="statement not covered" >        if (activeMonths.includes(monthName) &amp;&amp; yearOk) <span class="cstat-no" title="statement not covered" >break;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (activeMonths.includes(monthName) &amp;&amp; yearOk) <span class="cstat-no" title="statement not covered" >break;</span></span>
         // Jump to 1st of next month, preserve time
         const hours = <span class="cstat-no" title="statement not covered" >d.getUTCHours();</span>
         const mins = <span class="cstat-no" title="statement not covered" >d.getUTCMinutes();</span>
@@ -1303,7 +1303,7 @@ export const <span class="cstat-no" title="statement not covered" >reminderSched
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

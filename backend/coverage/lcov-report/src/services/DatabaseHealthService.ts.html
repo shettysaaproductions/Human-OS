@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/24</span>
+                <span class='fraction'>0/18</span>
             </div>
         
             
@@ -499,7 +499,7 @@ class DatabaseHealthService {
    */
 <span class="fstat-no" title="function not covered" >  async </span>check(): Promise&lt;HealthReport&gt; {
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;HealthReport&gt;('db_health');</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) <span class="cstat-no" title="statement not covered" >return cached;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) <span class="cstat-no" title="statement not covered" >return cached;</span></span>
 &nbsp;
     const startTime = <span class="cstat-no" title="statement not covered" >Date.now();</span>
     const alerts: Alert[] = <span class="cstat-no" title="statement not covered" >[];</span>
@@ -511,7 +511,7 @@ class DatabaseHealthService {
       const { error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin.from('profiles').select('id').limit(1);</span>
 <span class="cstat-no" title="statement not covered" >      latencyMs = Date.now() - pingStart;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 <span class="cstat-no" title="statement not covered" >      this.consecutiveFailures = 0;</span>
 <span class="cstat-no" title="statement not covered" >      this._status = 'online';</span>
     } catch (err) {
@@ -533,7 +533,7 @@ class DatabaseHealthService {
 &nbsp;
     // ── 2. Cache stats ──────────────────────────────────────────────
     const cacheStats = <span class="cstat-no" title="statement not covered" >cache.stats();</span>
-<span class="cstat-no" title="statement not covered" >    if (cacheStats.missRate &gt; 0.7 &amp;&amp; (cacheStats.hits + cacheStats.misses) &gt; 50) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cacheStats.missRate &gt; 0.7 &amp;&amp; (cacheStats.hits + cacheStats.misses) &gt; 50) {</span>
 <span class="cstat-no" title="statement not covered" >      this.addAlert(alerts, {</span>
         type: 'cache_miss_rate_high',
         message: `Cache miss rate is ${(cacheStats.missRate * 100).toFixed(1)}% — cache may be misconfigured.`,
@@ -545,7 +545,7 @@ class DatabaseHealthService {
     const egressMb = <span class="cstat-no" title="statement not covered" >qt.estimatedEgressMb();</span>
     const thresholdMb = <span class="cstat-no" title="statement not covered" >config.db.egressWarningThresholdMb;</span>
     const pctUsed = <span class="cstat-no" title="statement not covered" >parseFloat(((egressMb / thresholdMb) * 100).toFixed(1));</span>
-<span class="cstat-no" title="statement not covered" >    if (egressMb &gt;= thresholdMb) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (egressMb &gt;= thresholdMb) {</span>
 <span class="cstat-no" title="statement not covered" >      this.addAlert(alerts, {</span>
         type: 'quota_warning',
         message: `Estimated egress ${egressMb.toFixed(1)}MB exceeds warning threshold of ${thresholdMb}MB.`,
@@ -556,7 +556,7 @@ class DatabaseHealthService {
     // ── 4. Queue backlog check ──────────────────────────────────────
     let pendingJobs = <span class="cstat-no" title="statement not covered" >0;</span>
     let failedJobs = <span class="cstat-no" title="statement not covered" >0;</span>
-<span class="cstat-no" title="statement not covered" >    if (this._status === 'online') {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (this._status === 'online') {</span>
 <span class="cstat-no" title="statement not covered" >      try {</span>
         const [{ count: pending }, { count: failed }] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
           supabaseAdmin.from('background_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
@@ -565,7 +565,7 @@ class DatabaseHealthService {
 <span class="cstat-no" title="statement not covered" >        pendingJobs = pending ?? 0;</span>
 <span class="cstat-no" title="statement not covered" >        failedJobs = failed ?? 0;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >        if (pendingJobs &gt; 50) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (pendingJobs &gt; 50) {</span>
 <span class="cstat-no" title="statement not covered" >          this.addAlert(alerts, {</span>
             type: 'queue_backlog',
             message: `Queue backlog is high: ${pendingJobs} pending jobs.`,
@@ -625,7 +625,7 @@ export const <span class="cstat-no" title="statement not covered" >dbHealthServi
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -86,7 +86,7 @@ export class NovaConsciousnessEngine {
 
       for (const userId of uniqueUserIds) {
         try {
-          await this._processUser(userId);
+          await this.processUser(userId);
         } catch (userErr) {
           logger.warn('[NACE] Error processing user', { userId, error: userErr instanceof Error ? userErr.message : String(userErr) });
         }
@@ -99,7 +99,11 @@ export class NovaConsciousnessEngine {
     }
   }
 
-  private async _processUser(userId: string): Promise<void> {
+  async _processUser(userId: string): Promise<void> {
+    return this.processUser(userId);
+  }
+
+  async processUser(userId: string): Promise<void> {
     // Coma awareness: Don't reach out right after server boot to avoid spam
     if (Date.now() - serverBootTime < SERVER_BOOT_COOLDOWN_MS) {
       logger.info('[NACE] Skipping outreach — server just booted (coma cooldown)');

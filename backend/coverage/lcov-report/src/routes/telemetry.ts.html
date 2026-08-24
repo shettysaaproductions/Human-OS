@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/22</span>
             </div>
         
             
@@ -292,7 +292,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id ?? null;</span>
     const { event_type, event_data, platform, app_version } = <span class="cstat-no" title="statement not covered" >req.body;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!event_type) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!event_type) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'event_type is required' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -301,7 +301,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
       .from('telemetry_events')
       .insert({ user_id: userId, event_type, event_data: event_data || {}, platform, app_version });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 <span class="cstat-no" title="statement not covered" >    res.status(201).json({ success: true });</span>
   } catch (err) {
 <span class="cstat-no" title="statement not covered" >    logger.error('Failed to store telemetry event', { error: err instanceof Error ? err.message : String(err) });</span>
@@ -314,7 +314,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'telemetry:admin:errors';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const since24h = <span class="cstat-no" title="statement not covered" >new Date(Date.now() - 86400000).toISOString();</span>
     const since7d = <span class="cstat-no" title="statement not covered" >new Date(Date.now() - 7 * 86400000).toISOString();</span>
@@ -325,7 +325,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
       .gte('created_at', since7d)
       .order('created_at', { ascending: false });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
     const allEvents = <span class="cstat-no" title="statement not covered" >events || [];</span>
 &nbsp;
@@ -367,7 +367,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
 <span class="cstat-no" title="statement not covered" >telemetryRouter.get('/chat/:userId', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const { userId } = <span class="cstat-no" title="statement not covered" >req.params;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'userId is required' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -379,7 +379,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
       .order('created_at', { ascending: false })
       .limit(50);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({ success: true, data });</span>
   } catch (err) {
@@ -394,7 +394,7 @@ export const <span class="cstat-no" title="statement not covered" >telemetryRout
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/24</span>
+                <span class='fraction'>0/17</span>
             </div>
         
             
@@ -340,10 +340,10 @@
     ];
     
     const isExcluded = <span class="cstat-no" title="statement not covered" >EXCLUDED_PATTERNS.some(<span class="fstat-no" title="function not covered" >p </span>=&gt; <span class="cstat-no" title="statement not covered" >lower.includes(p))</span>;</span>
-<span class="cstat-no" title="statement not covered" >    if (isExcluded) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (isExcluded) <span class="cstat-no" title="statement not covered" >return null;</span></span>
     
     const fastMatch = <span class="cstat-no" title="statement not covered" >SEARCH_TRIGGERS.find(<span class="fstat-no" title="function not covered" >t </span>=&gt; <span class="cstat-no" title="statement not covered" >lower.includes(t))</span>;</span>
-<span class="cstat-no" title="statement not covered" >    if (fastMatch) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (fastMatch) {</span>
       // Generate a clean search query from the user's message
       // Strip Hinglish filler words to get a clean query
       const cleanQuery = <span class="cstat-no" title="statement not covered" >message</span>
@@ -368,7 +368,7 @@
     
     // Request a key from the load balancer
     const geminiKey = <span class="cstat-no" title="statement not covered" >geminiPool.getNextKey();</span>
-<span class="cstat-no" title="statement not covered" >    if (geminiKey) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (geminiKey) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.info('[WebSearch] Using Gemini Google Search Grounding');</span>
 <span class="cstat-no" title="statement not covered" >      try {</span>
         const genAI = <span class="cstat-no" title="statement not covered" >new GoogleGenerativeAI(geminiKey);</span>
@@ -383,7 +383,7 @@
 &nbsp;
         // Empty response = failed search — fall through to Wikipedia (the catch below
         // is not reached on a successful-but-empty call, so we signal it explicitly).
-<span class="cstat-no" title="statement not covered" >        if (!text || text.trim().length === 0) <span class="cstat-no" title="statement not covered" >throw new Error('Gemini returned empty response');</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!text || text.trim().length === 0) <span class="cstat-no" title="statement not covered" >throw new Error('Gemini returned empty response');</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >        return `\n\n## LIVE WEB SEARCH RESULTS (Omniscience Protocol)\nYou automatically searched the web using Google Search for "${query}" and found this:\n\n${text}\n\nCRITICAL RULE: When answering the user, you MUST include the source links/URLs provided above so the user can click them (just like ChatGPT does).`;</span>
       } catch (e) {
@@ -401,19 +401,19 @@
       );
       
       const searchResults = <span class="cstat-no" title="statement not covered" >response.data?.query?.search;</span>
-<span class="cstat-no" title="statement not covered" >      if (!searchResults || searchResults.length === 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!searchResults || searchResults.length === 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
       
       const results: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
 <span class="cstat-no" title="statement not covered" >      for (let i = <span class="cstat-no" title="statement not covered" >0;</span> i &lt; Math.min(3, searchResults.length); i++) {</span>
         const item = <span class="cstat-no" title="statement not covered" >searchResults[i];</span>
-<span class="cstat-no" title="statement not covered" >        if (item.title &amp;&amp; item.snippet) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (item.title &amp;&amp; item.snippet) {</span>
           // Clean HTML from Wikipedia snippets
           const cleanSnippet = <span class="cstat-no" title="statement not covered" >item.snippet.replace(/&lt;[^&gt;]*&gt;?/gm, '');</span>
 <span class="cstat-no" title="statement not covered" >          results.push(`Source: Wikipedia - ${item.title}\nInfo: ${cleanSnippet}`);</span>
         }
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (results.length === 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (results.length === 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
 <span class="cstat-no" title="statement not covered" >      return `\n\n## LIVE WEB SEARCH RESULTS (Omniscience Protocol)\nYou automatically searched the web for "${query}" and found this:\n` + results.join('\n\n') + `\n\nUse this information to answer the user accurately.`;</span>
     } catch (e) {
 <span class="cstat-no" title="statement not covered" >      logger.warn('[WebSearch] Search failed', { error: e instanceof Error ? e.message : String(e) });</span>
@@ -430,7 +430,7 @@ export const <span class="cstat-no" title="statement not covered" >webSearchServ
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

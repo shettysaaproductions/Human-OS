@@ -8,6 +8,7 @@ import { deterministicFactAgent } from '../agents/DeterministicFactAgent';
 import { logger } from '../lib/logger';
 import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
 import { cognitiveHealthService } from '../services/CognitiveHealthService';
+import { novaConsciousnessEngine } from '../services/NovaConsciousnessEngine';
 
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 5_000; // 5s base backoff
@@ -112,6 +113,13 @@ export function startWorkers() {
       await processWithBackoff(job, subconsciousAgent.processJob.bind(subconsciousAgent), 'extract_subconscious_actions');
     } else if (job.job_type === 'extract_life_threads') {
       await processWithBackoff(job, lifeThreadAgent.processJob.bind(lifeThreadAgent), 'extract_life_threads');
+    } else if (job.job_type === 'session_start_cognition') {
+      await processWithBackoff(job, async (j) => {
+        const userId = j.payload?.user_id;
+        if (userId) {
+          await novaConsciousnessEngine.processUser(userId);
+        }
+      }, 'session_start_cognition');
     } else {
       logger.warn(`Unknown subconscious job type: ${job.job_type}`);
     }

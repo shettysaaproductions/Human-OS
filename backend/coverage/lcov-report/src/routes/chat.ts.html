@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/720</span>
+                <span class='fraction'>0/589</span>
             </div>
         
             
@@ -4175,7 +4175,7 @@ async function <span class="fstat-no" title="function not covered" >isDuplicateA
       .order('created_at', { ascending: false })
       .limit(5);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error || !data || data.length === 0) <span class="cstat-no" title="statement not covered" >return false;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error || !data || data.length === 0) <span class="cstat-no" title="statement not covered" >return false;</span></span>
 &nbsp;
     // Duplicate detection: a true double-text race re-emits the SAME reply. The two rows
     // differ only by the RANDOM emoji MessageFormatter.addEmoji appends, so strip a trailing
@@ -4187,7 +4187,7 @@ async function <span class="fstat-no" title="function not covered" >isDuplicateA
     const normalizedNew = <span class="cstat-no" title="statement not covered" >stripTrailingEmoji(content.toLowerCase().trim());</span>
 <span class="cstat-no" title="statement not covered" >    for (const msg of data) {</span>
       const normalizedOld = <span class="cstat-no" title="statement not covered" >stripTrailingEmoji(msg.content.toLowerCase().trim());</span>
-<span class="cstat-no" title="statement not covered" >      if (normalizedOld === normalizedNew) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (normalizedOld === normalizedNew) <span class="cstat-no" title="statement not covered" >return true;</span></span>
     }
 <span class="cstat-no" title="statement not covered" >    return false;</span>
   } catch (err) {
@@ -4239,16 +4239,16 @@ export const <span class="cstat-no" title="statement not covered" >MAX_TOTAL_RES
 export const <span class="cstat-no" title="statement not covered" >MAX_INPUT_CHARS = 10000;</span>
 &nbsp;
 function <span class="fstat-no" title="function not covered" >isExcessiveRequest(</span>message: string): boolean {
-<span class="cstat-no" title="statement not covered" >  if (message.length &gt; MAX_INPUT_CHARS) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (message.length &gt; MAX_INPUT_CHARS) <span class="cstat-no" title="statement not covered" >return true;</span></span>
 &nbsp;
   const lower = <span class="cstat-no" title="statement not covered" >message.toLowerCase();</span>
   const match = <span class="cstat-no" title="statement not covered" >lower.match(/\b(\d+[,.]?\d*)\b\s*(words|pages|articles|essays)/);</span>
-<span class="cstat-no" title="statement not covered" >  if (match) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (match) {</span>
     const num = <span class="cstat-no" title="statement not covered" >parseInt(match[1].replace(/[,.]/g, ''), 10);</span>
-<span class="cstat-no" title="statement not covered" >    if (match[2] === 'words' &amp;&amp; num &gt; 2000) <span class="cstat-no" title="statement not covered" >return true;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (match[2] === 'pages' &amp;&amp; num &gt; 10) <span class="cstat-no" title="statement not covered" >return true;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (match[2] === 'articles' &amp;&amp; num &gt; 5) <span class="cstat-no" title="statement not covered" >return true;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (match[2] === 'essays' &amp;&amp; num &gt; 5) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (match[2] === 'words' &amp;&amp; num &gt; 2000) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (match[2] === 'pages' &amp;&amp; num &gt; 10) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (match[2] === 'articles' &amp;&amp; num &gt; 5) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (match[2] === 'essays' &amp;&amp; num &gt; 5) <span class="cstat-no" title="statement not covered" >return true;</span></span>
   }
 <span class="cstat-no" title="statement not covered" >  return false;</span>
 }
@@ -4262,7 +4262,7 @@ function <span class="fstat-no" title="function not covered" >chunkResponse(</sp
 }
 &nbsp;
 function <span class="fstat-no" title="function not covered" >shouldExtractShortTermMemory(</span>message: string): boolean {
-<span class="cstat-no" title="statement not covered" >  if (message.length &gt; 25) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (message.length &gt; 25) <span class="cstat-no" title="statement not covered" >return true;</span></span>
   const keywords = <span class="cstat-no" title="statement not covered" >['feel', 'sad', 'happy', 'mad', 'angry', 'wife', 'husband', 'friend', 'boss', 'office', 'work', 'issue', 'problem', 'task', 'todo', 'buy', 'going', 'went', 'saw', 'met'];</span>
   const lower = <span class="cstat-no" title="statement not covered" >message.toLowerCase();</span>
 <span class="cstat-no" title="statement not covered" >  return keywords.some(<span class="fstat-no" title="function not covered" >k </span>=&gt; <span class="cstat-no" title="statement not covered" >lower.includes(k))</span>;</span>
@@ -4444,7 +4444,7 @@ function <span class="fstat-no" title="function not covered" >convertNovaTable(<
     const lines = <span class="cstat-no" title="statement not covered" >tableContent.split('\n')</span>
       .map(<span class="fstat-no" title="function not covered" >(l</span>: string) =&gt; <span class="cstat-no" title="statement not covered" >l.trim())</span>
       .filter(<span class="fstat-no" title="function not covered" >(l</span>: string) =&gt; <span class="cstat-no" title="statement not covered" >l.length &gt; 0)</span>;
-<span class="cstat-no" title="statement not covered" >    if (lines.length &lt; 2) <span class="cstat-no" title="statement not covered" >return tableContent; </span></span>// need header + at least 1 data row
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (lines.length &lt; 2) <span class="cstat-no" title="statement not covered" >return tableContent; </span></span>// need header + at least 1 data row
 &nbsp;
     // First line = headers
     const headers = <span class="cstat-no" title="statement not covered" >lines[0].split('|').map(<span class="fstat-no" title="function not covered" >(h</span>: string) =&gt; <span class="cstat-no" title="statement not covered" >h.trim())</span>.filter(Boolean);</span>
@@ -4468,9 +4468,9 @@ function <span class="fstat-no" title="function not covered" >convertNovaTable(<
 function <span class="fstat-no" title="function not covered" >timeAgo(</span>dateStr: string): string {
   const diff = <span class="cstat-no" title="statement not covered" >Date.now() - new Date(dateStr).getTime();</span>
   const minutes = <span class="cstat-no" title="statement not covered" >Math.floor(diff / 60000);</span>
-<span class="cstat-no" title="statement not covered" >  if (minutes &lt; 60) <span class="cstat-no" title="statement not covered" >return `${minutes} minutes ago`;</span></span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (minutes &lt; 60) <span class="cstat-no" title="statement not covered" >return `${minutes} minutes ago`;</span></span>
   const hours = <span class="cstat-no" title="statement not covered" >Math.floor(minutes / 60);</span>
-<span class="cstat-no" title="statement not covered" >  if (hours &lt; 24) <span class="cstat-no" title="statement not covered" >return `${hours} hours ago`;</span></span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (hours &lt; 24) <span class="cstat-no" title="statement not covered" >return `${hours} hours ago`;</span></span>
   const days = <span class="cstat-no" title="statement not covered" >Math.floor(hours / 24);</span>
 <span class="cstat-no" title="statement not covered" >  return `${days} days ago`;</span>
 }
@@ -4484,15 +4484,15 @@ function <span class="fstat-no" title="function not covered" >timeAgo(</span>dat
  */
 function <span class="fstat-no" title="function not covered" >parseLLMResponse(</span>rawReply: string): string[] {
 <span class="cstat-no" title="statement not covered" >  rawReply = rawReply.trim();</span>
-<span class="cstat-no" title="statement not covered" >  if (!rawReply) <span class="cstat-no" title="statement not covered" >return [];</span></span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (!rawReply) <span class="cstat-no" title="statement not covered" >return [];</span></span>
 &nbsp;
   // Level 1: Try explicit &lt;NOVA_MSG&gt; or &lt;NOVA_MESSAGE_BREAK&gt; tags
-<span class="cstat-no" title="statement not covered" >  if (rawReply.includes('&lt;NOVA_MSG&gt;') || rawReply.includes('&lt;NOVA_MESSAGE_BREAK&gt;')) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (rawReply.includes('&lt;NOVA_MSG&gt;') || rawReply.includes('&lt;NOVA_MESSAGE_BREAK&gt;')) {</span>
     const segments = <span class="cstat-no" title="statement not covered" >rawReply</span>
       .split(/&lt;\/?NOVA_MSG&gt;|&lt;\/?NOVA_MESSAGE_BREAK&gt;/)
       .map(<span class="fstat-no" title="function not covered" >m </span>=&gt; <span class="cstat-no" title="statement not covered" >m.trim())</span>
       .filter(Boolean);
-<span class="cstat-no" title="statement not covered" >    if (segments.length &gt; 0) <span class="cstat-no" title="statement not covered" >return segments;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (segments.length &gt; 0) <span class="cstat-no" title="statement not covered" >return segments;</span></span>
   }
 &nbsp;
   // If no explicit tags are used, do not aggressively chop the message!
@@ -4584,7 +4584,7 @@ function <span class="fstat-no" title="function not covered" >sanitizeMarkdown(<
   const cleaned = <span class="cstat-no" title="statement not covered" >lines.map(<span class="fstat-no" title="function not covered" >line </span>=&gt; {</span>
     const trimmed = <span class="cstat-no" title="statement not covered" >line.trim();</span>
     // ANY line starting with | is treated as a table row
-<span class="cstat-no" title="statement not covered" >    if (trimmed.startsWith('|')) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (trimmed.startsWith('|')) {</span>
       // Split by | and clean each cell individually
       const parts = <span class="cstat-no" title="statement not covered" >line.split('|');</span>
       const sanitizedParts = <span class="cstat-no" title="statement not covered" >parts.map(<span class="fstat-no" title="function not covered" >cell </span>=&gt; <span class="cstat-no" title="statement not covered" >sanitizeTableCell(cell))</span>;</span>
@@ -4616,7 +4616,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 <span class="fstat-no" title="function not covered" >  async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {
 <span class="cstat-no" title="statement not covered" >    try {</span>
       const parseResult = <span class="cstat-no" title="statement not covered" >ChatSchema.safeParse(req.body);</span>
-<span class="cstat-no" title="statement not covered" >      if (!parseResult.success) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!parseResult.success) {</span>
 <span class="cstat-no" title="statement not covered" >        throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');</span>
       }
 &nbsp;
@@ -4643,11 +4643,11 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       }
 &nbsp;
 <span class="cstat-no" title="statement not covered" >      for (const msg of normalizedMessages) {</span>
-<span class="cstat-no" title="statement not covered" >        if (msg.reply_to_id &amp;&amp; !UUID_REGEX.test(msg.reply_to_id)) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (msg.reply_to_id &amp;&amp; !UUID_REGEX.test(msg.reply_to_id)) {</span>
 <span class="cstat-no" title="statement not covered" >          logger.warn('[Chat] Stripping malformed legacy reply_to_id', { reply_to_id: msg.reply_to_id, userId });</span>
 <span class="cstat-no" title="statement not covered" >          msg.reply_to_id = undefined;</span>
         }
-<span class="cstat-no" title="statement not covered" >        if (msg.client_message_id &amp;&amp; !UUID_REGEX.test(msg.client_message_id)) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (msg.client_message_id &amp;&amp; !UUID_REGEX.test(msg.client_message_id)) {</span>
 <span class="cstat-no" title="statement not covered" >          logger.warn('[Chat] Stripping malformed legacy client_message_id', { client_message_id: msg.client_message_id, userId });</span>
 <span class="cstat-no" title="statement not covered" >          msg.client_message_id = undefined;</span>
         }
@@ -4670,7 +4670,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       let activeConversationId = <span class="cstat-no" title="statement not covered" >conversation_id || crypto.randomUUID();</span>
 &nbsp;
       const isStreaming = <span class="cstat-no" title="statement not covered" >req.headers.accept === 'text/event-stream';</span>
-<span class="cstat-no" title="statement not covered" >      if (isStreaming) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >        res.setHeader('Content-Type', 'text/event-stream');</span>
 <span class="cstat-no" title="statement not covered" >        res.setHeader('Cache-Control', 'no-cache');</span>
 <span class="cstat-no" title="statement not covered" >        res.setHeader('Connection', 'keep-alive');</span>
@@ -4692,12 +4692,12 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       } else {
 <span class="cstat-no" title="statement not covered" >        for (const msg of normalizedMessages) {</span>
           let text = <span class="cstat-no" title="statement not covered" >msg.message;</span>
-<span class="cstat-no" title="statement not covered" >          if (msg.reply_to_content) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (msg.reply_to_content) {</span>
 <span class="cstat-no" title="statement not covered" >            text = `[Replying to: "${msg.reply_to_content}"]\n\n${text}`;</span>
           }
-<span class="cstat-no" title="statement not covered" >          if (msg.image_base64) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (msg.image_base64) {</span>
             const imageDesc = <span class="cstat-no" title="statement not covered" >await visionService.describeSharedImage(msg.image_base64);</span>
-<span class="cstat-no" title="statement not covered" >            if (imageDesc) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (imageDesc) {</span>
 <span class="cstat-no" title="statement not covered" >              if (imageDesc.includes('vision analysis unavailable')) {</span>
 <span class="cstat-no" title="statement not covered" >                text = `[User just shared an image but vision analysis is unavailable. You MUST ask them what is in it — e.g., "Dikha na kya hai isme!" or "Kya bheja hai bhai?"]\n\n${text}`;</span>
               } else {
@@ -4711,7 +4711,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       }
 &nbsp;
       // ── Degraded Mode: serve from in-memory buffer ─────────────
-<span class="cstat-no" title="statement not covered" >      if (isDegraded) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isDegraded) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.warn('Chat running in DEGRADED mode', { userId });</span>
 <span class="cstat-no" title="statement not covered" >        degradedMode.appendMessage(userId, 'user', primaryMessage);</span>
         const recentMessages = <span class="cstat-no" title="statement not covered" >degradedMode.getRecentMessages(userId);</span>
@@ -4791,11 +4791,11 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
           
 <span class="cstat-no" title="statement not covered" >          if (result.error) {</span>
 <span class="cstat-no" title="statement not covered" >            logger.error('[Chat] DB: Failed to save user message (continuing in memory)', { error: result.error, userId, is_proactive });</span>
-          } else <span class="cstat-no" title="statement not covered" >if (result.data) {</span>
+          } else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (result.data) {</span>
             // 1.1 Hidden context for image
-<span class="cstat-no" title="statement not covered" >            if (msg.image_base64 &amp;&amp; msg.message.includes('[User attached an image showing:')) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (msg.image_base64 &amp;&amp; msg.message.includes('[User attached an image showing:')) {</span>
               const imageDescMatch = <span class="cstat-no" title="statement not covered" >msg.message.match(/\[User attached an image showing: (.*?)\]/);</span>
-<span class="cstat-no" title="statement not covered" >              if (imageDescMatch &amp;&amp; imageDescMatch[1]) {</span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (imageDescMatch &amp;&amp; imageDescMatch[1]) {</span>
 <span class="cstat-no" title="statement not covered" >                try {</span>
 <span class="cstat-no" title="statement not covered" >                  await supabaseAdmin.from('chat_history')</span>
                     .insert({
@@ -4818,7 +4818,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       // If the user signalled sleep/unavailability, write the DB lock IMMEDIATELY so
       // NACE + follow-up engines stay silent — don't wait for the reactive sleep-guard.
       // Otherwise cancel any pending follow-ups since the user replied.
-<span class="cstat-no" title="statement not covered" >      if (!is_proactive) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!is_proactive) {</span>
 <span class="cstat-no" title="statement not covered" ><span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >        import('</span>../services/NovaFollowupService').t</span>hen(<span class="fstat-no" title="function not covered" >({</span> novaFollowupService, classifyUnavailability }) =&gt; {</span>
           const unavailability = <span class="cstat-no" title="statement not covered" >classifyUnavailability(primaryMessage);</span>
 <span class="cstat-no" title="statement not covered" >          if (unavailability) {</span>
@@ -4835,7 +4835,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
           status: 'online',
           updated_at: new Date().toISOString()
         }).then(<span class="fstat-no" title="function not covered" >({</span> error }) =&gt; {
-<span class="cstat-no" title="statement not covered" >          if (error) <span class="cstat-no" title="statement not covered" >logger.warn('Failed to update presence', { error });</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >logger.warn('Failed to update presence', { error });</span></span>
         }, <span class="fstat-no" title="function not covered" >e </span>=&gt; <span class="cstat-no" title="statement not covered" >logger.warn('[Chat] presence upsert threw', { error: e }))</span>;
 &nbsp;
         // Reset silent_visit_count and user_busy_until on user message
@@ -4843,13 +4843,13 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
           { user_id: userId, key: 'silent_visit_count', value: '0', updated_at: new Date().toISOString() },
           { user_id: userId, key: 'user_busy_until', value: '', updated_at: new Date().toISOString() }
         ], { onConflict: 'user_id, key' }).then(<span class="fstat-no" title="function not covered" >({</span> error }) =&gt; {
-<span class="cstat-no" title="statement not covered" >          if (error) <span class="cstat-no" title="statement not covered" >logger.warn('[Chat] Failed to reset working memory', { error });</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >logger.warn('[Chat] Failed to reset working memory', { error });</span></span>
         });
       }
 &nbsp;
       // Real-time correction detection: If user replied to a specific Nova message,
       // check if it's a correction and auto-generate a behavioral patch.
-<span class="cstat-no" title="statement not covered" >      if (reply_to_content &amp;&amp; !is_proactive) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (reply_to_content &amp;&amp; !is_proactive) {</span>
 <span class="cstat-no" title="statement not covered" ><span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >        import('</span>../services/NovaRealtimeLearningService').t</span>hen(<span class="fstat-no" title="function not covered" >({</span> novaRealtimeLearning }) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >          novaRealtimeLearning.analyzeCorrection(userId, primaryMessage, reply_to_content)</span>
             .catch(<span class="fstat-no" title="function not covered" >e </span>=&gt; <span class="cstat-no" title="statement not covered" >logger.warn('[REALTIME LEARNING] Background correction analysis failed', { error: e }))</span>;
@@ -4863,7 +4863,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 &nbsp;
       // 2. If fast async mode is requested, return 202 IMMEDIATELY NOW THAT THE MESSAGE IS IN DB
       // so the client can mark it as delivered. The rest happens in the background.
-<span class="cstat-no" title="statement not covered" >      if (async_mode) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (async_mode) {</span>
 <span class="cstat-no" title="statement not covered" >        res.status(202).json({</span>
           message: 'Processing in background',
           conversation_id: activeConversationId,
@@ -4881,7 +4881,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       const ASYNC_HARD_DEADLINE_MS = <span class="cstat-no" title="statement not covered" >90_000;</span>
       let asyncDeadlineTimer: any = <span class="cstat-no" title="statement not covered" >null;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (async_mode) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (async_mode) {</span>
 <span class="cstat-no" title="statement not covered" >        asyncDeadlineTimer = setTimeout(<span class="fstat-no" title="function not covered" >async </span>() =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >          logger.warn('[ASYNC] Request exceeded 90s deadline. This is a log-only watchdog — a reply that completes despite the delay is still saved and pushed.', { userId });</span>
         }, ASYNC_HARD_DEADLINE_MS);
@@ -4896,7 +4896,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       const lockToken = <span class="cstat-no" title="statement not covered" >crypto.randomUUID();</span>
       const newLock = <span class="cstat-no" title="statement not covered" >new Promise&lt;void&gt;(<span class="fstat-no" title="function not covered" >resolve </span>=&gt; { <span class="cstat-no" title="statement not covered" >releaseLock = resolve; </span>});</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (previousEntry) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (previousEntry) {</span>
         // Wait for previous request with timeout
         let mutexTimeoutId: NodeJS.Timeout | null = <span class="cstat-no" title="statement not covered" >null;</span>
         const timeoutPromise = <span class="cstat-no" title="statement not covered" >new Promise&lt;void&gt;(<span class="fstat-no" title="function not covered" >(_</span>, reject) =&gt; {</span>
@@ -4917,7 +4917,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 <span class="cstat-no" title="statement not covered" >            throw err;</span>
           }
         } finally {
-<span class="cstat-no" title="statement not covered" >          if (mutexTimeoutId) <span class="cstat-no" title="statement not covered" >clearTimeout(mutexTimeoutId);</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (mutexTimeoutId) <span class="cstat-no" title="statement not covered" >clearTimeout(mutexTimeoutId);</span></span>
         }
       }
 &nbsp;
@@ -4931,7 +4931,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 <span class="cstat-no" title="statement not covered" >      try {</span>
 &nbsp;
         // DEBOUNCE CHECK: Are there any NEWER user messages in this conversation?
-<span class="cstat-no" title="statement not covered" >        if (!is_proactive) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!is_proactive) {</span>
           const { data: latestUserMsg } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
             .from('chat_history')
             .select('id')
@@ -4946,18 +4946,18 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
             .limit(1)
             .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >          if (latestUserMsg &amp;&amp; latestUserMsg.id !== userMessageId) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (latestUserMsg &amp;&amp; latestUserMsg.id !== userMessageId) {</span>
 <span class="cstat-no" title="statement not covered" >            logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId });</span>
 <span class="cstat-no" title="statement not covered" >            if (isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >              res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);</span>
 <span class="cstat-no" title="statement not covered" >              res.end();</span>
-            } else <span class="cstat-no" title="statement not covered" >if (!async_mode) {</span>
+            } else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (!async_mode) {</span>
               // Only send a body in sync mode. In async mode the 202 was already flushed;
               // writing again here throws ERR_HTTP_HEADERS_SENT and triggers a spurious
               // FALLBACK_REPLY save. The newer message's own request will generate the reply.
 <span class="cstat-no" title="statement not covered" >              res.status(200).json({ skipped: true, reason: 'debounced' });</span>
             }
-<span class="cstat-no" title="statement not covered" >            if (asyncDeadlineTimer) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (asyncDeadlineTimer) {</span>
 <span class="cstat-no" title="statement not covered" >              clearTimeout(asyncDeadlineTimer);</span>
             }
 <span class="cstat-no" title="statement not covered" >            return; </span>// Abort LLM generation, the newer message's request will handle it
@@ -5069,14 +5069,14 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 <span class="cstat-no" title="statement not covered" >      context_ready_ms = Date.now();</span>
 <span class="cstat-no" title="statement not covered" >      logger.info('[Chat] Parallel context fetch completed', { userId, durationMs: dbDuration });</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (searchData) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (searchData) {</span>
 <span class="cstat-no" title="statement not covered" >        effectiveMessage = `${searchData}\n\nUser's question: ${effectiveMessage}`;</span>
 <span class="cstat-no" title="statement not covered" >        logger.info('[Chat] Web Search prepended to effectiveMessage');</span>
       }
 &nbsp;
       // ── Unpack results ─────────────────────────────────────────────────────────
       let profile = <span class="cstat-no" title="statement not covered" >profileResult.data as any;</span>
-<span class="cstat-no" title="statement not covered" >      if (profile &amp;&amp; !cachedProfile) <span class="cstat-no" title="statement not covered" >cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (profile &amp;&amp; !cachedProfile) <span class="cstat-no" title="statement not covered" >cache.set(profileCacheKey, profile, CACHE_TTL.PROFILE_MS, CACHE_NS.PROFILE);</span></span>
 &nbsp;
       const FALLBACK_PREFIXES = <span class="cstat-no" title="statement not covered" >[ 'Yaar, kuch technical issue', 'Yaar, thoda technical glitch', 'kuch technical issue aa gaya', '[SYSTEM]', 'Thodi der mein phir try karo', 'reminder set nahi kar sakta', 'reminder system thoda busy', 'Nova ka reminder system', 'Sorry yaar, reminder', 'system busy hai', 'set nahi kar sakta' ];</span>
       const isFallback = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(c</span>ontent: string) =&gt; <span class="cstat-no" title="statement not covered" >FALLBACK_PREFIXES.some(<span class="fstat-no" title="function not covered" >p </span>=&gt; <span class="cstat-no" title="statement not covered" >content.includes(p))</span>;</span></span>
@@ -5087,14 +5087,14 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
         .map(<span class="fstat-no" title="function not covered" >msg </span>=&gt; (<span class="cstat-no" title="statement not covered" >{ role: msg.role as 'user'|'assistant'|'system', content: msg.reply_to_content ? `[Replying to: "${msg.reply_to_content}"]\n${msg.content}` : msg.content })</span>);
 &nbsp;
       let recentCrossSessionContext = <span class="cstat-no" title="statement not covered" >'';</span>
-<span class="cstat-no" title="statement not covered" >      if (crossSessionResult.data &amp;&amp; (crossSessionResult.data as any[]).length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (crossSessionResult.data &amp;&amp; (crossSessionResult.data as any[]).length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        recentCrossSessionContext = (crossSessionResult.data as any[]).filter(<span class="fstat-no" title="function not covered" >m </span>=&gt; <span class="cstat-no" title="statement not covered" >!isFallback(m.content))</span>.reverse().map(<span class="fstat-no" title="function not covered" >m </span>=&gt; <span class="cstat-no" title="statement not covered" >`${m.role === 'assistant' ? 'Nova' : 'User'}: ${m.content.substring(0, 200)}${m.content.length &gt; 200 ? '...' : ''}`)</span>.join('\n');</span>
       }
 &nbsp;
       let workingMemories: { key: string; value: string }[] = <span class="cstat-no" title="statement not covered" >[];</span>
-<span class="cstat-no" title="statement not covered" >      if (!skipMemory) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!skipMemory) {</span>
 <span class="cstat-no" title="statement not covered" >        if (cachedWm) <span class="cstat-no" title="statement not covered" >workingMemories = cachedWm;</span></span>
-        else <span class="cstat-no" title="statement not covered" >if (wmResult.data) {</span>
+        else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (wmResult.data) {</span>
 <span class="cstat-no" title="statement not covered" >          workingMemories = (wmResult.data as any[]).map(<span class="fstat-no" title="function not covered" >wm </span>=&gt; (<span class="cstat-no" title="statement not covered" >{ key: wm.key, value: wm.value })</span>);</span>
 <span class="cstat-no" title="statement not covered" >          cache.set(wmCacheKey, workingMemories, CACHE_TTL.WORKING_MEMORY_MS, CACHE_NS.WORKING_MEMORY);</span>
         }
@@ -5103,13 +5103,13 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       const memories: any[] = <span class="cstat-no" title="statement not covered" >Array.isArray(memoriesResult) ? memoriesResult : [];</span>
 &nbsp;
       let shortTermMemories: any[] = <span class="cstat-no" title="statement not covered" >[];</span>
-<span class="cstat-no" title="statement not covered" >      if (!skipMemory) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!skipMemory) {</span>
         const allFetched = (<span class="cstat-no" title="statement not covered" >stmResult.data as any[]) || [];</span>
         let stmTokens = <span class="cstat-no" title="statement not covered" >0;</span>
 <span class="cstat-no" title="statement not covered" >        for (const m of allFetched) {</span>
           const memStr = <span class="cstat-no" title="statement not covered" >`${m.memory} ${m.emotion || ''}`;</span>
           const tokens = <span class="cstat-no" title="statement not covered" >Math.ceil(memStr.length / 4);</span>
-<span class="cstat-no" title="statement not covered" >          if (stmTokens + tokens &gt; 600) <span class="cstat-no" title="statement not covered" >break;</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (stmTokens + tokens &gt; 600) <span class="cstat-no" title="statement not covered" >break;</span></span>
 <span class="cstat-no" title="statement not covered" >          shortTermMemories.push({ memory: m.memory, emotion: m.emotion, importance: m.importance, timestamp: m.created_at ? timeAgo(m.created_at) : null });</span>
 <span class="cstat-no" title="statement not covered" >          stmTokens += tokens;</span>
         }
@@ -5132,33 +5132,33 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       let isWeekend = <span class="cstat-no" title="statement not covered" >FRIDAY_SAT_WEEKEND.includes(userCountry) ? dayIdx === 5 || dayIdx === 6 : dayIdx === 0 || dayIdx === 6;</span>
 &nbsp;
       let scheduleOverrideNote: string | undefined;
-<span class="cstat-no" title="statement not covered" >      if (workingMemories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (workingMemories.length &gt; 0) {</span>
         const todayName = <span class="cstat-no" title="statement not covered" >DAY_NAMES[dayIdx].toLowerCase();</span>
 <span class="cstat-no" title="statement not covered" >        for (const wm of workingMemories) {</span>
           const val = <span class="cstat-no" title="statement not covered" >wm.value.toLowerCase();</span>
-<span class="cstat-no" title="statement not covered" >          if (val.includes(todayName) &amp;&amp; (val.includes('working') || val.includes('work day') || val.includes('office'))) { <span class="cstat-no" title="statement not covered" >isWeekend = false; <span class="cstat-no" title="statement not covered" ></span>break; </span>}</span>
-<span class="cstat-no" title="statement not covered" >          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off')) &amp;&amp; val.includes(todayName)) { <span class="cstat-no" title="statement not covered" >isWeekend = true; <span class="cstat-no" title="statement not covered" ></span>break; </span>}</span>
-<span class="cstat-no" title="statement not covered" >          if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off'))) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (val.includes(todayName) &amp;&amp; (val.includes('working') || val.includes('work day') || val.includes('office'))) { <span class="cstat-no" title="statement not covered" >isWeekend = false; <span class="cstat-no" title="statement not covered" ></span>break; </span>}</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off')) &amp;&amp; val.includes(todayName)) { <span class="cstat-no" title="statement not covered" >isWeekend = true; <span class="cstat-no" title="statement not covered" ></span>break; </span>}</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if ((val.includes('weekoff') || val.includes('week off') || val.includes('day off'))) {</span>
             const DAYS_LC = <span class="cstat-no" title="statement not covered" >['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];</span>
             const weekoffDay = <span class="cstat-no" title="statement not covered" >DAYS_LC.find(<span class="fstat-no" title="function not covered" >d </span>=&gt; <span class="cstat-no" title="statement not covered" >val.includes(d))</span>;</span>
-<span class="cstat-no" title="statement not covered" >            if (weekoffDay &amp;&amp; weekoffDay !== todayName) { <span class="cstat-no" title="statement not covered" >isWeekend = false; <span class="cstat-no" title="statement not covered" ></span>break; </span>}</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (weekoffDay &amp;&amp; weekoffDay !== todayName) { <span class="cstat-no" title="statement not covered" >isWeekend = false; <span class="cstat-no" title="statement not covered" ></span>break; </span>}</span>
           }
         }
         const calendarIsWeekend = <span class="cstat-no" title="statement not covered" >FRIDAY_SAT_WEEKEND.includes(userCountry) ? dayIdx === 5 || dayIdx === 6 : dayIdx === 0 || dayIdx === 6;</span>
-<span class="cstat-no" title="statement not covered" >        if (calendarIsWeekend !== isWeekend) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (calendarIsWeekend !== isWeekend) {</span>
 <span class="cstat-no" title="statement not covered" >          scheduleOverrideNote = !isWeekend ? `⚠️ SCHEDULE OVERRIDE: The calendar says today (${DAY_NAMES[dayIdx]}) is a weekend, BUT the user's actual work schedule says they are WORKING today. Treat today as a NORMAL WORKING DAY.` : `⚠️ SCHEDULE OVERRIDE: The user's memory says today (${DAY_NAMES[dayIdx]}) is their WEEKOFF / day off. Treat today as a rest day.`;</span>
         }
       }
 &nbsp;
       let gapMinutes: number | null = <span class="cstat-no" title="statement not covered" >null;</span>
-<span class="cstat-no" title="statement not covered" >      if (lastMsgResult.data?.created_at) <span class="cstat-no" title="statement not covered" >gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (lastMsgResult.data?.created_at) <span class="cstat-no" title="statement not covered" >gapMinutes = (Date.now() - new Date(lastMsgResult.data.created_at).getTime()) / 60000;</span></span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (gapMinutes !== null) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (gapMinutes !== null) {</span>
 <span class="cstat-no" title="statement not covered" >        if (gapMinutes &gt; 1440) {</span>
 <span class="cstat-no" title="statement not covered" >          activeConversationId = crypto.randomUUID();</span>
-<span class="cstat-no" title="statement not covered" >          if (!is_proactive &amp;&amp; userMessageId &amp;&amp; !userMessageId.startsWith('msg_')) <span class="cstat-no" title="statement not covered" >supabaseAdmin.from('chat_history').update({ conversation_id: activeConversationId }).eq('id', userMessageId).then(<span class="fstat-no" title="function not covered" >res </span>=&gt; <span class="cstat-no" title="statement not covered" >res)</span>;</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (!is_proactive &amp;&amp; userMessageId &amp;&amp; !userMessageId.startsWith('msg_')) <span class="cstat-no" title="statement not covered" >supabaseAdmin.from('chat_history').update({ conversation_id: activeConversationId }).eq('id', userMessageId).then(<span class="fstat-no" title="function not covered" >res </span>=&gt; <span class="cstat-no" title="statement not covered" >res)</span>;</span></span>
 <span class="cstat-no" title="statement not covered" >          recentMessages = recentMessages.length &gt; 0 &amp;&amp; recentMessages[recentMessages.length - 1].role === 'user' ? [recentMessages[recentMessages.length - 1]] : [];</span>
-        } else <span class="cstat-no" title="statement not covered" >if (gapMinutes &gt; 360) {</span>
+        } else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (gapMinutes &gt; 360) {</span>
 <span class="cstat-no" title="statement not covered" >          recentMessages = recentMessages.slice(-3);</span>
         }
       }
@@ -5179,7 +5179,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 <span class="cstat-no" title="statement not covered" >      situationBrief = situationalAwareness.buildBrief(situationCtx);</span>
 &nbsp;
       let temporalContextBlock = <span class="cstat-no" title="statement not covered" >'';</span>
-<span class="cstat-no" title="statement not covered" >      if (temporalResult.data &amp;&amp; temporalResult.data.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (temporalResult.data &amp;&amp; temporalResult.data.length &gt; 0) {</span>
         const lines = <span class="cstat-no" title="statement not covered" >temporalResult.data.reverse().map(<span class="fstat-no" title="function not covered" >(m</span>: any) =&gt; {</span>
           const d = <span class="cstat-no" title="statement not covered" >new Date(new Date(m.created_at).getTime() + tzMs);</span>
           const tStr = <span class="cstat-no" title="statement not covered" >`${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()]}, ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')} ${tzLabel}`;</span>
@@ -5206,10 +5206,10 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 &nbsp;
       // Dispatch durable fact persistence immediately for deterministic facts &amp; corrections
       const explicitFacts = <span class="cstat-no" title="statement not covered" >turnAnalysis.units.filter(<span class="fstat-no" title="function not covered" >u </span>=&gt; <span class="cstat-no" title="statement not covered" >(u.type === 'fact' || u.type === 'correction') &amp;&amp; u.factKey &amp;&amp; u.factKey !== 'UNKNOWN_RELATION' &amp;&amp; u.factValue)</span>;</span>
-<span class="cstat-no" title="statement not covered" >      if (explicitFacts.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (explicitFacts.length &gt; 0) {</span>
         const factMap = <span class="cstat-no" title="statement not covered" >new Map&lt;string, { value: string, is_protected?: boolean, factClass?: string }&gt;();</span>
 <span class="cstat-no" title="statement not covered" >        for (const f of explicitFacts) {</span>
-<span class="cstat-no" title="statement not covered" >          if (f.factKey &amp;&amp; f.factKey !== 'UNKNOWN_RELATION' &amp;&amp; f.factValue) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (f.factKey &amp;&amp; f.factKey !== 'UNKNOWN_RELATION' &amp;&amp; f.factValue) {</span>
 <span class="cstat-no" title="statement not covered" >            factMap.set(f.factKey, {</span>
               value: f.factValue,
               is_protected: f.isProtected || false,
@@ -5260,7 +5260,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
       let rawReply = <span class="cstat-no" title="statement not covered" >'';</span>
 <span class="cstat-no" title="statement not covered" >      if (isExcessiveRequest(effectiveMessage)) {</span>
 <span class="cstat-no" title="statement not covered" >        rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";</span>
-<span class="cstat-no" title="statement not covered" >        if (isStreaming) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >          res.setHeader('Content-Type', 'text/event-stream');</span>
 <span class="cstat-no" title="statement not covered" >          res.setHeader('Cache-Control', 'no-cache');</span>
 <span class="cstat-no" title="statement not covered" >          res.setHeader('Connection', 'keep-alive');</span>
@@ -5314,12 +5314,12 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
                       novaBrain.processInteraction(userId, normalizedMessages, brainContext),
                       retryTimeoutPromise,
                     ]);
-<span class="cstat-no" title="statement not covered" >                    if (retryResult.reply) {</span>
+<span class="cstat-no" title="statement not covered" >                    <span class="missing-if-branch" title="if path not taken" >I</span>if (retryResult.reply) {</span>
 <span class="cstat-no" title="statement not covered" >                      retrySucceeded = true;</span>
 <span class="cstat-no" title="statement not covered" >                      rawReply = retryResult.reply;</span>
 <span class="cstat-no" title="statement not covered" >                      res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);</span>
-<span class="cstat-no" title="statement not covered" >                      if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
-<span class="cstat-no" title="statement not covered" >                      if (retryResult.subconscious_actions?.length) {</span>
+<span class="cstat-no" title="statement not covered" >                      <span class="missing-if-branch" title="if path not taken" >I</span>if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
+<span class="cstat-no" title="statement not covered" >                      <span class="missing-if-branch" title="if path not taken" >I</span>if (retryResult.subconscious_actions?.length) {</span>
 <span class="cstat-no" title="statement not covered" >                        extractedActions = retryResult.subconscious_actions;</span>
                         const { backgroundActions } = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >await import('</span>../services/BackgroundActionService');</span>
 <span class="cstat-no" title="statement not covered" >                        backgroundActions.processActions(userId, activeConversationId, retryResult.subconscious_actions, userCountry).catch(<span class="fstat-no" title="function not covered" >(e</span>: any) =&gt; {</span>
@@ -5328,7 +5328,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
                       }
                     }
                   } finally {
-<span class="cstat-no" title="statement not covered" >                    if (retryTimer) <span class="cstat-no" title="statement not covered" >clearTimeout(retryTimer);</span></span>
+<span class="cstat-no" title="statement not covered" >                    <span class="missing-if-branch" title="if path not taken" >I</span>if (retryTimer) <span class="cstat-no" title="statement not covered" >clearTimeout(retryTimer);</span></span>
                   }
                 } catch (retryErr: any) {
 <span class="cstat-no" title="statement not covered" >                  logger.error('[Chat] Non-streaming retry failed after stream interruption', {</span>
@@ -5336,7 +5336,7 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
                   });
                 }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >                if (retrySucceeded) <span class="cstat-no" title="statement not covered" >break; </span></span>// stream effectively done; drop to the normal save path
+<span class="cstat-no" title="statement not covered" >                <span class="missing-if-branch" title="if path not taken" >I</span>if (retrySucceeded) <span class="cstat-no" title="statement not covered" >break; </span></span>// stream effectively done; drop to the normal save path
 &nbsp;
                 // Both the stream AND the retry failed — now, and only now, save the
                 // in-voice fallback so the user always gets a bubble (never a dead chat).
@@ -5349,12 +5349,12 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
 <span class="cstat-no" title="statement not covered" >                res.end();</span>
 <span class="cstat-no" title="statement not covered" >                return;</span>
               } finally {
-<span class="cstat-no" title="statement not covered" >                if (chunkTimeoutId) <span class="cstat-no" title="statement not covered" >clearTimeout(chunkTimeoutId);</span></span>
+<span class="cstat-no" title="statement not covered" >                <span class="missing-if-branch" title="if path not taken" >I</span>if (chunkTimeoutId) <span class="cstat-no" title="statement not covered" >clearTimeout(chunkTimeoutId);</span></span>
               }
 &nbsp;
               const { value, done } = <span class="cstat-no" title="statement not covered" >nextResult;</span>
-<span class="cstat-no" title="statement not covered" >              if (done) {</span>
-<span class="cstat-no" title="statement not covered" >                if (value &amp;&amp; value.subconscious_actions &amp;&amp; value.subconscious_actions.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (done) {</span>
+<span class="cstat-no" title="statement not covered" >                <span class="missing-if-branch" title="if path not taken" >I</span>if (value &amp;&amp; value.subconscious_actions &amp;&amp; value.subconscious_actions.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >                  extractedActions = value.subconscious_actions;</span>
                   const { backgroundActions } = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >await import('</span>../services/BackgroundActionService');</span>
                   // Execute in background
@@ -5364,11 +5364,11 @@ const backToBackTimers = <span class="cstat-no" title="statement not covered" >n
                 }
 <span class="cstat-no" title="statement not covered" >                break;</span>
               }
-<span class="cstat-no" title="statement not covered" >              if (value) {</span>
-<span class="cstat-no" title="statement not covered" >                if (!first_token_ms) <span class="cstat-no" title="statement not covered" >first_token_ms = Date.now();</span></span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (value) {</span>
+<span class="cstat-no" title="statement not covered" >                <span class="missing-if-branch" title="if path not taken" >I</span>if (!first_token_ms) <span class="cstat-no" title="statement not covered" >first_token_ms = Date.now();</span></span>
 <span class="cstat-no" title="statement not covered" >                rawReply += value;</span>
 <span class="cstat-no" title="statement not covered" >                res.write(`data: ${JSON.stringify({ type: 'chunk', content: value })}\n\n`);</span>
-<span class="cstat-no" title="statement not covered" >                if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
+<span class="cstat-no" title="statement not covered" >                <span class="missing-if-branch" title="if path not taken" >I</span>if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
               }
             }
           } else {
@@ -5424,29 +5424,29 @@ HINGLISH RULES:
 <span class="cstat-no" title="statement not covered" >                throw llmErr;</span>
               }
             } finally {
-<span class="cstat-no" title="statement not covered" >              if (llmTimeoutId) <span class="cstat-no" title="statement not covered" >clearTimeout(llmTimeoutId);</span></span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (llmTimeoutId) <span class="cstat-no" title="statement not covered" >clearTimeout(llmTimeoutId);</span></span>
             }
 &nbsp;
 <span class="cstat-no" title="statement not covered" >            rawReply = result.reply;</span>
-<span class="cstat-no" title="statement not covered" >            if (result.subconscious_actions &amp;&amp; result.subconscious_actions.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (result.subconscious_actions &amp;&amp; result.subconscious_actions.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >              extractedActions = result.subconscious_actions;</span>
             }
           }
           
           const llmDuration = <span class="cstat-no" title="statement not covered" >Date.now() - llm_started_ms!;</span>
 <span class="cstat-no" title="statement not covered" >          logger.info('[Chat] LLM response received', { userId, durationMs: llmDuration });</span>
-<span class="cstat-no" title="statement not covered" >          if (llmDuration &gt; 5000) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (llmDuration &gt; 5000) {</span>
 <span class="cstat-no" title="statement not covered" >            logger.warn('[Chat] LLM call slow', { userId, durationMs: llmDuration });</span>
           }
 &nbsp;
 &nbsp;
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
-<span class="cstat-no" title="statement not covered" >          if (responseConfig.shouldOfferTable &amp;&amp; !rawReply.includes('&lt;NOVA_TABLE&gt;')) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (responseConfig.shouldOfferTable &amp;&amp; !rawReply.includes('&lt;NOVA_TABLE&gt;')) {</span>
             const extraText = <span class="cstat-no" title="statement not covered" >'\n&lt;NOVA_MESSAGE_BREAK&gt;\nTable format mein dekhna chahega? Zyada clear hoga.';</span>
 <span class="cstat-no" title="statement not covered" >            rawReply += extraText;</span>
-<span class="cstat-no" title="statement not covered" >            if (isStreaming) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >              res.write(`data: ${JSON.stringify({ type: 'chunk', content: extraText })}\n\n`);</span>
-<span class="cstat-no" title="statement not covered" >              if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
             }
           }
         } catch (nvidiaError: any) {
@@ -5461,7 +5461,7 @@ HINGLISH RULES:
               source: 'nvidia_error_streaming',
             });
 <span class="cstat-no" title="statement not covered" >            res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);</span>
-<span class="cstat-no" title="statement not covered" >            if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
 <span class="cstat-no" title="statement not covered" >            res.end();</span>
 <span class="cstat-no" title="statement not covered" >            return;</span>
           } else <span class="cstat-no" title="statement not covered" >if (async_mode) {</span>
@@ -5482,7 +5482,7 @@ HINGLISH RULES:
       // Coverage Check and Fast Repair
       let coverage_repair_invoked = <span class="cstat-no" title="statement not covered" >false;</span>
       const uncoveredUnits = <span class="cstat-no" title="statement not covered" >TurnAnalyzer.getUncoveredUnits(turnAnalysis, rawReply);</span>
-<span class="cstat-no" title="statement not covered" >      if (uncoveredUnits.length &gt; 0 &amp;&amp; rawReply !== FALLBACK_REPLY) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (uncoveredUnits.length &gt; 0 &amp;&amp; rawReply !== FALLBACK_REPLY) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.warn('[Chat] Uncovered required units detected, injecting repair bubble', { uncoveredUnits });</span>
 <span class="cstat-no" title="statement not covered" >        try {</span>
           const { complete } = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >await import('</span>../lib/nvidia');</span>
@@ -5492,14 +5492,14 @@ HINGLISH RULES:
              { role: 'user', content: 'You missed answering/acknowledging this. Add a quick follow up.' }
           ], { maxTokens: 100, temperature: 0.7 });
           
-<span class="cstat-no" title="statement not covered" >          if (fastRepair &amp;&amp; fastRepair.trim().length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (fastRepair &amp;&amp; fastRepair.trim().length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >             coverage_repair_invoked = true;</span>
 <span class="cstat-no" title="statement not covered" >             logger.info('[Chat] Metric coverage_repair_invoked', { userId, uncoveredUnitsCount: uncoveredUnits.length });</span>
              const repairBubble = <span class="cstat-no" title="statement not covered" >'\n&lt;NOVA_MESSAGE_BREAK&gt;\n' + fastRepair.trim();</span>
 <span class="cstat-no" title="statement not covered" >             rawReply += repairBubble;</span>
-<span class="cstat-no" title="statement not covered" >             if (isStreaming) {</span>
+<span class="cstat-no" title="statement not covered" >             <span class="missing-if-branch" title="if path not taken" >I</span>if (isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >                res.write(`data: ${JSON.stringify({ type: 'chunk', content: repairBubble })}\n\n`);</span>
-<span class="cstat-no" title="statement not covered" >                if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
+<span class="cstat-no" title="statement not covered" >                <span class="missing-if-branch" title="if path not taken" >I</span>if (typeof (res as any).flush === 'function') (<span class="cstat-no" title="statement not covered" >res as any).flush();</span></span>
              }
           }
         } catch (repairErr) {
@@ -5507,14 +5507,14 @@ HINGLISH RULES:
         }
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (isStreaming) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);</span>
 <span class="cstat-no" title="statement not covered" >        res.end();</span>
       }
 &nbsp;
       let optionsArray: string[] | undefined;
       const optionsMatch = <span class="cstat-no" title="statement not covered" >rawReply.match(/&lt;OPTIONS&gt;([\s\S]*?)&lt;\/OPTIONS&gt;/);</span>
-<span class="cstat-no" title="statement not covered" >      if (optionsMatch) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (optionsMatch) {</span>
 <span class="cstat-no" title="statement not covered" >        try {</span>
 <span class="cstat-no" title="statement not covered" >          optionsArray = JSON.parse(optionsMatch[1]);</span>
 <span class="cstat-no" title="statement not covered" >          rawReply = rawReply.replace(/&lt;OPTIONS&gt;[\s\S]*?&lt;\/OPTIONS&gt;/, '').trim();</span>
@@ -5526,9 +5526,9 @@ HINGLISH RULES:
       // Add Emoji
       let parsedEmotion = <span class="cstat-no" title="statement not covered" >'joy';</span>
 <span class="cstat-no" title="statement not covered" >      try {</span>
-<span class="cstat-no" title="statement not covered" >        if (situationBrief) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (situationBrief) {</span>
           const emotionMatch = <span class="cstat-no" title="statement not covered" >situationBrief.match(/Current Emotion: (\w+)/);</span>
-<span class="cstat-no" title="statement not covered" >          if (emotionMatch &amp;&amp; emotionMatch[1]) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (emotionMatch &amp;&amp; emotionMatch[1]) {</span>
 <span class="cstat-no" title="statement not covered" >            parsedEmotion = emotionMatch[1].toLowerCase();</span>
           }
         }
@@ -5537,7 +5537,7 @@ HINGLISH RULES:
       // Extract Image Requests
       let generatedImages: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
       const imageMatch = <span class="cstat-no" title="statement not covered" >rawReply.match(/&lt;NOVA_IMAGE&gt;(.*?)&lt;\/NOVA_IMAGE&gt;/s);</span>
-<span class="cstat-no" title="statement not covered" >      if (imageMatch &amp;&amp; imageMatch[1]) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (imageMatch &amp;&amp; imageMatch[1]) {</span>
         const prompt = <span class="cstat-no" title="statement not covered" >imageMatch[1].trim();</span>
         const imageUrl = <span class="cstat-no" title="statement not covered" >`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&amp;height=1024&amp;nologo=true`;</span>
 <span class="cstat-no" title="statement not covered" >        generatedImages.push(`![${prompt}](${imageUrl})`);</span>
@@ -5545,9 +5545,9 @@ HINGLISH RULES:
       }
 &nbsp;
       // Extract Autonomous Vision requests
-<span class="cstat-no" title="statement not covered" >      if (rawReply.includes('&lt;NOVA_VISION&gt;')) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (rawReply.includes('&lt;NOVA_VISION&gt;')) {</span>
 <span class="cstat-no" title="statement not covered" >        rawReply = rawReply.replace(/&lt;NOVA_VISION&gt;/g, '').trim();</span>
-<span class="cstat-no" title="statement not covered" >        if (profile?.push_token) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (profile?.push_token) {</span>
 <span class="cstat-no" title="statement not covered" >          sendVisionSnapNotification(profile.push_token).catch(<span class="fstat-no" title="function not covered" >e </span>=&gt; </span>
 <span class="cstat-no" title="statement not covered" >            logger.error('[ChatRouter] Failed to send vision snap notification', { error: e.message })</span>
           );
@@ -5557,7 +5557,7 @@ HINGLISH RULES:
       let parsedMessages = <span class="cstat-no" title="statement not covered" >parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));</span>
       
       // Append generated images as separate bubbles after stripping so they aren't removed
-<span class="cstat-no" title="statement not covered" >      if (generatedImages.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (generatedImages.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        parsedMessages = [...parsedMessages, ...generatedImages];</span>
       }
 &nbsp;
@@ -5565,7 +5565,7 @@ HINGLISH RULES:
       const emotion = <span class="cstat-no" title="statement not covered" >parsedEmotion || 'neutral';</span>
       const messagesWithEmoji = <span class="cstat-no" title="statement not covered" >parsedMessages.map(<span class="fstat-no" title="function not covered" >msg </span>=&gt; {</span>
         // Don't add emoji to very short messages
-<span class="cstat-no" title="statement not covered" >        if (msg.length &lt; 15) <span class="cstat-no" title="statement not covered" >return msg;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (msg.length &lt; 15) <span class="cstat-no" title="statement not covered" >return msg;</span></span>
 <span class="cstat-no" title="statement not covered" >        return MessageFormatter.addEmoji(msg, emotion);</span>
       });
       
@@ -5576,9 +5576,9 @@ HINGLISH RULES:
       // Streaming: the 'done' event was already flushed above — writing again after
       // res.end() would throw. Non-streaming: send an empty 200 so the client never
       // hangs waiting for a reply that will never arrive.
-<span class="cstat-no" title="statement not covered" >      if (finalBubbles.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (finalBubbles.length === 0) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.info('[Chat] LLM returned a blank reply (likely Subconscious only). No bubbles generated.');</span>
-<span class="cstat-no" title="statement not covered" >        if (!isStreaming &amp;&amp; !async_mode) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!isStreaming &amp;&amp; !async_mode) {</span>
 <span class="cstat-no" title="statement not covered" >          res.status(200).json({</span>
             reply: '',
             messages: [],
@@ -5604,7 +5604,7 @@ HINGLISH RULES:
       // LLM call was in flight. The debounce above only guards the moment of lock acquisition;
       // if B lands after join(point) while A is still generating, saving A's reply now would
       // give the user a stale double-reply. Re-check and drop A if a newer user row exists.
-<span class="cstat-no" title="statement not covered" >      if (async_mode &amp;&amp; !is_proactive) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (async_mode &amp;&amp; !is_proactive) {</span>
         const { data: newerUserMsg } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
           .from('chat_history')
           .select('id')
@@ -5615,9 +5615,9 @@ HINGLISH RULES:
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-<span class="cstat-no" title="statement not covered" >        if (newerUserMsg &amp;&amp; newerUserMsg.id &amp;&amp; newerUserMsg.id !== userMessageId) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (newerUserMsg &amp;&amp; newerUserMsg.id &amp;&amp; newerUserMsg.id !== userMessageId) {</span>
 <span class="cstat-no" title="statement not covered" >          logger.warn('[Chat] Superseded reply dropped — a newer user message arrived during the LLM call', { userId, userMessageId, supersededBy: newerUserMsg.id });</span>
-<span class="cstat-no" title="statement not covered" >          if (asyncDeadlineTimer) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (asyncDeadlineTimer) {</span>
 <span class="cstat-no" title="statement not covered" >            clearTimeout(asyncDeadlineTimer);</span>
           }
 <span class="cstat-no" title="statement not covered" >          return;</span>
@@ -5653,20 +5653,20 @@ HINGLISH RULES:
 &nbsp;
         // Prepare thoughts array
         const thoughts: any[] = <span class="cstat-no" title="statement not covered" >[];</span>
-<span class="cstat-no" title="statement not covered" >        if (situationBrief) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (situationBrief) {</span>
           // Parse situationBrief into human-readable thoughts
           const emotionMatch = <span class="cstat-no" title="statement not covered" >situationBrief.match(/Last known mood:\s*(\w+)/);</span>
           const patternMatch = <span class="cstat-no" title="statement not covered" >situationBrief.match(/BEHAVIOR PATTERN:\s*([A-Z_]+)/);</span>
           const timeMatch = <span class="cstat-no" title="statement not covered" >situationBrief.match(/Right now:\s*([^\n]+)/);</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >          if (emotionMatch) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (emotionMatch) {</span>
 <span class="cstat-no" title="statement not covered" >            thoughts.push({</span>
               engine: '🧠 Emotional Intelligence',
               type: 'context',
               detail: `Sensing ${emotionMatch[1].toLowerCase()} vibes from you right now`
             });
           }
-<span class="cstat-no" title="statement not covered" >          if (patternMatch) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (patternMatch) {</span>
             const pattern = <span class="cstat-no" title="statement not covered" >patternMatch[1];</span>
             const patternLabels: Record&lt;string, string&gt; = <span class="cstat-no" title="statement not covered" >{</span>
               'ACTIVE_CHATTING': '💬 You\'re actively chatting — keeping up the energy!',
@@ -5680,7 +5680,7 @@ HINGLISH RULES:
               detail: patternLabels[pattern] || `Current vibe: ${pattern}`
             });
           }
-<span class="cstat-no" title="statement not covered" >          if (timeMatch) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (timeMatch) {</span>
 <span class="cstat-no" title="statement not covered" >            thoughts.push({</span>
               engine: '⏰ Time Awareness',
               type: 'context',
@@ -5690,7 +5690,7 @@ HINGLISH RULES:
         }
         
         // Push accessed working memories if any
-<span class="cstat-no" title="statement not covered" >        if (workingMemories &amp;&amp; workingMemories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (workingMemories &amp;&amp; workingMemories.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >          workingMemories.forEach(<span class="fstat-no" title="function not covered" >wm </span>=&gt; {</span>
             const safeKey = <span class="cstat-no" title="statement not covered" >wm.key || 'context';</span>
             const cleanKey = <span class="cstat-no" title="statement not covered" >String(safeKey).replace(/_/g, ' ').toLowerCase();</span>
@@ -5703,7 +5703,7 @@ HINGLISH RULES:
         }
         
         // Push accessed long term memories if any
-<span class="cstat-no" title="statement not covered" >        if (memories &amp;&amp; memories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (memories &amp;&amp; memories.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >          memories.slice(0, 3).forEach(<span class="fstat-no" title="function not covered" >m </span>=&gt; {</span>
 <span class="cstat-no" title="statement not covered" >            thoughts.push({</span>
               engine: 'MemoryCore',
@@ -5713,7 +5713,7 @@ HINGLISH RULES:
           });
         }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >        if (extractedActions &amp;&amp; extractedActions.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (extractedActions &amp;&amp; extractedActions.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >          extractedActions.forEach(<span class="fstat-no" title="function not covered" >(a</span>ction: any) =&gt; {</span>
             let detail = <span class="cstat-no" title="statement not covered" >`Executed action: ${action.tool}`;</span>
 <span class="cstat-no" title="statement not covered" >            if (action.tool === 'MemoryRepository' &amp;&amp; action.action === 'save') {</span>
@@ -5734,8 +5734,8 @@ HINGLISH RULES:
 <span class="cstat-no" title="statement not covered" >              if (action.action === 'save_short_term') <span class="cstat-no" title="statement not covered" >detail = `Saved to short-term memory: ${action.data?.summary || 'User context'}`;</span></span>
               else <span class="cstat-no" title="statement not covered" >if (action.action === 'save_long_term') <span class="cstat-no" title="statement not covered" >detail = `Committed to long-term memory: ${action.data?.memory || 'Core detail'}`;</span></span>
               else <span class="cstat-no" title="statement not covered" >if (action.action === 'delete_memory') <span class="cstat-no" title="statement not covered" >detail = `Removed outdated memory to keep context fresh.`;</span></span>
-              else <span class="cstat-no" title="statement not covered" >if (action.action === 'search_memory') <span class="cstat-no" title="statement not covered" >detail = `Searched memories for connections regarding: ${action.data?.query || 'context'}`;</span></span>
-            } else <span class="cstat-no" title="statement not covered" >if (action.tool === 'ReminderEngine') {</span>
+              else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (action.action === 'search_memory') <span class="cstat-no" title="statement not covered" >detail = `Searched memories for connections regarding: ${action.data?.query || 'context'}`;</span></span>
+            } else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (action.tool === 'ReminderEngine') {</span>
 <span class="cstat-no" title="statement not covered" >              detail = `Scheduled reminder for ${action.data?.trigger_time || 'later'}: ${action.data?.title || action.data?.purpose || 'Follow-up'}`;</span>
             }
 <span class="cstat-no" title="statement not covered" >            thoughts.push({</span>
@@ -5809,7 +5809,7 @@ HINGLISH RULES:
             }
             
             // Always try to send push notification even if DB save failed
-<span class="cstat-no" title="statement not covered" >            if (pushToken) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (pushToken) {</span>
 <span class="cstat-no" title="statement not covered" >              await sendNovaReplyNotification(pushToken, msgText, activeConversationId, 'emergency_' + Date.now())</span>
                 .catch(<span class="fstat-no" title="function not covered" >err </span>=&gt; <span class="cstat-no" title="statement not covered" >logger.warn('[Push] Emergency notification failed', { error: err?.message }))</span>;
             }
@@ -5818,14 +5818,14 @@ HINGLISH RULES:
 <span class="cstat-no" title="statement not covered" >            logger.info('[Chat] AI response saved to DB', { requestId, userId, messageId: savedMsg.id });</span>
             
             // If this is the last bubble (where meta is attached), save the thoughts
-<span class="cstat-no" title="statement not covered" >            if (idx === finalBubbles.length - 1 &amp;&amp; thoughts.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (idx === finalBubbles.length - 1 &amp;&amp; thoughts.length &gt; 0) {</span>
               const thoughtsResult = <span class="cstat-no" title="statement not covered" >await supabaseAdmin.from('nova_thoughts').insert({</span>
                 chat_message_id: savedMsg.id,
                 user_id: userId,
                 thoughts: thoughts
               });
               
-<span class="cstat-no" title="statement not covered" >              if (thoughtsResult.error) {</span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (thoughtsResult.error) {</span>
 <span class="cstat-no" title="statement not covered" >                logger.error('[Chat] FAILED to save thoughts to nova_thoughts', {</span>
                   requestId,
                   userId,
@@ -5836,10 +5836,10 @@ HINGLISH RULES:
             }
 &nbsp;
             // Send push for each bubble (with small delay between)
-<span class="cstat-no" title="statement not covered" >            if (pushToken) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (pushToken) {</span>
 <span class="cstat-no" title="statement not covered" >              await sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)</span>
                 .catch(<span class="fstat-no" title="function not covered" >err </span>=&gt; <span class="cstat-no" title="statement not covered" >logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }))</span>;
-<span class="cstat-no" title="statement not covered" >              if (idx &lt; finalBubbles.length - 1) {</span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (idx &lt; finalBubbles.length - 1) {</span>
 <span class="cstat-no" title="statement not covered" >                await new Promise(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >setTimeout(r, 800))</span>;</span>
               }
             }
@@ -5855,7 +5855,7 @@ HINGLISH RULES:
       let chunks: any[] = <span class="cstat-no" title="statement not covered" >[];</span>
       let parsedMessagesArray: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
       
-<span class="cstat-no" title="statement not covered" >      if (!isStreaming) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isStreaming) {</span>
 <span class="cstat-no" title="statement not covered" >        parsedMessagesArray = finalBubbles;</span>
         const totalChunks = <span class="cstat-no" title="statement not covered" >finalBubbles.length;</span>
 <span class="cstat-no" title="statement not covered" >        chunks = finalBubbles.map(<span class="fstat-no" title="function not covered" >(c</span>ontent, idx) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
@@ -5893,14 +5893,14 @@ HINGLISH RULES:
 &nbsp;
       const totalDuration = <span class="cstat-no" title="statement not covered" >Date.now() - request_received_ms;</span>
 <span class="cstat-no" title="statement not covered" >      logger.info('[Chat] Request completed', { requestId, userId, durationMs: totalDuration });</span>
-<span class="cstat-no" title="statement not covered" >      if (totalDuration &gt; 10000) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (totalDuration &gt; 10000) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.warn('[Chat] Total request slow', { userId, totalDurationMs: totalDuration });</span>
       }
       
       // If user is actively chatting, schedule a targeted NACE pulse 60s from now
       // to handle back-to-back proactive messaging without spamming the global cron
-<span class="cstat-no" title="statement not covered" >      if (!is_proactive) {</span>
-<span class="cstat-no" title="statement not covered" >        if (backToBackTimers.has(userId)) <span class="cstat-no" title="statement not covered" >clearTimeout(backToBackTimers.get(userId));</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!is_proactive) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (backToBackTimers.has(userId)) <span class="cstat-no" title="statement not covered" >clearTimeout(backToBackTimers.get(userId));</span></span>
 <span class="cstat-no" title="statement not covered" >        backToBackTimers.set(userId, setTimeout(<span class="fstat-no" title="function not covered" >() =</span>&gt; {</span>
 <span class="cstat-no" title="statement not covered" ><span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >          import('</span>../services/NovaConsciousnessEngine').t</span>hen(<span class="fstat-no" title="function not covered" >({</span> novaConsciousnessEngine }) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >            novaConsciousnessEngine.pulse().catch(<span class="fstat-no" title="function not covered" >e </span>=&gt; <span class="cstat-no" title="statement not covered" >logger.error('[NACE] Back-to-back pulse failed', { error: e }))</span>;</span>
@@ -5908,12 +5908,12 @@ HINGLISH RULES:
         }, 60000));
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (asyncDeadlineTimer) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (asyncDeadlineTimer) {</span>
 <span class="cstat-no" title="statement not covered" >        clearTimeout(asyncDeadlineTimer);</span>
       }
 &nbsp;
       // In async_mode the 202 was already sent above — skip the synchronous response
-<span class="cstat-no" title="statement not covered" >      if (!isStreaming &amp;&amp; !async_mode) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isStreaming &amp;&amp; !async_mode) {</span>
 <span class="cstat-no" title="statement not covered" >        res.status(200).json({</span>
           reply,
           messages: parsedMessagesArray,
@@ -5946,7 +5946,7 @@ HINGLISH RULES:
       // is in the DB but Nova never replied. Save a fallback reply so the user
       // always gets SOMETHING and the chat never stays stuck.
       const isAsync = <span class="cstat-no" title="statement not covered" >req.body?.async_mode === true;</span>
-<span class="cstat-no" title="statement not covered" >      if (isAsync) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isAsync) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.error('[ASYNC] Unexpected crash during processing — saving fallback reply', {</span>
           error: err instanceof Error ? err.message : String(err),
           userId: (req as any).user?.id,
@@ -5957,14 +5957,14 @@ HINGLISH RULES:
           // to req.body.conversation_id here — the client may omit it, and inserting
           // '' into the uuid column makes the fallback insert fail silently, so the
           // user never gets their "glitch" recovery message.
-<span class="cstat-no" title="statement not covered" >          if (userId) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (userId) {</span>
 <span class="cstat-no" title="statement not covered" >            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, undefined, {</span>
               asyncMode: true,
               source: 'async_catch_block',
             });
             // Try to push a notification so user knows to check
             const ptResult = <span class="cstat-no" title="statement not covered" >await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();</span>
-<span class="cstat-no" title="statement not covered" >            if (ptResult.data?.push_token) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (ptResult.data?.push_token) {</span>
 <span class="cstat-no" title="statement not covered" >              sendNovaReplyNotification(ptResult.data.push_token, FALLBACK_REPLY).catch(<span class="fstat-no" title="function not covered" >() =</span>&gt; {});</span>
             }
           }
@@ -5973,7 +5973,7 @@ HINGLISH RULES:
         }
       }
       
-<span class="cstat-no" title="statement not covered" >      if (!isAsync) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isAsync) {</span>
 <span class="cstat-no" title="statement not covered" >        if (res.headersSent) {</span>
 <span class="cstat-no" title="statement not covered" >          logger.error('[Chat] Unhandled error during streaming', { error: err instanceof Error ? err.message : String(err) });</span>
 <span class="cstat-no" title="statement not covered" >          try {</span>
@@ -5988,10 +5988,10 @@ HINGLISH RULES:
     } finally {
       // Always disarm the deadline watchdog on this path (covers the async error catch and
       // any other unguarded return) so a stale timer can't fire a misleading log 90s later.
-<span class="cstat-no" title="statement not covered" >      if (asyncDeadlineTimer) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (asyncDeadlineTimer) {</span>
 <span class="cstat-no" title="statement not covered" >        clearTimeout(asyncDeadlineTimer);</span>
       }
-<span class="cstat-no" title="statement not covered" >      if (releaseLock) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (releaseLock) {</span>
 <span class="cstat-no" title="statement not covered" >        releaseLock();</span>
 <span class="cstat-no" title="statement not covered" >        logger.info('[Chat] Mutex released', { userId });</span>
       }
@@ -5999,7 +5999,7 @@ HINGLISH RULES:
       // may have replaced the entry (e.g., after a mutex timeout) — deleting it
       // here would drop a live lock and let concurrent replies race.
       const currentEntry = <span class="cstat-no" title="statement not covered" >userLocks.get(userId);</span>
-<span class="cstat-no" title="statement not covered" >      if (currentEntry &amp;&amp; currentEntry.token === lockToken) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (currentEntry &amp;&amp; currentEntry.token === lockToken) {</span>
 <span class="cstat-no" title="statement not covered" >        userLocks.delete(userId);</span>
       }
     }
@@ -6029,24 +6029,24 @@ HINGLISH RULES:
         .order('created_at', { ascending: false })
         .limit(limit);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (conversationId) <span class="cstat-no" title="statement not covered" >query = query.eq('conversation_id', conversationId);</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (conversationId) <span class="cstat-no" title="statement not covered" >query = query.eq('conversation_id', conversationId);</span></span>
 &nbsp;
       // Cursor: if before_id provided, get the timestamp of that message and
       // return only messages strictly older than it.
-<span class="cstat-no" title="statement not covered" >      if (beforeId) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (beforeId) {</span>
         const { data: cursorRow } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
           .from('chat_history')
           .select('created_at')
           .eq('id', beforeId)
           .eq('user_id', userId)
           .maybeSingle();
-<span class="cstat-no" title="statement not covered" >        if (cursorRow?.created_at) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (cursorRow?.created_at) {</span>
 <span class="cstat-no" title="statement not covered" >          query = (query as any).lt('created_at', cursorRow.created_at);</span>
         }
       }
 &nbsp;
       const { data, error } = <span class="cstat-no" title="statement not covered" >await qt.track('get_history', 'chat_history', <span class="fstat-no" title="function not covered" >() =</span>&gt; <span class="cstat-no" title="statement not covered" >query)</span>;</span>
-<span class="cstat-no" title="statement not covered" >      if (error) <span class="cstat-no" title="statement not covered" >throw new Error(error.message);</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw new Error(error.message);</span></span>
 &nbsp;
       // Return in ascending order (oldest first) so the client can prepend correctly
 <span class="cstat-no" title="statement not covered" >      res.status(200).json((data || []).reverse());</span>
@@ -6066,7 +6066,7 @@ HINGLISH RULES:
 &nbsp;
       // Ensure messageId is a valid UUID to prevent Postgres errors on temporary IDs
       const uuidRegex = <span class="cstat-no" title="statement not covered" >/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;</span>
-<span class="cstat-no" title="statement not covered" >      if (!uuidRegex.test(messageId)) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!uuidRegex.test(messageId)) {</span>
 <span class="cstat-no" title="statement not covered" >        res.status(200).json({ thoughts: [] });</span>
 <span class="cstat-no" title="statement not covered" >        return;</span>
       }
@@ -6078,7 +6078,7 @@ HINGLISH RULES:
         .eq('user_id', userId)
         .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >        throw new Error(`Failed to fetch thoughts: ${error.message}`);</span>
       }
 &nbsp;
@@ -6105,7 +6105,7 @@ HINGLISH RULES:
         .eq('user_id', userId)
         .eq('role', 'assistant')
         .eq('is_read', false);
-<span class="cstat-no" title="statement not covered" >      if (error) <span class="cstat-no" title="statement not covered" >throw new Error(error.message);</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw new Error(error.message);</span></span>
 <span class="cstat-no" title="statement not covered" >      res.status(200).json({ success: true });</span>
     } catch (err) {
 <span class="cstat-no" title="statement not covered" >      next(err);</span>
@@ -6134,7 +6134,7 @@ HINGLISH RULES:
           .single()
       );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >        throw new Error(error.message);</span>
       }
 &nbsp;
@@ -6151,7 +6151,7 @@ HINGLISH RULES:
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

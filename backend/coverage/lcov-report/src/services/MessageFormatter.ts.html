@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/33</span>
+                <span class='fraction'>0/24</span>
             </div>
         
             
@@ -201,7 +201,7 @@
   
   // Split long messages into multiple bubbles (like WhatsApp)
 <span class="fstat-no" title="function not covered" >  static </span>splitIntoBubbles(text: string, maxLength: number = <span class="branch-0 cbranch-no" title="branch not covered" >150)</span>: string[] {
-<span class="cstat-no" title="statement not covered" >    if (text.length &lt;= maxLength) <span class="cstat-no" title="statement not covered" >return [text];</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (text.length &lt;= maxLength) <span class="cstat-no" title="statement not covered" >return [text];</span></span>
     
     const sentences = <span class="cstat-no" title="statement not covered" >text.match(/[^.!?]+[.!?]+/g) || [text];</span>
     const bubbles: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
@@ -216,14 +216,14 @@
       }
     }
     
-<span class="cstat-no" title="statement not covered" >    if (currentBubble.trim()) <span class="cstat-no" title="statement not covered" >bubbles.push(currentBubble.trim());</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (currentBubble.trim()) <span class="cstat-no" title="statement not covered" >bubbles.push(currentBubble.trim());</span></span>
 <span class="cstat-no" title="statement not covered" >    return bubbles.length &gt; 0 ? bubbles : [text];</span>
   }
 &nbsp;
   // Add emoji based on emotional context
 <span class="fstat-no" title="function not covered" >  static </span>addEmoji(text: string, emotion: string): string {
     // Don't add emoji if text already has emoji
-<span class="cstat-no" title="statement not covered" >    if (/[\u{1F600}-\u{1F64F}]/u.test(text)) <span class="cstat-no" title="statement not covered" >return text;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (/[\u{1F600}-\u{1F64F}]/u.test(text)) <span class="cstat-no" title="statement not covered" >return text;</span></span>
     
     const emojiMap: Record&lt;string, string[]&gt; = <span class="cstat-no" title="statement not covered" >{</span>
       joy: ['😊', '✨', '🎉', '💫', '😄'],
@@ -240,16 +240,16 @@
     const randomEmoji = <span class="cstat-no" title="statement not covered" >emojis[Math.floor(Math.random() * emojis.length)];</span>
     
     // Add emoji at natural break points
-<span class="cstat-no" title="statement not covered" >    if (text.includes('?') &amp;&amp; text.length &gt; 30) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (text.includes('?') &amp;&amp; text.length &gt; 30) {</span>
       // Add after question
 <span class="cstat-no" title="statement not covered" >      return text.replace(/\?/, `? ${randomEmoji}`);</span>
     }
-<span class="cstat-no" title="statement not covered" >    if (text.includes('!') &amp;&amp; text.length &gt; 30) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (text.includes('!') &amp;&amp; text.length &gt; 30) {</span>
 <span class="cstat-no" title="statement not covered" >      return text.replace(/!/, `! ${randomEmoji}`);</span>
     }
     
     // Add at end for longer messages
-<span class="cstat-no" title="statement not covered" >    if (text.length &gt; 50) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (text.length &gt; 50) {</span>
 <span class="cstat-no" title="statement not covered" >      return `${text} ${randomEmoji}`;</span>
     }
     
@@ -258,9 +258,9 @@
 &nbsp;
   // Merge related short messages
 <span class="fstat-no" title="function not covered" >  static </span>shouldMergeWithPrevious(currentMsg: string, previousMsg: string, timeGapMs: number): boolean {
-<span class="cstat-no" title="statement not covered" >    if (timeGapMs &gt; 30000) <span class="cstat-no" title="statement not covered" >return false; </span></span>// Don't merge if &gt; 30s gap
-<span class="cstat-no" title="statement not covered" >    if (currentMsg.length &gt; 100) <span class="cstat-no" title="statement not covered" >return false; </span></span>// Don't merge long messages
-<span class="cstat-no" title="statement not covered" >    if (previousMsg.length &gt; 200) <span class="cstat-no" title="statement not covered" >return false;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (timeGapMs &gt; 30000) <span class="cstat-no" title="statement not covered" >return false; </span></span>// Don't merge if &gt; 30s gap
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (currentMsg.length &gt; 100) <span class="cstat-no" title="statement not covered" >return false; </span></span>// Don't merge long messages
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (previousMsg.length &gt; 200) <span class="cstat-no" title="statement not covered" >return false;</span></span>
 <span class="cstat-no" title="statement not covered" >    return true;</span>
   }
 }
@@ -271,7 +271,7 @@
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

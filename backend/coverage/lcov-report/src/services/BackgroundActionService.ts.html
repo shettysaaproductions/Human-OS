@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/293</span>
+                <span class='fraction'>0/230</span>
             </div>
         
             
@@ -1157,7 +1157,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
 &nbsp;
 <span class="cstat-no" title="statement not covered" >export class B</span>ackgroundActionService {
 <span class="fstat-no" title="function not covered" >  async </span>processCriticalActions(userId: string, requestId: string, actions: any[], userCountry: string): Promise&lt;{ success: boolean, actionType: string, error?: string }&gt; {
-<span class="cstat-no" title="statement not covered" >    if (!actions || actions.length === 0) <span class="cstat-no" title="statement not covered" >return { success: true, actionType: 'none' };</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!actions || actions.length === 0) <span class="cstat-no" title="statement not covered" >return { success: true, actionType: 'none' };</span></span>
 &nbsp;
     // We only execute the FIRST action synchronously as the primary critical action
     const action = <span class="cstat-no" title="statement not covered" >actions[0];</span>
@@ -1176,7 +1176,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         .select()
         .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error &amp;&amp; error.code === '23505') {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error &amp;&amp; error.code === '23505') {</span>
         // Conflict! Row already exists.
         const { data: existing } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
           .from('action_idempotency')
@@ -1201,10 +1201,10 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         const engine = <span class="cstat-no" title="statement not covered" >new ReminderEngine(userTzOffset);</span>
         
         let specs = <span class="cstat-no" title="statement not covered" >action.data.reminders || [action.data];</span>
-<span class="cstat-no" title="statement not covered" >        if (!Array.isArray(specs)) <span class="cstat-no" title="statement not covered" >specs = [specs];</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!Array.isArray(specs)) <span class="cstat-no" title="statement not covered" >specs = [specs];</span></span>
         
 <span class="cstat-no" title="statement not covered" >        specs = specs.map(<span class="fstat-no" title="function not covered" >(s</span>pec: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >          if (!spec.time_phrase) <span class="cstat-no" title="statement not covered" >return this.normalizeStructuredSpec(spec);</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (!spec.time_phrase) <span class="cstat-no" title="statement not covered" >return this.normalizeStructuredSpec(spec);</span></span>
           // For critical synchronous execution, we only want to support the structured LLM output
           // to avoid complex regex logic, but we'll fall back to normalize if needed.
           // Wait, we need the regex from earlier for safety! We will just re-use the exact same logic.
@@ -1244,12 +1244,12 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
   }
 &nbsp;
 <span class="fstat-no" title="function not covered" >  async </span>processActions(userId: string, conversationId: string, actions: any[], userCountry: string, messageHash?: string) {
-<span class="cstat-no" title="statement not covered" >    if (!actions || actions.length === 0) <span class="cstat-no" title="statement not covered" >return;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!actions || actions.length === 0) <span class="cstat-no" title="statement not covered" >return;</span></span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (messageHash) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (messageHash) {</span>
       const cacheKey = <span class="cstat-no" title="statement not covered" >`${userId}:${messageHash}`;</span>
       const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
-<span class="cstat-no" title="statement not covered" >      if (processedCache.has(cacheKey) &amp;&amp; (now - processedCache.get(cacheKey)!) &lt; 60000) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (processedCache.has(cacheKey) &amp;&amp; (now - processedCache.get(cacheKey)!) &lt; 60000) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.info(`[BackgroundAction] Idempotency hit for ${cacheKey}, skipping duplicate execution.`);</span>
 <span class="cstat-no" title="statement not covered" >        return;</span>
       }
@@ -1257,7 +1257,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
       
       // Cleanup old cache entries
 <span class="cstat-no" title="statement not covered" >      for (const [k, v] of processedCache.entries()) {</span>
-<span class="cstat-no" title="statement not covered" >        if (now - v &gt; 60000) <span class="cstat-no" title="statement not covered" >processedCache.delete(k);</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (now - v &gt; 60000) <span class="cstat-no" title="statement not covered" >processedCache.delete(k);</span></span>
       }
     }
 &nbsp;
@@ -1270,7 +1270,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
 &nbsp;
           // Support array of reminders or single reminder data
           let specs = <span class="cstat-no" title="statement not covered" >action.data.reminders || [action.data];</span>
-<span class="cstat-no" title="statement not covered" >          if (!Array.isArray(specs)) <span class="cstat-no" title="statement not covered" >specs = [specs];</span></span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (!Array.isArray(specs)) <span class="cstat-no" title="statement not covered" >specs = [specs];</span></span>
 &nbsp;
           // ── Spec normalisation ──────────────────────────────────────────────
           // Primary path: Nova emits structured JSON (trigger_date, trigger_time,
@@ -1278,7 +1278,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
           // Fallback: older/legacy `time_phrase` (regex bridge) still converts
           // natural language → structured fields, kept for safety.
 <span class="cstat-no" title="statement not covered" >          specs = specs.map(<span class="fstat-no" title="function not covered" >(s</span>pec: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >            if (!spec.time_phrase) <span class="cstat-no" title="statement not covered" >return this.normalizeStructuredSpec(spec);</span></span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (!spec.time_phrase) <span class="cstat-no" title="statement not covered" >return this.normalizeStructuredSpec(spec);</span></span>
 <span class="cstat-no" title="statement not covered" >            return this.parseLegacySpec(spec, userTzOffset);</span>
           });
 &nbsp;
@@ -1292,7 +1292,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         }
         else <span class="cstat-no" title="statement not covered" >if (action.tool === 'ReminderEngine' &amp;&amp; action.action === 'delete') {</span>
           const id = <span class="cstat-no" title="statement not covered" >action.data?.id;</span>
-<span class="cstat-no" title="statement not covered" >          if (!id) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (!id) {</span>
 <span class="cstat-no" title="statement not covered" >            logger.warn('[BackgroundAction] ReminderEngine.delete missing id', { userId });</span>
 <span class="cstat-no" title="statement not covered" >            continue;</span>
           }
@@ -1303,7 +1303,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         }
         else <span class="cstat-no" title="statement not covered" >if (action.tool === 'EventDetector' &amp;&amp; action.action === 'fire') {</span>
           const event = <span class="cstat-no" title="statement not covered" >String(action.data?.event || '').toLowerCase().trim();</span>
-<span class="cstat-no" title="statement not covered" >          if (!event) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (!event) {</span>
 <span class="cstat-no" title="statement not covered" >            logger.warn('[BackgroundAction] EventDetector.fire missing event', { userId });</span>
 <span class="cstat-no" title="statement not covered" >            continue;</span>
           }
@@ -1314,12 +1314,12 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         else <span class="cstat-no" title="statement not covered" >if (action.tool === 'MomentEngine' &amp;&amp; action.action === 'extract') {</span>
            // Save to short_term_memories with deduplication
            const memString = <span class="cstat-no" title="statement not covered" >action.data.memory || action.data.summary || action.data.key || action.data.moment;</span>
-<span class="cstat-no" title="statement not covered" >           if (!memString) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (!memString) <span class="cstat-no" title="statement not covered" >continue;</span></span>
 &nbsp;
            // QUALITY GATE: Ignore generic conversational fluff
            const lowerMem = <span class="cstat-no" title="statement not covered" >memString.toLowerCase();</span>
            const FLUFF_WORDS = <span class="cstat-no" title="statement not covered" >['said hi', 'said hello', 'how are', 'how is', 'checking in', 'good morning', 'good night', 'nothing much', 'just texting', 'just saying hi'];</span>
-<span class="cstat-no" title="statement not covered" >           if (FLUFF_WORDS.some(<span class="fstat-no" title="function not covered" >w </span>=&gt; <span class="cstat-no" title="statement not covered" >lowerMem.includes(w))</span> || memString.length &lt; 15) {</span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (FLUFF_WORDS.some(<span class="fstat-no" title="function not covered" >w </span>=&gt; <span class="cstat-no" title="statement not covered" >lowerMem.includes(w))</span> || memString.length &lt; 15) {</span>
 <span class="cstat-no" title="statement not covered" >             logger.info('[BackgroundAction] Rejected short-term memory as fluff', { memString });</span>
 <span class="cstat-no" title="statement not covered" >             continue;</span>
            }
@@ -1334,7 +1334,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
              .gte('created_at', tenMinsAgo)
              .limit(1);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >           if (existing &amp;&amp; existing.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (existing &amp;&amp; existing.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >             logger.info('[BackgroundAction] Skipped duplicate short-term memory', { memString });</span>
 <span class="cstat-no" title="statement not covered" >             continue;</span>
            }
@@ -1382,10 +1382,10 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         }
         else <span class="cstat-no" title="statement not covered" >if (action.tool === 'LifeEventExtractor' &amp;&amp; action.action === 'event') {</span>
            const expectedTime = <span class="cstat-no" title="statement not covered" >new Date(action.data.expected_time);</span>
-<span class="cstat-no" title="statement not covered" >           if (!isNaN(expectedTime.getTime())) {</span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (!isNaN(expectedTime.getTime())) {</span>
              const followUpMinutes = <span class="cstat-no" title="statement not covered" >Math.min(Math.max(action.data.follow_up_after_minutes || 60, 15), 24 * 60);</span>
              const followUpAfter = <span class="cstat-no" title="statement not covered" >new Date(expectedTime.getTime() + followUpMinutes * 60 * 1000);</span>
-<span class="cstat-no" title="statement not covered" >             if (followUpAfter.getTime() &gt; Date.now()) {</span>
+<span class="cstat-no" title="statement not covered" >             <span class="missing-if-branch" title="if path not taken" >I</span>if (followUpAfter.getTime() &gt; Date.now()) {</span>
 <span class="cstat-no" title="statement not covered" >               await supabaseAdmin.from('nova_agenda').insert({</span>
                  user_id: userId,
                  event_description: action.data.description.substring(0, 500),
@@ -1420,12 +1420,12 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
             .order('created_at', { ascending: false })
             .limit(10);
             
-<span class="cstat-no" title="statement not covered" >          if (items &amp;&amp; items.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (items &amp;&amp; items.length &gt; 0) {</span>
             const keywords = <span class="cstat-no" title="statement not covered" >action.data.task_description.toLowerCase().split(' ').filter(<span class="fstat-no" title="function not covered" >(w</span>: string) =&gt; <span class="cstat-no" title="statement not covered" >w.length &gt; 3)</span>;</span>
             let bestMatch = <span class="cstat-no" title="statement not covered" >items[0];</span>
 <span class="cstat-no" title="statement not covered" >            for (const item of items) {</span>
               const desc = <span class="cstat-no" title="statement not covered" >item.event_description.toLowerCase();</span>
-<span class="cstat-no" title="statement not covered" >              if (keywords.some(<span class="fstat-no" title="function not covered" >(k</span>w: string) =&gt; <span class="cstat-no" title="statement not covered" >desc.includes(kw))</span>) {</span>
+<span class="cstat-no" title="statement not covered" >              <span class="missing-if-branch" title="if path not taken" >I</span>if (keywords.some(<span class="fstat-no" title="function not covered" >(k</span>w: string) =&gt; <span class="cstat-no" title="statement not covered" >desc.includes(kw))</span>) {</span>
 <span class="cstat-no" title="statement not covered" >                bestMatch = item;</span>
 <span class="cstat-no" title="statement not covered" >                break;</span>
               }
@@ -1451,10 +1451,10 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
 &nbsp;
            // Fallback to 4 hours if the LLM couldn't determine a time
            let followUpAfter = <span class="cstat-no" title="statement not covered" >new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(); </span>
-<span class="cstat-no" title="statement not covered" >           if (followUpIso) {</span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (followUpIso) {</span>
              const parsedTarget = <span class="cstat-no" title="statement not covered" >new Date(followUpIso);</span>
              // If the parsed time is in the future, use it!
-<span class="cstat-no" title="statement not covered" >             if (parsedTarget.getTime() &gt; Date.now()) {</span>
+<span class="cstat-no" title="statement not covered" >             <span class="missing-if-branch" title="if path not taken" >I</span>if (parsedTarget.getTime() &gt; Date.now()) {</span>
 <span class="cstat-no" title="statement not covered" >               followUpAfter = followUpIso;</span>
              }
            }
@@ -1475,7 +1475,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
         }
         else <span class="cstat-no" title="statement not covered" >if (action.tool === 'ExternalApiEngine' &amp;&amp; action.action === 'webhook') {</span>
            const { url, method, body } = <span class="cstat-no" title="statement not covered" >action.data;</span>
-<span class="cstat-no" title="statement not covered" >           if (url &amp;&amp; (url.startsWith('http://') || url.startsWith('https://'))) {</span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (url &amp;&amp; (url.startsWith('http://') || url.startsWith('https://'))) {</span>
 <span class="cstat-no" title="statement not covered" >             try {</span>
                const axios = <span class="cstat-no" title="statement not covered" >(<span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >await import('</span>axios'))</span>.default;</span>
 <span class="cstat-no" title="statement not covered" >               logger.info(`[ExternalApiEngine] Triggering webhook: ${method} ${url}`);</span>
@@ -1490,9 +1490,9 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
              }
            }
         }
-        else <span class="cstat-no" title="statement not covered" >if (action.tool === 'WorkingMemory' &amp;&amp; action.action === 'set') {</span>
+        else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (action.tool === 'WorkingMemory' &amp;&amp; action.action === 'set') {</span>
            const { key, value } = <span class="cstat-no" title="statement not covered" >action.data;</span>
-<span class="cstat-no" title="statement not covered" >           if (key) {</span>
+<span class="cstat-no" title="statement not covered" >           <span class="missing-if-branch" title="if path not taken" >I</span>if (key) {</span>
              const PERMANENT_KEYS = <span class="cstat-no" title="statement not covered" >['work_schedule', 'weekoff_day', 'daily_commute', 'sleep_cycle',</span>
                'office_hours', 'login_time', 'logout_time', 'gym_time', 'working_days', 'work_days',
                'sleep_time', 'wake_time', 'shift_time', 'lunch_time'];
@@ -1504,7 +1504,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
                updated_at: new Date().toISOString()
              };
              
-<span class="cstat-no" title="statement not covered" >             if (isPermanentKey) {</span>
+<span class="cstat-no" title="statement not covered" >             <span class="missing-if-branch" title="if path not taken" >I</span>if (isPermanentKey) {</span>
                // Make schedule facts effectively permanent (10 years) to override the default 7-day expiry
 <span class="cstat-no" title="statement not covered" >               payload.expires_at = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString();</span>
              }
@@ -1532,33 +1532,33 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
     };
 &nbsp;
     // New fields pass straight through
-<span class="cstat-no" title="statement not covered" >    if (spec.purpose) <span class="cstat-no" title="statement not covered" >out.purpose = spec.purpose;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.urgency) <span class="cstat-no" title="statement not covered" >out.urgency = spec.urgency;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.event_trigger) <span class="cstat-no" title="statement not covered" >out.event_trigger = spec.event_trigger;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.end_condition) <span class="cstat-no" title="statement not covered" >out.end_condition = spec.end_condition;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.purpose) <span class="cstat-no" title="statement not covered" >out.purpose = spec.purpose;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.urgency) <span class="cstat-no" title="statement not covered" >out.urgency = spec.urgency;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.event_trigger) <span class="cstat-no" title="statement not covered" >out.event_trigger = spec.event_trigger;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.end_condition) <span class="cstat-no" title="statement not covered" >out.end_condition = spec.end_condition;</span></span>
 &nbsp;
     // Time fields (new + legacy keys)
-<span class="cstat-no" title="statement not covered" >    if (spec.trigger_date) <span class="cstat-no" title="statement not covered" >out.date = spec.trigger_date;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.date) <span class="cstat-no" title="statement not covered" >out.date = spec.date;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.trigger_time) <span class="cstat-no" title="statement not covered" >out.time_of_day = this.normalizeTimeOfDay(spec.trigger_time);</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.time_of_day) <span class="cstat-no" title="statement not covered" >out.time_of_day = this.normalizeTimeOfDay(spec.time_of_day);</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.relative_value !== undefined &amp;&amp; spec.relative_value !== null) <span class="cstat-no" title="statement not covered" >out.relative_value = Number(spec.relative_value);</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.relative_unit) <span class="cstat-no" title="statement not covered" >out.relative_unit = spec.relative_unit;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.trigger_date) <span class="cstat-no" title="statement not covered" >out.date = spec.trigger_date;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.date) <span class="cstat-no" title="statement not covered" >out.date = spec.date;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.trigger_time) <span class="cstat-no" title="statement not covered" >out.time_of_day = this.normalizeTimeOfDay(spec.trigger_time);</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.time_of_day) <span class="cstat-no" title="statement not covered" >out.time_of_day = this.normalizeTimeOfDay(spec.time_of_day);</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.relative_value !== undefined &amp;&amp; spec.relative_value !== null) <span class="cstat-no" title="statement not covered" >out.relative_value = Number(spec.relative_value);</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.relative_unit) <span class="cstat-no" title="statement not covered" >out.relative_unit = spec.relative_unit;</span></span>
 &nbsp;
     // Recurrence
-<span class="cstat-no" title="statement not covered" >    if (spec.recurrence_interval !== undefined &amp;&amp; spec.recurrence_interval !== null) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.recurrence_interval !== undefined &amp;&amp; spec.recurrence_interval !== null) {</span>
 <span class="cstat-no" title="statement not covered" >      out.recurrence_interval_value = Number(spec.recurrence_interval);</span>
     }
-<span class="cstat-no" title="statement not covered" >    if (spec.recurrence_unit) <span class="cstat-no" title="statement not covered" >out.recurrence_interval_unit = spec.recurrence_unit;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.recurrence_limit !== undefined &amp;&amp; spec.recurrence_limit !== null) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.recurrence_unit) <span class="cstat-no" title="statement not covered" >out.recurrence_interval_unit = spec.recurrence_unit;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.recurrence_limit !== undefined &amp;&amp; spec.recurrence_limit !== null) {</span>
 <span class="cstat-no" title="statement not covered" >      out.recurrence_limit = Number(spec.recurrence_limit);</span>
     }
 &nbsp;
     // End date → end_at
-<span class="cstat-no" title="statement not covered" >    if (spec.end_at) <span class="cstat-no" title="statement not covered" >out.end_at = spec.end_at;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (spec.end_date &amp;&amp; !spec.end_at) <span class="cstat-no" title="statement not covered" >out.end_at = spec.end_date;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.end_at) <span class="cstat-no" title="statement not covered" >out.end_at = spec.end_at;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.end_date &amp;&amp; !spec.end_at) <span class="cstat-no" title="statement not covered" >out.end_at = spec.end_date;</span></span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (spec.is_auto !== undefined) <span class="cstat-no" title="statement not covered" >out.is_auto = spec.is_auto;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (spec.is_auto !== undefined) <span class="cstat-no" title="statement not covered" >out.is_auto = spec.is_auto;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    return out;</span>
   }
@@ -1569,11 +1569,11 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
   private <span class="fstat-no" title="function not covered" >normalizeTimeOfDay(</span>time: any): string {
     const s = <span class="cstat-no" title="statement not covered" >String(time).trim().toLowerCase();</span>
     const m = <span class="cstat-no" title="statement not covered" >s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);</span>
-<span class="cstat-no" title="statement not covered" >    if (!m) <span class="cstat-no" title="statement not covered" >return s; </span></span>// leave as-is; ReminderEngine will surface any issue
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!m) <span class="cstat-no" title="statement not covered" >return s; </span></span>// leave as-is; ReminderEngine will surface any issue
     let hh = <span class="cstat-no" title="statement not covered" >parseInt(m[1], 10);</span>
     const mm = <span class="cstat-no" title="statement not covered" >m[2] ? parseInt(m[2], 10) : 0;</span>
-<span class="cstat-no" title="statement not covered" >    if (m[3] === 'pm' &amp;&amp; hh &lt; 12) <span class="cstat-no" title="statement not covered" >hh += 12;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (m[3] === 'am' &amp;&amp; hh === 12) <span class="cstat-no" title="statement not covered" >hh = 0;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (m[3] === 'pm' &amp;&amp; hh &lt; 12) <span class="cstat-no" title="statement not covered" >hh += 12;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (m[3] === 'am' &amp;&amp; hh === 12) <span class="cstat-no" title="statement not covered" >hh = 0;</span></span>
 <span class="cstat-no" title="statement not covered" >    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;</span>
   }
 &nbsp;
@@ -1583,7 +1583,7 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
     const base: any = <span class="cstat-no" title="statement not covered" >{ title, notes: spec.notes };</span>
 &nbsp;
     const everyMatch = <span class="cstat-no" title="statement not covered" >phrase.match(/every\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);</span>
-<span class="cstat-no" title="statement not covered" >    if (everyMatch) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (everyMatch) {</span>
 <span class="cstat-no" title="statement not covered" >      base.relative_value = parseFloat(everyMatch[1]);</span>
 <span class="cstat-no" title="statement not covered" >      base.relative_unit = everyMatch[2];</span>
 <span class="cstat-no" title="statement not covered" >      base.recurrence_interval_value = parseFloat(everyMatch[1]);</span>
@@ -1592,27 +1592,27 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
     }
 &nbsp;
     const relMatch = <span class="cstat-no" title="statement not covered" >phrase.match(/(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);</span>
-<span class="cstat-no" title="statement not covered" >    if (relMatch) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (relMatch) {</span>
 <span class="cstat-no" title="statement not covered" >      base.relative_value = parseFloat(relMatch[1]);</span>
 <span class="cstat-no" title="statement not covered" >      base.relative_unit = relMatch[2];</span>
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
 &nbsp;
     const dayAtTimeMatch = <span class="cstat-no" title="statement not covered" >phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);</span>
-<span class="cstat-no" title="statement not covered" >    if (dayAtTimeMatch) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (dayAtTimeMatch) {</span>
       const dayName = <span class="cstat-no" title="statement not covered" >dayAtTimeMatch[1].toLowerCase();</span>
       let hh = <span class="cstat-no" title="statement not covered" >parseInt(dayAtTimeMatch[2]);</span>
       const mm = <span class="cstat-no" title="statement not covered" >dayAtTimeMatch[3] ? parseInt(dayAtTimeMatch[3]) : 0;</span>
       const meridiem = <span class="cstat-no" title="statement not covered" >dayAtTimeMatch[4]?.toLowerCase();</span>
-<span class="cstat-no" title="statement not covered" >      if (meridiem === 'pm' &amp;&amp; hh &lt; 12) <span class="cstat-no" title="statement not covered" >hh += 12;</span></span>
-<span class="cstat-no" title="statement not covered" >      if (meridiem === 'am' &amp;&amp; hh === 12) <span class="cstat-no" title="statement not covered" >hh = 0;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (meridiem === 'pm' &amp;&amp; hh &lt; 12) <span class="cstat-no" title="statement not covered" >hh += 12;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (meridiem === 'am' &amp;&amp; hh === 12) <span class="cstat-no" title="statement not covered" >hh = 0;</span></span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;</span>
 &nbsp;
       const dayIndex = <span class="cstat-no" title="statement not covered" >['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);</span>
-<span class="cstat-no" title="statement not covered" >      if (dayIndex !== -1) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (dayIndex !== -1) {</span>
         const today = <span class="cstat-no" title="statement not covered" >new Date(Date.now() + userTzOffset * 3600000);</span>
         let daysAhead = <span class="cstat-no" title="statement not covered" >(dayIndex - today.getDay() + 7) % 7;</span>
-<span class="cstat-no" title="statement not covered" >        if (daysAhead === 0) <span class="cstat-no" title="statement not covered" >daysAhead = 7;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (daysAhead === 0) <span class="cstat-no" title="statement not covered" >daysAhead = 7;</span></span>
         const targetDate = <span class="cstat-no" title="statement not covered" >new Date(today);</span>
 <span class="cstat-no" title="statement not covered" >        targetDate.setDate(today.getDate() + daysAhead);</span>
 <span class="cstat-no" title="statement not covered" >        base.date = targetDate.toISOString().split('T')[0];</span>
@@ -1623,21 +1623,21 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
     }
 &nbsp;
     const atTimeMatch = <span class="cstat-no" title="statement not covered" >phrase.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);</span>
-<span class="cstat-no" title="statement not covered" >    if (atTimeMatch) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (atTimeMatch) {</span>
       let hh = <span class="cstat-no" title="statement not covered" >parseInt(atTimeMatch[1]);</span>
       const mm = <span class="cstat-no" title="statement not covered" >atTimeMatch[2] ? parseInt(atTimeMatch[2]) : 0;</span>
       const meridiem = <span class="cstat-no" title="statement not covered" >atTimeMatch[3]?.toLowerCase();</span>
-<span class="cstat-no" title="statement not covered" >      if (meridiem === 'pm' &amp;&amp; hh &lt; 12) <span class="cstat-no" title="statement not covered" >hh += 12;</span></span>
-<span class="cstat-no" title="statement not covered" >      if (meridiem === 'am' &amp;&amp; hh === 12) <span class="cstat-no" title="statement not covered" >hh = 0;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (meridiem === 'pm' &amp;&amp; hh &lt; 12) <span class="cstat-no" title="statement not covered" >hh += 12;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (meridiem === 'am' &amp;&amp; hh === 12) <span class="cstat-no" title="statement not covered" >hh = 0;</span></span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;</span>
-<span class="cstat-no" title="statement not covered" >      if (phrase.includes('tomorrow')) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (phrase.includes('tomorrow')) {</span>
         const d = <span class="cstat-no" title="statement not covered" >new Date(Date.now() + userTzOffset * 3600000 + 86400000);</span>
 <span class="cstat-no" title="statement not covered" >        base.date = d.toISOString().split('T')[0];</span>
       }
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (phrase.includes('tomorrow')) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (phrase.includes('tomorrow')) {</span>
       const d = <span class="cstat-no" title="statement not covered" >new Date(Date.now() + userTzOffset * 3600000 + 86400000);</span>
 <span class="cstat-no" title="statement not covered" >      base.date = d.toISOString().split('T')[0];</span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = '09:00';</span>
@@ -1645,13 +1645,13 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
     }
 &nbsp;
     const dayMatch = <span class="cstat-no" title="statement not covered" >phrase.match(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);</span>
-<span class="cstat-no" title="statement not covered" >    if (dayMatch) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (dayMatch) {</span>
       const dayName = <span class="cstat-no" title="statement not covered" >dayMatch[1].toLowerCase();</span>
       const dayIndex = <span class="cstat-no" title="statement not covered" >['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(dayName);</span>
-<span class="cstat-no" title="statement not covered" >      if (dayIndex !== -1) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (dayIndex !== -1) {</span>
         const today = <span class="cstat-no" title="statement not covered" >new Date(Date.now() + userTzOffset * 3600000);</span>
         let daysAhead = <span class="cstat-no" title="statement not covered" >(dayIndex - today.getDay() + 7) % 7;</span>
-<span class="cstat-no" title="statement not covered" >        if (daysAhead === 0) <span class="cstat-no" title="statement not covered" >daysAhead = 7;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (daysAhead === 0) <span class="cstat-no" title="statement not covered" >daysAhead = 7;</span></span>
         const targetDate = <span class="cstat-no" title="statement not covered" >new Date(today);</span>
 <span class="cstat-no" title="statement not covered" >        targetDate.setDate(today.getDate() + daysAhead);</span>
 <span class="cstat-no" title="statement not covered" >        base.date = targetDate.toISOString().split('T')[0];</span>
@@ -1661,19 +1661,19 @@ const processedCache = <span class="cstat-no" title="statement not covered" >new
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (phrase.includes('tonight') || phrase.includes('evening')) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (phrase.includes('tonight') || phrase.includes('evening')) {</span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = '20:00';</span>
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
-<span class="cstat-no" title="statement not covered" >    if (phrase.includes('morning')) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (phrase.includes('morning')) {</span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = '08:00';</span>
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
-<span class="cstat-no" title="statement not covered" >    if (phrase.includes('noon') || phrase.includes('lunch')) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (phrase.includes('noon') || phrase.includes('lunch')) {</span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = '12:00';</span>
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
-<span class="cstat-no" title="statement not covered" >    if (phrase.includes('night')) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (phrase.includes('night')) {</span>
 <span class="cstat-no" title="statement not covered" >      base.time_of_day = '22:00';</span>
 <span class="cstat-no" title="statement not covered" >      return base;</span>
     }
@@ -1693,7 +1693,7 @@ export const <span class="cstat-no" title="statement not covered" >backgroundAct
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/137</span>
+                <span class='fraction'>0/112</span>
             </div>
         
             
@@ -942,7 +942,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'beta:overview';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const [
       { count: totalUsers },
@@ -1021,7 +1021,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'beta:retention';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     // Get all profiles with their created_at date
     const { data: profiles, error: profilesError } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -1029,7 +1029,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
       .select('id, created_at')
       .order('created_at', { ascending: true });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (profilesError) <span class="cstat-no" title="statement not covered" >throw profilesError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (profilesError) <span class="cstat-no" title="statement not covered" >throw profilesError;</span></span>
     const users = <span class="cstat-no" title="statement not covered" >profiles || [];</span>
 &nbsp;
     // Get all session dates per user
@@ -1038,12 +1038,12 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
       .select('user_id, session_date, message_count')
       .gt('message_count', 0);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (sessionsError) <span class="cstat-no" title="statement not covered" >throw sessionsError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (sessionsError) <span class="cstat-no" title="statement not covered" >throw sessionsError;</span></span>
 &nbsp;
     // Build a set of (userId, date) pairs for quick lookup
     const activeDays = <span class="cstat-no" title="statement not covered" >new Map&lt;string, Set&lt;string&gt;&gt;();</span>
 <span class="cstat-no" title="statement not covered" >    (sessions || []).forEach(<span class="fstat-no" title="function not covered" >(s</span>: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >      if (!activeDays.has(s.user_id)) <span class="cstat-no" title="statement not covered" >activeDays.set(s.user_id, new Set());</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!activeDays.has(s.user_id)) <span class="cstat-no" title="statement not covered" >activeDays.set(s.user_id, new Set());</span></span>
 <span class="cstat-no" title="statement not covered" >      activeDays.get(s.user_id)!.add(s.session_date);</span>
     });
 &nbsp;
@@ -1060,13 +1060,13 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
       const userDays = <span class="cstat-no" title="statement not covered" >activeDays.get(user.id) || new Set();</span>
 &nbsp;
       // Only count cohorts where enough time has passed
-<span class="cstat-no" title="statement not covered" >      if (d1Date &lt;= today) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (d1Date &lt;= today) {</span>
 <span class="cstat-no" title="statement not covered" >        d1Eligible++;</span>
-<span class="cstat-no" title="statement not covered" >        if (userDays.has(d1Date)) <span class="cstat-no" title="statement not covered" >d1Retained++;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (userDays.has(d1Date)) <span class="cstat-no" title="statement not covered" >d1Retained++;</span></span>
       }
-<span class="cstat-no" title="statement not covered" >      if (d7Date &lt;= today) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (d7Date &lt;= today) {</span>
 <span class="cstat-no" title="statement not covered" >        d7Eligible++;</span>
-<span class="cstat-no" title="statement not covered" >        if (userDays.has(d7Date)) <span class="cstat-no" title="statement not covered" >d7Retained++;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (userDays.has(d7Date)) <span class="cstat-no" title="statement not covered" >d7Retained++;</span></span>
       }
     });
 &nbsp;
@@ -1109,7 +1109,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'beta:crashes';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { data: events, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
       .from('telemetry_events')
@@ -1118,7 +1118,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
       .order('created_at', { ascending: false })
       .limit(200);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
     const all = <span class="cstat-no" title="statement not covered" >events || [];</span>
 &nbsp;
@@ -1129,7 +1129,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
     // Group by platform
     const byPlatform: Record&lt;string, number&gt; = <span class="cstat-no" title="statement not covered" >{};</span>
 <span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(e</span>: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >      if (e.platform) <span class="cstat-no" title="statement not covered" >byPlatform[e.platform] = (byPlatform[e.platform] || 0) + 1;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (e.platform) <span class="cstat-no" title="statement not covered" >byPlatform[e.platform] = (byPlatform[e.platform] || 0) + 1;</span></span>
     });
 &nbsp;
     // Last 24h vs last 7d
@@ -1168,7 +1168,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'beta:feedback';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { data: feedback, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
       .from('user_feedback')
@@ -1176,19 +1176,19 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
       .order('created_at', { ascending: false })
       .limit(500);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
     const all = <span class="cstat-no" title="statement not covered" >feedback || [];</span>
     const byType: Record&lt;string, number&gt; = <span class="cstat-no" title="statement not covered" >{};</span>
     let ratingSum = <span class="cstat-no" title="statement not covered" >0,</span> ratingCount = <span class="cstat-no" title="statement not covered" >0;</span>
 <span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(f</span>: any) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >      byType[f.feedback_type] = (byType[f.feedback_type] || 0) + 1;</span>
-<span class="cstat-no" title="statement not covered" >      if (f.rating) { <span class="cstat-no" title="statement not covered" >ratingSum += f.rating; <span class="cstat-no" title="statement not covered" ></span>ratingCount++; </span>}</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (f.rating) { <span class="cstat-no" title="statement not covered" >ratingSum += f.rating; <span class="cstat-no" title="statement not covered" ></span>ratingCount++; </span>}</span>
     });
 &nbsp;
     // Group ratings distribution 1-5
     const ratingDist: Record&lt;string, number&gt; = <span class="cstat-no" title="statement not covered" >{ '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };</span>
-<span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(f</span>: any) =&gt; { <span class="cstat-no" title="statement not covered" >if (f.rating) <span class="cstat-no" title="statement not covered" >ratingDist[String(f.rating)]++; </span></span>});</span>
+<span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(f</span>: any) =&gt; { <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (f.rating) <span class="cstat-no" title="statement not covered" >ratingDist[String(f.rating)]++; </span></span>});</span>
 &nbsp;
     // Recent quotes (emotional_reaction type, last 5)
     const quotes = <span class="cstat-no" title="statement not covered" >all</span>
@@ -1227,7 +1227,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'beta:moments';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { data: moments, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
       .from('user_moments')
@@ -1235,7 +1235,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
       .order('created_at', { ascending: false })
       .limit(500);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
     const all = <span class="cstat-no" title="statement not covered" >moments || [];</span>
     const total = <span class="cstat-no" title="statement not covered" >all.length;</span>
@@ -1251,9 +1251,9 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
     // Open rate per type
     const openByType: Record&lt;string, { total: number; opened: number; rate: string }&gt; = <span class="cstat-no" title="statement not covered" >{};</span>
 <span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(m</span>: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >      if (!openByType[m.moment_type]) <span class="cstat-no" title="statement not covered" >openByType[m.moment_type] = { total: 0, opened: 0, rate: '0%' };</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!openByType[m.moment_type]) <span class="cstat-no" title="statement not covered" >openByType[m.moment_type] = { total: 0, opened: 0, rate: '0%' };</span></span>
 <span class="cstat-no" title="statement not covered" >      openByType[m.moment_type].total++;</span>
-<span class="cstat-no" title="statement not covered" >      if (m.status === 'opened') <span class="cstat-no" title="statement not covered" >openByType[m.moment_type].opened++;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (m.status === 'opened') <span class="cstat-no" title="statement not covered" >openByType[m.moment_type].opened++;</span></span>
     });
 <span class="cstat-no" title="statement not covered" >    Object.keys(openByType).forEach(<span class="fstat-no" title="function not covered" >t </span>=&gt; {</span>
       const { total: t2, opened } = <span class="cstat-no" title="statement not covered" >openByType[t];</span>
@@ -1298,21 +1298,21 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'beta:feature-usage';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { data: events, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
       .from('telemetry_events')
       .select('event_type, event_data, user_id')
       .gte('created_at', daysAgo(7));
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
     const all = <span class="cstat-no" title="statement not covered" >events || [];</span>
 &nbsp;
     // Count screen_view events by screen name
     const screenViews: Record&lt;string, number&gt; = <span class="cstat-no" title="statement not covered" >{};</span>
 <span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(e</span>: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >      if (e.event_type === 'screen_view' &amp;&amp; e.event_data?.screen) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (e.event_type === 'screen_view' &amp;&amp; e.event_data?.screen) {</span>
         const screen = <span class="cstat-no" title="statement not covered" >e.event_data.screen;</span>
 <span class="cstat-no" title="statement not covered" >        screenViews[screen] = (screenViews[screen] || 0) + 1;</span>
       }
@@ -1326,9 +1326,9 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
     // Unique users per feature (from event_data.screen)
     const uniqueUsersByScreen: Record&lt;string, Set&lt;string&gt;&gt; = <span class="cstat-no" title="statement not covered" >{};</span>
 <span class="cstat-no" title="statement not covered" >    all.forEach(<span class="fstat-no" title="function not covered" >(e</span>: any) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >      if (e.event_type === 'screen_view' &amp;&amp; e.event_data?.screen &amp;&amp; e.user_id) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (e.event_type === 'screen_view' &amp;&amp; e.event_data?.screen &amp;&amp; e.user_id) {</span>
         const screen = <span class="cstat-no" title="statement not covered" >e.event_data.screen;</span>
-<span class="cstat-no" title="statement not covered" >        if (!uniqueUsersByScreen[screen]) <span class="cstat-no" title="statement not covered" >uniqueUsersByScreen[screen] = new Set();</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!uniqueUsersByScreen[screen]) <span class="cstat-no" title="statement not covered" >uniqueUsersByScreen[screen] = new Set();</span></span>
 <span class="cstat-no" title="statement not covered" >        uniqueUsersByScreen[screen].add(e.user_id);</span>
       }
     });
@@ -1357,7 +1357,7 @@ function <span class="fstat-no" title="function not covered" >daysAgo(</span>n: 
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

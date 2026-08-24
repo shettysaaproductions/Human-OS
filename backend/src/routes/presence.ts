@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { subconsciousQueue } from '../services/QueueService';
 
 const router = Router();
 
@@ -67,14 +68,9 @@ router.post('/', async (req: Request, res: Response) => {
       if (status === 'online') {
         const prevOffline = !latestHistory || latestHistory.status !== 'online';
         if (prevOffline) {
-          // Fire-and-forget background job for session cognition
-          supabaseAdmin.from('background_jobs').insert({
-            job_type: 'session_start_cognition',
-            payload: { user_id: userId, timestamp: updateData.last_active_at },
-            status: 'pending'
-          }).then(({ error }) => {
-            if (error) logger.error('[Presence] Failed to queue session cognition', { error: error.message });
-          });
+          // Fire-and-forget background job for session cognition via subconsciousQueue
+          subconsciousQueue.add('session_start_cognition', { user_id: userId, timestamp: updateData.last_active_at })
+            .catch((err) => logger.error('[Presence] Failed to queue session cognition', { error: err?.message }));
         }
       }
 

@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/168</span>
+                <span class='fraction'>0/133</span>
             </div>
         
             
@@ -1246,7 +1246,7 @@ export interface MomentPayload {
 <span class="cstat-no" title="statement not covered" >    try {</span>
       // 1. Check preferences first
       const prefs = <span class="cstat-no" title="statement not covered" >await this.getPreferences(userId);</span>
-<span class="cstat-no" title="statement not covered" >      if (!prefs.goal_followups_enabled) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!prefs.goal_followups_enabled) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`Goal follow-ups disabled for user ${userId}`);</span>
 <span class="cstat-no" title="statement not covered" >        return null;</span>
       }
@@ -1279,14 +1279,14 @@ export interface MomentPayload {
       const goalsList: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
       const memoryMap = <span class="cstat-no" title="statement not covered" >new Map&lt;string, string&gt;();</span> // description -&gt; memory/node ID
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (memories &amp;&amp; memories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (memories &amp;&amp; memories.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        for (const mem of memories) {</span>
 <span class="cstat-no" title="statement not covered" >          goalsList.push(`Goal memory [ID: ${mem.id}]: Key: "${mem.key}", Value: "${mem.value}"`);</span>
 <span class="cstat-no" title="statement not covered" >          memoryMap.set(mem.id, mem.id);</span>
         }
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (kgGoals &amp;&amp; kgGoals.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (kgGoals &amp;&amp; kgGoals.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        for (const node of kgGoals) {</span>
           const desc = <span class="cstat-no" title="statement not covered" >`Goal KG Node [ID: ${node.id}]: Name: "${node.name}", Attributes: ${JSON.stringify(node.attributes)}`;</span>
 <span class="cstat-no" title="statement not covered" >          goalsList.push(desc);</span>
@@ -1294,7 +1294,7 @@ export interface MomentPayload {
         }
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (goalsList.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (goalsList.length === 0) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`No active goals found for user ${userId}`);</span>
 <span class="cstat-no" title="statement not covered" >        return null;</span>
       }
@@ -1314,10 +1314,10 @@ export interface MomentPayload {
 &nbsp;
       const result = <span class="cstat-no" title="statement not covered" >await novaBrain.evaluateGoalFollowup(preferredName, goalsList, pastMomentIds);</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (result.shouldNotify &amp;&amp; result.body) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (result.shouldNotify &amp;&amp; result.body) {</span>
         // Validate source_memory_id exists in our map or goals
         let sourceId: string | null = <span class="cstat-no" title="statement not covered" >null;</span>
-<span class="cstat-no" title="statement not covered" >        if (result.source_memory_id &amp;&amp; memoryMap.has(result.source_memory_id)) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (result.source_memory_id &amp;&amp; memoryMap.has(result.source_memory_id)) {</span>
 <span class="cstat-no" title="statement not covered" >          sourceId = result.source_memory_id;</span>
         }
 &nbsp;
@@ -1344,7 +1344,7 @@ export interface MomentPayload {
 <span class="cstat-no" title="statement not covered" >    try {</span>
       // 1. Check preferences first
       const prefs = <span class="cstat-no" title="statement not covered" >await this.getPreferences(userId);</span>
-<span class="cstat-no" title="statement not covered" >      if (!prefs.child_milestones_enabled) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!prefs.child_milestones_enabled) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`Child milestones disabled for user ${userId}`);</span>
 <span class="cstat-no" title="statement not covered" >        return null;</span>
       }
@@ -1386,14 +1386,14 @@ export interface MomentPayload {
       const relationships: string[] = <span class="cstat-no" title="statement not covered" >[];</span>
       const memoryMap = <span class="cstat-no" title="statement not covered" >new Map&lt;string, string&gt;();</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (familyMemories &amp;&amp; familyMemories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (familyMemories &amp;&amp; familyMemories.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        for (const mem of familyMemories) {</span>
 <span class="cstat-no" title="statement not covered" >          relationships.push(`Family memory [ID: ${mem.id}]: Key: "${mem.key}", Value: "${mem.value}"`);</span>
 <span class="cstat-no" title="statement not covered" >          memoryMap.set(mem.id, mem.id);</span>
         }
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (peopleNodes &amp;&amp; peopleNodes.length &gt; 0 &amp;&amp; edges &amp;&amp; edges.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (peopleNodes &amp;&amp; peopleNodes.length &gt; 0 &amp;&amp; edges &amp;&amp; edges.length &gt; 0) {</span>
         const nodeMap = <span class="cstat-no" title="statement not covered" >new Map(peopleNodes.map(<span class="fstat-no" title="function not covered" >n </span>=&gt; <span class="cstat-no" title="statement not covered" >[n.id, n])</span>);</span>
 <span class="cstat-no" title="statement not covered" >        for (const edge of edges) {</span>
           const source = <span class="cstat-no" title="statement not covered" >nodeMap.get(edge.source_node_id);</span>
@@ -1401,7 +1401,7 @@ export interface MomentPayload {
           const relation = <span class="cstat-no" title="statement not covered" >edge.relation_type.toUpperCase();</span>
 &nbsp;
           // Check if relation is parental/child relationship
-<span class="cstat-no" title="statement not covered" >          if (</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (</span>
             relation.includes('PARENT') ||
             relation.includes('FATHER') ||
             relation.includes('MOTHER') ||
@@ -1411,13 +1411,13 @@ export interface MomentPayload {
           ) {
             const desc = <span class="cstat-no" title="statement not covered" >`KG Relationship [ID: ${target?.id || source?.id}]: "${source?.name || 'User'}" is ${relation} of "${target?.name || 'Child'}" (Attributes: ${JSON.stringify(target?.attributes || {})})`;</span>
 <span class="cstat-no" title="statement not covered" >            relationships.push(desc);</span>
-<span class="cstat-no" title="statement not covered" >            if (target) <span class="cstat-no" title="statement not covered" >memoryMap.set(target.id, target.id);</span></span>
-<span class="cstat-no" title="statement not covered" >            if (source) <span class="cstat-no" title="statement not covered" >memoryMap.set(source.id, source.id);</span></span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (target) <span class="cstat-no" title="statement not covered" >memoryMap.set(target.id, target.id);</span></span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (source) <span class="cstat-no" title="statement not covered" >memoryMap.set(source.id, source.id);</span></span>
           }
         }
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (relationships.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (relationships.length === 0) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`No family or child nodes found for user ${userId}`);</span>
 <span class="cstat-no" title="statement not covered" >        return null;</span>
       }
@@ -1437,9 +1437,9 @@ export interface MomentPayload {
 &nbsp;
       const result = <span class="cstat-no" title="statement not covered" >await novaBrain.evaluateChildMilestone(preferredName, relationships, pastMomentIds);</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (result.shouldNotify &amp;&amp; result.body) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (result.shouldNotify &amp;&amp; result.body) {</span>
         let sourceId: string | null = <span class="cstat-no" title="statement not covered" >null;</span>
-<span class="cstat-no" title="statement not covered" >        if (result.source_memory_id &amp;&amp; memoryMap.has(result.source_memory_id)) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (result.source_memory_id &amp;&amp; memoryMap.has(result.source_memory_id)) {</span>
 <span class="cstat-no" title="statement not covered" >          sourceId = result.source_memory_id;</span>
         }
 &nbsp;
@@ -1483,7 +1483,7 @@ export interface MomentPayload {
       const prefs = <span class="cstat-no" title="statement not covered" >await this.getPreferences(userId);</span>
 &nbsp;
       // If all toggles are disabled, we do not notify
-<span class="cstat-no" title="statement not covered" >      if (!prefs.goal_followups_enabled &amp;&amp; !prefs.child_milestones_enabled) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!prefs.goal_followups_enabled &amp;&amp; !prefs.child_milestones_enabled) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`All moment notifications are disabled for user ${userId}`);</span>
 <span class="cstat-no" title="statement not covered" >        return false;</span>
       }
@@ -1501,12 +1501,12 @@ export interface MomentPayload {
           .limit(1)
       );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (momentsError) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (momentsError) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.error('Failed to check today moments limit', { error: momentsError.message });</span>
 <span class="cstat-no" title="statement not covered" >        return false;</span>
       }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (todayMoments &amp;&amp; todayMoments.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (todayMoments &amp;&amp; todayMoments.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`Daily moment limit reached (max 1/day) for user ${userId}`);</span>
 <span class="cstat-no" title="statement not covered" >        return false;</span>
       }
@@ -1518,7 +1518,7 @@ export interface MomentPayload {
 &nbsp;
       const timezone = <span class="cstat-no" title="statement not covered" >profile?.timezone || 'UTC';</span>
       const isQuiet = <span class="cstat-no" title="statement not covered" >this.isCurrentTimeInQuietHours(prefs.quiet_hours, timezone);</span>
-<span class="cstat-no" title="statement not covered" >      if (isQuiet) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isQuiet) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.debug(`User ${userId} is currently in quiet hours (${prefs.quiet_hours}) in timezone ${timezone}`);</span>
 <span class="cstat-no" title="statement not covered" >        return false;</span>
       }
@@ -1536,7 +1536,7 @@ export interface MomentPayload {
   private <span class="fstat-no" title="function not covered" >isCurrentTimeInQuietHours(</span>quietHoursStr: string, timezone: string): boolean {
 <span class="cstat-no" title="statement not covered" >    try {</span>
       const match = <span class="cstat-no" title="statement not covered" >quietHoursStr.match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);</span>
-<span class="cstat-no" title="statement not covered" >      if (!match) <span class="cstat-no" title="statement not covered" >return false;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!match) <span class="cstat-no" title="statement not covered" >return false;</span></span>
 &nbsp;
       const startHour = <span class="cstat-no" title="statement not covered" >parseInt(match[1], 10);</span>
       const startMin = <span class="cstat-no" title="statement not covered" >parseInt(match[2], 10);</span>
@@ -1554,7 +1554,7 @@ export interface MomentPayload {
       // E.g. "14:23"
       const formatted = <span class="cstat-no" title="statement not covered" >formatter.format(now);</span>
       const timeMatch = <span class="cstat-no" title="statement not covered" >formatted.match(/^(\d{1,2}):(\d{2})$/);</span>
-<span class="cstat-no" title="statement not covered" >      if (!timeMatch) <span class="cstat-no" title="statement not covered" >return false;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!timeMatch) <span class="cstat-no" title="statement not covered" >return false;</span></span>
 &nbsp;
       const currentHour = <span class="cstat-no" title="statement not covered" >parseInt(timeMatch[1], 10);</span>
       const currentMin = <span class="cstat-no" title="statement not covered" >parseInt(timeMatch[2], 10);</span>
@@ -1584,7 +1584,7 @@ export interface MomentPayload {
 <span class="cstat-no" title="statement not covered" >      supabaseAdmin.from('user_moment_preferences').select('*').eq('user_id', userId).maybeSingle()</span>
     );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn(`Failed to fetch preferences for user ${userId}, using defaults`, { error: error.message });</span>
     }
 &nbsp;
@@ -1611,7 +1611,7 @@ export interface MomentPayload {
         .single()
     );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 <span class="cstat-no" title="statement not covered" >    return data;</span>
   }
 &nbsp;
@@ -1634,7 +1634,7 @@ export interface MomentPayload {
         .single()
     );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 <span class="cstat-no" title="statement not covered" >    return data;</span>
   }
 &nbsp;
@@ -1645,7 +1645,7 @@ export interface MomentPayload {
     const updates: any = <span class="cstat-no" title="statement not covered" >{ status };</span>
 <span class="cstat-no" title="statement not covered" >    if (status === 'opened') {</span>
 <span class="cstat-no" title="statement not covered" >      updates.opened_at = new Date().toISOString();</span>
-    } else <span class="cstat-no" title="statement not covered" >if (status === 'dismissed') {</span>
+    } else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (status === 'dismissed') {</span>
 <span class="cstat-no" title="statement not covered" >      updates.dismissed_at = new Date().toISOString();</span>
     }
 &nbsp;
@@ -1653,7 +1653,7 @@ export interface MomentPayload {
 <span class="cstat-no" title="statement not covered" >      supabaseAdmin.from('user_moments').update(updates).eq('id', momentId)</span>
     );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.error(`Failed to update moment status to ${status}`, { momentId, error: error.message });</span>
 <span class="cstat-no" title="statement not covered" >      throw error;</span>
     }
@@ -1694,18 +1694,18 @@ export interface MomentPayload {
       .gte('created_at', new Date(Date.now() - 14 * 86400000).toISOString())
       .order('created_at', { ascending: true });
     
-<span class="cstat-no" title="statement not covered" >    if (!data || data.length &lt; 10) <span class="cstat-no" title="statement not covered" >return;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!data || data.length &lt; 10) <span class="cstat-no" title="statement not covered" >return;</span></span>
     
     const hourBuckets: Map&lt;number, string[]&gt; = <span class="cstat-no" title="statement not covered" >new Map();</span>
 <span class="cstat-no" title="statement not covered" >    for (const msg of data) {</span>
       const hour = <span class="cstat-no" title="statement not covered" >new Date(msg.created_at).getUTCHours();</span>
-<span class="cstat-no" title="statement not covered" >      if (!hourBuckets.has(hour)) <span class="cstat-no" title="statement not covered" >hourBuckets.set(hour, []);</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!hourBuckets.has(hour)) <span class="cstat-no" title="statement not covered" >hourBuckets.set(hour, []);</span></span>
 <span class="cstat-no" title="statement not covered" >      hourBuckets.get(hour)!.push(msg.content.substring(0, 50));</span>
     }
     
     let peakSummary = <span class="cstat-no" title="statement not covered" >'';</span>
 <span class="cstat-no" title="statement not covered" >    for (const [hour, msgs] of hourBuckets.entries()) {</span>
-<span class="cstat-no" title="statement not covered" >      if (msgs.length &gt;= 3) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (msgs.length &gt;= 3) {</span>
         const istHour = <span class="cstat-no" title="statement not covered" >(hour + 5) % 24;</span> // roughly +5:30 IST
         const ampm = <span class="cstat-no" title="statement not covered" >istHour &gt;= 12 ? 'PM' : 'AM';</span>
         const displayHour = <span class="cstat-no" title="statement not covered" >(istHour % 12) || 12;</span>
@@ -1713,7 +1713,7 @@ export interface MomentPayload {
       }
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (peakSummary) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (peakSummary) {</span>
 <span class="cstat-no" title="statement not covered" >      await qt.track('update_activity_pattern', 'working_memory', <span class="fstat-no" title="function not covered" >() =</span>&gt;</span>
 <span class="cstat-no" title="statement not covered" >        supabaseAdmin.from('working_memory').upsert({</span>
           user_id: userId,
@@ -1737,7 +1737,7 @@ export interface MomentPayload {
 <span class="cstat-no" title="statement not covered" >        supabaseAdmin.from('profiles').select('id').eq('onboarding_completed', true)</span>
       );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (error || !profiles) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error || !profiles) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.error('Failed to retrieve profiles for Moment Engine run', { error: error?.message });</span>
 <span class="cstat-no" title="statement not covered" >        return 0;</span>
       }
@@ -1749,17 +1749,17 @@ export interface MomentPayload {
         });
 &nbsp;
         const canNotify = <span class="cstat-no" title="statement not covered" >await this.shouldNotify(p.id);</span>
-<span class="cstat-no" title="statement not covered" >        if (!canNotify) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!canNotify) <span class="cstat-no" title="statement not covered" >continue;</span></span>
 &nbsp;
         // Try checking goal follow-ups
         let moment = <span class="cstat-no" title="statement not covered" >await this.checkGoalFollowups(p.id);</span>
 &nbsp;
         // If no goal follow-up, try child milestones
-<span class="cstat-no" title="statement not covered" >        if (!moment) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!moment) {</span>
 <span class="cstat-no" title="statement not covered" >          moment = await this.checkChildMilestones(p.id);</span>
         }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >        if (moment) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (moment) {</span>
           // Double check grounding using refine logic
           const refined = <span class="cstat-no" title="statement not covered" >await this.generateMoment(p.id, moment.moment_type, moment);</span>
 <span class="cstat-no" title="statement not covered" >          await this.saveMoment(refined);</span>
@@ -1773,7 +1773,7 @@ export interface MomentPayload {
               .select('push_token')
               .eq('id', p.id)
               .maybeSingle();
-<span class="cstat-no" title="statement not covered" >            if (profileData?.push_token) {</span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (profileData?.push_token) {</span>
 <span class="cstat-no" title="statement not covered" >              await sendMomentNotification(</span>
                 profileData.push_token,
                 refined.title || 'Nova',
@@ -1804,7 +1804,7 @@ export const <span class="cstat-no" title="statement not covered" >momentEngineS
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

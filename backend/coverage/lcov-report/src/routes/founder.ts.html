@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/74</span>
+                <span class='fraction'>0/70</span>
             </div>
         
             
@@ -423,7 +423,7 @@ const CACHE_TTL = <span class="cstat-no" title="statement not covered" >60;</spa
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'founder:overview';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const [usersRes, memoriesRes, momentsRes, reflectionsRes, episodicRes, sessionsRes] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
       supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }),
@@ -465,7 +465,7 @@ const CACHE_TTL = <span class="cstat-no" title="statement not covered" >60;</spa
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'founder:system';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const [pendingJobsRes, failedJobsRes] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
       supabaseAdmin.from('background_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
@@ -500,7 +500,7 @@ const CACHE_TTL = <span class="cstat-no" title="statement not covered" >60;</spa
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'founder:costs';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     // Total tokens used from agent_metrics
     const { data: metrics } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -544,7 +544,7 @@ const CACHE_TTL = <span class="cstat-no" title="statement not covered" >60;</spa
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const cacheKey = <span class="cstat-no" title="statement not covered" >'founder:telemetry';</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;any&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) { <span class="cstat-no" title="statement not covered" >res.status(200).json({ success: true, data: cached, cached: true }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const [momentsOpened, momentsDismissed, momentsGenerated, dailyRef, weeklyRef] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
       supabaseAdmin.from('user_moments').select('*', { count: 'exact', head: true }).eq('status', 'opened'),
@@ -589,7 +589,7 @@ const CACHE_TTL = <span class="cstat-no" title="statement not covered" >60;</spa
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

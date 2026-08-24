@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/19</span>
             </div>
         
             
@@ -420,20 +420,20 @@ If no graph entities are found, return {"kg_nodes": [], "kg_edges": []}.`
     const edges = <span class="cstat-no" title="statement not covered" >parsed.kg_edges || [];</span>
     let created = <span class="cstat-no" title="statement not covered" >0;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (nodes.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (nodes.length &gt; 0) {</span>
       const nodeMap = <span class="cstat-no" title="statement not covered" >new Map&lt;string, string&gt;();</span> // name -&gt; uuid
 &nbsp;
       // Cache User node ID for this job (avoid duplicate lookups per edge)
       let userNodeId: string | null = <span class="cstat-no" title="statement not covered" >null;</span>
 &nbsp;
       const getOrCreateUserNode = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >async </span>(): Promise&lt;string | null&gt; =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >        if (userNodeId) <span class="cstat-no" title="statement not covered" >return userNodeId;</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (userNodeId) <span class="cstat-no" title="statement not covered" >return userNodeId;</span></span>
 &nbsp;
         const { data: userNode } = <span class="cstat-no" title="statement not covered" >await qt.track('kg_get_user_node', 'kg_nodes', <span class="fstat-no" title="function not covered" >() =</span>&gt;</span>
 <span class="cstat-no" title="statement not covered" >          supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId).eq('name', 'User').maybeSingle()</span>
         );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >        if (userNode) { <span class="cstat-no" title="statement not covered" >userNodeId = userNode.id; <span class="cstat-no" title="statement not covered" ></span>return userNodeId; </span>}</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (userNode) { <span class="cstat-no" title="statement not covered" >userNodeId = userNode.id; <span class="cstat-no" title="statement not covered" ></span>return userNodeId; </span>}</span>
 &nbsp;
         const { data: newU } = <span class="cstat-no" title="statement not covered" >await qt.track('kg_create_user_node', 'kg_nodes', <span class="fstat-no" title="function not covered" >() =</span>&gt;</span>
 <span class="cstat-no" title="statement not covered" >          supabaseAdmin.from('kg_nodes')</span>
@@ -441,7 +441,7 @@ If no graph entities are found, return {"kg_nodes": [], "kg_edges": []}.`
             .select('id').single()
         );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >        if (newU) { <span class="cstat-no" title="statement not covered" >userNodeId = newU.id; <span class="cstat-no" title="statement not covered" ></span>return userNodeId; </span>}</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (newU) { <span class="cstat-no" title="statement not covered" >userNodeId = newU.id; <span class="cstat-no" title="statement not covered" ></span>return userNodeId; </span>}</span>
 <span class="cstat-no" title="statement not covered" >        return null;</span>
       };
 &nbsp;
@@ -452,7 +452,7 @@ If no graph entities are found, return {"kg_nodes": [], "kg_edges": []}.`
             .eq('user_id', userId).eq('name', node.name).maybeSingle()
         );
 &nbsp;
-<span class="cstat-no" title="statement not covered" >        if (error) <span class="cstat-no" title="statement not covered" >logger.warn('Error checking kg_nodes', { error: error.message });</span></span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >logger.warn('Error checking kg_nodes', { error: error.message });</span></span>
 &nbsp;
         let nodeId: string;
 <span class="cstat-no" title="statement not covered" >        if (data) {</span>
@@ -470,17 +470,17 @@ If no graph entities are found, return {"kg_nodes": [], "kg_edges": []}.`
       }
 &nbsp;
       // Insert Edges
-<span class="cstat-no" title="statement not covered" >      if (edges.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (edges.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        for (const edge of edges) {</span>
           let sourceId = <span class="cstat-no" title="statement not covered" >nodeMap.get((edge as any).source_node_name);</span>
           let targetId = <span class="cstat-no" title="statement not covered" >nodeMap.get((edge as any).target_node_name);</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >          if ((edge as any).source_node_name === 'User') {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if ((edge as any).source_node_name === 'User') {</span>
             const uid = <span class="cstat-no" title="statement not covered" >await getOrCreateUserNode();</span>
-<span class="cstat-no" title="statement not covered" >            if (uid) <span class="cstat-no" title="statement not covered" >sourceId = uid;</span></span>
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (uid) <span class="cstat-no" title="statement not covered" >sourceId = uid;</span></span>
           }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >          if (sourceId &amp;&amp; targetId) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (sourceId &amp;&amp; targetId) {</span>
 <span class="cstat-no" title="statement not covered" >            await qt.track('kg_insert_edge', 'kg_edges', <span class="fstat-no" title="function not covered" >() =</span>&gt;</span>
 <span class="cstat-no" title="statement not covered" >              supabaseAdmin.from('kg_edges').insert({</span>
                 user_id: userId,
@@ -508,7 +508,7 @@ export const <span class="cstat-no" title="statement not covered" >kgAgent = new
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

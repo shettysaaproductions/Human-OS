@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/40</span>
+                <span class='fraction'>0/27</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/47</span>
+                <span class='fraction'>0/48</span>
             </div>
         
             
@@ -184,11 +184,8 @@
 <a name='L119'></a><a href='#L119'>119</a>
 <a name='L120'></a><a href='#L120'>120</a>
 <a name='L121'></a><a href='#L121'>121</a>
-<a name='L122'></a><a href='#L122'>122</a>
-<a name='L123'></a><a href='#L123'>123</a>
-<a name='L124'></a><a href='#L124'>124</a>
-<a name='L125'></a><a href='#L125'>125</a>
-<a name='L126'></a><a href='#L126'>126</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L122'></a><a href='#L122'>122</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -259,12 +256,7 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -316,6 +308,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js"><span class="cstat-no" title="statement not covered" >import { Router, Request, Response } from 'express';</span>
 <span class="cstat-no" title="statement not covered" >import { supabaseAdmin } from '../lib/supabase';</span>
 <span class="cstat-no" title="statement not covered" >import { logger } from '../lib/logger';</span>
+<span class="cstat-no" title="statement not covered" >import { subconsciousQueue } from '../services/QueueService';</span>
 &nbsp;
 const router = <span class="cstat-no" title="statement not covered" >Router();</span>
 &nbsp;
@@ -323,7 +316,7 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const { userId, status, timestamp } = <span class="cstat-no" title="statement not covered" >req.body;</span>
     
-<span class="cstat-no" title="statement not covered" >    if (!userId || !status) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId || !status) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'Missing userId or status' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -334,7 +327,7 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
       updated_at: new Date().toISOString(),
     };
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (status === 'typing') {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (status === 'typing') {</span>
 <span class="cstat-no" title="statement not covered" >      updateData.last_typing_at = updateData.last_active_at;</span>
     }
 &nbsp;
@@ -343,7 +336,7 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
       .from('user_presence')
       .upsert({ user_id: userId, ...updateData }, { onConflict: 'user_id' });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('Failed to update user presence', { error: error.message, userId });</span>
 <span class="cstat-no" title="statement not covered" >      res.status(500).json({ error: 'Failed to update presence' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
@@ -359,17 +352,17 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
       .maybeSingle();
 &nbsp;
     let shouldInsertHistory = <span class="cstat-no" title="statement not covered" >true;</span>
-<span class="cstat-no" title="statement not covered" >    if (latestHistory) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (latestHistory) {</span>
       const isSameStatus = <span class="cstat-no" title="statement not covered" >latestHistory.status === status;</span>
       const msSinceLast = <span class="cstat-no" title="statement not covered" >Date.now() - new Date(latestHistory.created_at).getTime();</span>
       const isRecent = <span class="cstat-no" title="statement not covered" >msSinceLast &lt; 5 * 60 * 1000;</span> // 5 minutes
       
-<span class="cstat-no" title="statement not covered" >      if (isSameStatus &amp;&amp; isRecent) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (isSameStatus &amp;&amp; isRecent) {</span>
 <span class="cstat-no" title="statement not covered" >        shouldInsertHistory = false;</span>
       }
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (shouldInsertHistory) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (shouldInsertHistory) {</span>
 <span class="cstat-no" title="statement not covered" >      await supabaseAdmin</span>
         .from('user_presence_history')
         .insert({
@@ -379,24 +372,19 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
         });
 &nbsp;
       // Detect session start (transition to online)
-<span class="cstat-no" title="statement not covered" >      if (status === 'online') {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (status === 'online') {</span>
         const prevOffline = <span class="cstat-no" title="statement not covered" >!latestHistory || latestHistory.status !== 'online';</span>
-<span class="cstat-no" title="statement not covered" >        if (prevOffline) {</span>
-          // Fire-and-forget background job for session cognition
-<span class="cstat-no" title="statement not covered" >          supabaseAdmin.from('background_jobs').insert({</span>
-            job_type: 'session_start_cognition',
-            payload: { user_id: userId, timestamp: updateData.last_active_at },
-            status: 'pending'
-          }).then(<span class="fstat-no" title="function not covered" >({</span> error }) =&gt; {
-<span class="cstat-no" title="statement not covered" >            if (error) <span class="cstat-no" title="statement not covered" >logger.error('[Presence] Failed to queue session cognition', { error: error.message });</span></span>
-          });
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (prevOffline) {</span>
+          // Fire-and-forget background job for session cognition via subconsciousQueue
+<span class="cstat-no" title="statement not covered" >          subconsciousQueue.add('session_start_cognition', { user_id: userId, timestamp: updateData.last_active_at })</span>
+            .catch(<span class="fstat-no" title="function not covered" >(e</span>rr) =&gt; <span class="cstat-no" title="statement not covered" >logger.error('[Presence] Failed to queue session cognition', { error: err?.message }))</span>;
         }
       }
 &nbsp;
       // Detect "silent visit" (online -&gt; offline/away transition without a message)
-<span class="cstat-no" title="statement not covered" >      if (status === 'offline' || status === 'away') {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (status === 'offline' || status === 'away') {</span>
         const prevOnline = <span class="cstat-no" title="statement not covered" >latestHistory?.status === 'online';</span>
-<span class="cstat-no" title="statement not covered" >        if (prevOnline) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (prevOnline) {</span>
           const sessionStart = <span class="cstat-no" title="statement not covered" >new Date(latestHistory.created_at).toISOString();</span>
           
           // Did user send a message during this session?
@@ -408,7 +396,7 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
             .gte('created_at', sessionStart)
             .limit(1);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >          if (!msgDuringSession || msgDuringSession.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (!msgDuringSession || msgDuringSession.length === 0) {</span>
             // It's a silent visit! Increment count in working_memory
             const { data: silentVisitWm } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
               .from('working_memory')
@@ -445,7 +433,7 @@ const router = <span class="cstat-no" title="statement not covered" >Router();</
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

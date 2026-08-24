@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../../lib/supabase';
 import { chatCompletionBackground } from '../../lib/nvidia';
 
 jest.mock('../../lib/supabase', () => {
-  const mockQuery = {
+  const mockQuery: any = {
     from: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
@@ -13,7 +13,9 @@ jest.mock('../../lib/supabase', () => {
     insert: jest.fn().mockReturnThis(),
     update: jest.fn().mockReturnThis(),
     delete: jest.fn().mockReturnThis(),
-    then: jest.fn(),
+    single: jest.fn().mockResolvedValue({ data: { id: '123' }, error: null }),
+    maybeSingle: jest.fn().mockResolvedValue({ data: { id: '123' }, error: null }),
+    then: jest.fn((resolve) => resolve({ data: [], error: null })),
   };
   return { supabaseAdmin: mockQuery };
 });
@@ -50,11 +52,15 @@ describe('LifeThreadAgent', () => {
       ]
     });
 
-    mockSupabase.in.mockResolvedValueOnce({
-      data: [
-        { id: '123', topic: 'job interview', state: 'active', priority: 'high', provenance: 'User has an interview tomorrow.' }
-      ]
-    });
+    mockSupabase.in
+      .mockResolvedValueOnce({
+        data: [
+          { id: '123', topic: 'job interview', state: 'active', priority: 'high', provenance: 'User has an interview tomorrow.' }
+        ]
+      })
+      .mockResolvedValueOnce({
+        data: []
+      });
 
     // Mock LLM response
     (chatCompletionBackground as jest.Mock).mockResolvedValue(
@@ -67,12 +73,6 @@ describe('LifeThreadAgent', () => {
         provenance: 'User finished the interview and it went well.'
       })
     );
-
-    // Mock update
-    mockSupabase.update.mockReturnValue({
-      eq: jest.fn().mockReturnThis(),
-      then: (resolve: any) => resolve({ error: null })
-    });
 
     await agent.processJob({
       payload: {
@@ -103,11 +103,9 @@ describe('LifeThreadAgent', () => {
       data: [{ role: 'user', content: 'I am going to start a new cloud kitchen business.' }]
     });
 
-    // Not strictly needed because insert resolves itself in this test, 
-    // but just in case we need .eq again:
-    mockSupabase.in.mockResolvedValueOnce({
-      data: []
-    });
+    mockSupabase.in
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [] });
 
     (chatCompletionBackground as jest.Mock).mockResolvedValue(
       JSON.stringify({
@@ -118,8 +116,6 @@ describe('LifeThreadAgent', () => {
         provenance: 'User is starting a new cloud kitchen.'
       })
     );
-
-    mockSupabase.insert.mockResolvedValue({ error: null });
 
     await agent.processJob({
       payload: {

@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/20</span>
             </div>
         
             
@@ -611,7 +611,7 @@ function <span class="fstat-no" title="function not covered" >hashMessage(</span
     // Check cache first
     const cacheKey = <span class="cstat-no" title="statement not covered" >`memory_extraction:${hashMessage(message)}`;</span>
     const cached = <span class="cstat-no" title="statement not covered" >cache.get&lt;ConsolidatedExtraction&gt;(cacheKey);</span>
-<span class="cstat-no" title="statement not covered" >    if (cached) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (cached) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.info(`[ConsolidatedMemoryAgent] Cache hit for message ${messageId}`, { userId });</span>
 <span class="cstat-no" title="statement not covered" >      return this.persistExtraction(userId, messageId, cached);</span>
     }
@@ -716,7 +716,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     // ── Semantic memories ──
     const semanticMemories = <span class="cstat-no" title="statement not covered" >parsed.semantic_memories || [];</span>
 <span class="cstat-no" title="statement not covered" >    for (const mem of semanticMemories) {</span>
-<span class="cstat-no" title="statement not covered" >      if (mem.shouldPersist) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (mem.shouldPersist) {</span>
 <span class="cstat-no" title="statement not covered" >        await memoryRepository.upsertMemory(userId, mem, messageId);</span>
 <span class="cstat-no" title="statement not covered" >        totalCreated++;</span>
       }
@@ -724,7 +724,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 &nbsp;
     // ── Working memories ──
     const workingMemories = <span class="cstat-no" title="statement not covered" >parsed.working_memories || [];</span>
-<span class="cstat-no" title="statement not covered" >    if (workingMemories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (workingMemories.length &gt; 0) {</span>
       const wmInserts = <span class="cstat-no" title="statement not covered" >workingMemories.map(<span class="fstat-no" title="function not covered" >(w</span>m: any) =&gt; {</span>
         const expires = <span class="cstat-no" title="statement not covered" >new Date();</span>
 <span class="cstat-no" title="statement not covered" >        expires.setHours(expires.getHours() + (wm.expires_in_hours || 24));</span>
@@ -741,7 +741,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 &nbsp;
     // ── Episodic memories ──
     const episodicMemories = <span class="cstat-no" title="statement not covered" >parsed.episodic_memories || [];</span>
-<span class="cstat-no" title="statement not covered" >    if (episodicMemories.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (episodicMemories.length &gt; 0) {</span>
       const epInserts = <span class="cstat-no" title="statement not covered" >episodicMemories.map(<span class="fstat-no" title="function not covered" >(e</span>p: any) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
         user_id: userId,
         summary: ep.summary,
@@ -755,7 +755,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 &nbsp;
     // ── KG entities ──
     const kgEntities = <span class="cstat-no" title="statement not covered" >parsed.kg_entities || [];</span>
-<span class="cstat-no" title="statement not covered" >    if (kgEntities.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (kgEntities.length &gt; 0) {</span>
       const kgInserts = <span class="cstat-no" title="statement not covered" >kgEntities.map(<span class="fstat-no" title="function not covered" >(k</span>g: any) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
         user_id: userId,
         entity: kg.entity,
@@ -768,7 +768,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     }
 &nbsp;
     // ── Emotional state ──
-<span class="cstat-no" title="statement not covered" >    if (parsed.emotional_state) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (parsed.emotional_state) {</span>
 <span class="cstat-no" title="statement not covered" >      await supabaseAdmin.from('emotional_states').insert({</span>
         user_id: userId,
         mood: parsed.emotional_state.mood,
@@ -779,7 +779,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     }
 &nbsp;
     // ── Milestone ──
-<span class="cstat-no" title="statement not covered" >    if (parsed.milestone) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (parsed.milestone) {</span>
 <span class="cstat-no" title="statement not covered" >      await supabaseAdmin.from('milestones').insert({</span>
         user_id: userId,
         title: parsed.milestone.title,
@@ -792,7 +792,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     }
 &nbsp;
     // ── Short term memory ──
-<span class="cstat-no" title="statement not covered" >    if (parsed.short_term) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (parsed.short_term) {</span>
       const st = <span class="cstat-no" title="statement not covered" >parsed.short_term;</span>
       const expires = <span class="cstat-no" title="statement not covered" >new Date();</span>
 <span class="cstat-no" title="statement not covered" >      expires.setHours(expires.getHours() + (st.expires_in_hours || 6));</span>
@@ -817,7 +817,7 @@ export const <span class="cstat-no" title="statement not covered" >consolidatedM
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

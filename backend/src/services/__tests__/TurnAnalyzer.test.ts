@@ -398,5 +398,29 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
         job.payload.sourceMessage
       );
     });
+
+    it('should accurately capture all 4 facts from rapid succession turn: wife, son, full name, and city', () => {
+      const messages = [
+        { message: "Meri wife ka naam Sakshi hai" },
+        { message: "Mere bete ka naam Shresht hai" },
+        { message: "Mera pura name Sagar shetty hai" },
+        { message: "Mai Dahisar me rehta hu" }
+      ];
+
+      const result = TurnAnalyzer.analyze(messages);
+
+      expect(result.units.length).toBe(4);
+      expect(result.units[0].factKey).toBe('wife_name');
+      expect(result.units[0].factValue).toBe('Sakshi');
+
+      expect(result.units[1].factKey).toBe('son_name');
+      expect(result.units[1].factValue).toBe('Shresht');
+
+      expect(result.units[2].factKey).toBe('user_name');
+      expect(result.units[2].factValue).toBe('Sagar shetty');
+
+      expect(result.units[3].factKey).toBe('city');
+      expect(result.units[3].factValue).toBe('Dahisar');
+    });
   });
 });

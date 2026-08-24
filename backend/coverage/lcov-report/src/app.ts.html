@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/18</span>
+                <span class='fraction'>0/11</span>
             </div>
         
             
@@ -537,7 +537,7 @@
     cors({
       origin: <span class="fstat-no" title="function not covered" >(o</span>rigin, callback) =&gt; {
         // Allow requests with no origin (e.g., curl, Postman, mobile apps)
-<span class="cstat-no" title="statement not covered" >        if (!origin) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!origin) {</span>
 <span class="cstat-no" title="statement not covered" >          callback(null, true);</span>
 <span class="cstat-no" title="statement not covered" >          return;</span>
         }
@@ -655,11 +655,11 @@
   // Runs every 30s: checks DB health, fires alerts, drains degraded queue on recovery
   const healthInterval = <span class="cstat-no" title="statement not covered" >setInterval(<span class="fstat-no" title="function not covered" >async </span>() =&gt; {</span>
     const report = <span class="cstat-no" title="statement not covered" >await dbHealthService.check();</span>
-<span class="cstat-no" title="statement not covered" >    if (report.status === 'online') {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (report.status === 'online') {</span>
       const queueSize = <span class="cstat-no" title="statement not covered" >degradedMode.queueSize();</span>
-<span class="cstat-no" title="statement not covered" >      if (queueSize &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (queueSize &gt; 0) {</span>
         const result = <span class="cstat-no" title="statement not covered" >await degradedMode.drain();</span>
-<span class="cstat-no" title="statement not covered" >        if (result.success &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (result.success &gt; 0) {</span>
           // Invalidate diagnostics cache after drain
           const { cache } = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >await import('</span>./lib/cache');</span>
 <span class="cstat-no" title="statement not covered" >          cache.invalidateNamespace('diagnostics');</span>
@@ -667,14 +667,14 @@
       }
     }
   }, 30_000);
-<span class="cstat-no" title="statement not covered" >  if (healthInterval.unref) <span class="cstat-no" title="statement not covered" >healthInterval.unref();</span></span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (healthInterval.unref) <span class="cstat-no" title="statement not covered" >healthInterval.unref();</span></span>
 &nbsp;
   // ── Render free-tier keep-alive ping ────────────────────────────────────────
   // Render spins down free services after 15 min of inactivity, causing a
   // 10-30s cold start on the next request. Pinging /health every 9 min keeps
   // the server warm so users never wait for a cold boot.
   const renderUrl = <span class="cstat-no" title="statement not covered" >process.env.RENDER_EXTERNAL_URL;</span>
-<span class="cstat-no" title="statement not covered" >  if (renderUrl &amp;&amp; process.env.NODE_ENV === 'production') {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (renderUrl &amp;&amp; process.env.NODE_ENV === 'production') {</span>
     const keepAliveInterval = <span class="cstat-no" title="statement not covered" >setInterval(<span class="fstat-no" title="function not covered" >async </span>() =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >      try {</span>
         const url = <span class="cstat-no" title="statement not covered" >`${renderUrl}/health`;</span>
@@ -684,7 +684,7 @@
 <span class="cstat-no" title="statement not covered" >        logger.warn('[KeepAlive] Ping failed (non-critical)', { error: err?.message });</span>
       }
     }, 9 * 60 * 1000); // every 9 minutes
-<span class="cstat-no" title="statement not covered" >    if (keepAliveInterval.unref) <span class="cstat-no" title="statement not covered" >keepAliveInterval.unref();</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (keepAliveInterval.unref) <span class="cstat-no" title="statement not covered" >keepAliveInterval.unref();</span></span>
 <span class="cstat-no" title="statement not covered" >    logger.info('[KeepAlive] Server warm-up ping started', { url: renderUrl, intervalMin: 9 });</span>
   }
 &nbsp;
@@ -697,7 +697,7 @@
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../prettify.js"></script>
         <script>

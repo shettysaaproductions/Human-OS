@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/32</span>
+                <span class='fraction'>0/26</span>
             </div>
         
             
@@ -379,7 +379,7 @@ interface GeocodeResult {
       const geoResponse = <span class="cstat-no" title="statement not covered" >await axios.get(geoUrl);</span>
       const results = <span class="cstat-no" title="statement not covered" >geoResponse.data.results;</span>
       
-<span class="cstat-no" title="statement not covered" >      if (!results || results.length === 0) <span class="cstat-no" title="statement not covered" >return;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!results || results.length === 0) <span class="cstat-no" title="statement not covered" >return;</span></span>
       const { latitude, longitude } = <span class="cstat-no" title="statement not covered" >results[0] as GeocodeResult;</span>
 &nbsp;
       // 2. Fetch Current Weather using Open-Meteo Free Weather API
@@ -387,7 +387,7 @@ interface GeocodeResult {
       const weatherResponse = <span class="cstat-no" title="statement not covered" >await axios.get(weatherUrl);</span>
       const current = <span class="cstat-no" title="statement not covered" >weatherResponse.data.current_weather;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (!current) <span class="cstat-no" title="statement not covered" >return;</span></span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!current) <span class="cstat-no" title="statement not covered" >return;</span></span>
 &nbsp;
       const temp = <span class="cstat-no" title="statement not covered" >current.temperature;</span>
       const windSpeed = <span class="cstat-no" title="statement not covered" >current.windspeed;</span>
@@ -400,7 +400,7 @@ interface GeocodeResult {
       const isExtremeHeat = <span class="cstat-no" title="statement not covered" >temp &gt;= 40;</span>
       const isExtremeCold = <span class="cstat-no" title="statement not covered" >temp &lt;= 5;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (!isRaining &amp;&amp; !isThunderstorm &amp;&amp; !isExtremeHeat &amp;&amp; !isExtremeCold) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isRaining &amp;&amp; !isThunderstorm &amp;&amp; !isExtremeHeat &amp;&amp; !isExtremeCold) {</span>
         // Normal weather, don't spam the user
 <span class="cstat-no" title="statement not covered" >        return;</span>
       }
@@ -417,7 +417,7 @@ interface GeocodeResult {
         .eq('outreach_type', 'proactive_weather')
         .gte('created_at', twelveHoursAgo);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (recentAlerts &amp;&amp; recentAlerts.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (recentAlerts &amp;&amp; recentAlerts.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        logger.info(`[WeatherWatcher] Cooldown active — weather alert already sent in last 12h`, { userId });</span>
 <span class="cstat-no" title="statement not covered" >        return; </span>// Already alerted this weather event
       }
@@ -435,12 +435,12 @@ interface GeocodeResult {
         .order('created_at', { ascending: false })
         .limit(10);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (recentWeatherMsgs &amp;&amp; recentWeatherMsgs.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (recentWeatherMsgs &amp;&amp; recentWeatherMsgs.length &gt; 0) {</span>
         const weatherKeywords = <span class="cstat-no" title="statement not covered" >['weather', 'rain', 'raining', 'thunderstorm', 'umbrella', 'storm', 'temperature', 'baarish', 'garmi', 'thand'];</span>
         const alreadyTalkedWeather = <span class="cstat-no" title="statement not covered" >recentWeatherMsgs.some(<span class="fstat-no" title="function not covered" >msg </span>=&gt;</span>
 <span class="cstat-no" title="statement not covered" >          weatherKeywords.some(<span class="fstat-no" title="function not covered" >kw </span>=&gt; <span class="cstat-no" title="statement not covered" >msg.content.toLowerCase().includes(kw))</span></span>
         );
-<span class="cstat-no" title="statement not covered" >        if (alreadyTalkedWeather) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (alreadyTalkedWeather) {</span>
 <span class="cstat-no" title="statement not covered" >          logger.info(`[WeatherWatcher] Topic dedup — weather already mentioned in recent chat`, { userId });</span>
 <span class="cstat-no" title="statement not covered" >          return;</span>
         }
@@ -499,7 +499,7 @@ export const <span class="cstat-no" title="statement not covered" >weatherWatche
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">90.9% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/11</span>
+                <span class='fraction'>10/11</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">66.66% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/6</span>
+                <span class='fraction'>4/6</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">50% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/2</span>
+                <span class='fraction'>1/2</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">90.9% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/11</span>
+                <span class='fraction'>10/11</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line high'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -132,33 +132,31 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -170,7 +168,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -189,33 +189,33 @@
  * JWT tokens, or memory content. Only log hashed user IDs.
  */
 &nbsp;
-<span class="cstat-no" title="statement not covered" >import winston from 'winston';</span>
-<span class="cstat-no" title="statement not covered" >import { config } from '../config';</span>
-<span class="cstat-no" title="statement not covered" >import crypto from 'crypto';</span>
+import winston from 'winston';
+import { config } from '../config';
+import crypto from 'crypto';
 &nbsp;
-const { combine, timestamp, errors, json, colorize, printf } = <span class="cstat-no" title="statement not covered" >winston.format;</span>
+const { combine, timestamp, errors, json, colorize, printf } = winston.format;
 &nbsp;
 // ── Development format: human-readable ────────────────────────────────────────
-const devFormat = <span class="cstat-no" title="statement not covered" >combine(</span>
+const devFormat = combine(
   colorize(),
   timestamp({ format: 'HH:mm:ss' }),
   errors({ stack: true }),
-  printf(<span class="fstat-no" title="function not covered" >({</span> level, message, timestamp: ts, ...meta }) =&gt; {
-    const metaStr = <span class="cstat-no" title="statement not covered" >Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';</span>
-<span class="cstat-no" title="statement not covered" >    return `${ts} [${level}] ${message}${metaStr}`;</span>
+  printf(({ level, message, timestamp: ts, ...meta }) =&gt; {
+    const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
+    return `${ts} [${level}] ${message}${metaStr}`;
   }),
 );
 &nbsp;
 // ── Production format: structured JSON ────────────────────────────────────────
-const prodFormat = <span class="cstat-no" title="statement not covered" >combine(</span>
+const prodFormat = combine(
   timestamp(),
   errors({ stack: true }),
   json(),
 );
 &nbsp;
-export const <span class="cstat-no" title="statement not covered" >logger = winston.createLogger({</span>
-  level: config.server.isProduction ? 'info' : 'debug',
-  format: config.server.isProduction ? prodFormat : devFormat,
+export const logger = winston.createLogger({
+  level: config.server.isProduction ? <span class="branch-0 cbranch-no" title="branch not covered" >'info' </span>: 'debug',
+  format: config.server.isProduction ? <span class="branch-0 cbranch-no" title="branch not covered" >prodFormat </span>: devFormat,
   transports: [
     new winston.transports.Console(),
   ],
@@ -227,7 +227,7 @@ export const <span class="cstat-no" title="statement not covered" >logger = wins
  * Hash a user ID for safe logging.
  * Use this instead of logging raw user IDs.
  */
-<span class="cstat-no" title="statement not covered" >export function <span class="fstat-no" title="function not covered" >h</span>ashUserId(</span>userId: string): string {
+export function <span class="fstat-no" title="function not covered" >hashUserId(</span>userId: string): string {
 <span class="cstat-no" title="statement not covered" >  return crypto</span>
     .createHash('sha256')
     .update(userId)
@@ -241,7 +241,7 @@ export const <span class="cstat-no" title="statement not covered" >logger = wins
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

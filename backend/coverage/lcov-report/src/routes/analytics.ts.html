@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/68</span>
+                <span class='fraction'>0/55</span>
             </div>
         
             
@@ -555,7 +555,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
 <span class="cstat-no" title="statement not covered" >analyticsRouter.get('/memories', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Unauthorized' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -566,7 +566,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (countError) <span class="cstat-no" title="statement not covered" >throw countError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (countError) <span class="cstat-no" title="statement not covered" >throw countError;</span></span>
 &nbsp;
     // 2. Categories breakdown
     // In a production app, we'd use a view or RPC for GROUP BY, but we can aggregate here for MVP
@@ -576,7 +576,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (memoriesError) <span class="cstat-no" title="statement not covered" >throw memoriesError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (memoriesError) <span class="cstat-no" title="statement not covered" >throw memoriesError;</span></span>
 &nbsp;
     const categories = <span class="cstat-no" title="statement not covered" >(allMemories || []).reduce(<span class="fstat-no" title="function not covered" >(a</span>cc: any, mem: any) =&gt; {</span>
       const type = <span class="cstat-no" title="statement not covered" >mem.memory_type || 'uncategorized';</span>
@@ -605,7 +605,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
 <span class="cstat-no" title="statement not covered" >analyticsRouter.get('/emotions', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Unauthorized' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -616,7 +616,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({</span>
       success: true,
@@ -636,7 +636,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
 <span class="cstat-no" title="statement not covered" >analyticsRouter.get('/goals', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Unauthorized' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -648,7 +648,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .eq('entity_type', 'goal')
       .order('created_at', { ascending: false });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({</span>
       success: true,
@@ -668,7 +668,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
 <span class="cstat-no" title="statement not covered" >analyticsRouter.get('/timeline', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Unauthorized' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -681,7 +681,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .order('created_at', { ascending: false })
       .limit(20);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (episodicError) <span class="cstat-no" title="statement not covered" >throw episodicError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (episodicError) <span class="cstat-no" title="statement not covered" >throw episodicError;</span></span>
 &nbsp;
     // Fetch moments
     const { data: moments, error: momentsError } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -691,7 +691,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .order('created_at', { ascending: false })
       .limit(20);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (momentsError) <span class="cstat-no" title="statement not covered" >throw momentsError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (momentsError) <span class="cstat-no" title="statement not covered" >throw momentsError;</span></span>
     
     // Combine and sort
     const combined = <span class="cstat-no" title="statement not covered" >[</span>
@@ -713,7 +713,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
 <span class="cstat-no" title="statement not covered" >analyticsRouter.get('/kg', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Unauthorized' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -724,7 +724,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .eq('user_id', userId)
       .limit(100);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (nodesError) <span class="cstat-no" title="statement not covered" >throw nodesError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (nodesError) <span class="cstat-no" title="statement not covered" >throw nodesError;</span></span>
 &nbsp;
     const { data: edges, error: edgesError } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
       .from('kg_edges')
@@ -732,7 +732,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
       .eq('user_id', userId)
       .limit(100);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (edgesError) <span class="cstat-no" title="statement not covered" >throw edgesError;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (edgesError) <span class="cstat-no" title="statement not covered" >throw edgesError;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({</span>
       success: true,
@@ -793,7 +793,7 @@ export const <span class="cstat-no" title="statement not covered" >analyticsRout
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

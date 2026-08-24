@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/30</span>
+                <span class='fraction'>0/23</span>
             </div>
         
             
@@ -236,24 +236,24 @@ export interface ResponseConfig {
   const hasExplicitAgreement = <span class="cstat-no" title="statement not covered" >/\b(sure|yes|ha|haan|dikha|bata|karo|give|please|yep|yeah|show|dikh|ok|okay)\b/i.test(lower);</span>
   const userAgreed = <span class="cstat-no" title="statement not covered" >hasExplicitAgreement &amp;&amp; len &lt; 30;</span> // Short AND explicit — not just short
   
-<span class="cstat-no" title="statement not covered" >  if (aiOfferedTable &amp;&amp; userAgreed) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (aiOfferedTable &amp;&amp; userAgreed) {</span>
 <span class="cstat-no" title="statement not covered" >    return { mode: 'LONG_CONTEXT', maxTokens: 1500, temperature: 0.5, shouldOfferTable: false };</span>
   }
 &nbsp;
   // ── TABLE / LONG_CONTEXT triggers (explicit depth requests) ──
   const explainPatterns = <span class="cstat-no" title="statement not covered" >/\b(explain|detail|difference|compare|research|samjhao|batao in detail|deep dive|analysis|pros and cons|list.*(options|features)|step by step)\b/i;</span>
-<span class="cstat-no" title="statement not covered" >  if (explainPatterns.test(lower)) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (explainPatterns.test(lower)) {</span>
     // Provide a detailed explanation, then auto-probe with a table offer
 <span class="cstat-no" title="statement not covered" >    return { mode: 'LONG_CONTEXT', maxTokens: 1000, temperature: 0.7, shouldOfferTable: true };</span>
   }
   
   const creativePatterns = <span class="cstat-no" title="statement not covered" >/\b(write|poem|story|email|draft|script|lyrics|article|letter|essay|speech)\b/i;</span>
-<span class="cstat-no" title="statement not covered" >  if (creativePatterns.test(lower)) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (creativePatterns.test(lower)) {</span>
 <span class="cstat-no" title="statement not covered" >    return { mode: 'LONG_CONTEXT', maxTokens: 2048, temperature: 0.9, shouldOfferTable: false };</span>
   }
   
   const tablePatterns = <span class="cstat-no" title="statement not covered" >/\b(table|chart|comparison|spreadsheet|excel)\b/i;</span>
-<span class="cstat-no" title="statement not covered" >  if (tablePatterns.test(lower)) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (tablePatterns.test(lower)) {</span>
     // User explicitly asked for a table — go straight to LONG_CONTEXT
 <span class="cstat-no" title="statement not covered" >    return { mode: 'LONG_CONTEXT', maxTokens: 1500, temperature: 0.5, shouldOfferTable: false };</span>
   }
@@ -263,19 +263,19 @@ export interface ResponseConfig {
   // Ultra-short casual (under 60 chars, no question intent)
   // These are the most common Indian chat replies: "ok", "haan", "ha", "correct", "theek hai"
   // Nova MUST move the conversation forward with 2 bubbles — needs room for that.
-<span class="cstat-no" title="statement not covered" >  if (len &lt; 60 &amp;&amp; !lower.includes('?') &amp;&amp; !/\b(kya|kab|kaise|kitna|kyun|how|what|when|why|who)\b/.test(lower)) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (len &lt; 60 &amp;&amp; !lower.includes('?') &amp;&amp; !/\b(kya|kab|kaise|kitna|kyun|how|what|when|why|who)\b/.test(lower)) {</span>
 <span class="cstat-no" title="statement not covered" >    return { mode: 'HUMAN_CHAT', maxTokens: 300, temperature: 0.9, shouldOfferTable: false };</span>
   }
   
   // Direct factual questions
   const factualPatterns = <span class="cstat-no" title="statement not covered" >/\b(how old|kitna|kab|what.?s (my|his|her)|name kya|time kya|age kya|when did|kitne din|kitne saal)\b/i;</span>
-<span class="cstat-no" title="statement not covered" >  if (factualPatterns.test(lower)) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (factualPatterns.test(lower)) {</span>
 <span class="cstat-no" title="statement not covered" >    return { mode: 'HUMAN_CHAT', maxTokens: 350, temperature: 0.5, shouldOfferTable: false };</span>
   }
   
   // Emotional / vent
   const emotionalPatterns = <span class="cstat-no" title="statement not covered" >/\b(feel|sad|happy|angry|bura laga|khush|tension|stress|jhagda|fight|cry|ro raha|dukhi|pareshan)\b/i;</span>
-<span class="cstat-no" title="statement not covered" >  if (emotionalPatterns.test(lower)) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (emotionalPatterns.test(lower)) {</span>
 <span class="cstat-no" title="statement not covered" >    return { mode: 'HUMAN_CHAT', maxTokens: 400, temperature: 0.85, shouldOfferTable: false };</span>
   }
   
@@ -289,7 +289,7 @@ export interface ResponseConfig {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/47</span>
+                <span class='fraction'>0/32</span>
             </div>
         
             
@@ -329,7 +329,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
 <span class="cstat-no" title="statement not covered" >memoryManagementRouter.get('/', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { search, type, archived, limit = <span class="branch-0 cbranch-no" title="branch not covered" >'50',</span> offset = <span class="branch-0 cbranch-no" title="branch not covered" >'0' </span>} = <span class="cstat-no" title="statement not covered" >req.query;</span>
 &nbsp;
@@ -346,16 +346,16 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
 <span class="cstat-no" title="statement not covered" >      query = query.eq('is_archived', false);</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (type) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (type) {</span>
 <span class="cstat-no" title="statement not covered" >      query = query.eq('memory_type', type as string);</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (search) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (search) {</span>
 <span class="cstat-no" title="statement not covered" >      query = query.or(`key.ilike.%${search}%,value.ilike.%${search}%`);</span>
     }
 &nbsp;
     const { data, error } = <span class="cstat-no" title="statement not covered" >await query;</span>
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({ success: true, data: data || [] });</span>
   } catch (err) {
@@ -368,7 +368,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
 <span class="cstat-no" title="statement not covered" >memoryManagementRouter.delete('/:id', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { id } = <span class="cstat-no" title="statement not covered" >req.params;</span>
     const { error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
@@ -377,7 +377,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
       .eq('id', id)
       .eq('user_id', userId); // Ensure ownership
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({ success: true });</span>
   } catch (err) {
 <span class="cstat-no" title="statement not covered" >    logger.error('Failed to delete memory', { error: err instanceof Error ? err.message : String(err) });</span>
@@ -389,7 +389,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
 <span class="cstat-no" title="statement not covered" >memoryManagementRouter.patch('/:id/archive', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { id } = <span class="cstat-no" title="statement not covered" >req.params;</span>
     const { archived = <span class="branch-0 cbranch-no" title="branch not covered" >true </span>} = <span class="cstat-no" title="statement not covered" >req.body;</span>
@@ -402,8 +402,8 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
       .select('id, is_archived')
       .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (!data) { <span class="cstat-no" title="statement not covered" >res.status(404).json({ error: 'Memory not found' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!data) { <span class="cstat-no" title="statement not covered" >res.status(404).json({ error: 'Memory not found' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({ success: true, data });</span>
   } catch (err) {
@@ -416,19 +416,19 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
 <span class="cstat-no" title="statement not covered" >memoryManagementRouter.patch('/:id', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response, next: NextFunction): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = <span class="cstat-no" title="statement not covered" >req.user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) { <span class="cstat-no" title="statement not covered" >res.status(401).json({ error: 'Unauthorized' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
     const { id } = <span class="cstat-no" title="statement not covered" >req.params;</span>
     const { value, key } = <span class="cstat-no" title="statement not covered" >req.body;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!value &amp;&amp; !key) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!value &amp;&amp; !key) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'Provide at least one of: value, key' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
 &nbsp;
     const updates: any = <span class="cstat-no" title="statement not covered" >{ updated_at: new Date().toISOString() };</span>
-<span class="cstat-no" title="statement not covered" >    if (value) <span class="cstat-no" title="statement not covered" >updates.value = value;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (key) <span class="cstat-no" title="statement not covered" >updates.key = key;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (value) <span class="cstat-no" title="statement not covered" >updates.value = value;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (key) <span class="cstat-no" title="statement not covered" >updates.key = key;</span></span>
 &nbsp;
     const { data, error } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin</span>
       .from('memories')
@@ -438,8 +438,8 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
       .select('id, key, value')
       .maybeSingle();
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (!data) { <span class="cstat-no" title="statement not covered" >res.status(404).json({ error: 'Memory not found' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) <span class="cstat-no" title="statement not covered" >throw error;</span></span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!data) { <span class="cstat-no" title="statement not covered" >res.status(404).json({ error: 'Memory not found' }); <span class="cstat-no" title="statement not covered" ></span>return; </span>}</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    res.status(200).json({ success: true, data });</span>
   } catch (err) {
@@ -454,7 +454,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryManagem
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/83</span>
+                <span class='fraction'>0/70</span>
             </div>
         
             
@@ -674,12 +674,12 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
 <span class="cstat-no" title="statement not covered" >authRouter.post('/signup', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const { email, password } = <span class="cstat-no" title="statement not covered" >req.body;</span>
-<span class="cstat-no" title="statement not covered" >    if (!email || !password) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!email || !password) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'Email and password are required' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!config.supabase.url || !config.supabase.anonKey) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!config.supabase.url || !config.supabase.anonKey) {</span>
       const errorMsg = <span class="cstat-no" title="statement not covered" >'Backend Error: SUPABASE_URL or SUPABASE_ANON_KEY is missing from environment variables.';</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('Signup failed: Supabase variables missing', { urlSet: !!config.supabase.url, anonKeySet: !!config.supabase.anonKey });</span>
 <span class="cstat-no" title="statement not covered" >      res.status(500).json({ error: errorMsg });</span>
@@ -692,7 +692,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
       password,
     });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('Supabase auth.signUp returned an error', { error: error.message, status: error.status });</span>
       // Security: Don't leak internal error details to client
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: error.status === 429 ? 'Too many attempts. Please wait a moment.' : error.message });</span>
@@ -720,12 +720,12 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
 <span class="cstat-no" title="statement not covered" >authRouter.post('/login', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const { email, password } = <span class="cstat-no" title="statement not covered" >req.body;</span>
-<span class="cstat-no" title="statement not covered" >    if (!email || !password) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!email || !password) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'Email and password are required' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!config.supabase.url || !config.supabase.anonKey) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!config.supabase.url || !config.supabase.anonKey) {</span>
       const errorMsg = <span class="cstat-no" title="statement not covered" >'Backend Error: SUPABASE_URL or SUPABASE_ANON_KEY is missing from environment variables.';</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('Login failed: Supabase variables missing', { urlSet: !!config.supabase.url, anonKeySet: !!config.supabase.anonKey });</span>
 <span class="cstat-no" title="statement not covered" >      res.status(500).json({ error: errorMsg });</span>
@@ -737,7 +737,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
       password,
     });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('Supabase auth.signInWithPassword returned an error', { error: error.message, status: error.status });</span>
       // Security: Return generic message to prevent user enumeration
       const isRateLimited = <span class="cstat-no" title="statement not covered" >error.status === 429;</span>
@@ -779,14 +779,14 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
 <span class="cstat-no" title="statement not covered" >authRouter.post('/refresh', <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const { refresh_token } = <span class="cstat-no" title="statement not covered" >req.body;</span>
-<span class="cstat-no" title="statement not covered" >    if (!refresh_token) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!refresh_token) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'refresh_token is required' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
 &nbsp;
     const { data, error } = <span class="cstat-no" title="statement not covered" >await supabaseAnon.auth.refreshSession({ refresh_token });</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error || !data.session) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error || !data.session) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn('Token refresh failed', { error: error?.message });</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Session expired. Please log in again.' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
@@ -819,7 +819,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
 <span class="cstat-no" title="statement not covered" >authRouter.post('/logout', authenticateUser, <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const token = <span class="cstat-no" title="statement not covered" >req.headers.authorization?.split(' ')[1];</span>
-<span class="cstat-no" title="statement not covered" >    if (token) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (token) {</span>
       // For a purely stateless JWT API, logout is primarily handled by the client dropping the token.
       // We can attempt to sign out via the anon client if a session was active, but since we don't persist sessions, it's a no-op.
 <span class="cstat-no" title="statement not covered" >      await supabaseAnon.auth.signOut();</span>
@@ -864,7 +864,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
     const userId = (<span class="cstat-no" title="statement not covered" >req as any).user?.id;</span>
     const { token } = <span class="cstat-no" title="statement not covered" >req.body;</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!token || (!token.startsWith('ExponentPushToken[') &amp;&amp; !token.startsWith('ExpoPushToken['))) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!token || (!token.startsWith('ExponentPushToken[') &amp;&amp; !token.startsWith('ExpoPushToken['))) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(400).json({ error: 'Invalid push token format' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -874,7 +874,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
       .update({ push_token: token })
       .eq('id', userId);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (error) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('Failed to save push token', { error: error.message, userId });</span>
 <span class="cstat-no" title="statement not covered" >      res.status(500).json({ error: 'Failed to save push token' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
@@ -898,7 +898,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
 <span class="cstat-no" title="statement not covered" >authRouter.delete('/mark-dead', authenticateUser, <span class="fstat-no" title="function not covered" >async </span>(req: Request, res: Response): Promise&lt;void&gt; =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const userId = (<span class="cstat-no" title="statement not covered" >req as any).user?.id;</span>
-<span class="cstat-no" title="statement not covered" >    if (!userId) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!userId) {</span>
 <span class="cstat-no" title="statement not covered" >      res.status(401).json({ error: 'Unauthorized' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
     }
@@ -940,7 +940,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
     // 2. Delete the actual Auth user (this permanently revokes access and deletes the identity)
     const { error: authError } = <span class="cstat-no" title="statement not covered" >await supabaseAdmin.auth.admin.deleteUser(userId);</span>
     
-<span class="cstat-no" title="statement not covered" >    if (authError) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (authError) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.error('[Mark Dead] Failed to delete auth user', { error: authError.message, userId });</span>
 <span class="cstat-no" title="statement not covered" >      res.status(500).json({ error: 'Failed to completely delete account identity' });</span>
 <span class="cstat-no" title="statement not covered" >      return;</span>
@@ -964,7 +964,7 @@ export const <span class="cstat-no" title="statement not covered" >authRouter: i
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

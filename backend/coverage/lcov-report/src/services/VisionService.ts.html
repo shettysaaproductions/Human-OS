@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/20</span>
             </div>
         
             
@@ -281,11 +281,11 @@
    */
 <span class="fstat-no" title="function not covered" >  async </span>analyzeContextImage(userId: string, frontImageBase64?: string, rearImageBase64?: string, mimeType: string = <span class="branch-0 cbranch-no" title="branch not covered" >'image/jpeg')</span>: Promise&lt;string | null&gt; {
     const key = <span class="cstat-no" title="statement not covered" >geminiPool.getNextKey();</span>
-<span class="cstat-no" title="statement not covered" >    if (!key) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!key) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn('[VisionService] ❌ GEMINI_API_KEY not set! Vision analysis disabled. Add GEMINI_API_KEY to your .env and Render environment variables.');</span>
 <span class="cstat-no" title="statement not covered" >      return null;</span>
     }
-<span class="cstat-no" title="statement not covered" >    if (!frontImageBase64 &amp;&amp; !rearImageBase64) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!frontImageBase64 &amp;&amp; !rearImageBase64) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn('[VisionService] No images provided for vision analysis.');</span>
 <span class="cstat-no" title="statement not covered" >      return null;</span>
     }
@@ -298,17 +298,17 @@
       
       const parts: any[] = <span class="cstat-no" title="statement not covered" >[prompt];</span>
       
-<span class="cstat-no" title="statement not covered" >      if (frontImageBase64) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (frontImageBase64) {</span>
 <span class="cstat-no" title="statement not covered" >        parts.push({ inlineData: { data: frontImageBase64, mimeType: mimeType } });</span>
       }
-<span class="cstat-no" title="statement not covered" >      if (rearImageBase64) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (rearImageBase64) {</span>
 <span class="cstat-no" title="statement not covered" >        parts.push({ inlineData: { data: rearImageBase64, mimeType: mimeType } });</span>
       }
       
       const result = <span class="cstat-no" title="statement not covered" >await model.generateContent(parts);</span>
 &nbsp;
       const text = <span class="cstat-no" title="statement not covered" >result.response.text();</span>
-<span class="cstat-no" title="statement not covered" >      if (text &amp;&amp; text.trim().length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (text &amp;&amp; text.trim().length &gt; 0) {</span>
         const visualContext = <span class="cstat-no" title="statement not covered" >text.trim();</span>
 <span class="cstat-no" title="statement not covered" >        logger.info('[VisionService] Successfully analyzed image', { userId, context: visualContext });</span>
         
@@ -318,7 +318,7 @@
           .update({ current_visual_context: visualContext })
           .eq('id', userId);
           
-<span class="cstat-no" title="statement not covered" >        if (error) {</span>
+<span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
 <span class="cstat-no" title="statement not covered" >          logger.error('[VisionService] Failed to save visual context to DB', { userId, error: error.message });</span>
         }
         
@@ -337,7 +337,7 @@
    */
 <span class="fstat-no" title="function not covered" >  async </span>describeSharedImage(imageBase64: string, mimeType: string = <span class="branch-0 cbranch-no" title="branch not covered" >'image/jpeg')</span>: Promise&lt;string | null&gt; {
     const key = <span class="cstat-no" title="statement not covered" >geminiPool.getNextKey();</span>
-<span class="cstat-no" title="statement not covered" >    if (!key) {</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!key) {</span>
 <span class="cstat-no" title="statement not covered" >      logger.warn('[VisionService] ❌ GEMINI_API_KEY not set — returning fallback description so Nova knows an image was shared.');</span>
       // Return a fallback so Nova at least knows an image was attached
 <span class="cstat-no" title="statement not covered" >      return '[image shared by user — vision analysis unavailable, ask them to describe it]';</span>
@@ -360,7 +360,7 @@
       ]);
 &nbsp;
       const text = <span class="cstat-no" title="statement not covered" >result.response.text();</span>
-<span class="cstat-no" title="statement not covered" >      if (text &amp;&amp; text.trim().length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (text &amp;&amp; text.trim().length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >        return text.trim();</span>
       }
 <span class="cstat-no" title="statement not covered" >      return null;</span>
@@ -379,7 +379,7 @@ export const <span class="cstat-no" title="statement not covered" >visionService
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-23T21:19:26.501Z
+                at 2026-08-24T14:55:54.343Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
