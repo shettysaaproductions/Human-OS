@@ -18,24 +18,30 @@ export interface ActionRecord {
 export class ActionIntelligenceService {
   /**
    * Evaluates all active actions for a given thread (or user) to determine the next best action.
+   * Can optionally accept an already assembled CognitiveContext to avoid duplicate DB queries.
    */
-  async getNextBestAction(userId: string, threadId?: string): Promise<{ type: 'NEXT_BEST_ACTION', action: ActionRecord } | { type: 'NO_ACTION' }> {
-    let query = supabaseAdmin
-      .from('nova_actions')
-      .select('*')
-      .eq('user_id', userId)
-      .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
-      
-    if (threadId) {
-      query = query.eq('source_thread_id', threadId);
-    }
-    
-    const { data: actions, error } = await query;
-    if (error || !actions || actions.length === 0) {
-      return { type: 'NO_ACTION' };
-    }
+  async getNextBestAction(userId: string, threadId?: string, contextActions?: ActionRecord[]): Promise<{ type: 'NEXT_BEST_ACTION', action: ActionRecord } | { type: 'NO_ACTION' }> {
+    let typedActions: ActionRecord[];
 
-    const typedActions = actions as ActionRecord[];
+    if (contextActions && contextActions.length > 0) {
+      typedActions = threadId ? contextActions.filter(a => a.source_thread_id === threadId) : contextActions;
+    } else {
+      let query = supabaseAdmin
+        .from('nova_actions')
+        .select('*')
+        .eq('user_id', userId)
+        .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
+        
+      if (threadId) {
+        query = query.eq('source_thread_id', threadId);
+      }
+      
+      const { data: actions, error } = await query;
+      if (error || !actions || actions.length === 0) {
+        return { type: 'NO_ACTION' };
+      }
+      typedActions = actions as ActionRecord[];
+    }
     
     // Evaluate Readiness based on Dependencies
     // An action is ready if it has no dependencies, OR if all its dependencies are 'completed'

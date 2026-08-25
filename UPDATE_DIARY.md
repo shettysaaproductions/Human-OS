@@ -1,4 +1,33 @@
 
+## [2026-08-25] Phase 10 — Unified Cognitive Context Fabric & Recall Quality
+
+### Trigger
+Phase 10 objective: Eliminate context fragmentation across chat, proactive cognition (NACE), life-thread reasoning, and action intelligence through a canonical, bounded, provenance-aware cognitive context layer.
+
+### Changes Made
+- **Canonical Cognitive Context Service (`CognitiveContextService.ts`)**:
+  - Implemented `CognitiveContextService` assembling unified `CognitiveContext` object (User profile, Temporal intelligence with schedule override, Realtime presence & decay, Recent conversation & conversational antecedents, Turn analysis & facts, Memories with deterministic ranking & conflict resolution, Short-term & Working memory, Life threads, Action intelligence, and Upcoming reminders).
+- **Deterministic Ranking & Conflict Resolution**:
+  - Multi-tier ranking based on turn keyword relevance (+40), protection status (+30), and recency.
+  - Distinct separation of CURRENT vs HISTORICAL facts for conflicting keys (e.g. wife: Sakshi -> Priya). Only the current value is surfaced as active truth while historical records are cleanly isolated with provenance.
+- **Pronoun & Conversational Antecedent Continuity**:
+  - Extracted conversational antecedents from recent turns (`extractConversationalAntecedents`) so pronouns ("she", "he", "they") bind to immediate conversation referents rather than unrelated distant long-term memories.
+- **Degraded Mode & Resiliency**:
+  - Safe parallel queries with isolated error boundaries. Non-critical table failures are logged, tracked in `metadata.degraded_sources`, and fallback defaults are supplied without crashing the conversation.
+- **Observability & Health Monitoring**:
+  - Exposed safe aggregate counters (`context_assemblies`, `items_considered`, `items_selected`, `conflicts_detected`, `conflicts_resolved`, `retrieval_failures`) on `/health/context-fabric`.
+- **Unit & E2E Testing**:
+  - Added comprehensive test suite `CognitiveContextService.test.ts` (6 tests passing).
+  - Verified full test suite (14 suites, 143 tests passing).
+  - Executed live production E2E test verifying 4-fact multi-turn capture, wife correction, pronoun continuity, life thread + action integration, and degraded mode resilience.
+
+### Status
+- TypeScript build passed (`npm run build` exit 0).
+- All 14 unit test suites passed (143/143 tests).
+- Production live verification passed.
+
+---
+
 ## [2026-08-24] Phase 8.1 — Nova Reliability Pass: Multi-Message Fact Capture + Presence-Aware Proactive Return
 
 ### Trigger

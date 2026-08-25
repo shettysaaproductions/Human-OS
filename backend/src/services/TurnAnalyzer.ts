@@ -388,7 +388,7 @@ export class TurnAnalyzer {
     }
 
     // Name
-    m = lower.match(/\b(?:mera naam|mera pura name|mera pura naam|my name is)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    m = lower.match(/\b(?:mera naam|mera pura name|mera pura naam|my name is|my full name is|my full name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'user_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Ambiguous Name (No relationship specified)

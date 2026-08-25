@@ -82,3 +82,24 @@ healthRouter.get('/cognitive', async (_req: Request, res: Response): Promise<voi
     });
   }
 });
+
+// Cognitive Context Fabric Safe Metrics Endpoint
+healthRouter.get('/context-fabric', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { cognitiveContextService } = await import('../services/CognitiveContextService');
+    const metrics = cognitiveContextService.getMetrics();
+    res.status(200).json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      metrics
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      error: err.message
+    });
+  }
+});
+
+

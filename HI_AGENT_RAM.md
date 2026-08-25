@@ -74,6 +74,12 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 25 Session — Phase 10 Unified Cognitive Context Fabric & Recall Quality:**
+  - **Canonical Cognitive Context (`CognitiveContextService.ts`)**: Single source of truth for conversational context across normal chat, proactive cognition (NACE), life-thread reasoning, and action intelligence.
+  - **Deterministic Ranking & Fact Conflict Resolution**: Resolves current vs historical facts cleanly (e.g. wife: Sakshi -> Priya). Segregates historical facts into `historicalFacts` while keeping only the current truth active.
+  - **Conversational Antecedent & Pronoun Continuity**: Resolves pronouns ("she", "he", "they") against recent conversational referents (`extractConversationalAntecedents`), preventing distant long-term memories from hijacking active context.
+  - **Degraded Mode & Resiliency**: Parallel query execution with isolated error handlers. Degraded sources are tracked in `metadata.degraded_sources` without failing chat or inventing false facts.
+  - **All 14 Test Suites Passing (143 tests).**
 - ✅ **Aug 24 Session — Phase 8.1 Nova Reliability Pass:**
   - **Multi-Message Fact Capture:** Upgraded regex and semantic fact extraction in `TurnAnalyzer.ts` for multi-word phrases (e.g., "Sagar shetty"), added explicit son/daughter patterns, and supported conversational location phrases ("Mai Dahisar me rehta hu").
   - **Presence-Aware Returning User Cognition:** Connected `session_start_cognition` job to `subconsciousQueue` and registered worker handler calling `novaConsciousnessEngine.processUser(userId)`.
