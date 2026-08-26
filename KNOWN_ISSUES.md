@@ -1,7 +1,14 @@
 # Known Issues List (Active)
 
 This document tracks identified bugs, limitations, and workarounds.
-**Last Updated: Aug 22, 2026**
+**Last Updated: Aug 26, 2026**
+
+---
+
+## ✅ Resolved Aug 26, 2026
+
+- **Proactive Spam / Repeated Messages (P0):** Multiple engines (NACE every 15min + `checkIgnoredNovaMessages` every 30s) operated with completely independent in-memory cooldown state. On every Render free-tier restart, all in-memory Maps (lastProactiveSentAt, ignoreEscalationCount) reset to zero, causing immediate bursts of repeated messages. **Fixed:** Added `ProactiveGate.ts` — a single authoritative DB-backed gate (via `nova_outreach_log`) that all proactive engines must pass. Gate enforces: (1) suppression lock, (2) quiet hours, (3) escalation cooldown from DB ignored-count (restart-safe), (4) logical-key idempotency per message ID, (5) near-duplicate content dedup (75% Jaccard), (6) long-silence suppression (48h+4 ignored). Migration 038 adds `logical_key` and `replied_at` columns to `nova_outreach_log`.
+- **Ignored count not resetting on user reply (P1):** The in-memory `ignoreEscalationCount` was never persisted, so after a server restart the counter reset even if the user had been ignoring Nova for hours. **Fixed:** `cancelFollowups` now calls `proactiveGate.markReplied()` which updates `replied_at` on all unreplied outreach log rows, making the ignored-count DB-authoritative.
 
 ---
 
