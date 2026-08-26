@@ -64,6 +64,9 @@ export interface GateOptions {
   timezoneOffsetMinutes?: number;
 }
 
+// In-process lock per user to serialize concurrent acquire calls on the same instance
+const userGateLocks = new Map<string, Promise<any>>();
+
 export class ProactiveGate {
 
   /**
@@ -72,6 +75,24 @@ export class ProactiveGate {
    * successfully saving the message to chat_history.
    */
   async acquire(userId: string, opts: GateOptions): Promise<GateDecision> {
+    // Acquire per-user mutex to guarantee sequential evaluation and prevent race conditions
+    const currentLock = userGateLocks.get(userId) || Promise.resolve();
+    let releaseLock: () => void;
+    const nextLock = new Promise<void>((resolve) => { releaseLock = resolve; });
+    userGateLocks.set(userId, nextLock);
+
+    try {
+      await currentLock;
+      return await this._acquireInternal(userId, opts);
+    } finally {
+      releaseLock!();
+      if (userGateLocks.get(userId) === nextLock) {
+        userGateLocks.delete(userId);
+      }
+    }
+  }
+
+  private async _acquireInternal(userId: string, opts: GateOptions): Promise<GateDecision> {
     const {
       outreachType,
       logicalKey,
@@ -142,6 +163,7 @@ export class ProactiveGate {
         .from('nova_outreach_log')
         .select('id, created_at')
         .eq('user_id', userId)
+        .is('replied_at', null)
         .gte('created_at', since)
         .order('created_at', { ascending: false });
 
@@ -336,6 +358,7 @@ export class ProactiveGate {
         .from('nova_outreach_log')
         .select('id')
         .eq('user_id', userId)
+        .is('replied_at', null)
         .gte('created_at', since);
       return unreplied?.length ?? 0;
     } catch {
