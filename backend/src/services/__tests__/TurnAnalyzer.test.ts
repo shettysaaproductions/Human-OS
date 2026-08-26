@@ -422,5 +422,29 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
       expect(result.units[3].factKey).toBe('city');
       expect(result.units[3].factValue).toBe('Dahisar');
     });
+
+    it('L. Correction flow: "Meri wife ka naam Sakshi hai" → "Actually uska naam Priya hai" → wife_name=Priya, oldValue=Sakshi', () => {
+      const result = TurnAnalyzer.analyze([
+        { message: 'Meri wife ka naam Sakshi hai.' },
+        { message: 'Actually uska naam Priya hai.' }
+      ]);
+
+      expect(result.hasCorrections).toBe(true);
+      const correctionUnit = result.units.find(u => u.type === 'correction');
+      expect(correctionUnit).toBeDefined();
+      expect(correctionUnit?.factKey).toBe('wife_name');
+      expect(correctionUnit?.factValue).toBe('Priya');
+      expect(correctionUnit?.oldValue).toBe('Sakshi');
+      expect(correctionUnit?.relationship).toBe('wife');
+      expect(correctionUnit?.factClass).toBe('HIGH_CONFIDENCE_DURABLE_FACT');
+    });
+
+    it('M. Hinglish city: "Main Bandra me rehta hun" → city=Bandra', () => {
+      const result = TurnAnalyzer.analyze([{ message: 'Main Bandra me rehta hun.' }]);
+      const cityUnit = result.units.find(u => u.factKey === 'city');
+      expect(cityUnit).toBeDefined();
+      expect(cityUnit?.factValue).toBe('Bandra');
+    });
   });
 });
+

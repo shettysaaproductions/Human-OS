@@ -224,9 +224,10 @@ export class BackgroundActionService {
                value: memValue,
                memory_type: action.data.memory_type || 'semantic',
                source_message: action.data.source || 'background_action',
+               is_archived: false,
                last_accessed_at: new Date().toISOString(),
                updated_at: new Date().toISOString()
-             });
+             }, { onConflict: 'user_id,key' });
            }
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
@@ -365,6 +366,101 @@ export class BackgroundActionService {
              await supabaseAdmin.from('working_memory').upsert(payload, { onConflict: 'user_id, key' });
              logger.info('[BackgroundAction] Updated WorkingMemory', { userId, key, value });
            }
+        }
+        // ── LifeThread tool handlers ──────────────────────────────────────────────
+        else if (action.tool === 'LifeThread' && action.action === 'upsert') {
+          // Create or update a life thread. Idempotent by topic (normalized).
+          const topic = String(action.data?.topic || '').trim().substring(0, 500);
+          const state = action.data?.state || 'active';
+          const priority = action.data?.priority || 'medium';
+          const provenance = String(action.data?.provenance || '').substring(0, 500);
+          if (!topic) { logger.warn('[BackgroundAction] LifeThread.upsert missing topic', { userId }); }
+          else {
+            // Check for existing active thread with same topic (case-insensitive)
+            const { data: existing } = await supabaseAdmin
+              .from('life_threads')
+              .select('id, state')
+              .eq('user_id', userId)
+              .ilike('topic', topic)
+              .in('state', ['active', 'waiting', 'blocked'])
+              .limit(1)
+              .maybeSingle();
+            if (existing) {
+              await supabaseAdmin.from('life_threads').update({
+                state, priority, provenance: provenance || undefined,
+                last_relevant_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }).eq('id', existing.id);
+              logger.info('[BackgroundAction] LifeThread updated', { userId, id: existing.id, topic, state });
+            } else {
+              await supabaseAdmin.from('life_threads').insert({
+                user_id: userId, topic, state, priority, provenance,
+                last_relevant_at: new Date().toISOString()
+              });
+              logger.info('[BackgroundAction] LifeThread created', { userId, topic, state });
+            }
+          }
+        }
+        else if (action.tool === 'LifeThread' && action.action === 'complete') {
+          // Mark matching active threads as completed so they stop triggering proactive follow-ups.
+          const topic = String(action.data?.topic || '').trim();
+          if (!topic) { logger.warn('[BackgroundAction] LifeThread.complete missing topic', { userId }); }
+          else {
+            const { error } = await supabaseAdmin.from('life_threads')
+              .update({ state: 'completed', updated_at: new Date().toISOString() })
+              .eq('user_id', userId)
+              .ilike('topic', `%${topic}%`)
+              .in('state', ['active', 'waiting', 'blocked']);
+            if (error) logger.warn('[BackgroundAction] LifeThread.complete failed', { userId, topic, error: error.message });
+            else logger.info('[BackgroundAction] LifeThread completed', { userId, topic });
+          }
+        }
+        // ── NovaAction tool handlers ──────────────────────────────────────────────
+        else if (action.tool === 'NovaAction' && action.action === 'create') {
+          const logicalKey = String(action.data?.logical_key || '').trim().substring(0, 200);
+          const title = String(action.data?.title || '').trim().substring(0, 500);
+          if (!logicalKey || !title) { logger.warn('[BackgroundAction] NovaAction.create missing logical_key or title', { userId }); }
+          else {
+            // Idempotent: UNIQUE(user_id, logical_key) — upsert on conflict
+            await supabaseAdmin.from('nova_actions').upsert({
+              user_id: userId,
+              logical_key: logicalKey,
+              title,
+              description: String(action.data?.description || '').substring(0, 1000),
+              state: action.data?.state || 'suggested',
+              priority: action.data?.priority || 'medium',
+              execution_class: action.data?.execution_class || 'SAFE_AUTOMATIC',
+              source_thread_id: action.data?.source_thread_id || null,
+              due_at: action.data?.due_at || null,
+              dependency_ids: action.data?.dependency_ids || [],
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id,logical_key', ignoreDuplicates: false });
+            logger.info('[BackgroundAction] NovaAction created/upserted', { userId, logicalKey, title });
+          }
+        }
+        else if (action.tool === 'NovaAction' && action.action === 'complete') {
+          const logicalKey = String(action.data?.logical_key || '').trim();
+          if (!logicalKey) { logger.warn('[BackgroundAction] NovaAction.complete missing logical_key', { userId }); }
+          else {
+            const { error } = await supabaseAdmin.from('nova_actions')
+              .update({ state: 'completed', updated_at: new Date().toISOString() })
+              .eq('user_id', userId)
+              .eq('logical_key', logicalKey)
+              .neq('state', 'completed');
+            if (error) logger.warn('[BackgroundAction] NovaAction.complete failed', { userId, logicalKey, error: error.message });
+            else logger.info('[BackgroundAction] NovaAction completed', { userId, logicalKey });
+          }
+        }
+        else if (action.tool === 'NovaAction' && action.action === 'cancel') {
+          const logicalKey = String(action.data?.logical_key || '').trim();
+          if (logicalKey) {
+            await supabaseAdmin.from('nova_actions')
+              .update({ state: 'cancelled', updated_at: new Date().toISOString() })
+              .eq('user_id', userId)
+              .eq('logical_key', logicalKey)
+              .not('state', 'in', '("completed","cancelled")');
+            logger.info('[BackgroundAction] NovaAction cancelled', { userId, logicalKey });
+          }
         }
       } catch (err) {
         logger.error(`[BackgroundAction] Failed executing ${action.tool}.${action.action}`, { err: err instanceof Error ? err.message : String(err) });

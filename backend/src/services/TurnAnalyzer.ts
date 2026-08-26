@@ -73,8 +73,11 @@ export class TurnAnalyzer {
         const isCorrection = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
 
         if (isCorrection) {
-          let resolvedKey: string | undefined = extractedFacts[0]?.key;
-          let resolvedVal: string | undefined = extractedFacts[0]?.value || this.extractNameFromCorrection(lower);
+          // For corrections: prefer specific relation facts, but ignore UNKNOWN_RELATION facts
+          // since their 'value' may contain pronouns (e.g. 'uska') captured by the fallback pattern.
+          const specificFact = extractedFacts.find(f => f.key !== 'UNKNOWN_RELATION');
+          let resolvedKey: string | undefined = specificFact?.key;
+          let resolvedVal: string | undefined = specificFact?.value || this.extractNameFromCorrection(lower);
           let oldValue: string | undefined;
           let relationship: string | undefined;
 
@@ -332,28 +335,28 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
-    // Wife name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    // Wife name — covers both "meri wife ka naam Sakshi hai" and "my wife is Sakshi"
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Husband name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Sister name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Brother name
-    m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Son name
-    m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    // Son name — covers "mere bete ka naam Shresht hai" and "my son is Shresht"
+    m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'son_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Daughter name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (m) facts.push({ key: 'daughter_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Company / Job
@@ -376,20 +379,24 @@ export class TurnAnalyzer {
       facts.push({ key: `${m[1].toLowerCase()}_number`, value: m[2].trim(), text, isProtected: isExplicitRemember, factClass });
     }
 
-    // City / Location
-    m = lower.match(/\b(?:rehta hoon|rehti hoon|rehta hu|live in|living in|i am from|from|stay in|staying in)\s+([a-zA-Z0-9\s]+?)(?:\s+me|(?:\s+me)?\s+rehta|[.,;!]|$)/i);
-    if (m && !['a', 'the', 'my', 'home', 'here'].includes(m[1].toLowerCase())) {
+    // City / Location — covers "Mai Dahisar me rehta hu" and "living in Dahisar"
+    m = lower.match(/\b(?:rehta hoon|rehti hoon|rehta hun|rehta hu|rehti hu|live in|living in|i am from|from|stay in|staying in)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+me\b|(?:\s+me[in]?)?\s+rehta|[.,;!]|$)/i);
+    if (m && !['a', 'the', 'my', 'home', 'here'].includes(m[1].trim().toLowerCase())) {
       facts.push({ key: 'city', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
-    } else {
-      m = lower.match(/\b(?:mai|main|i)\s+([a-zA-Z0-9\s]+?)(?:\s+me\s+rehta|\s+mein\s+rehta|\s+se\s+hu)/i);
-      if (m && !['a', 'the', 'my', 'home', 'here'].includes(m[1].toLowerCase())) {
+    } else if (facts.every(f => f.key !== 'city')) {
+      // Hinglish: "Mai Dahisar me rehta hu" — the city is between 'mai/main/i' and 'me/mein rehta'
+      m = lower.match(/\b(?:mai|main|i)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+me\s+rehta|\s+mein\s+rehta|\s+me\s+rehti|\s+se\s+hu|\s+se\s+hoon)/i);
+      if (m && !['a', 'the', 'my', 'home', 'here'].includes(m[1].trim().toLowerCase())) {
         facts.push({ key: 'city', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       }
     }
 
-    // Name
-    m = lower.match(/\b(?:mera naam|mera pura name|mera pura naam|my name is|my full name is|my full name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'user_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    // Name — maps to user_name key; full_name is just an alias stored at persistence layer
+    m = lower.match(/\b(?:mera naam|mera pura name|mera pura naam|my name is|my full name is|my full name)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) {
+      const nameVal = this.cleanValue(m[1]);
+      facts.push({ key: 'user_name', value: nameVal, text, isProtected: isExplicitRemember, factClass });
+    }
 
     // Ambiguous Name (No relationship specified)
     if (facts.length === 0) {
@@ -404,10 +411,28 @@ export class TurnAnalyzer {
   }
 
   private static extractNameFromCorrection(lower: string): string | undefined {
-    const m = lower.match(/\b(?:her|his|unka|unki|iska|iski|their|actual)?\s*name\s+is\s+([a-zA-Z]+)\b/i) ||
-              lower.match(/\b(?:naam|nam)\s+(?:hai|is)\s+([a-zA-Z]+)\b/i) ||
-              lower.match(/\b(?:actually|instead|correction:?)\s+([a-zA-Z]+)\b/i);
-    return m ? this.cleanValue(m[1]) : undefined;
+    // Try explicit "name is X" / "naam hai X" / "naam X hai" patterns first
+    const m = lower.match(/\b(?:her|his|unka|unki|iska|iski|their|uska|uski|actual)?\s*name\s+is\s+([a-zA-Z][a-zA-Z\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+              lower.match(/\b(?:naam|nam)\s+(?:hai\s+)?([a-zA-Z][a-zA-Z\s]+?)(?:\s+hai|[.,;!]|$)/i);
+    if (m) {
+      const candidate = this.cleanValue(m[1]);
+      return this.isStopPronoun(candidate) ? undefined : candidate;
+    }
+    // Fallback: 'actually X' — but skip pronouns
+    const fallback = lower.match(/\b(?:actually|instead|correction:?)\s+([a-zA-Z]+)\b/i);
+    if (fallback) {
+      const candidate = this.cleanValue(fallback[1]);
+      return this.isStopPronoun(candidate) ? undefined : candidate;
+    }
+    return undefined;
+  }
+
+  /** Returns true if the given word is a pronoun that should not be treated as a person's name */
+  private static isStopPronoun(word: string): boolean {
+    const PRONOUNS = new Set(['her', 'his', 'him', 'she', 'he', 'they', 'them', 'their',
+      'uska', 'uski', 'unka', 'unki', 'iska', 'iski', 'woh', 'wo', 'yeh', 'ye',
+      'actually', 'instead', 'correction', 'naam', 'name', 'hai', 'tha', 'thi']);
+    return PRONOUNS.has(word.toLowerCase().trim());
   }
 
   private static cleanValue(val: string): string {
