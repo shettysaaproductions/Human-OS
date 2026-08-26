@@ -157,8 +157,16 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
     3. Tier1 prompt: Removed hardcoded "45 min" gate — now uses actual computed `effectiveMinGap` from code
   - **⚠️ CRITICAL RULE:** Never set `offline` effectiveMinGap above 5min for a companion app — 15min ensures 100% silence.
   - **⚠️ CRITICAL RULE:** LLM decision prompts must inject ACTUAL computed threshold values, not hardcode them.
+  - **⚠️ CRITICAL RULE:** LLM decision prompts must inject ACTUAL computed threshold values, not hardcode them.
   - **Key routing:** 4-key NVIDIA rotation confirmed: frontal gets all 4 keys. `needsDeepModel` threshold tuned: <15 chars or FAST_ONLY words → always 8B (fast). >150 chars or deep triggers → 49B.
-
+- ✅ **Aug 26 Session — Intelligence Reliability Pass (22-point):**
+  - **TurnAnalyzer Hinglish patterns** (`TurnAnalyzer.ts`): All relationship patterns upgraded for `ka naam...hai` form. City catches "rehta hun/hu". 24/24 tests pass.
+  - **Correction pronoun guard** (`TurnAnalyzer.ts`): `extractNameFromCorrection` skips Hindi pronouns (uska/uski/unka). UNKNOWN_RELATION ignored in correction flow. `isStopPronoun()` added.
+  - **LifeThread + NovaAction handlers** (`BackgroundActionService.ts`): Full DB persistence: `LifeThread.upsert/complete`, `NovaAction.create/complete/cancel`. Idempotent on `(user_id, logical_key)`.
+  - **Memory upsert** (`BackgroundActionService.ts`): `MemoryRepository.save` now sets `is_archived: false`, conflict key `'user_id,key'`.
+  - **Proactive grounding** (`promptBuilder.ts`): `PROACTIVE GROUNDING — MANDATORY CITATION` + `UNKNOWN_IS_NOT_TRUE` rules added.
+  - **Migration 037**: Idempotent column guards for life_threads/nova_actions + partial indexes.
+  - **Tests L + M**: Sakshi→Priya + Bandra Hinglish city regression tests passing.
 
 ---
 
