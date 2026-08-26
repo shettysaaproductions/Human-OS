@@ -14,10 +14,11 @@ function optionalEnv(key: string, defaultValue: string): string {
   const value = process.env[key];
   const resolved = value && value.trim() !== '' ? value.trim() : defaultValue;
   
-  // Auto-upgrade dead 70B models to 49B to prevent 404 crashes
-  // if the user's Render dashboard has the old variable stuck in memory
-  if (resolved.toLowerCase().includes('70b-instruct')) {
-    return 'nvidia/llama-3.3-nemotron-super-49b-v1';
+  // Auto-upgrade retired models (Llama 3.1 8B retired Aug 26, 2026, 70B retired, Nemotron-49B preview retired)
+  // to active meta/llama-3.2-11b-vision-instruct so stale Render environment variables don't crash with 410 Gone.
+  const lower = resolved.toLowerCase();
+  if (lower.includes('70b-instruct') || lower.includes('3.1-8b-instruct') || lower.includes('nemotron-super-49b') || lower.includes('nemotron-70b')) {
+    return 'meta/llama-3.2-11b-vision-instruct';
   }
   return resolved;
 }
@@ -48,8 +49,8 @@ export const config = {
     apiKey14: optionalEnv('NVIDIA_API_KEY_14', ''),  // Key 14: Deep Cortex overflow
     apiKey15: optionalEnv('NVIDIA_API_KEY_15', ''),  // Key 15: Emergency reserve
     baseUrl:   optionalEnv('NVIDIA_BASE_URL',   'https://integrate.api.nvidia.com/v1'),
-    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.1-8b-instruct'),
-    deepModel: optionalEnv('NVIDIA_DEEP_MODEL', 'nvidia/llama-3.3-nemotron-super-49b-v1'),
+    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.2-11b-vision-instruct'),
+    deepModel: optionalEnv('NVIDIA_DEEP_MODEL', 'meta/llama-3.2-11b-vision-instruct'),
   },
 
   // Optional in Phase 1 — Supabase is not yet used.

@@ -90,7 +90,7 @@ function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: numb
   );
 }
 
-export const EXTRACTION_MODEL = 'meta/llama-3.1-8b-instruct';
+export const EXTRACTION_MODEL = 'meta/llama-3.2-11b-vision-instruct';
 
 export interface ChatOptions {
   model?: string;

@@ -450,7 +450,7 @@ export class NovaFollowupService {
       await supabaseAdmin.from('nova_outreach_log').insert({
         user_id: followup.user_id,
         message: followup.message,
-        outreach_type: 'nova_followup',
+        outreach_type: 'proactive',
         logical_key: `followup:fired:${followup.id}`,
       });
     } catch (logErr) {
@@ -517,7 +517,7 @@ export class NovaFollowupService {
         const tzOffset = profile.data?.timezone_offset ?? 0;
 
         const unanswGateDecision = await proactiveGate.acquire(userMsg.user_id, {
-          outreachType: 'unanswered_conv',
+          outreachType: 'engagement_checkin',
           logicalKey: `followup:unanswered:${convId}:${userMsg.id}`,
           logicalKeyWindowMinutes: 30,
           skipQuietHoursCheck: true, // already checked above
@@ -721,7 +721,7 @@ export class NovaFollowupService {
         // ── PROACTIVE GATE: replaces in-memory _checkProactiveCooldown ──────────────
         // DB-backed gate enforces cross-engine dedup even after Render restart.
         const ignoredGateDecision = await proactiveGate.acquire(userId, {
-          outreachType: 'ignored_message_followup',
+          outreachType: 'engagement_checkin',
           logicalKey: `followup:ignored:${novaMsg.id}`,
           logicalKeyWindowMinutes: 60,
           skipQuietHoursCheck: true, // already checked above
