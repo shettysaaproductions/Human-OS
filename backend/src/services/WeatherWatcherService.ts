@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import axios from 'axios';
+import { proactiveGate } from './ProactiveGate';
 
 // Interface for Open-Meteo Geocoding
 interface GeocodeResult {
@@ -103,36 +104,40 @@ Notable: ${isRaining ? 'Raining' : ''} ${isThunderstorm ? 'Thunderstorm' : ''} $
 Write a very short, casual text message warning them or checking in. (e.g., "hey, looks like it's raining heavily out there, stay dry!" or "40 degrees today, stay hydrated!"). No emojis, no robotic phrasing. Keep it to 1 sentence.`;
 
       const alertMessage = await complete('PROACTIVE', [{ role: 'system', content: prompt }], { maxTokens: 50 });
-
-      // ── QUOTE STRIPPING (Fix #4) ───────────────────────────────────────────
-      // LLM sometimes wraps the output in quotation marks. Strip them.
       const cleanAlertMessage = alertMessage.trim().replace(/^["']|["']$/g, '').trim();
 
-      // 4. Send the alert using the Trigger Engine.
-      // Use the shared singleton so the 30 req/min rate limit is actually tracked —
-      // `new NovaTriggerEngine()` starts with an empty requestTimestamps every time,
-      // so the rate limit could never fire.
-      const { novaTriggerEngine } = await import('./NovaTriggerEngine');
+      // ── AUTHORITATIVE PROACTIVE GATE ───────────────────────────────────────────
+      // Single DB-backed gate — enforces 12h weather cooldown via logical_key.
+      // Replaces the inline 12h + topic-dedup checks above.
+      const weatherKey = `weather:alert:${userId}:${new Date().toISOString().slice(0, 13)}`; // hourly bucket
+      const gateDecision = await proactiveGate.acquire(userId, {
+        outreachType: 'proactive_weather',
+        logicalKey: weatherKey,
+        logicalKeyWindowMinutes: 12 * 60,
+        proposedMessage: cleanAlertMessage,
+        skipMinGapCheck: true, // weather alerts bypass ignored-count escalation
+      });
 
-      // We pass a dummy context, ensuring 'shouldSend' passes if not in DND
+      if (!gateDecision.allowed) {
+        logger.info(`[WeatherWatcher] Gate blocked weather alert`, { userId, blockedBy: gateDecision.blockedBy });
+        return;
+      }
+
+      // Send the alert using the Trigger Engine.
+      const { novaTriggerEngine } = await import('./NovaTriggerEngine');
       await novaTriggerEngine.scheduleMessage(userId, {
-        userPresence: 'offline', // We don't care, it's a proactive alert
+        userPresence: 'offline',
         lastUserMessageAt: 0,
-        lastNovaReplyAt: Date.now() - 3600000, // Pretend we haven't spoken in an hour
+        lastNovaReplyAt: Date.now() - 3600000,
         conversationIntensity: 'casual',
         userActivity: null,
         pendingReminders: 0,
         emotionalState: {}
       }, async () => cleanAlertMessage);
 
-      // Record in outreach log so the 12-hour DB cooldown fires on future cron ticks
-      await supabaseAdmin.from('nova_outreach_log').insert({
-        user_id: userId,
-        message: cleanAlertMessage,
-        outreach_type: 'proactive_weather',
-      });
-
-      logger.info(`[WeatherWatcher] Fired proactive weather alert for ${userId} in ${location}`);
+      // Commit gate reservation
+      await proactiveGate.commit(gateDecision.outreachId, cleanAlertMessage);
+      logger.info(`[WeatherWatcher] Fired proactive weather alert`, { userId, location });
 
     } catch (e) {
       logger.error('[WeatherWatcher] Failed to run weather check', { error: e });

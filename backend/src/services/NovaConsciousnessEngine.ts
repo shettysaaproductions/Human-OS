@@ -11,6 +11,7 @@ import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
+import { proactiveGate } from './ProactiveGate';
 // Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
 // The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
 const MIN_GAP_MINUTES = 1;
@@ -674,30 +675,36 @@ ${escalationTone}`;
         return;
       }
 
-      // ── EXACT-MATCH DEDUP CHECK ──────────────────────────────────────────────
-      // Prevent sending the same message twice (e.g. "Arey, busy hai kya?" repeated).
-      // Normalize both strings: lowercase, strip punctuation, collapse whitespace.
-      const normalize = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
-      const normalizedNew = normalize(generated.message);
-      const recentOutreachMessages = (recentOutreaches || []).map(o => normalize(o.message));
-      
-      const isDuplicateOutreach = recentOutreachMessages.some(prev => {
-        if (prev === normalizedNew) return true;
-        // Near-duplicate: if word overlap is > 75%, treat as duplicate
-        const prevWords = new Set(prev.split(' ').filter(Boolean));
-        const newWords = new Set(normalizedNew.split(' ').filter(Boolean));
-        if (prevWords.size === 0 || newWords.size === 0) return false;
-        let overlap = 0;
-        for (const w of newWords) if (prevWords.has(w)) overlap++;
-        const union = new Set([...prevWords, ...newWords]).size;
-        return union > 0 && overlap / union >= 0.75;
+      const message = generated.message;
+
+      // ── AUTHORITATIVE PROACTIVE GATE ─────────────────────────────────────────
+      // Single DB-backed gate that enforces dedup, cooldown, logical-key idempotency
+      // across all proactive engines. Replaces in-memory dedup maps.
+      const agendaId = agendaItem?.id ?? 'none';
+      const logicalKey = agendaItem
+        ? `nace:agenda:${agendaId}`
+        : `nace:engagement:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`; // 1-hour bucket
+
+      const gateDecision = await proactiveGate.acquire(userId, {
+        outreachType: agendaItem ? 'agenda_followup' : 'engagement_checkin',
+        logicalKey,
+        logicalKeyWindowMinutes: agendaItem ? 60 : 60,
+        proposedMessage: message,
+        skipQuietHoursCheck: true, // NACE already checks sleep window above
+        skipMinGapCheck: true,     // NACE already enforces escalation gap above
+        timezoneOffsetMinutes: profile.timezone_offset || 0,
       });
-      
-      if (isDuplicateOutreach) {
-        logger.warn('[NACE] 🚫 Duplicate outreach detected — skipping to avoid repeating the same message', { userId, message: generated.message.substring(0, 60) });
+
+      if (!gateDecision.allowed) {
+        logger.info('[NACE] 🚫 ProactiveGate blocked', {
+          userId, blockedBy: gateDecision.blockedBy, detail: (gateDecision as any).detail
+        });
         return;
       }
 
+      const outreachId = gateDecision.outreachId;
+
+      // Update agenda retry state BEFORE delivery so a crash doesn't re-fire it immediately
       if (agendaItem) {
         const newRetryCount = (agendaItem.retry_count || 0) + 1;
         if (newRetryCount >= (agendaItem.max_retries || 3)) {
@@ -707,28 +714,13 @@ ${escalationTone}`;
           if (agendaItem.urgency === 'high') delayHours = 4;
           else if (agendaItem.urgency === 'medium') delayHours = 8;
           const nextRetry = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
-          await supabaseAdmin.from('nova_agenda').update({ retry_count: newRetryCount, next_retry_at: nextRetry, updated_at: new Date().toISOString() }).eq('id', agendaItem.id);
+          await supabaseAdmin.from('nova_agenda').update({
+            retry_count: newRetryCount, next_retry_at: nextRetry, updated_at: new Date().toISOString()
+          }).eq('id', agendaItem.id);
         }
       }
 
-      const message = generated.message;
-
-      // ── PERSISTENT DEDUP via working_memory ─────────────────────────────────
-      // Backup dedup in case nova_outreach_log insert failed on a prior pulse.
-      // This prevents the "same message 3x" bug caused by outreach_log insert errors.
-      const normalize2 = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
-      const { data: lastProactiveWm } = await supabaseAdmin
-        .from('working_memory')
-        .select('value')
-        .eq('user_id', userId)
-        .eq('key', 'last_proactive_content')
-        .maybeSingle();
-      if (lastProactiveWm?.value && normalize2(lastProactiveWm.value) === normalize2(message)) {
-        logger.warn('[NACE] 🚫 Working memory dedup — same message as last proactive, skipping', { userId, message: message.substring(0, 60) });
-        return;
-      }
-
-      // Save to chat_history so Nova remembers saying this
+      // Save to chat_history
       const { data: latestChat } = await supabaseAdmin
         .from('chat_history')
         .select('conversation_id')
@@ -738,24 +730,17 @@ ${escalationTone}`;
         .maybeSingle();
       const conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-      await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine');
-
-      // Log to outreach log so MIN_GAP check works correctly + update working_memory dedup
-      const { error: outreachLogError } = await supabaseAdmin.from('nova_outreach_log').insert({
-        user_id: userId,
-        message,
-        outreach_type: agendaItem ? 'agenda_followup' : 'engagement_checkin',
-      });
-      if (outreachLogError) {
-        logger.warn('[NACE] ⚠️ outreach_log insert failed — dedup ledger may be incomplete', { error: outreachLogError.message, userId });
+      try {
+        await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine');
+        // Commit actual message to gate log (was written as placeholder on acquire)
+        await proactiveGate.commit(outreachId, message);
+      } catch (saveErr) {
+        // Delivery failed — release reservation so cooldown isn't polluted
+        await proactiveGate.release(outreachId);
+        throw saveErr;
       }
-      // Always persist to working_memory as backup dedup (even if outreach_log failed)
-      await supabaseAdmin.from('working_memory').upsert(
-        { user_id: userId, key: 'last_proactive_content', value: message, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,key' }
-      );
 
-      // Send push notification (only if token exists — message is already saved to DB above)
+      // Send push notification
       if (hasPushToken) {
         const { sendNovaReplyNotification } = await import('../lib/pushNotifications');
         await sendNovaReplyNotification(profile.push_token, message, conversationId).catch(err =>
@@ -765,7 +750,10 @@ ${escalationTone}`;
         logger.info('[NACE] Message saved to DB (no push token — user will see it on app open)', { userId });
       }
 
-      logger.info('[NACE] Proactive message sent successfully', { userId, messagePreview: message.substring(0, 60) });
+      logger.info('[NACE] ✅ Proactive message sent', {
+        userId, outreachId, messagePreview: message.substring(0, 60),
+        decision: { outreachType: agendaItem ? 'agenda_followup' : 'engagement_checkin', logicalKey }
+      });
     } catch (e) {
       logger.warn('[NACE] Tier 2 generation or send failed', { error: e instanceof Error ? e.message : String(e) });
     }

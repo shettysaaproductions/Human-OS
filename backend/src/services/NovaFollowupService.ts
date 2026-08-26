@@ -20,6 +20,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { sendPushNotification } from '../lib/pushNotifications';
+import { proactiveGate } from './ProactiveGate';
 
 // Deduplication cache to prevent duplicate messages
 const dedupCache = new Map<string, { lastContent: string, lastSentAt: number }>();
@@ -32,11 +33,8 @@ const ignoredFollowupSent = new Map<string, number>();
 // Key: userId → count. Resets when user replies.
 const ignoreEscalationCount = new Map<string, number>();
 
-// ── Global proactive message cooldown (Fix #5: Multi-Scheduler Concurrency Lock) ──
-// Prevents duplicate greetings from NACE, Followup, and Weather schedulers firing
-// close together. Key: userId → timestamp of last proactive message sent.
-const lastProactiveSentAt = new Map<string, number>();
-const GLOBAL_PROACTIVE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes between any two proactive messages
+// NOTE: Global proactive cooldown is now enforced by ProactiveGate (DB-backed).
+// lastProactiveSentAt and GLOBAL_PROACTIVE_COOLDOWN_MS removed — they reset on server restart.
 
 // ── Sleep / unavailability signal classification ──────────────────────────────
 // Shared by queueFollowup's guard, chat.ts's immediate lock (recordUnavailability),
@@ -115,22 +113,6 @@ export class NovaFollowupService {
     // Quiet: 23:00–23:59 (11 PM–midnight) and 00:00–06:59 (midnight–7 AM)
     // We only have integer hours, so we allow from hour 7 onwards (7:00 AM+).
     return hour >= 23 || hour < 7;
-  }
-
-  /**
-   * Enforce global 10-minute proactive message cooldown (Fix #5).
-   * Returns true if the cooldown allows sending, false if blocked.
-   */
-  private _checkProactiveCooldown(userId: string): boolean {
-    const lastSent = lastProactiveSentAt.get(userId) || 0;
-    return (Date.now() - lastSent) >= GLOBAL_PROACTIVE_COOLDOWN_MS;
-  }
-
-  /**
-   * Record that a proactive message was sent for this user.
-   */
-  private _recordProactiveSent(userId: string): void {
-    lastProactiveSentAt.set(userId, Date.now());
   }
 
   /**
@@ -297,6 +279,9 @@ export class NovaFollowupService {
       ignoredFollowupSent.delete(userId);
       ignoreEscalationCount.delete(userId);
 
+      // Mark all unreplied outreaches as replied — resets DB-backed ignored count
+      await proactiveGate.markReplied(userId, new Date().toISOString());
+
       // Clear DB suppression — user replied, so Nova can re-engage in future sessions.
       // Also clear the unseen check-in counter (DB-persisted so it survives restarts).
       await supabaseAdmin
@@ -457,9 +442,22 @@ export class NovaFollowupService {
       lastSentAt: Date.now()
     });
 
-    // Record global proactive cooldown (Fix #5) — every follow-up fired here is
-    // proactive (queued via queueFollowup), so it counts toward the 10-min lock.
-    this._recordProactiveSent(followup.user_id);
+    // Record global proactive cooldown via gate — every follow-up fired here is
+    // proactive (queued via queueFollowup), so it counts toward the gate cooldown.
+    // We don't call gate.acquire() for followups (they were already gate-checked at
+    // queueFollowup time), but we write to nova_outreach_log for cross-engine dedup.
+    try {
+      await supabaseAdmin.from('nova_outreach_log').insert({
+        user_id: followup.user_id,
+        message: followup.message,
+        outreach_type: 'nova_followup',
+        logical_key: `followup:fired:${followup.id}`,
+      });
+    } catch (logErr) {
+      logger.warn('[NovaFollowup] outreach_log record failed (non-critical)', {
+        followupId: followup.id, error: logErr instanceof Error ? logErr.message : String(logErr)
+      });
+    }
   }
   /**
    * Scan for conversations where the last message was from the user (unanswered)
@@ -509,8 +507,26 @@ export class NovaFollowupService {
           }
         }
 
-        // ── GLOBAL PROACTIVE COOLDOWN (Fix #5) ─────────────────────────────────
-        if (!this._checkProactiveCooldown(userMsg.user_id)) {
+        // ── PROACTIVE GATE (replaces in-memory global cooldown) ──────────────────
+        // DB-backed gate ensures cross-engine dedup even after server restart.
+        const profile = await supabaseAdmin
+          .from('profiles')
+          .select('timezone_offset')
+          .eq('id', userMsg.user_id)
+          .maybeSingle();
+        const tzOffset = profile.data?.timezone_offset ?? 0;
+
+        const unanswGateDecision = await proactiveGate.acquire(userMsg.user_id, {
+          outreachType: 'unanswered_conv',
+          logicalKey: `followup:unanswered:${convId}:${userMsg.id}`,
+          logicalKeyWindowMinutes: 30,
+          skipQuietHoursCheck: true, // already checked above
+          skipMinGapCheck: true,     // unanswered = Nova failed to reply, not spam
+          timezoneOffsetMinutes: tzOffset,
+        });
+
+        if (!unanswGateDecision.allowed) {
+          logger.info('[NovaFollowup] Unanswered gate blocked', { userId: userMsg.user_id, blockedBy: unanswGateDecision.blockedBy });
           continue;
         }
 
@@ -702,11 +718,25 @@ export class NovaFollowupService {
           }
         }
 
-        // ── GLOBAL PROACTIVE COOLDOWN (Fix #5): 10 min min between any proactive msgs ──
-        if (!this._checkProactiveCooldown(userId)) {
-          logger.info('[NovaFollowup] Global proactive cooldown active — skipping', { userId });
+        // ── PROACTIVE GATE: replaces in-memory _checkProactiveCooldown ──────────────
+        // DB-backed gate enforces cross-engine dedup even after Render restart.
+        const ignoredGateDecision = await proactiveGate.acquire(userId, {
+          outreachType: 'ignored_message_followup',
+          logicalKey: `followup:ignored:${novaMsg.id}`,
+          logicalKeyWindowMinutes: 60,
+          skipQuietHoursCheck: true, // already checked above
+          skipMinGapCheck: false,    // gate enforces escalation cooldown
+        });
+
+        if (!ignoredGateDecision.allowed) {
+          logger.info('[NovaFollowup] Ignored-message gate blocked', {
+            userId, blockedBy: ignoredGateDecision.blockedBy, msgId: novaMsg.id
+          });
           continue;
         }
+
+        // Reserve outreachId — will release if generation fails
+        const ignoredOutreachId = ignoredGateDecision.outreachId;
 
         // ── ANTI-CHAINING GUARD: Don't follow up on our own follow-ups ──────────────
         if (await this._hasUnansweredFollowup(userId)) {
@@ -714,9 +744,12 @@ export class NovaFollowupService {
           continue;
         }
 
-        // Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes
+        // Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes (in-memory)
         const lastSent = ignoredFollowupSent.get(userId) || 0;
-        if (Date.now() - lastSent < 3 * 60 * 1000) continue;
+        if (Date.now() - lastSent < 3 * 60 * 1000) {
+          await proactiveGate.release(ignoredOutreachId);
+          continue;
+        }
 
         // Skip if user replied after Nova's message
         const { data: userReply } = await supabaseAdmin
@@ -728,6 +761,7 @@ export class NovaFollowupService {
           .limit(1);
         if (userReply && userReply.length > 0) {
           ignoreEscalationCount.delete(userId);
+          await proactiveGate.release(ignoredOutreachId); // release — not spam, user replied
           continue;
         }
 
@@ -827,7 +861,12 @@ export class NovaFollowupService {
           }
 
           logger.info('[NovaFollowup] Online (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
-          await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0, { isOnlineNudge: true });
+          try {
+            await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0, { isOnlineNudge: true });
+            await proactiveGate.commit(ignoredOutreachId, msg);
+          } catch {
+            await proactiveGate.release(ignoredOutreachId);
+          }
           continue;
         }
 
@@ -863,8 +902,12 @@ export class NovaFollowupService {
           logger.warn('[NovaFollowup] Offline check-in gen failed, using fallback');
         }
 
-        await this._writeSuppression(userId, backoffHours);
-        await this.queueFollowup(userId, novaMsg.conversation_id, deferredMsg, backoffHours, { cancelExisting: false });
+        try {
+          await this.queueFollowup(userId, novaMsg.conversation_id, deferredMsg, backoffHours, { cancelExisting: false });
+          await proactiveGate.commit(ignoredOutreachId, deferredMsg);
+        } catch {
+          await proactiveGate.release(ignoredOutreachId);
+        }
 
         await supabaseAdmin.from('working_memory').upsert({
           user_id: userId,
@@ -958,5 +1001,5 @@ export function _clearFollowupCachesForTest() {
   dedupCache.clear();
   ignoredFollowupSent.clear();
   ignoreEscalationCount.clear();
-  lastProactiveSentAt.clear();
+  // lastProactiveSentAt removed — cooldown now DB-backed via ProactiveGate
 }
