@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-26 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-27 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -74,6 +74,13 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 27 Session — Phase 10.0 Unified Cognitive Context Fabric (WIRED INTO CHAT):**
+  - **`CognitiveContextService` → `chat.ts` integration:** `cognitiveContextService.assembleContext()` now fires in parallel with the existing context fetch on every chat request.
+  - **Unified TurnAnalysis:** `chat.ts` now uses `cogCtx.turn.turnAnalysis` (from the unified service) instead of a second standalone `TurnAnalyzer.analyze()` call. Falls back to direct call if assembly fails.
+  - **Observability metrics logged per request:** `durableFacts`, `conflicts_detected`, `conflicts_resolved`, `degraded_sources`, `assembly_duration_ms`.
+  - **Test fixes:** `nvidiaRouting.test.ts` updated to expect `meta/llama-3.2-11b-vision-instruct` (Phase 9 model migration). `NovaFollowupService.test.ts` mock sequence corrected for `ProactiveGate` + `_hasUnansweredFollowup` interaction.
+  - **Build:** `tsc` exit 0, 0 errors. **All 14 test suites, 145 tests passing.** Pushed to `main`.
+  - **No OTA required** (backend-only change). User must manually redeploy Render.
 - ✅ **Aug 25 Session — Phase 10 Unified Cognitive Context Fabric & Recall Quality:**
   - **Canonical Cognitive Context (`CognitiveContextService.ts`)**: Single source of truth for conversational context across normal chat, proactive cognition (NACE), life-thread reasoning, and action intelligence.
   - **Deterministic Ranking & Fact Conflict Resolution**: Resolves current vs historical facts cleanly (e.g. wife: Sakshi -> Priya). Segregates historical facts into `historicalFacts` while keeping only the current truth active.
