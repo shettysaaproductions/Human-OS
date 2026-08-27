@@ -21,6 +21,7 @@ import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
 import { TurnAnalyzer } from '../services/TurnAnalyzer';
+import { cognitiveContextService } from '../services/CognitiveContextService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -857,6 +858,22 @@ chatRouter.post(
       const dbStartTime = Date.now();
       context_started_ms = dbStartTime;
 
+      // ── Phase 10: CognitiveContextService — Unified Cognitive Context Fabric ──
+      // Assembles provenance-aware, conflict-resolved, bounded context in parallel.
+      // Runs alongside the existing fetches; never blocks the critical path.
+      const cogCtxPromise = cognitiveContextService.assembleContext(userId, {
+        message: effectiveMessage,
+        messages: normalizedMessages.map(m => ({ message: m.message, reply_to_content: m.reply_to_content })),
+        conversationId: activeConversationId,
+        isProactive: is_proactive,
+        skipMemory,
+      }).catch(err => {
+        logger.warn('[Chat][Phase10] CognitiveContext assembly failed — continuing with legacy context', {
+          userId, error: err instanceof Error ? err.message : String(err)
+        });
+        return null;
+      });
+
       const profilePromise = (cachedProfile && cachedProfile.push_token)
         ? Promise.resolve({ data: cachedProfile, error: null })
         : qt.track('get_profile', 'profiles', () => supabaseAdmin.from('profiles').select('preferred_name, companion_personality, country, push_token, current_visual_context, timezone_offset, grammatical_gender').eq('id', userId).maybeSingle());
@@ -1082,7 +1099,22 @@ chatRouter.post(
       const memoryContext = '';
       const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
 
-      const turnAnalysis = TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
+      // ── Phase 10: Resolve cogCtx (if ready) and use unified turn analysis ──
+      const cogCtx = await cogCtxPromise;
+      if (cogCtx) {
+        logger.info('[Chat][Phase10] CognitiveContext assembled', {
+          userId,
+          durableFacts: cogCtx.memories.durableFacts.length,
+          conflicts: cogCtx.metadata.conflicts_detected,
+          conflictsResolved: cogCtx.metadata.conflicts_resolved,
+          degradedSources: cogCtx.metadata.degraded_sources,
+          assemblyMs: cogCtx.metadata.assembly_duration_ms,
+        });
+      }
+
+      // Use CognitiveContext's unified turn analysis (avoids duplicate TurnAnalyzer.analyze call).
+      // Falls back to a fresh analysis if CognitiveContext assembly failed.
+      const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // Dispatch durable fact persistence immediately for deterministic facts & corrections
