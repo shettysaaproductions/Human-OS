@@ -1,7 +1,9 @@
-import { complete, determineUserProfile, stream } from '../lib/nvidia';
+import { complete, determineUserProfile } from '../lib/nvidia';
+import { cognitiveRouter } from '../lib/cognitiveRouter';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 import { backgroundActions } from './BackgroundActionService';
+
 
 
 /**
@@ -271,7 +273,8 @@ export class NovaBrainService {
       const maxTok = profile === 'USER_DEEP' ? 512 : 256;
       logger.info('[NOVA BRAIN] Call 1 (Conversation)', { profile, maxTokens: maxTok, messageLength: combinedUserMessage.length });
 
-      const rawReply = await complete(profile, convoMessages, {
+      // Phase 10.1: Route through CognitiveModelRouter (Gemini primary, NVIDIA fallback)
+      const rawReply = await cognitiveRouter.complete('CONVERSATION', convoMessages, {
         temperature: 0.85,
         maxTokens: maxTok,
       });
@@ -377,7 +380,8 @@ export class NovaBrainService {
     const convoMessages = buildMessages(fullPrompt, context.recentMessages, combinedUserMessage);
 
     const profile = determineUserProfile(combinedUserMessage);
-    const responseStream = stream(profile, convoMessages, {
+    // Phase 10.1: Route stream through CognitiveModelRouter (Gemini primary, NVIDIA fallback)
+    const responseStream = cognitiveRouter.stream('CONVERSATION', convoMessages, {
       temperature: 0.85,
       maxTokens: profile === 'USER_DEEP' ? 512 : 256,
     });
@@ -474,12 +478,14 @@ Return ONLY a JSON object with:
   "iso_timestamp_utc": "ISO string for today at that time in UTC, or null if no time found"
 }`;
 
-    const response = await complete('PROACTIVE', [
+    // Phase 10.1: PROACTIVE_REASONING workload (Gemini handles proactive JSON too)
+    const response = await cognitiveRouter.complete('PROACTIVE_REASONING', [
       { role: 'system', content: 'You are a precise time extractor.' },
       { role: 'user', content: prompt }
     ], {
-      response_format: { type: 'json_object' },
-      temperature: 0.1
+      jsonMode: true,
+      temperature: 0.1,
+      maxTokens: 150,
     });
 
     const parsed = JSON.parse(response);
@@ -512,12 +518,13 @@ Return a JSON object matching this structure:
   "source_memory_id": "string (the exact ID of the goal or node that this is about, or null)"
 }`;
 
-    const response = await complete('PROACTIVE', [
+    const response = await cognitiveRouter.complete('PROACTIVE_REASONING', [
       { role: 'system', content: 'You extract goal check-ins in JSON format.' },
       { role: 'user', content: prompt }
     ], {
-      response_format: { type: 'json_object' },
-      temperature: 0.2
+      jsonMode: true,
+      temperature: 0.2,
+      maxTokens: 250,
     });
 
     return JSON.parse(response);
@@ -549,12 +556,13 @@ Return a JSON object matching this structure:
   "source_memory_id": "string (the exact ID of the node or memory this is about, or null)"
 }`;
 
-    const response = await complete('PROACTIVE', [
+    const response = await cognitiveRouter.complete('PROACTIVE_REASONING', [
       { role: 'system', content: 'You extract child milestone check-ins in JSON format.' },
       { role: 'user', content: prompt }
     ], {
-      response_format: { type: 'json_object' },
-      temperature: 0.2
+      jsonMode: true,
+      temperature: 0.2,
+      maxTokens: 250,
     });
 
     return JSON.parse(response);
@@ -577,12 +585,13 @@ Return JSON:
   "body": "Refined Body"
 }`;
 
-    const response = await complete('PROACTIVE', [
+    const response = await cognitiveRouter.complete('PROACTIVE_REASONING', [
       { role: 'system', content: 'You validate and refine check-in notifications in JSON.' },
       { role: 'user', content: prompt }
     ], {
-      response_format: { type: 'json_object' },
-      temperature: 0.1
+      jsonMode: true,
+      temperature: 0.1,
+      maxTokens: 200,
     });
 
     return JSON.parse(response);
@@ -611,11 +620,11 @@ PROACTIVE RESTRAINT:
 
 Output JSON only: {"shouldReach": boolean, "reason": "short explanation", "triggerType": "agenda | engagement | curiosity | routine"}`;
 
-    const response = await complete('PROACTIVE', [
+    const response = await cognitiveRouter.complete('PROACTIVE_REASONING', [
       { role: 'system', content: prompt },
       { role: 'user', content: tier1Context }
     ], {
-      temperature: 0.1, maxTokens: 100, response_format: { type: 'json_object' }
+      temperature: 0.1, maxTokens: 100, jsonMode: true,
     });
     return JSON.parse(response);
   }
@@ -654,11 +663,11 @@ If the selected context does not justify a message, output an empty message ("")
 
 Output JSON: {"message": "your reply here or empty string if no grounded reason", "tone": "emotional | playful | concerned"}`;
 
-    const response = await complete('PROACTIVE', [
+    const response = await cognitiveRouter.complete('PROACTIVE_GENERATION', [
       { role: 'system', content: prompt },
       { role: 'user', content: tier2Context }
     ], {
-      temperature: 0.85, maxTokens: 200, response_format: { type: 'json_object' }
+      temperature: 0.85, maxTokens: 200, jsonMode: true,
     });
     const parsed = JSON.parse(response);
     if (parsed.message) {
@@ -679,7 +688,9 @@ Output JSON: {"message": "your reply here or empty string if no grounded reason"
       }
     ];
 
-    const raw = await complete('PROACTIVE', messages, { response_format: { type: 'json_object' }, maxTokens: 512 });
+    const raw = await cognitiveRouter.complete('PROACTIVE_REASONING', messages, {
+      jsonMode: true, maxTokens: 512,
+    });
     return JSON.parse(raw);
   }
 
@@ -695,7 +706,9 @@ Output JSON: {"message": "your reply here or empty string if no grounded reason"
       }
     ];
 
-    const raw = await complete('PROACTIVE', messages, { response_format: { type: 'json_object' }, maxTokens: 768 });
+    const raw = await cognitiveRouter.complete('PROACTIVE_REASONING', messages, {
+      jsonMode: true, maxTokens: 768,
+    });
     return JSON.parse(raw);
   }
 }

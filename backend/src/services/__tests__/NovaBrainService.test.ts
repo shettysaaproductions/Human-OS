@@ -15,6 +15,23 @@ jest.mock('../../lib/nvidia', () => ({
   stream: jest.fn()
 }));
 
+// Phase 10.1: CognitiveModelRouter mock — delegates complete/stream to nvidia mock
+// so all existing test value assertions still work.
+jest.mock('../../lib/cognitiveRouter', () => ({
+  cognitiveRouter: {
+    complete: jest.fn(async (workload: string, messages: any[], options: any) => {
+      // Delegate to nvidia.complete mock so tests can control the return value
+      const { complete } = jest.requireMock('../../lib/nvidia');
+      return complete(workload, messages, options);
+    }),
+    stream: jest.fn(async function*(workload: string, messages: any[], options: any) {
+      const { stream } = jest.requireMock('../../lib/nvidia');
+      yield* stream(workload, messages, options);
+    }),
+  },
+}));
+
+
 jest.mock('../BackgroundActionService', () => ({
   backgroundActions: {
     processCriticalActions: jest.fn().mockResolvedValue(undefined)
@@ -291,7 +308,7 @@ describe('NovaBrainService', () => {
       const result = await service.evaluateConsciousnessTier2('ctx');
       expect(result.message).toBeDefined();
       expect(result.tone).toBeDefined();
-      expect(chatCompletionBackground).toHaveBeenCalledWith('PROACTIVE', expect.any(Array), expect.objectContaining({ temperature: 0.85, maxTokens: 200 }));
+      expect(chatCompletionBackground).toHaveBeenCalledWith('PROACTIVE_GENERATION', expect.any(Array), expect.objectContaining({ temperature: 0.85, maxTokens: 200 }));
     });
 
     it('evaluateGoalFollowup: should include preferred name and avoid past IDs', async () => {

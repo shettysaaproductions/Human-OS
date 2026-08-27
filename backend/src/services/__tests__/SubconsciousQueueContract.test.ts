@@ -12,6 +12,20 @@ jest.mock('../../lib/nvidia', () => ({
   stream: jest.fn()
 }));
 
+// Phase 10.1: cognitiveRouter mock — delegates to nvidia complete mock
+jest.mock('../../lib/cognitiveRouter', () => ({
+  cognitiveRouter: {
+    complete: jest.fn(async (workload: string, messages: any[], options: any) => {
+      const { complete } = jest.requireMock('../../lib/nvidia');
+      return complete(workload, messages, options);
+    }),
+    stream: jest.fn(async function*(workload: string, messages: any[], options: any) {
+      const { stream } = jest.requireMock('../../lib/nvidia');
+      yield* stream(workload, messages, options);
+    }),
+  },
+}));
+
 jest.mock('../../lib/logger', () => ({
   logger: {
     info: jest.fn(),

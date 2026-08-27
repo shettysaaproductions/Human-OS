@@ -77,4 +77,28 @@ export const config = {
   expo: {
     accessToken: optionalEnv('EXPO_ACCESS_TOKEN', ''),
   },
+
+  gemini: {
+    // Two production keys configured for Phase 10.1 experimentation.
+    // Additional keys (3, 4) can be added later without code changes.
+    apiKey1: optionalEnv('GEMINI_API_KEY_1', ''),
+    apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
+    // Primary Gemini model for conversational workloads
+    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-2.0-flash'),
+  },
+
+  // Cognitive Model Router — maps workloads to providers.
+  // Valid providers: 'gemini' | 'nvidia'
+  // Override any workload via env vars, e.g. ROUTE_CONVERSATION=nvidia to revert.
+  routing: {
+    conversation:       optionalEnv('ROUTE_CONVERSATION',       'gemini'),
+    proactiveReasoning: optionalEnv('ROUTE_PROACTIVE_REASONING', 'gemini'),
+    proactiveGeneration:optionalEnv('ROUTE_PROACTIVE_GENERATION','gemini'),
+    memoryExtraction:   optionalEnv('ROUTE_MEMORY_EXTRACTION',   'nvidia'),
+    lifeThreads:        optionalEnv('ROUTE_LIFE_THREADS',         'nvidia'),
+    actionIntelligence: optionalEnv('ROUTE_ACTION_INTELLIGENCE',  'nvidia'),
+    backgroundCognition:optionalEnv('ROUTE_BACKGROUND_COGNITION', 'nvidia'),
+    vision:             optionalEnv('ROUTE_VISION',               'nvidia'),
+    turnAnalysis:       optionalEnv('ROUTE_TURN_ANALYSIS',        'nvidia'),
+  },
 } as const;
