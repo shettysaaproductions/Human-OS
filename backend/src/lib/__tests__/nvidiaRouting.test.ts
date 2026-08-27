@@ -21,9 +21,10 @@ describe('NVIDIA routing profiles', () => {
     expect(determineUserProfile('My project plan is going okay today.')).toBe('USER_FAST');
   });
 
-  it('keeps extraction capabilities on the 8B model', () => {
+  it('keeps extraction capabilities on the vision model (post Phase 9 migration)', () => {
     for (const profile of ['MEMORY', 'SUBCONSCIOUS', 'CRITICAL_ACTION', 'TIMEOUT_FALLBACK'] as const) {
-      expect(resolveRoutingProfile(profile).model).toBe('meta/llama-3.1-8b-instruct');
+      // Phase 9: llama-3.1-8b-instruct was retired (410 Gone) → migrated to llama-3.2-11b-vision-instruct
+      expect(resolveRoutingProfile(profile).model).toBe('meta/llama-3.2-11b-vision-instruct');
     }
   });
 

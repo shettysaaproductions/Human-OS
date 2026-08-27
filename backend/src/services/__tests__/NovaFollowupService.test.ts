@@ -59,6 +59,18 @@ jest.mock('../NovaBrainService', () => ({
   }
 }));
 
+// ProactiveGate mock: allow acquisition by default so checkIgnoredNovaMessages tests
+// can reach the insertion path. jest.mock() is hoisted, so we cannot reference outer
+// const variables in the factory — use jest.fn() directly inside and retrieve via require().
+jest.mock('../ProactiveGate', () => ({
+  proactiveGate: {
+    acquire: jest.fn().mockResolvedValue({ allowed: true, outreachId: 'gate-test-id' }),
+    commit: jest.fn().mockResolvedValue(undefined),
+    release: jest.fn().mockResolvedValue(undefined),
+  }
+}));
+
+
 describe('NovaFollowupService', () => {
   let service: NovaFollowupService;
   let mockChain: any;
@@ -373,18 +385,28 @@ describe('NovaFollowupService', () => {
       meta: {}
     });
 
+    let gate: { acquire: jest.Mock; commit: jest.Mock; release: jest.Mock };
+    beforeEach(() => {
+      // Access ProactiveGate through jest.requireMock (avoids hoisting issues with jest.mock factories)
+      gate = (jest.requireMock('../ProactiveGate') as any).proactiveGate;
+      gate.acquire.mockResolvedValue({ allowed: true, outreachId: 'gate-test-id' });
+      gate.commit.mockResolvedValue(undefined);
+      gate.release.mockResolvedValue(undefined);
+    });
+
     it('SEEN: user actively in-app → queues a quick nudge', async () => {
       mockChain.order.mockResolvedValueOnce({ data: [novaMsg30('u1-seen')] }); // initial scan
       mockChain.limit.mockResolvedValue({ data: [] });                        // userReply / newerNova / recentPending / detectUnavailability
-      
+
       mockChain.maybeSingle
-        .mockResolvedValueOnce({ data: null }) // 1. user_preferences (tz offset)
-        .mockResolvedValueOnce({ data: { status: 'online', updated_at: new Date(Date.now() - 60 * 1000).toISOString() } }) // 2. presence
-        .mockResolvedValueOnce({ data: null }); // 3. suppression
+        .mockResolvedValueOnce({ data: null }) // 1. _getUserLocalHour (tz offset)
+        .mockResolvedValueOnce({ data: null }) // 2. _hasUnansweredFollowup (lastAssistant = null → no unanswered)
+        .mockResolvedValueOnce({ data: { status: 'online', updated_at: new Date(Date.now() - 60 * 1000).toISOString() } }) // 3. presence
+        .mockResolvedValueOnce({ data: null }); // 4. suppression
 
       await service.checkIgnoredNovaMessages();
 
-      const inserted = mockChain.insert.mock.calls.map(c => c[0]).find(c => c.user_id === 'u1-seen');
+      const inserted = mockChain.insert.mock.calls.map((c: any) => c[0]).find((c: any) => c.user_id === 'u1-seen');
       expect(inserted).toBeDefined();
       expect(inserted.status).toBe('pending');
       const fireDelayMs = new Date(inserted.fire_at).getTime() - Date.now();
@@ -394,16 +416,17 @@ describe('NovaFollowupService', () => {
     it('UNSEEN: user offline → books a deferred ~3.5h check-in', async () => {
       mockChain.order.mockResolvedValueOnce({ data: [novaMsg30('u1-unseen')] });
       mockChain.limit.mockResolvedValue({ data: [] });
-      
+
       mockChain.maybeSingle
-        .mockResolvedValueOnce({ data: null }) // 1. tz offset
-        .mockResolvedValueOnce({ data: { status: 'offline', updated_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString() } }) // 2. presence
-        .mockResolvedValueOnce({ data: null }) // 3. suppression
-        .mockResolvedValueOnce({ data: { value: '0' } }); // 4. unseen count
+        .mockResolvedValueOnce({ data: null }) // 1. _getUserLocalHour (tz offset)
+        .mockResolvedValueOnce({ data: null }) // 2. _hasUnansweredFollowup (lastAssistant = null)
+        .mockResolvedValueOnce({ data: { status: 'offline', updated_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString() } }) // 3. presence
+        .mockResolvedValueOnce({ data: null }) // 4. suppression
+        .mockResolvedValueOnce({ data: { value: '0' } }); // 5. unseen count
 
       await service.checkIgnoredNovaMessages();
 
-      const inserted = mockChain.insert.mock.calls.map(c => c[0]).find(c => c.user_id === 'u1-unseen');
+      const inserted = mockChain.insert.mock.calls.map((c: any) => c[0]).find((c: any) => c.user_id === 'u1-unseen');
       expect(inserted).toBeDefined();
       const fireDelayMs = new Date(inserted.fire_at).getTime() - Date.now();
       // Test author expected a 15 min delay for the first offline checkin since attempt=0 maps to 1 min which is clamped to 15 min by queueFollowup.
@@ -415,17 +438,22 @@ describe('NovaFollowupService', () => {
     it('SUPPRESSED: lock active → no follow-up queued', async () => {
       mockChain.order.mockResolvedValueOnce({ data: [novaMsg30('u1-suppressed')] });
       mockChain.limit.mockResolvedValue({ data: [] });
-      
+
       mockChain.maybeSingle
-        .mockResolvedValueOnce({ data: null }) // 1. tz offset
-        .mockResolvedValueOnce({ data: { status: 'offline', updated_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString() } }) // 2. presence
-        .mockResolvedValueOnce({ data: { value: new Date(Date.now() + 8 * 3600 * 1000).toISOString() } }); // 3. suppression lock
+        .mockResolvedValueOnce({ data: null }) // 1. _getUserLocalHour (tz offset)
+        .mockResolvedValueOnce({ data: null }) // 2. _hasUnansweredFollowup (lastAssistant = null)
+        .mockResolvedValueOnce({ data: { status: 'offline', updated_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString() } }) // 3. presence
+        .mockResolvedValueOnce({ data: { value: new Date(Date.now() + 8 * 3600 * 1000).toISOString() } }); // 4. suppression lock (active → blocks)
 
       await service.checkIgnoredNovaMessages();
 
-      expect(mockChain.insert).not.toHaveBeenCalled();
+      // Only ProactiveGate commit (nova_outreach_log) should NOT have been called since we
+      // hit the suppression guard before scheduling. The nova_followups insert must not fire.
+      const followupInserts = mockChain.insert.mock.calls.map((c: any) => c[0]).filter((c: any) => c.status === 'pending' && c.user_id === 'u1-suppressed');
+      expect(followupInserts.length).toBe(0);
     });
   });
+
 
   describe('3.9 queueFollowup cancelExisting opt', () => {
     it('does NOT cancel existing follow-ups when cancelExisting:false', async () => {

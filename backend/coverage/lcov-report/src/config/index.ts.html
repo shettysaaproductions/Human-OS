@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">88.88% </span>
+                <span class="strong">90% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>8/9</span>
+                <span class='fraction'>9/10</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">80% </span>
+                <span class="strong">88.88% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>4/5</span>
+                <span class='fraction'>8/9</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">88.88% </span>
+                <span class="strong">90% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>8/9</span>
+                <span class='fraction'>9/10</span>
             </div>
         
             
@@ -142,34 +142,33 @@
 <a name='L77'></a><a href='#L77'>77</a>
 <a name='L78'></a><a href='#L78'>78</a>
 <a name='L79'></a><a href='#L79'>79</a>
-<a name='L80'></a><a href='#L80'>80</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">124x</span>
-<span class="cline-any cline-yes">124x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">124x</span>
+<span class="cline-any cline-yes">31x</span>
+<span class="cline-any cline-yes">31x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">31x</span>
+<span class="cline-any cline-yes">31x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">124x</span>
+<span class="cline-any cline-yes">31x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -207,7 +206,10 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -237,10 +239,11 @@ function optionalEnv(key: string, defaultValue: string): string {
   const value = process.env[key];
   const resolved = value &amp;&amp; value.trim() !== '' ? value.trim() : defaultValue;
   
-  // Auto-upgrade dead 70B models to 49B to prevent 404 crashes
-  // if the user's Render dashboard has the old variable stuck in memory
-  <span class="missing-if-branch" title="if path not taken" >I</span>if (resolved.toLowerCase().includes('70b-instruct')) {
-<span class="cstat-no" title="statement not covered" >    return 'nvidia/llama-3.3-nemotron-super-49b-v1';</span>
+  // Auto-upgrade retired models (Llama 3.1 8B retired Aug 26, 2026, 70B retired, Nemotron-49B preview retired)
+  // to active meta/llama-3.2-11b-vision-instruct so stale Render environment variables don't crash with 410 Gone.
+  const lower = resolved.toLowerCase();
+  <span class="missing-if-branch" title="if path not taken" >I</span>if (lower.includes('70b-instruct') || lower.includes('3.1-8b-instruct') || lower.includes('nemotron-super-49b') || lower.includes('nemotron-70b')) {
+<span class="cstat-no" title="statement not covered" >    return 'meta/llama-3.2-11b-vision-instruct';</span>
   }
   return resolved;
 }
@@ -271,8 +274,8 @@ export const config = {
     apiKey14: optionalEnv('NVIDIA_API_KEY_14', ''),  // Key 14: Deep Cortex overflow
     apiKey15: optionalEnv('NVIDIA_API_KEY_15', ''),  // Key 15: Emergency reserve
     baseUrl:   optionalEnv('NVIDIA_BASE_URL',   'https://integrate.api.nvidia.com/v1'),
-    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.1-8b-instruct'),
-    deepModel: optionalEnv('NVIDIA_DEEP_MODEL', 'nvidia/llama-3.3-nemotron-super-49b-v1'),
+    chatModel: optionalEnv('NVIDIA_CHAT_MODEL', 'meta/llama-3.2-11b-vision-instruct'),
+    deepModel: optionalEnv('NVIDIA_DEEP_MODEL', 'meta/llama-3.2-11b-vision-instruct'),
   },
 &nbsp;
   // Optional in Phase 1 — Supabase is not yet used.
@@ -307,7 +310,7 @@ export const config = {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-24T14:55:54.343Z
+                at 2026-08-27T06:45:06.555Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

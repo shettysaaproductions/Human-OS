@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/44</span>
+                <span class='fraction'>0/47</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/34</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/6</span>
+                <span class='fraction'>0/7</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/36</span>
+                <span class='fraction'>0/38</span>
             </div>
         
             
@@ -170,7 +170,13 @@
 <a name='L105'></a><a href='#L105'>105</a>
 <a name='L106'></a><a href='#L106'>106</a>
 <a name='L107'></a><a href='#L107'>107</a>
-<a name='L108'></a><a href='#L108'>108</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -192,6 +198,12 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -206,8 +218,8 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -297,24 +309,30 @@ export interface ActionRecord {
 <span class="cstat-no" title="statement not covered" >export class A</span>ctionIntelligenceService {
   /**
    * Evaluates all active actions for a given thread (or user) to determine the next best action.
+   * Can optionally accept an already assembled CognitiveContext to avoid duplicate DB queries.
    */
-<span class="fstat-no" title="function not covered" >  async </span>getNextBestAction(userId: string, threadId?: string): Promise&lt;{ type: 'NEXT_BEST_ACTION', action: ActionRecord } | { type: 'NO_ACTION' }&gt; {
-    let query = <span class="cstat-no" title="statement not covered" >supabaseAdmin</span>
-      .from('nova_actions')
-      .select('*')
-      .eq('user_id', userId)
-      .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
-      
-<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (threadId) {</span>
-<span class="cstat-no" title="statement not covered" >      query = query.eq('source_thread_id', threadId);</span>
-    }
-    
-    const { data: actions, error } = <span class="cstat-no" title="statement not covered" >await query;</span>
-<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (error || !actions || actions.length === 0) {</span>
-<span class="cstat-no" title="statement not covered" >      return { type: 'NO_ACTION' };</span>
-    }
+<span class="fstat-no" title="function not covered" >  async </span>getNextBestAction(userId: string, threadId?: string, contextActions?: ActionRecord[]): Promise&lt;{ type: 'NEXT_BEST_ACTION', action: ActionRecord } | { type: 'NO_ACTION' }&gt; {
+    let typedActions: ActionRecord[];
 &nbsp;
-    const typedActions = <span class="cstat-no" title="statement not covered" >actions as ActionRecord[];</span>
+<span class="cstat-no" title="statement not covered" >    if (contextActions &amp;&amp; contextActions.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      typedActions = threadId ? contextActions.filter(<span class="fstat-no" title="function not covered" >a </span>=&gt; <span class="cstat-no" title="statement not covered" >a.source_thread_id === threadId)</span> : contextActions;</span>
+    } else {
+      let query = <span class="cstat-no" title="statement not covered" >supabaseAdmin</span>
+        .from('nova_actions')
+        .select('*')
+        .eq('user_id', userId)
+        .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
+        
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (threadId) {</span>
+<span class="cstat-no" title="statement not covered" >        query = query.eq('source_thread_id', threadId);</span>
+      }
+      
+      const { data: actions, error } = <span class="cstat-no" title="statement not covered" >await query;</span>
+<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (error || !actions || actions.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >        return { type: 'NO_ACTION' };</span>
+      }
+<span class="cstat-no" title="statement not covered" >      typedActions = actions as ActionRecord[];</span>
+    }
     
     // Evaluate Readiness based on Dependencies
     // An action is ready if it has no dependencies, OR if all its dependencies are 'completed'
@@ -391,7 +409,7 @@ export const <span class="cstat-no" title="statement not covered" >actionIntelli
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-24T14:55:54.343Z
+                at 2026-08-27T06:45:06.555Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
