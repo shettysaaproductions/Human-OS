@@ -75,6 +75,7 @@ export interface GeminiOptions {
   jsonMode?: boolean;
   timeoutMs?: number;
   targetSlot?: GeminiSlot;
+  deadlineMs?: number;
 }
 
 // ── Key Pool Entry ────────────────────────────────────────────────────────────
@@ -129,13 +130,16 @@ class GeminiPool {
   get keyCount(): number { return this.keys.size; }
 
   /**
-   * Execute an operation across the credential pool.
-   * - Normal production traffic: attempts KEY_1 (primary) -> KEY_2 (failover).
+   * Execute an operation across the credential pool with a SINGLE overall deadline.
+   * - Normal production traffic: attempts KEY_1 (primary) -> KEY_2 (failover) within deadline.
    * - Targeted traffic (e.g. benchmark): uses targetSlot directly (e.g. KEY_3) in isolation.
+   * - Never sequentially consumes 8s KEY_1 + 8s KEY_2; breaks immediately if deadline is near.
    */
   async execute<T>(
-    operation: (client: GoogleGenerativeAI, slot: GeminiSlot) => Promise<T>,
-    targetSlot?: GeminiSlot
+    operation: (client: GoogleGenerativeAI, slot: GeminiSlot, remainingTimeoutMs: number) => Promise<T>,
+    targetSlot?: GeminiSlot,
+    deadlineMs?: number,
+    defaultTimeoutMs: number = 8000
   ): Promise<T> {
     const now = Date.now();
 
@@ -148,9 +152,10 @@ class GeminiPool {
       if (keyEntry.cooldownUntil > now) {
         throw new Error(`[Gemini] Target credential slot ${targetSlot} is on cooldown (${keyEntry.cooldownUntil - now}ms remaining)`);
       }
+      const remainingMs = deadlineMs ? Math.max(500, deadlineMs - Date.now()) : defaultTimeoutMs;
 
       try {
-        const result = await operation(keyEntry.client, targetSlot);
+        const result = await operation(keyEntry.client, targetSlot, remainingMs);
         keyEntry.consecutiveFailures = 0;
         keyEntry.cooldownUntil = 0;
         return result;
@@ -168,15 +173,23 @@ class GeminiPool {
       const keyEntry = this.keys.get(slot);
       if (!keyEntry) continue;
 
-      if (keyEntry.cooldownUntil > now) {
+      const currentNow = Date.now();
+      if (keyEntry.cooldownUntil > currentNow) {
         logger.debug(`[Gemini] ${slot} on cooldown, checking next failover slot`, {
-          remainingMs: keyEntry.cooldownUntil - now,
+          remainingMs: keyEntry.cooldownUntil - currentNow,
         });
         continue;
       }
 
+      // Check remaining deadline budget before attempting slot
+      const remainingMs = deadlineMs ? deadlineMs - currentNow : defaultTimeoutMs;
+      if (remainingMs < 1000) {
+        logger.warn(`[Gemini] Skipping ${slot} — remaining deadline budget (${remainingMs}ms) too small, failing fast to fallback`);
+        break; // Stop immediately to preserve remaining budget for NVIDIA fallback
+      }
+
       try {
-        const result = await operation(keyEntry.client, slot);
+        const result = await operation(keyEntry.client, slot, remainingMs);
         keyEntry.consecutiveFailures = 0;
         keyEntry.cooldownUntil = 0;
         return result;
@@ -187,12 +200,12 @@ class GeminiPool {
         if (isBadRequest) throw err; // Don't retry bad request across keys
 
         this.handleKeyFailure(keyEntry, err);
-        // Continue to KEY_2 on failure
+        // Continue to KEY_2 ONLY if remaining deadline allows
       }
     }
 
     if (!lastError) {
-      lastError = new Error('[Gemini] All production conversational keys (KEY_1, KEY_2) on cooldown');
+      lastError = new Error('[Gemini] All production conversational keys (KEY_1, KEY_2) on cooldown or deadline expired');
     }
     throw lastError;
   }
@@ -284,7 +297,8 @@ export async function geminiComplete(
   let text: string;
   const timeoutMs = options.timeoutMs ?? (options.jsonMode ? 30_000 : config.gemini.conversationTimeoutMs);
 
-  return pool.execute(async (client) => {
+  return pool.execute(async (client, _slot, remainingTimeoutMs) => {
+    const effectiveTimeoutMs = Math.min(timeoutMs, remainingTimeoutMs);
     const model = client.getGenerativeModel({
       model: modelName,
       systemInstruction: systemInstruction || undefined,
@@ -303,7 +317,7 @@ export async function geminiComplete(
       // generateContent() accepts string | Part[] for single-turn (not Content[] with role).
       const response = await withGeminiTimeout(() =>
         model.generateContent(lastMessage.content),
-        timeoutMs
+        effectiveTimeoutMs
       );
       text = response.response.text();
     } else {
@@ -317,7 +331,7 @@ export async function geminiComplete(
 
       const response = await withGeminiTimeout(() =>
         chat.sendMessage([{ text: lastMessage.content }]),
-        timeoutMs
+        effectiveTimeoutMs
       );
       text = response.response.text();
     }
@@ -326,7 +340,7 @@ export async function geminiComplete(
       throw new Error('[Gemini] Empty response received');
     }
     return text.trim();
-  }, options.targetSlot);
+  }, options.targetSlot, options.deadlineMs, timeoutMs);
 }
 
 /**

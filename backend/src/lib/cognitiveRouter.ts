@@ -140,18 +140,34 @@ class CognitiveModelRouter {
       fallbackUsed: false,
     };
 
+    // ── Single Overall Deadline Policy ───────────────────────────────────────
+    const overallTimeoutMs = options.timeoutMs ?? (
+      workload === 'CONVERSATION' ? config.gemini.conversationTimeoutMs : 30_000
+    );
+    const deadlineTimestamp = startMs + overallTimeoutMs;
+
     // ── Primary Provider ──────────────────────────────────────────────────────
     try {
       let text: string;
       if (primaryProvider === 'gemini') {
-        const timeoutMs = options.timeoutMs ?? (
-          workload === 'CONVERSATION' ? config.gemini.conversationTimeoutMs : 30_000
-        );
+        // Reserve at least 2500ms for NVIDIA fallback if Gemini times out or stalls
+        const elapsedSoFar = Date.now() - startMs;
+        const totalRemainingBudget = overallTimeoutMs - elapsedSoFar;
+
+        // If interactive conversation, bound Gemini to at most ~5000ms (or totalBudget - 2500ms),
+        // guaranteeing that NVIDIA has sufficient remaining budget before the 8000ms deadline.
+        const geminiMaxTimeout = workload === 'CONVERSATION'
+          ? Math.max(1500, Math.min(5000, totalRemainingBudget - 2500))
+          : totalRemainingBudget;
+
+        const geminiDeadline = Date.now() + geminiMaxTimeout;
+
         const geminiOpts = {
           maxTokens: options.maxTokens,
           temperature: options.temperature,
           jsonMode: options.jsonMode,
-          timeoutMs,
+          timeoutMs: geminiMaxTimeout,
+          deadlineMs: geminiDeadline,
         };
         text = options.jsonMode
           ? await geminiComplete(messages, { ...geminiOpts, jsonMode: true })
@@ -180,6 +196,8 @@ class CognitiveModelRouter {
       if (primaryProvider === 'gemini') {
         logger.warn(`[CognitiveRouter] Gemini failed for ${workload} (${result.errorCategory}), falling back to NVIDIA`, {
           error: primaryErr.message,
+          elapsedMs: result.latencyMs,
+          remainingDeadlineMs: Math.max(0, deadlineTimestamp - Date.now()),
         });
 
         try {
