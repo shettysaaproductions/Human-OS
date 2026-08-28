@@ -79,10 +79,15 @@ export const config = {
   },
 
   gemini: {
-    // Two production keys configured for Phase 10.1 experimentation.
-    // Additional keys (3, 4) can be added later without code changes.
+    // 4-Key Credential Pool Architecture:
+    // Key 1: Primary production conversational traffic
+    // Key 2: Conversational failover
+    // Key 3: Isolated benchmark / evaluation credential
+    // Key 4: Reserve / controlled testing capacity
     apiKey1: optionalEnv('GEMINI_API_KEY_1', ''),
     apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
+    apiKey3: optionalEnv('GEMINI_API_KEY_3', ''),
+    apiKey4: optionalEnv('GEMINI_API_KEY_4', ''),
     // Primary Gemini model for conversational workloads
     chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-3.6-flash'),
     // Hard interactive timeout for conversation workloads (default 8s)

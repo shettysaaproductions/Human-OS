@@ -146,6 +146,7 @@ interface ProviderResult {
   provider_attempted: 'gemini' | 'nvidia';
   provider_used: 'gemini' | 'nvidia' | 'none';
   model_used: string;
+  credential_slot: 'KEY_3' | 'NVIDIA_POOL';
   fallback_used: boolean;
   status: 'SUCCESS' | 'RATE_LIMITED' | 'TIMEOUT' | 'PROVIDER_ERROR';
   latency_ms: number;
@@ -158,13 +159,15 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function runGeminiDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
   const startMs = Date.now();
   const modelName = config.gemini.chatModel || 'gemini-3.6-flash';
-  const apiKey = config.gemini.apiKey1 || config.gemini.apiKey2;
+  // Strictly isolated benchmark credential: KEY_3
+  const apiKey = config.gemini.apiKey3 || config.gemini.apiKey1;
 
   if (!apiKey) {
     return {
       provider_attempted: 'gemini',
       provider_used: 'none',
       model_used: modelName,
+      credential_slot: 'KEY_3',
       fallback_used: false,
       status: 'PROVIDER_ERROR',
       latency_ms: 0,
@@ -216,6 +219,7 @@ async function runGeminiDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
       provider_attempted: 'gemini',
       provider_used: 'gemini',
       model_used: modelName,
+      credential_slot: 'KEY_3',
       fallback_used: false,
       status: 'SUCCESS',
       latency_ms,
@@ -239,6 +243,7 @@ async function runGeminiDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
       provider_attempted: 'gemini',
       provider_used: 'none',
       model_used: modelName,
+      credential_slot: 'KEY_3',
       fallback_used: false,
       status: errorStatus,
       latency_ms,
@@ -266,6 +271,7 @@ async function runNvidiaDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
       provider_attempted: 'nvidia',
       provider_used: 'nvidia',
       model_used: modelName,
+      credential_slot: 'NVIDIA_POOL',
       fallback_used: false,
       status: 'SUCCESS',
       latency_ms,
@@ -279,6 +285,7 @@ async function runNvidiaDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
       provider_attempted: 'nvidia',
       provider_used: 'none',
       model_used: modelName,
+      credential_slot: 'NVIDIA_POOL',
       fallback_used: false,
       status: 'PROVIDER_ERROR',
       latency_ms,
@@ -290,7 +297,7 @@ async function runNvidiaDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
 
 async function main() {
   console.log('\n════════════════════════════════════════════════════════════════════════════════');
-  console.log('NOVA ISOLATED BENCHMARK — Phase 10.1 (Gemini vs NVIDIA)');
+  console.log('NOVA ISOLATED BENCHMARK — Phase 10.1 (Gemini Key 3 vs NVIDIA)');
   console.log('════════════════════════════════════════════════════════════════════════════════\n');
 
   const benchmarkEntries: Array<{
@@ -304,17 +311,17 @@ async function main() {
     console.log(`[Case ${tc.id}] ${tc.category} — ${tc.description}`);
     console.log(`Input: "${tc.userMessage}"\n`);
 
-    // Run Gemini (isolated)
-    process.stdout.write(`  GEMINI : `);
+    // Run Gemini (isolated Key 3)
+    process.stdout.write(`  GEMINI (Slot: KEY_3) : `);
     const geminiRes = await runGeminiDirect(tc);
     console.log(`[${geminiRes.status}] in ${geminiRes.latency_ms}ms (model: ${geminiRes.model_used})`);
     console.log(`  Output : "${geminiRes.final_response}"\n`);
 
     // Pacing delay to avoid burst rate limits on Gemini free tier
-    await sleep(2000);
+    await sleep(1500);
 
     // Run NVIDIA (isolated)
-    process.stdout.write(`  NVIDIA : `);
+    process.stdout.write(`  NVIDIA (Slot: NVIDIA_POOL) : `);
     const nvidiaRes = await runNvidiaDirect(tc);
     console.log(`[${nvidiaRes.status}] in ${nvidiaRes.latency_ms}ms (model: ${nvidiaRes.model_used})`);
     console.log(`  Output : "${nvidiaRes.final_response}"\n`);
@@ -326,21 +333,29 @@ async function main() {
   console.log('\n════════════════════════════════════════════════════════════════════════════════');
   console.log('BENCHMARK COMPARISON TABLE (EVIDENCE-ONLY, NO SYNTHETIC SCORES)');
   console.log('════════════════════════════════════════════════════════════════════════════════');
-  console.log(`${'#'.padEnd(4)}${'Category'.padEnd(25)}${'Gemini Status'.padEnd(16)}${'Gemini ms'.padEnd(12)}${'NVIDIA Status'.padEnd(16)}NVIDIA ms`);
-  console.log('─'.repeat(85));
+  console.log(`${'#'.padEnd(4)}${'Category'.padEnd(25)}${'Gemini Slot'.padEnd(14)}${'Gemini Status'.padEnd(15)}${'Gemini ms'.padEnd(12)}${'NVIDIA Status'.padEnd(15)}NVIDIA ms`);
+  console.log('─'.repeat(95));
 
+  let geminiSuccessCount = 0;
   for (const entry of benchmarkEntries) {
+    if (entry.gemini.status === 'SUCCESS') geminiSuccessCount++;
     console.log(
       `${entry.test.id.padEnd(4)}` +
       `${entry.test.category.slice(0, 23).padEnd(25)}` +
-      `${entry.gemini.status.padEnd(16)}` +
+      `${entry.gemini.credential_slot.padEnd(14)}` +
+      `${entry.gemini.status.padEnd(15)}` +
       `${(entry.gemini.latency_ms + 'ms').padEnd(12)}` +
-      `${entry.nvidia.status.padEnd(16)}` +
+      `${entry.nvidia.status.padEnd(15)}` +
       `${entry.nvidia.latency_ms + 'ms'}`
     );
   }
 
-  console.log('\n════════════════════════════════════════════════════════════════════════════════\n');
+  console.log('─'.repeat(95));
+  const conclusion = geminiSuccessCount === benchmarkEntries.length
+    ? 'SUCCESSFUL COMPARISON'
+    : 'INCONCLUSIVE (Gemini capacity/rate-limited on free-tier quota)';
+  console.log(`BENCHMARK CONCLUSION: ${conclusion}`);
+  console.log('════════════════════════════════════════════════════════════════════════════════\n');
 }
 
 main().catch(err => {

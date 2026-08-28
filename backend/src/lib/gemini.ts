@@ -65,18 +65,23 @@ export interface GeminiMessage {
   content: string;
 }
 
+export type GeminiSlot = 'KEY_1' | 'KEY_2' | 'KEY_3' | 'KEY_4';
+export type GeminiKeyRole = 'primary' | 'failover' | 'benchmark' | 'reserve';
+
 export interface GeminiOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
   jsonMode?: boolean;
   timeoutMs?: number;
+  targetSlot?: GeminiSlot;
 }
 
 // ── Key Pool Entry ────────────────────────────────────────────────────────────
 
 interface PoolKey {
-  index: number;
+  slot: GeminiSlot;
+  role: GeminiKeyRole;
   client: GoogleGenerativeAI;
   cooldownUntil: number;
   consecutiveFailures: number;
@@ -85,109 +90,132 @@ interface PoolKey {
 // ── Gemini Key Pool ───────────────────────────────────────────────────────────
 
 class GeminiPool {
-  private readonly keys: PoolKey[] = [];
-  private currentIndex = 0;
+  private readonly keys: Map<GeminiSlot, PoolKey> = new Map();
 
   private static readonly COOLDOWN_RATELIMIT_MS = 60_000;  // 60s for 429
   private static readonly COOLDOWN_OVERLOAD_MS  = 30_000;  // 30s for 503/overload
 
   constructor() {
-    const rawKeys = [config.gemini.apiKey1, config.gemini.apiKey2]
-      .filter(k => k && k.trim() !== '');
+    const keyConfigs: Array<{ slot: GeminiSlot; role: GeminiKeyRole; key: string }> = [
+      { slot: 'KEY_1', role: 'primary',   key: config.gemini.apiKey1 },
+      { slot: 'KEY_2', role: 'failover',  key: config.gemini.apiKey2 },
+      { slot: 'KEY_3', role: 'benchmark', key: config.gemini.apiKey3 },
+      { slot: 'KEY_4', role: 'reserve',   key: config.gemini.apiKey4 },
+    ];
 
-    if (rawKeys.length === 0) {
-      logger.warn('[Gemini] No API keys configured — Gemini provider will be unavailable');
-      return;
-    }
-
-    rawKeys.forEach((key, i) => {
-      this.keys.push({
-        index: i,
-        client: new GoogleGenerativeAI(key),
-        cooldownUntil: 0,
-        consecutiveFailures: 0,
-      });
+    keyConfigs.forEach(({ slot, role, key }) => {
+      if (key && key.trim() !== '') {
+        this.keys.set(slot, {
+          slot,
+          role,
+          client: new GoogleGenerativeAI(key.trim()),
+          cooldownUntil: 0,
+          consecutiveFailures: 0,
+        });
+      }
     });
 
-    logger.info(`[Gemini] Pool initialized with ${this.keys.length} key(s)`);
+    logger.info(`[Gemini] Pool initialized with ${this.keys.size} key(s) [Roles: 1=primary, 2=failover, 3=benchmark, 4=reserve]`);
   }
 
   get available(): boolean {
-    if (this.keys.length === 0) return false;
     const now = Date.now();
-    return this.keys.some(k => k.cooldownUntil <= now);
+    const key1 = this.keys.get('KEY_1');
+    const key2 = this.keys.get('KEY_2');
+    return (key1 !== undefined && key1.cooldownUntil <= now) ||
+           (key2 !== undefined && key2.cooldownUntil <= now);
   }
 
-  get keyCount(): number { return this.keys.length; }
+  get keyCount(): number { return this.keys.size; }
 
   /**
-   * Execute an operation across the key pool with automatic failover.
-   * Skips keys that are on cooldown (rate-limited or erroring).
+   * Execute an operation across the credential pool.
+   * - Normal production traffic: attempts KEY_1 (primary) -> KEY_2 (failover).
+   * - Targeted traffic (e.g. benchmark): uses targetSlot directly (e.g. KEY_3) in isolation.
    */
-  async execute<T>(operation: (client: GoogleGenerativeAI) => Promise<T>): Promise<T> {
-    if (this.keys.length === 0) {
-      throw new Error('[Gemini] No API keys configured');
+  async execute<T>(
+    operation: (client: GoogleGenerativeAI, slot: GeminiSlot) => Promise<T>,
+    targetSlot?: GeminiSlot
+  ): Promise<T> {
+    const now = Date.now();
+
+    // 1. Isolated Targeted Execution (e.g. KEY_3 for benchmark)
+    if (targetSlot) {
+      const keyEntry = this.keys.get(targetSlot);
+      if (!keyEntry) {
+        throw new Error(`[Gemini] Target credential slot ${targetSlot} is not configured`);
+      }
+      if (keyEntry.cooldownUntil > now) {
+        throw new Error(`[Gemini] Target credential slot ${targetSlot} is on cooldown (${keyEntry.cooldownUntil - now}ms remaining)`);
+      }
+
+      try {
+        const result = await operation(keyEntry.client, targetSlot);
+        keyEntry.consecutiveFailures = 0;
+        keyEntry.cooldownUntil = 0;
+        return result;
+      } catch (err: any) {
+        this.handleKeyFailure(keyEntry, err);
+        throw err;
+      }
     }
 
-    const now = Date.now();
-    const total = this.keys.length;
+    // 2. Production Conversational Execution: KEY_1 (Primary) -> KEY_2 (Failover)
+    const productionSlots: GeminiSlot[] = ['KEY_1', 'KEY_2'];
     let lastError: any = null;
 
-    for (let attempt = 0; attempt < total; attempt++) {
-      const keyEntry = this.keys[(this.currentIndex + attempt) % total];
+    for (const slot of productionSlots) {
+      const keyEntry = this.keys.get(slot);
+      if (!keyEntry) continue;
 
       if (keyEntry.cooldownUntil > now) {
-        logger.debug(`[Gemini] Key ${keyEntry.index} on cooldown, skipping`, {
+        logger.debug(`[Gemini] ${slot} on cooldown, checking next failover slot`, {
           remainingMs: keyEntry.cooldownUntil - now,
         });
         continue;
       }
 
       try {
-        const result = await operation(keyEntry.client);
-        // Success — clear consecutive failures
+        const result = await operation(keyEntry.client, slot);
         keyEntry.consecutiveFailures = 0;
         keyEntry.cooldownUntil = 0;
-        this.currentIndex = (this.currentIndex + 1) % total;
         return result;
       } catch (err: any) {
         lastError = err;
         const status = err.status ?? err.httpErrorCode ?? 0;
-        const msg = (err.message || '').toLowerCase();
-
-        const isRateLimit = status === 429 || msg.includes('quota') || msg.includes('rate') || msg.includes('resource_exhausted');
-        const isOverload  = status === 503 || msg.includes('overload') || msg.includes('unavailable');
         const isBadRequest = status === 400 || status === 401 || status === 403;
+        if (isBadRequest) throw err; // Don't retry bad request across keys
 
-        if (isBadRequest) {
-          // Config or prompt error — don't retry across keys, surface immediately
-          throw err;
-        }
-
-        // Only put a key on cooldown for definitive HTTP error codes.
-        // Timeouts and unknown errors rotate to next key but don't cooldown the current
-        // one — the key may be fine, the request may just have been slow.
-        if (isRateLimit || isOverload) {
-          const cooldownMs = isRateLimit ? GeminiPool.COOLDOWN_RATELIMIT_MS : GeminiPool.COOLDOWN_OVERLOAD_MS;
-          keyEntry.cooldownUntil = Date.now() + cooldownMs;
-          keyEntry.consecutiveFailures++;
-          logger.warn(`[Gemini] Key ${keyEntry.index} rate-limited/overloaded, cooling ${cooldownMs}ms`, { status });
-        } else {
-          // Timeout or unknown: rotate to next key, do NOT lock this key.
-          // It might work on retry or the next key might be faster.
-          keyEntry.consecutiveFailures++;
-          logger.warn(`[Gemini] Key ${keyEntry.index} failed (${err.name}), rotating to next key`, {
-            status,
-            errorName: err.name,
-          });
-        }
+        this.handleKeyFailure(keyEntry, err);
+        // Continue to KEY_2 on failure
       }
     }
 
     if (!lastError) {
-      lastError = new Error('[Gemini] All keys on cooldown');
+      lastError = new Error('[Gemini] All production conversational keys (KEY_1, KEY_2) on cooldown');
     }
     throw lastError;
+  }
+
+  private handleKeyFailure(keyEntry: PoolKey, err: any): void {
+    const status = err.status ?? err.httpErrorCode ?? 0;
+    const msg = (err.message || '').toLowerCase();
+
+    const isRateLimit = status === 429 || msg.includes('quota') || msg.includes('rate') || msg.includes('resource_exhausted');
+    const isOverload  = status === 503 || msg.includes('overload') || msg.includes('unavailable');
+
+    if (isRateLimit || isOverload) {
+      const cooldownMs = isRateLimit ? GeminiPool.COOLDOWN_RATELIMIT_MS : GeminiPool.COOLDOWN_OVERLOAD_MS;
+      keyEntry.cooldownUntil = Date.now() + cooldownMs;
+      keyEntry.consecutiveFailures++;
+      logger.warn(`[Gemini] ${keyEntry.slot} (${keyEntry.role}) rate-limited/overloaded, cooling ${cooldownMs}ms`, { status });
+    } else {
+      keyEntry.consecutiveFailures++;
+      logger.warn(`[Gemini] ${keyEntry.slot} (${keyEntry.role}) failed (${err.name}), rotating to failover`, {
+        status,
+        errorName: err.name,
+      });
+    }
   }
 
   /**
@@ -195,11 +223,15 @@ class GeminiPool {
    */
   getStatus() {
     const now = Date.now();
+    const slotStatus: Record<string, string> = {};
+    this.keys.forEach((key, slot) => {
+      slotStatus[slot] = key.cooldownUntil <= now ? 'AVAILABLE' : `COOLING_${Math.round((key.cooldownUntil - now)/1000)}s`;
+    });
+
     return {
-      configured: this.keys.length > 0,
-      keyCount: this.keys.length,
-      availableKeys: this.keys.filter(k => k.cooldownUntil <= now).length,
-      coolingKeys: this.keys.filter(k => k.cooldownUntil > now).length,
+      configured: this.keys.size > 0,
+      keyCount: this.keys.size,
+      slots: slotStatus,
     };
   }
 }
@@ -294,7 +326,17 @@ export async function geminiComplete(
       throw new Error('[Gemini] Empty response received');
     }
     return text.trim();
-  });
+  }, options.targetSlot);
+}
+
+/**
+ * Isolated benchmark completion via Gemini (strictly routes to KEY_3).
+ */
+export async function geminiBenchmarkComplete(
+  messages: OAIMessage[],
+  options: Omit<GeminiOptions, 'targetSlot'> = {},
+): Promise<string> {
+  return geminiComplete(messages, { ...options, targetSlot: 'KEY_3' });
 }
 
 /**

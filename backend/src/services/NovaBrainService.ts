@@ -191,8 +191,8 @@ export function validateAndRepairGrounding(
 
       if (isFabricatingSpecificAnswer) {
         logger.warn('[GroundingValidator] Detected confident answer to unknown personal fact, replacing with grounded admission');
-        if (lowerUser.includes('kahan gaye') || lowerUser.includes('kahan the')) {
-          text = 'Haha kal hum mile the kya? Mujhe toh lagta hai kal baat nahi hui thi!';
+        if (lowerUser.includes('kahan gaye') || lowerUser.includes('kahan the') || lowerUser.includes('kal')) {
+          text = 'Mujhe yaad nahi aa raha — kal humari baat hui thi kya? Tu hi bata na!';
         } else {
           text = 'Mujhe abhi yaad nahi aa raha yaar, tu hi bata na!';
         }
