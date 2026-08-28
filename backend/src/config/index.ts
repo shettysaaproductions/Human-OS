@@ -84,7 +84,7 @@ export const config = {
     apiKey1: optionalEnv('GEMINI_API_KEY_1', ''),
     apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
     // Primary Gemini model for conversational workloads
-    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-2.0-flash'),
+    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-3.6-flash'),
   },
 
   // Cognitive Model Router — maps workloads to providers.

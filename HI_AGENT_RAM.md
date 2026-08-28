@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-27 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-27 Phase 10.1 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
 
 ---
 
@@ -74,6 +74,20 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 27 Session — Phase 10.1 Multi-Provider Cognitive Router + Gemini Brain:**
+  - **`lib/gemini.ts`**: GeminiPool with 2-key round-robin, 60s rate-limit cooldown, 30s overload cooldown, 45s timeout. Uses existing `@google/generative-ai` v0.24.1. Supports `geminiComplete`, `geminiCompleteJSON`, `geminiStream`.
+  - **`lib/cognitiveRouter.ts`**: `CognitiveModelRouter` singleton. Maps 9 workload types to providers via env config. Gemini primary → NVIDIA fallback for conversational workloads. NVIDIA primary for memory/extraction workloads (no change to BrainKeyRouter).
+  - **Workload Routing (default):**
+    - CONVERSATION → Gemini | PROACTIVE_REASONING → Gemini | PROACTIVE_GENERATION → Gemini
+    - MEMORY_EXTRACTION → NVIDIA | LIFE_THREAD_EXTRACTION → NVIDIA | ACTION_INTELLIGENCE → NVIDIA
+    - BACKGROUND_COGNITION → NVIDIA | VISION → NVIDIA | TURN_ANALYSIS → NVIDIA
+  - **Config:** `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, `GEMINI_CHAT_MODEL=gemini-2.0-flash`. Set in `.env` and Render. Override routing via `ROUTE_CONVERSATION=nvidia` etc.
+  - **`NovaBrainService.ts`**: All LLM calls now route through `cognitiveRouter`. `extractCriticalAction` still uses `complete('CRITICAL_ACTION', ...)` directly (NVIDIA, synchronous critical path).
+  - **⚠️ Render must have `GEMINI_API_KEY_1` + `GEMINI_API_KEY_2` added manually.**
+  - **Tests:** 15 suites, **153 tests passing**, exit 0. New `cognitiveRouter.test.ts` added (8 tests).
+  - **Benchmark:** `scripts/nova_benchmark.ts` — run with `npx ts-node scripts/nova_benchmark.ts`.
+  - **No OTA required** (backend-only). No DB migration required.
+  - **Git SHA:** `8be8f59` pushed to `main`.
 - ✅ **Aug 27 Session — Phase 10.0 Unified Cognitive Context Fabric (WIRED INTO CHAT):**
   - **`CognitiveContextService` → `chat.ts` integration:** `cognitiveContextService.assembleContext()` now fires in parallel with the existing context fetch on every chat request.
   - **Unified TurnAnalysis:** `chat.ts` now uses `cogCtx.turn.turnAnalysis` (from the unified service) instead of a second standalone `TurnAnalyzer.analyze()` call. Falls back to direct call if assembly fails.
