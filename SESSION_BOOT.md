@@ -24,11 +24,12 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 
 ---
 
-## 2. Current Production Status (July 2026)
+## 2. Current Production Status (Aug 28, 2026)
 
 **All 7 engines are LIVE in production on Render.**
 
 ### ✅ Recently Completed
+- **Memory Canonicalization (Aug 28, 2026):** Created `lib/memoryKeySchema.ts` — single canonical key map (12 concepts, 70+ aliases). `memoryRepository.upsertMemory` now normalizes keys as Layer 0. `BackgroundActionService` bypass eliminated. `CognitiveContextService` groups by canonical key. LLM prompt updated with canonical schema. Production reconciliation: 15 alias rows collapsed (9 renamed, 6 archived). Git SHA `b0b942e`. OTA published to production, Runtime 1.1.0.
 - **Auto Upgrade Protocol Execution**: Strict anti-robot patches applied to `promptBuilder.ts` (Anti-formality "Aap", anti-echoing)
 - **True WhatsApp Async Messaging**: Network request returns 202 instantly, bypassing Android OS suspending threads.
 - **Smart "Left on Read" Engine**: Nova intelligently double-texts after 6-15 mins if her question was ignored.

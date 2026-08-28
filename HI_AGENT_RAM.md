@@ -1,5 +1,5 @@
 # ⚡ HI AGENT RAM SNAPSHOT — Human-OS Token-Efficient Knowledge Cache
-> **Last Trained:** 2026-08-27 Phase 10.1 | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active
+> **Last Trained:** 2026-08-28 Memory Canonicalization | **Branch:** main | **Live APK Package:** com.humanos.mobile | **Status:** Production Active | **Git SHA:** b0b942e
 
 ---
 
@@ -74,6 +74,17 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 28 Session — Memory Canonicalization (BUG-08–BUG-18 Schema Overhaul):**
+  - **NEW: `lib/memoryKeySchema.ts`** — Single authoritative canonical key map. 12 concept groups, 70+ aliases. Exposes `canonicalizeKey()`, `isAliasKey()`, `sameCanonicalConcept()`. ZERO external dependencies.
+  - **`memoryRepository.ts` — Layer 0 Normalization:** `upsertMemory` now calls `canonicalizeKey()` as its FIRST operation before any authority check or DB lookup. Alias keys (e.g. `mothers_name`, `sons_name`, `business_name`) are silently collapsed to canonical form before writing.
+  - **`ConsolidatedMemoryAgent.ts` — LLM Prompt Canonical Schema:** Injected canonical key schema directly into the LLM system prompt (18-line mandatory key table). Also added agent-level `canonicalizeKey()` in `filterSemanticMemories()` as defense-in-depth BEFORE repository.
+  - **`BackgroundActionService.ts` — Bypass Eliminated:** Removed direct `supabaseAdmin.from('memories').upsert()` bypass path. Now routes through `memoryRepository.upsertMemory()` — full authority checks + canonicalization apply.
+  - **`CognitiveContextService.ts` — Alias-Aware Context Assembly:** `resolveAndRankMemories()` groups memories by `canonicalizeKey(mem.key)` instead of raw key. Alias rows (e.g. `mothers_name`) are treated as the same concept as `mother_name`, preventing duplicate facts in prompt context.
+  - **`scripts/reconcile_alias_keys.ts`** — Safe idempotent production sweep. Dry-run shows diff, then applies. Authority-ordered merge: lower-authority alias loses to higher-authority canonical. Never hard-deletes.
+  - **Production Reconciliation (Aug 28):** 15 alias rows found across all users. 9 renamed (no canonical existed), 6 archived (lost to higher-authority canonical). `sons_name → son_name`, `mothers_name → mother_name` (both lost to deterministic Rajeshree/Shreshth). ✅
+  - **CRITICAL INVARIANT:** After canonicalization, ONLY ONE canonical memory record may participate in active reasoning per semantic concept per user.
+  - **Build:** `tsc` exit 0, 0 errors. OTA published → production branch, Runtime 1.1.0, Update ID `5eb061be`. User must manually redeploy Render.
+  - **Git SHA:** `b0b942e` pushed to `main`.
 - ✅ **Aug 27 Session — Phase 10.1 Multi-Provider Cognitive Router + Gemini Brain:**
   - **`lib/gemini.ts`**: GeminiPool with 2-key round-robin, 60s rate-limit cooldown, 30s overload cooldown, 45s timeout. Uses existing `@google/generative-ai` v0.24.1. Supports `geminiComplete`, `geminiCompleteJSON`, `geminiStream`.
   - **`lib/cognitiveRouter.ts`**: `CognitiveModelRouter` singleton. Maps 9 workload types to providers via env config. Gemini primary → NVIDIA fallback for conversational workloads. NVIDIA primary for memory/extraction workloads (no change to BrainKeyRouter).

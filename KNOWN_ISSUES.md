@@ -1,7 +1,14 @@
 # Known Issues List (Active)
 
 This document tracks identified bugs, limitations, and workarounds.
-**Last Updated: Aug 26, 2026**
+**Last Updated: Aug 28, 2026**
+
+---
+
+## ✅ Resolved Aug 28, 2026
+
+- **Memory Schema Fragmentation — Alias Key Proliferation (P0):** `memories` table accepted arbitrary LLM-generated keys, causing semantic duplicates (`mothers_name`, `mom_name`, `mother_name` all coexisting). `BackgroundActionService` bypassed `memoryRepository` entirely via direct `supabaseAdmin.upsert()`, bypassing all authority and canonicalization guards. `CognitiveContextService` grouped by raw key, so alias rows created duplicate facts in the reasoning prompt. **Fixed:** Created `lib/memoryKeySchema.ts` (single canonical key map, 12 concepts, 70+ aliases). `memoryRepository.upsertMemory` now calls `canonicalizeKey()` as Layer 0 before any authority check. `BackgroundActionService` routes through `memoryRepository`. `CognitiveContextService` groups by canonical key. LLM prompt in `ConsolidatedMemoryAgent` now contains the full canonical key schema. Production reconciliation script cleaned 15 alias rows across all users.
+- **Authority Guard Not Applied to BackgroundActionService Writes (P0):** The direct Supabase bypass in `BackgroundActionService` also meant `source_authority` was never set, and the generic-entity blocklist and authority hierarchy guard never ran. **Fixed:** Same fix — all writes now route through `memoryRepository`.
 
 ---
 
