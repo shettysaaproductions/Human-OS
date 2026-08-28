@@ -1,5 +1,23 @@
 export type MemoryType = 'family' | 'personal' | 'work' | 'goals' | 'preferences' | 'health' | 'important_dates';
 
+/**
+ * Source authority encodes WHO provided a memory fact.
+ * This is SEPARATE from is_protected / protection_source which govern
+ * Phase 6.1 retention/pruning semantics — those are NOT changed.
+ *
+ * Authority precedence (ascending):
+ *   subconscious_inference < confirmed_memory < deterministic < explicit_user
+ *
+ * A lower-authority write MUST NOT overwrite a higher-authority row
+ * unless correction_intent = true.
+ */
+export type SourceAuthority =
+  | 'subconscious_inference'  // LLM-extracted, no explicit user statement
+  | 'confirmed_memory'        // Confirmed by repeated user interaction
+  | 'deterministic'           // TurnAnalyzer rule-based extraction
+  | 'explicit_user'           // User directly stated / explicitly corrected
+  | 'needs_review';           // Reconciliation script: evidence ambiguous
+
 export interface Memory {
   id: string;
   user_id: string;
@@ -12,10 +30,13 @@ export interface Memory {
   emotional_weight: number;
   is_archived: boolean;
   is_user_confirmed: boolean;
+  /** Retention/pruning semantics — Phase 6.1 UNCHANGED */
   protection_source?: string;
   protected_at?: Date;
   source_message?: string;
   last_accessed_at?: Date;
+  /** Information authority — who said this fact */
+  source_authority?: SourceAuthority;
   created_at: Date;
   updated_at: Date;
 }
@@ -30,8 +51,13 @@ export interface ExtractedMemory {
   frequency?: number;
   emotional_weight?: number;
   source_message_id?: string;
+  /** Retention/pruning semantics — Phase 6.1 UNCHANGED */
   is_protected?: boolean;
   protection_source?: string;
+  /** Information authority — governs overwrite permission */
+  source_authority?: SourceAuthority;
+  /** True when this write is an explicit user correction — may overwrite higher-authority values */
+  correction_intent?: boolean;
 }
 
 export interface WorkingMemory {

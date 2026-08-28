@@ -104,7 +104,9 @@ export class NovaConsciousnessEngine {
     return this.processUser(userId);
   }
 
-  async processUser(userId: string): Promise<void> {
+  async processUser(userId: string, opts?: { trigger?: string; awayDurationMinutes?: number | null }): Promise<void> {
+    const isSessionStart = opts?.trigger === 'session_start';
+    const awayDurationMinutes = opts?.awayDurationMinutes ?? null;
     // Coma awareness: Don't reach out right after server boot to avoid spam
     if (Date.now() - serverBootTime < SERVER_BOOT_COOLDOWN_MS) {
       logger.info('[NACE] Skipping outreach — server just booted (coma cooldown)');
@@ -289,11 +291,25 @@ export class NovaConsciousnessEngine {
 
     // Count unreplied Nova outreaches since user's last message
     const lastUserMsgTimeStr = lastUserMsg?.created_at || new Date(0).toISOString();
-    const { data: unrepliedOutreaches } = await supabaseAdmin
+
+    // BUG-07 / BUG-05 fix: when triggered by session_start, exclude phantom
+    // 'followup:unanswered:*' entries written by the faulty unanswered scanner
+    // (BUG-05). These polluted ignoredCount causing 720-min escalation gaps that
+    // silently blocked every session-start evaluation.
+    const outreachQuery = supabaseAdmin
       .from('nova_outreach_log')
       .select('id')
       .eq('user_id', userId)
       .gte('created_at', lastUserMsgTimeStr);
+
+    if (isSessionStart) {
+      // Only count real NACE outreach — skip the unanswered-conversation phantom entries
+      outreachQuery
+        .in('outreach_type', ['agenda_followup', 'engagement_checkin'])
+        .not('logical_key', 'like', 'followup:unanswered:%');
+    }
+
+    const { data: unrepliedOutreaches } = await outreachQuery;
 
     const ignoredCount = unrepliedOutreaches?.length || 0;
 
@@ -360,7 +376,12 @@ export class NovaConsciousnessEngine {
       }
     }
 
-    if (gapMinutes < effectiveMinGap && !shouldReachSilentVisit && !isSleepWindowOverridden) return;
+    if (gapMinutes < effectiveMinGap && !shouldReachSilentVisit && !isSleepWindowOverridden) {
+      // BUG-07: session_start evaluations bypass the gap check entirely.
+      // ProactiveGate enforces cooldown via a 30-min logical key bucket.
+      if (!isSessionStart) return;
+      logger.info('[NACE] session_start: bypassing gap check — ProactiveGate will enforce 30-min bucket', { userId, gapMinutes: Math.round(gapMinutes), effectiveMinGap });
+    }
 
     // 4. Pending Agenda
     const { data: pendingAgenda } = await supabaseAdmin
@@ -521,6 +542,12 @@ export class NovaConsciousnessEngine {
       spontaneousThoughtNote = "LONG SILENCE CHECK-IN: It's been quiet for 2+ hours. Don't ask 'how are you'. Instead, share something useful: a thought about their goals, a reminder about something they mentioned, a quick tip, or just say something funny/interesting. Be genuinely helpful. ";
     }
 
+    // BUG-07: Session-start context note for Tier 1
+    // Tells the LLM this is a returning-user evaluation, not a routine check-in.
+    const sessionStartNote = isSessionStart
+      ? `\nSESSION START EVALUATION: User just returned online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' minutes' : 'some time'} away.\nThis is a session-start evaluation, NOT a routine NACE check-in.\nIf there is a SPECIFIC grounded unresolved context (open life thread, unanswered question, pending agenda item, reminder that fired while they were away): recommend YES.\nIf there is no specific grounded reason: choose NO.\n"User came online" alone is NEVER a sufficient reason to reach out.`
+      : '';
+
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
 Is Sleep Window: ${tContext.isSleepWindow}
 User Presence: ${userPresence} (${userPresence === 'online' ? 'actively using app' : userPresence === 'away' ? 'was active recently' : 'not on app'})
@@ -534,7 +561,7 @@ Last Conversation Snippet: ${lastConvSnippet || 'None'}
 Active Life Threads: ${lifeThreadSummary || 'None'}
 ${abandonmentNote}
 ${spontaneousThoughtNote}
-
+${sessionStartNote}
 DECISION RULES (use actual gap values above, not hardcoded numbers):
 - User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately — enable back-to-back messaging.
 - User is AWAY: reach out if gap >= 3 min. They stepped away but will see it soon.
@@ -546,7 +573,7 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
 - PROACTIVE RESTRAINT: If there is no specific, grounded reason to message (e.g. no agenda, no recent context to follow up on, no missing fact to ask about), choose NO. Time of day alone is NOT a sufficient reason to check in.`;
 
     let shouldReach = false;
-    let triggerType = 'engagement';
+    let triggerType = isSessionStart ? 'session_start' : 'engagement';
     let seenNoReplyContext = ''; // Injected into Tier2 if user saw message but didn't reply
 
     // ── READ RECEIPT AWARENESS ─────────────────────────────────────────────────
@@ -642,6 +669,11 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
     };
     const escalationTone = getEscalationTone(ignoredCount, gapMinutes / 60);
 
+    // BUG-07: returning-user context note for Tier 2
+    const sessionStartContextNote = isSessionStart && shouldReach
+      ? `RETURNING USER OPENING: User just came back online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' min' : 'some time'} away. Do NOT use a generic greeting like "hey" or "kaise ho". Open with ONE specific thing you know about them that is genuinely unresolved or relevant RIGHT NOW (e.g. "Woh meeting ka kya hua?", "Dhaba ke liye supplier waali baat yaad hai?"). If there is nothing specific, STAY SILENT (return empty message).`
+      : '';
+
     const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
 Silence Duration: ${Math.round(gapMinutes / 60)} hours
@@ -663,7 +695,8 @@ ${seenNoReplyContext}
 ${busyWindowNote}
 ${silentVisitNote}
 ${midSleepWakeNote}
-${escalationTone}`;
+${escalationTone}
+${sessionStartContextNote}`;
 
 
     try {
@@ -681,14 +714,18 @@ ${escalationTone}`;
       // Single DB-backed gate that enforces dedup, cooldown, logical-key idempotency
       // across all proactive engines. Replaces in-memory dedup maps.
       const agendaId = agendaItem?.id ?? 'none';
+      // BUG-07: session_start uses its own 30-min bucket so it is never blocked by
+      // the routine engagement 1-hour bucket. Each session-start is a distinct event.
       const logicalKey = agendaItem
         ? `nace:agenda:${agendaId}`
-        : `nace:engagement:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`; // 1-hour bucket
+        : isSessionStart
+          ? `nace:session_start:${userId}:${Math.floor(Date.now() / (30 * 60 * 1000))}` // 30-min bucket
+          : `nace:engagement:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`; // 1-hour bucket
 
       const gateDecision = await proactiveGate.acquire(userId, {
-        outreachType: agendaItem ? 'agenda_followup' : 'engagement_checkin',
+        outreachType: agendaItem ? 'agenda_followup' : (isSessionStart ? 'session_start' : 'engagement_checkin'),
         logicalKey,
-        logicalKeyWindowMinutes: agendaItem ? 60 : 60,
+        logicalKeyWindowMinutes: agendaItem ? 60 : (isSessionStart ? 30 : 60),
         proposedMessage: message,
         skipQuietHoursCheck: true, // NACE already checks sleep window above
         skipMinGapCheck: true,     // NACE already enforces escalation gap above

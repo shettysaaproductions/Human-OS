@@ -565,8 +565,9 @@ export class NovaFollowupService {
 
         const { data: newerMsgs } = await supabaseAdmin
           .from('chat_history')
-          .select('id, content')
+          .select('id, role, content')
           .eq('conversation_id', convId)
+          .eq('role', 'assistant')  // BUG-05 fix: must be an assistant reply, not just any message
           .gt('created_at', userMsg.created_at)
           .limit(1);
 
@@ -574,10 +575,13 @@ export class NovaFollowupService {
           if (newerMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
             logger.info('[NovaFollowup] Found fallback reply, treating conversation as stuck', { convId });
           } else {
-            // Nova (or someone) replied a real message after this message. It's not stuck.
+            // Nova replied with a real message after this user message. Not stuck.
+            // BUG-05: Release the gate reservation so this valid reply doesn't pollute ignoredCount
+            await proactiveGate.release(unanswGateDecision.outreachId);
             continue;
           }
         }
+
 
         // Add additional check: was ANY assistant message sent in the last 2 minutes?
         // This handles cases where conversationId rotated or time filtering is slightly off

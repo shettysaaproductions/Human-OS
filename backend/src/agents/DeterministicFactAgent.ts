@@ -36,9 +36,15 @@ export class DeterministicFactAgent {
           importance: isProtected ? 90 : 75,
           confidence: 0.95,
           shouldPersist: true,
+          // Authority: deterministic facts always outrank subconscious_inference
+          source_authority: 'deterministic',
+          // Retention semantics (Phase 6.1 — unchanged)
           is_protected: isProtected,
-          protection_source: isProtected ? 'user_explicit' : undefined
+          protection_source: isProtected ? 'user_explicit' : undefined,
+          // Corrections from TurnAnalyzer carry correction_intent
+          correction_intent: fact.factClass === 'PROTECTED_FACT' || fact.isCorrection === true,
         }, sourceMessage || 'Direct Fact Extraction');
+
 
         logger.info('[DeterministicFactAgent] Successfully persisted deterministic fact', {
           userId,

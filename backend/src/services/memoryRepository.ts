@@ -1,33 +1,99 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { ExtractedMemory, Memory } from '../types/memory';
+import { ExtractedMemory, Memory, SourceAuthority } from '../types/memory';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
 
 // Explicit column list — never use select('*') on memories
-const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type';
+const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type, source_authority, protection_source, protected_at';
+
+// ── Authority rank (higher = more authoritative) ──────────────────────────────
+const AUTHORITY_RANK: Record<SourceAuthority, number> = {
+  subconscious_inference: 1,
+  confirmed_memory:       2,
+  deterministic:          3,
+  explicit_user:          4,
+  needs_review:           0, // reconciliation placeholder — always overwriteable
+};
+
+function authorityRank(a?: string | null): number {
+  return AUTHORITY_RANK[(a ?? 'subconscious_inference') as SourceAuthority] ?? 1;
+}
+
+// ── Generic entity value blocklist ────────────────────────────────────────────
+// These are relational nouns, NOT proper names. Storing them as a _name value
+// is a Category Error — they must never overwrite a real name like "Sakshi".
+// Applied only when source_authority = subconscious_inference AND key ends _name.
+const GENERIC_ENTITY_VALUES = new Set([
+  'wife', 'husband', 'mom', 'mother', 'dad', 'father', 'bhai', 'brother',
+  'sister', 'son', 'daughter', 'didi', 'bhabhi', 'nana', 'nani', 'dada',
+  'dadi', 'spouse', 'partner', 'girlfriend', 'boyfriend', 'friend', 'yaar',
+]);
+
+function isGenericEntityValue(key: string, value: string, authority?: string): boolean {
+  if (authority !== 'subconscious_inference') return false;
+  if (!key.endsWith('_name')) return false;
+  return GENERIC_ENTITY_VALUES.has(value.toLowerCase().trim());
+}
 
 export class MemoryRepository {
   /**
-   * Upserts a memory.
-   * If user_id + key exists, it updates the value, increments importance (up to 100),
-   * and updates the confidence and updated_at.
+   * Upserts a memory with authority-aware overwrite protection.
+   *
+   * Authority rules:
+   *   1. Generic entity value blocklist — rejects relational nouns as _name values
+   *      from subconscious_inference sources (defense layer 1 — extraction boundary).
+   *   2. Authority hierarchy guard — a lower-authority source cannot overwrite
+   *      a higher-authority existing fact unless correction_intent = true (layer 2).
+   *   3. is_protected / protection_source are UNCHANGED — they govern Phase 6.1
+   *      retention/pruning and are completely orthogonal to authority.
    */
   async upsertMemory(userId: string, memory: ExtractedMemory, sourceMessage: string): Promise<void> {
     if (!memory.shouldPersist) return;
 
+    const incomingAuthority = memory.source_authority ?? 'subconscious_inference';
+
+    // ── Layer 1: Generic entity value blocklist ───────────────────────────────
+    if (isGenericEntityValue(memory.key, memory.value, incomingAuthority)) {
+      logger.info('[MemoryRepository] BLOCKED generic entity value', {
+        userId, key: memory.key, value: memory.value, authority: incomingAuthority
+      });
+      return;
+    }
+
     try {
-      // 1. Check if memory exists — only fetch the columns we need
+      // 1. Check if memory exists — fetch authority alongside existing columns
       const { data: existing } = await qt.track('upsert_memory_check', 'memories', () =>
         supabaseAdmin
           .from('memories')
-          .select('id, importance, frequency, emotional_weight')
+          .select('id, importance, frequency, emotional_weight, source_authority')
           .eq('user_id', userId)
           .eq('key', memory.key)
           .maybeSingle()
       );
 
       if (existing) {
+        // ── Layer 2: Authority hierarchy guard ───────────────────────────────
+        const existingRank = authorityRank(existing.source_authority);
+        const incomingRank = authorityRank(incomingAuthority);
+
+        if (existingRank > incomingRank && !memory.correction_intent) {
+          logger.info('[MemoryRepository] BLOCKED lower-authority overwrite', {
+            userId,
+            key: memory.key,
+            existingAuthority: existing.source_authority,
+            incomingAuthority,
+          });
+          return;
+        }
+
+        if (memory.correction_intent) {
+          logger.info('[MemoryRepository] CORRECTION accepted — superseding existing value', {
+            userId, key: memory.key,
+            from: existing.source_authority, to: incomingAuthority,
+          });
+        }
+
         const newImportance = Math.min((existing.importance || 50) + 5, 100);
         const newFrequency = (existing.frequency || 1) + 1;
 
@@ -41,16 +107,18 @@ export class MemoryRepository {
               frequency: newFrequency,
               emotional_weight: memory.emotional_weight ?? existing.emotional_weight ?? 0,
               source_message: sourceMessage,
+              source_authority: incomingAuthority,
               updated_at: new Date().toISOString(),
+              // Retention semantics — Phase 6.1 UNCHANGED
               ...(memory.is_protected ? {
                 protection_source: memory.protection_source || 'system',
                 protected_at: new Date().toISOString()
-              } : {})
+              } : {}),
             })
             .eq('id', existing.id)
         );
 
-        logger.debug('Memory updated', { key: memory.key, userId, frequency: newFrequency });
+        logger.debug('Memory updated', { key: memory.key, userId, frequency: newFrequency, authority: incomingAuthority });
       } else {
         await qt.track('upsert_memory_insert', 'memories', () =>
           supabaseAdmin
@@ -64,15 +132,17 @@ export class MemoryRepository {
               confidence: memory.confidence,
               emotional_weight: memory.emotional_weight ?? 0,
               source_message: sourceMessage,
+              source_authority: incomingAuthority,
               last_accessed_at: new Date().toISOString(),
+              // Retention semantics — Phase 6.1 UNCHANGED
               ...(memory.is_protected ? {
                 protection_source: memory.protection_source || 'system',
                 protected_at: new Date().toISOString()
-              } : {})
+              } : {}),
             })
         );
 
-        logger.debug('Memory inserted', { key: memory.key, userId });
+        logger.debug('Memory inserted', { key: memory.key, userId, authority: incomingAuthority });
       }
     } catch (err) {
       logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), memory });

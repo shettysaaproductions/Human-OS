@@ -68,11 +68,24 @@ router.post('/', async (req: Request, res: Response) => {
       if (status === 'online') {
         const prevOffline = !latestHistory || latestHistory.status !== 'online';
         if (prevOffline) {
+          // Compute away duration so NACE can inject it into the returning-user context
+          const awayDurationMinutes = latestHistory?.created_at
+            ? Math.round((Date.now() - new Date(latestHistory.created_at).getTime()) / 60000)
+            : null;
+
           // Fire-and-forget background job for session cognition via subconsciousQueue
-          subconsciousQueue.add('session_start_cognition', { user_id: userId, timestamp: updateData.last_active_at })
-            .catch((err) => logger.error('[Presence] Failed to queue session cognition', { error: err?.message }));
+          // BUG-07: pass trigger + prevStatus + awayDurationMinutes so processUser()
+          // can bypass phantom escalation gap and inject returning-user context.
+          subconsciousQueue.add('session_start_cognition', {
+            user_id: userId,
+            timestamp: updateData.last_active_at,
+            trigger: 'session_start',
+            prevStatus: latestHistory?.status ?? 'offline',
+            awayDurationMinutes,
+          }).catch((err) => logger.error('[Presence] Failed to queue session cognition', { error: err?.message }));
         }
       }
+
 
       // Detect "silent visit" (online -> offline/away transition without a message)
       if (status === 'offline' || status === 'away') {

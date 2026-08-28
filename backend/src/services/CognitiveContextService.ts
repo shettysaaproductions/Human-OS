@@ -443,8 +443,30 @@ export class CognitiveContextService {
     // ── 7. Life Threads & Action Intelligence ───────────────────────────────
     const rawThreads = (lifeThreadsRes.data as any[]) || [];
     itemsConsidered += rawThreads.length;
-    const activeThreads = rawThreads.filter(t => t.state === 'active').slice(0, maxLifeThreads);
-    const waitingOrBlocked = rawThreads.filter(t => t.state === 'waiting' || t.state === 'blocked').slice(0, 2);
+
+    // BUG-06 / Amendment 3: Strip [CONCEPT SUPERSEDED] annotations from the
+    // provenance shown in the situation brief. The thread stays active in DB
+    // (provenance is preserved for audit), but the brief must NEVER surface
+    // the invalidated concept as if it were the current state.
+    const sanitizeThreadProvenance = (provenance: string | null | undefined): string => {
+      if (!provenance) return '';
+      // Remove lines that contain [CONCEPT SUPERSEDED] — these are historical correction markers
+      return provenance
+        .split('\n')
+        .filter(line => !line.includes('[CONCEPT SUPERSEDED'))
+        .join('\n')
+        .trim();
+    };
+
+    const activeThreads = rawThreads
+      .filter(t => t.state === 'active')
+      .slice(0, maxLifeThreads)
+      .map(t => ({ ...t, provenance: sanitizeThreadProvenance(t.provenance) }));
+    const waitingOrBlocked = rawThreads
+      .filter(t => t.state === 'waiting' || t.state === 'blocked')
+      .slice(0, 2)
+      .map(t => ({ ...t, provenance: sanitizeThreadProvenance(t.provenance) }));
+
 
     const rawActions = (actionsRes.data as any[]) || [];
     itemsConsidered += rawActions.length;

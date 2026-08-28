@@ -7,6 +7,59 @@ import { cache, CACHE_NS } from '../lib/cache';
 import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
 
+// ── Hinglish vocative words that are NOT kinship facts ──────────────────────────
+// "Bhai, sun" = addressing the listener. "Mera bhai Amit hai" = kinship fact.
+const HINGLISH_VOCATIVES = new Set(['bhai','yaar','bro','boss','dude','arre','oye','man','buddy','re']);
+
+// Kinship-statement patterns — must be present for brother/bhai_name to be extracted
+const KINSHIP_PATTERNS = /\b(mera|mere|hamara|hamare|meri|apna|us(?:ka|ki)|uska|ek|ek\s+bhai|bhai\s+ka\s+naam|brother\s+ka\s+naam|brother\s+hai|bhai\s+hai)\b/i;
+
+// ── Generic entity blocklist (pre-DB filter — layer 1 defense-in-depth) ─────────
+// memoryRepository also enforces this as layer 2. Both layers exist for safety.
+const GENERIC_ENTITY_VALUES_AGENT = new Set([
+  'wife', 'husband', 'mom', 'mother', 'dad', 'father', 'bhai', 'brother',
+  'sister', 'son', 'daughter', 'didi', 'bhabhi', 'nana', 'nani', 'dada',
+  'dadi', 'spouse', 'partner', 'girlfriend', 'boyfriend', 'friend', 'yaar',
+]);
+
+/**
+ * Filter LLM-extracted semantic memories before persistence.
+ * Removes generic entity values and vocative misclassifications.
+ */
+function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
+  return memories.filter(mem => {
+    if (!mem.shouldPersist) return false;
+    const key: string = mem.key ?? '';
+    const value: string = (mem.value ?? '').trim();
+
+    // ── BUG-01: Generic entity blocklist ───────────────────────────────────
+    if (key.endsWith('_name') && GENERIC_ENTITY_VALUES_AGENT.has(value.toLowerCase())) {
+      logger.info('[ConsolidatedMemoryAgent] BLOCKED generic entity value (pre-DB filter)', { key, value });
+      return false;
+    }
+
+    // ── BUG-02: Hinglish vocative disambiguation ──────────────────────────
+    // Reject brother_name / bhai_name unless the source sentence contains a
+    // kinship-statement pattern (e.g. "mera bhai", "brother ka naam")
+    const isBrotherKey = key === 'brother_name' || key === 'bhai_name' || key === 'brother';
+    if (isBrotherKey) {
+      const lowerSrc = sourceMessage.toLowerCase();
+      const hasKinshipPattern = KINSHIP_PATTERNS.test(lowerSrc);
+      const hasVocativeOnly = HINGLISH_VOCATIVES.has(value.toLowerCase()) && !hasKinshipPattern;
+      if (hasVocativeOnly) {
+        logger.info('[ConsolidatedMemoryAgent] BLOCKED vocative as kinship fact', { key, value, sourceMessage: sourceMessage.substring(0, 80) });
+        return false;
+      }
+      if (!hasKinshipPattern) {
+        logger.info('[ConsolidatedMemoryAgent] BLOCKED brother_name without kinship evidence', { key, value });
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
 /**
  * ConsolidatedMemoryAgent — Performs ALL 7 memory extractions in a SINGLE LLM call.
  *
@@ -151,10 +204,19 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     let totalCreated = 0;
 
     // ── Semantic memories ──
-    const semanticMemories = parsed.semantic_memories || [];
+    const rawSemanticMemories = parsed.semantic_memories || [];
+    // Apply pre-DB filters (BUG-01 generic value + BUG-02 vocative guard)
+    // source_message_id is used as the source text for vocative check
+    const semanticMemories = filterSemanticMemories(rawSemanticMemories, messageId);
     for (const mem of semanticMemories) {
       if (mem.shouldPersist) {
-        await memoryRepository.upsertMemory(userId, mem, messageId);
+        await memoryRepository.upsertMemory(userId, {
+          ...mem,
+          // LLM extractions are always subconscious_inference (lowest authority)
+          // The memoryRepository authority guard will block any attempt to overwrite
+          // deterministic or explicit_user facts with these.
+          source_authority: 'subconscious_inference',
+        }, messageId);
         totalCreated++;
       }
     }

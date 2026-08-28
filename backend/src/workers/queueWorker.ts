@@ -117,9 +117,15 @@ export function startWorkers() {
       await processWithBackoff(job, async (j) => {
         const userId = j.payload?.user_id;
         if (userId) {
-          await novaConsciousnessEngine.processUser(userId);
+          // BUG-07: pass trigger opts so processUser can bypass phantom escalation
+          // and inject returning-user context into Tier 1 and Tier 2 prompts.
+          await novaConsciousnessEngine.processUser(userId, {
+            trigger: j.payload?.trigger,
+            awayDurationMinutes: j.payload?.awayDurationMinutes ?? null,
+          });
         }
       }, 'session_start_cognition');
+
     } else {
       logger.warn(`Unknown subconscious job type: ${job.job_type}`);
     }

@@ -23,6 +23,22 @@ export interface SemanticUnit {
   factClass?: FactClassification;
 }
 
+/**
+ * Deterministic reminder intent detected in user message (BUG-03).
+ * Extracted BEFORE the LLM call so the reminder can be persisted
+ * regardless of whether the LLM emits a <subconscious_actions> block.
+ */
+export interface ReminderIntent {
+  /** The full user sentence that triggered this intent */
+  text: string;
+  /** The extracted time phrase (e.g., "3 baje", "in 20 min", "kal subah 9") */
+  timePhrase: string;
+  /** Raw time string for parsing by ReminderEngine */
+  rawTime: string;
+  /** True if intent was detected but no time phrase found — let LLM clarify */
+  isAmbiguous: boolean;
+}
+
 export interface TurnAnalysisResult {
   units: SemanticUnit[];
   hasQuestions: boolean;
@@ -30,6 +46,10 @@ export interface TurnAnalysisResult {
   hasEmotions: boolean;
   hasActions: boolean;
   hasCorrections: boolean;
+  /** BUG-03: Deterministic reminder intent if found */
+  reminderIntent?: ReminderIntent | null;
+  /** BUG-06: Negated concept nouns from corrections (e.g. ["fashion", "fashion ka shop"]) */
+  negativeCorrectionConcepts?: string[];
 }
 
 export interface ExtractedFact {
@@ -222,8 +242,90 @@ export class TurnAnalyzer {
       hasFacts: units.some(u => u.type === 'fact' || (u.type === 'correction' && !!u.factKey)),
       hasEmotions: units.some(u => u.type === 'emotion'),
       hasActions: units.some(u => u.type === 'action'),
-      hasCorrections: units.some(u => u.type === 'correction')
+      hasCorrections: units.some(u => u.type === 'correction'),
+      // BUG-03: Deterministic reminder extraction across all clauses
+      reminderIntent: this.extractReminderIntent(messages.map(m => m.message || '').join(' ')),
+      // BUG-06: Negated concept extraction for life-thread correction propagation
+      negativeCorrectionConcepts: this.extractNegatedConcepts(messages.map(m => m.message || '').join(' ')),
     };
+  }
+
+  /**
+   * BUG-03: Deterministic reminder intent extraction.
+   * Runs BEFORE the LLM so reminders can be persisted regardless of LLM behavior.
+   * Returns null if no reminder intent detected.
+   * Returns { isAmbiguous: true } if intent found but time phrase missing.
+   */
+  public static extractReminderIntent(text: string): ReminderIntent | null {
+    const lower = text.toLowerCase();
+
+    // Step 1: Check for reminder intent keywords
+    const REMINDER_INTENT_RE = /\b(yaad dila|yaad dilao|remind me|reminder.*set|yaad kara|yaad kar dena|mujhe yaad|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/i;
+    if (!REMINDER_INTENT_RE.test(lower)) return null;
+
+    // Step 2: Extract time phrase
+    const TIME_PATTERNS: RegExp[] = [
+      /(\d{1,2}(?::\d{2})?\s*(?:am|pm|baje))/i,         // "3 pm", "9:30 am", "5 baje"
+      /in\s+(\d+)\s*min(?:utes?)?/i,                       // "in 20 minutes"
+      /in\s+(\d+)\s*hour(?:s)?/i,                          // "in 2 hours"
+      /(\d{1,2})\s*baje/i,                                 // "3 baje"
+      /kal\s+(\w+\s+)?(?:subah|shaam|raat)?\s*(\d{1,2}(?::\d{2})?)/i, // "kal 9 baje"
+      /aaj\s+(\w+\s+)?(?:subah|shaam|raat)?\s*(\d{1,2}(?::\d{2})?)/i, // "aaj shaam 6"
+      /at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i,          // "at 5pm"
+    ];
+
+    let timePhrase = '';
+    let rawTime = '';
+
+    for (const pattern of TIME_PATTERNS) {
+      const m = lower.match(pattern);
+      if (m) {
+        timePhrase = m[0].trim();
+        rawTime = m[1] ?? m[2] ?? m[0];
+        break;
+      }
+    }
+
+    if (!timePhrase) {
+      // Intent detected but no time — ambiguous, let LLM ask for clarification
+      return { text, timePhrase: '', rawTime: '', isAmbiguous: true };
+    }
+
+    return { text, timePhrase, rawTime, isAmbiguous: false };
+  }
+
+  /**
+   * BUG-06: Extract negated concept nouns from correction messages.
+   * Used by LifeThreadAgent to mark superseded concepts within threads
+   * WITHOUT killing the entire thread.
+   *
+   * Examples:
+   *   "fashion ka shop nahi" → ["fashion ka shop", "fashion"]
+   *   "koi ladki nahi hai" → ["ladki"]
+   */
+  public static extractNegatedConcepts(text: string): string[] {
+    const lower = text.toLowerCase();
+    const concepts: string[] = [];
+
+    // Pattern: "<noun phrase> nahi/nahi tha/nahi thi/nai"
+    const NEGATION_PATTERNS: RegExp[] = [
+      /([\w\s]+?)\s+(?:ka|ki|ke)?\s+(?:shop|dukaan|business|kaam|kaam\s+nahi)\s+nahi(?:\s+(?:tha|thi|hai))?/gi,
+      /([\w]+(?:\s+[\w]+)?)\s+nahi(?:\s+(?:tha|thi|hai))?\b/gi,
+      /koi\s+([\w\s]+?)\s+nahi/gi,
+    ];
+
+    for (const pattern of NEGATION_PATTERNS) {
+      let m: RegExpExecArray | null;
+      pattern.lastIndex = 0;
+      while ((m = pattern.exec(lower)) !== null) {
+        const concept = m[1]?.trim();
+        if (concept && concept.length > 2 && !['main','mein','mai','to','kya','yeh','woh'].includes(concept)) {
+          concepts.push(concept);
+        }
+      }
+    }
+
+    return [...new Set(concepts)];
   }
 
   private static splitIntoClauses(text: string): string[] {
