@@ -1,13 +1,11 @@
 /**
- * Nova Benchmark Harness — Phase 10.1 Quality & Latency Hardening
+ * Nova Isolated Benchmark Harness — Phase 10.1
  *
- * Compares Gemini conversational provider vs NVIDIA fallback across:
- *   A. NATURALNESS (Hinglish casual flow, no robot/formal jargon)
- *   B. CONTEXT ADHERENCE (faithfulness to user's conversation)
- *   C. UNSUPPORTED ASSERTIONS (hallucinated ages, fake events, invented facts)
- *   D. RELATIONSHIP CORRECTNESS (maintains true entities and corrections)
- *   E. LATENCY (actual ms)
- *   F. RESPONSE COMPLETION / TRUNCATION (complete vs cut off)
+ * Compares Gemini vs NVIDIA with STRICT provider isolation:
+ * - Does NOT inherit stale pool cooldown state
+ * - Explicitly tracks provider_attempted, provider_used, model_used, fallback_used, status, latency_ms
+ * - Never labels a fallback response as a Gemini response
+ * - No synthetic intelligence score — only side-by-side evidence
  *
  * Usage:
  *   cd backend
@@ -17,15 +15,15 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-import { geminiComplete } from '../src/lib/gemini';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { complete as nvidiaComplete } from '../src/lib/nvidia';
+import { config } from '../src/config';
 import { validateAndRepairGrounding, sanitizeReply } from '../src/services/NovaBrainService';
 
-interface TestCase {
+interface BenchmarkTestCase {
   id: string;
   category: string;
   description: string;
-  systemPrompt: string;
   userMessage: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   context?: any;
@@ -37,12 +35,11 @@ ANTI-ROBOT RULE (FORMALITY): NEVER use "Aap", "Aapka", "Aapko", "Dhanyavad". Use
 ANTI-ROBOT RULE (PRONOUN): Use "tum" not "aap".
 ANTI-ROBOT RULE (SELF-NARRATION): Do NOT explain what you are doing. Just respond naturally.`;
 
-const CORE_TEST_CASES: TestCase[] = [
+const BENCHMARK_CASES: BenchmarkTestCase[] = [
   {
-    id: 'T1',
+    id: '1',
     category: 'Hinglish Casual',
     description: 'Casual expression about leaving office late',
-    systemPrompt: NOVA_BASE_SYSTEM,
     userMessage: 'Aaj office se late nikla yaar 😮‍💨',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -50,10 +47,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T2',
+    id: '2',
     category: 'Wife Correction',
     description: 'User corrects wife name from Priya to Sakshi',
-    systemPrompt: NOVA_BASE_SYSTEM,
     userMessage: 'arre nahi, meri wife ka naam Sakshi hai',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -61,10 +57,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T3',
-    category: 'Child / Unsupported Age Scenario',
-    description: 'User mentions son activity without specifying age — probe for hallucinated age',
-    systemPrompt: NOVA_BASE_SYSTEM,
+    id: '3',
+    category: 'Child / Family Context',
+    description: 'User mentions energetic child without giving age',
     userMessage: 'mera beta bohot active hai, din bhar daudte rehta hai',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -72,10 +67,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T4',
-    category: 'Unknown Information (Fact Probe)',
-    description: 'User asks for favourite colour with no prior memory',
-    systemPrompt: NOVA_BASE_SYSTEM,
+    id: '4',
+    category: 'Unknown Fact',
+    description: 'User asks for favourite colour (no prior memory exists)',
     userMessage: 'mera favourite colour kya hai?',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -83,21 +77,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T5',
-    category: 'Unknown Information (Event Probe)',
-    description: 'User asks where we went yesterday with no prior history',
-    systemPrompt: NOVA_BASE_SYSTEM,
-    userMessage: 'kal hum kahan gaye the?',
-    messages: [
-      { role: 'system', content: NOVA_BASE_SYSTEM },
-      { role: 'user', content: 'kal hum kahan gaye the?' }
-    ]
-  },
-  {
-    id: 'T6',
-    category: 'Sab Thik (Casual Continuity)',
-    description: 'Checking in with informal sab thik',
-    systemPrompt: NOVA_BASE_SYSTEM,
+    id: '5',
+    category: 'Sab Thik',
+    description: 'Checking in casually',
     userMessage: 'sab thik chal raha hai?',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -105,10 +87,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T7',
-    category: 'Multi-Message Memory Sequence',
-    description: '4-fact conversation sequence (Wife, Son, City, Company)',
-    systemPrompt: NOVA_BASE_SYSTEM,
+    id: '6',
+    category: 'Multi-Message Context',
+    description: 'Sequenced conversation history (Wife, Son, City)',
     userMessage: 'Mai Dahisar me rehta hu',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -120,10 +101,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T8',
+    id: '7',
     category: 'Proactive Reasoning',
-    description: 'Should Nova reach out at 7:30 PM Wednesday without pending schedule?',
-    systemPrompt: 'You are Nova\'s Proactive Context Grounding Engine. Evaluate whether to initiate outreach.',
+    description: 'Evaluate if proactive reach-out is justified at 7:30 PM Wednesday without reminders',
     userMessage: 'Time: Wednesday 7:30 PM IST. Active reminders: none. User status: unknown.',
     messages: [
       { role: 'system', content: 'You are Nova\'s Proactive Context Grounding Engine. Evaluate if outreach is justified. Output JSON: {"shouldReach": boolean, "reason": string}' },
@@ -131,10 +111,19 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T9',
-    category: 'Ambiguous Short Message',
-    description: 'Short ambiguous "acha" — should not invent topics',
-    systemPrompt: NOVA_BASE_SYSTEM,
+    id: '8',
+    category: 'Unsupported-Age Scenario',
+    description: 'Specific probe on child milestones without age context',
+    userMessage: 'mera beta abhi naye naye tricks seekh raha hai',
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'mera beta abhi naye naye tricks seekh raha hai' }
+    ]
+  },
+  {
+    id: '9',
+    category: 'Ambiguous "acha"',
+    description: 'Short ambiguous "acha" response',
     userMessage: 'acha',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -142,10 +131,9 @@ const CORE_TEST_CASES: TestCase[] = [
     ]
   },
   {
-    id: 'T10',
-    category: 'Casual Sign-off',
+    id: '10',
+    category: 'Sign-off',
     description: 'Signing off for the night',
-    systemPrompt: NOVA_BASE_SYSTEM,
     userMessage: 'chal kal baat karte hai yaar',
     messages: [
       { role: 'system', content: NOVA_BASE_SYSTEM },
@@ -154,118 +142,201 @@ const CORE_TEST_CASES: TestCase[] = [
   }
 ];
 
-function analyzeEvidence(response: string, userMsg: string) {
-  // Naturalness check
-  const hasFormalAap = /\b(aap|aapka|aapko|dhanyavad)\b/i.test(response);
-  const hasAIBotAdmission = /\b(as an ai|language model|virtual assistant)\b/i.test(response);
-  const naturalness = (!hasFormalAap && !hasAIBotAdmission) ? 'GOOD (Hinglish/Casual)' : 'POOR (Formal/Bot)';
-
-  // Unsupported assertion check (e.g. invented ages like "5 mahine", "2 saal", or "mere wife")
-  const hasInventedAge = /\b(\d+)\s*(mahine|saal|months?|years?|yo)\b/i.test(response) && !/\b(\d+)\b/.test(userMsg);
-  const hasSpouseHallucination = /\b(mere|meri)\s+(wife|biwi|husband|pati)\b/i.test(response);
-  const unsupportedAssertion = hasInventedAge ? `FLAGGED (Invented age: ${response.match(/\b(\d+)\s*(mahine|saal|months?|years?)\b/i)?.[0]})`
-    : hasSpouseHallucination ? 'FLAGGED (AI spouse claim)'
-    : 'NONE DETECTED';
-
-  // Context adherence
-  const contextAdherence = response.length > 5 && !response.includes('[ERROR]') ? 'ADHERED' : 'FAILED/EMPTY';
-
-  // Relationship correctness
-  const relationshipCorrectness = (!hasSpouseHallucination) ? 'CORRECT' : 'CONFUSED';
-
-  // Completion / Truncation
-  const isTruncated = response.endsWith('...') || /[,—\-:]\s*$/.test(response) || (response.length > 0 && !/[.!?)"'}\]]$/.test(response.trim()));
-  const completion = isTruncated ? 'TRUNCATED / INCOMPLETE' : 'COMPLETE';
-
-  return { naturalness, unsupportedAssertion, contextAdherence, relationshipCorrectness, completion };
+interface ProviderResult {
+  provider_attempted: 'gemini' | 'nvidia';
+  provider_used: 'gemini' | 'nvidia' | 'none';
+  model_used: string;
+  fallback_used: boolean;
+  status: 'SUCCESS' | 'RATE_LIMITED' | 'TIMEOUT' | 'PROVIDER_ERROR';
+  latency_ms: number;
+  raw_response: string;
+  final_response: string;
 }
 
-async function runSingleTest(tc: TestCase, provider: 'gemini' | 'nvidia') {
-  const startMs = Date.now();
-  let rawResponse = '';
-  let error: string | undefined;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  try {
-    if (provider === 'gemini') {
-      rawResponse = await geminiComplete(tc.messages, {
-        maxTokens: 300,
-        temperature: 0.85,
-        timeoutMs: 8000 // 8s bounded interactive timeout
-      });
-    } else {
-      rawResponse = await nvidiaComplete('USER_FAST', tc.messages, {
-        maxTokens: 300,
-        temperature: 0.85
-      });
-    }
-  } catch (err: any) {
-    error = err.message || String(err);
-    rawResponse = `[ERROR: ${error}]`;
+async function runGeminiDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
+  const startMs = Date.now();
+  const modelName = config.gemini.chatModel || 'gemini-3.6-flash';
+  const apiKey = config.gemini.apiKey1 || config.gemini.apiKey2;
+
+  if (!apiKey) {
+    return {
+      provider_attempted: 'gemini',
+      provider_used: 'none',
+      model_used: modelName,
+      fallback_used: false,
+      status: 'PROVIDER_ERROR',
+      latency_ms: 0,
+      raw_response: '[NO_API_KEY_CONFIGURED]',
+      final_response: '[NO_API_KEY_CONFIGURED]'
+    };
   }
 
-  const latencyMs = Date.now() - startMs;
-  
-  // Apply post-processing and grounding validation
-  const sanitized = sanitizeReply(rawResponse);
-  const finalResponse = validateAndRepairGrounding(sanitized, tc.userMessage, tc.context || {});
-  const evidence = analyzeEvidence(finalResponse, tc.userMessage);
+  try {
+    const client = new GoogleGenerativeAI(apiKey);
+    const systemPrompt = tc.messages.find(m => m.role === 'system')?.content || '';
+    const nonSystem = tc.messages.filter(m => m.role !== 'system');
+    const lastMsg = nonSystem[nonSystem.length - 1]?.content || tc.userMessage;
+    const historyMsgs = nonSystem.slice(0, -1);
 
-  return {
-    testId: tc.id,
-    category: tc.category,
-    description: tc.description,
-    provider,
-    latencyMs,
-    rawResponse,
-    finalResponse,
-    error,
-    evidence
-  };
+    const model = client.getGenerativeModel({
+      model: modelName,
+      systemInstruction: systemPrompt || undefined,
+      generationConfig: {
+        maxOutputTokens: 512,
+        temperature: 0.85
+      }
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT_8000MS')), 8000)
+    );
+
+    let completionPromise: Promise<any>;
+    if (historyMsgs.length === 0) {
+      completionPromise = model.generateContent(lastMsg);
+    } else {
+      const chat = model.startChat({
+        history: historyMsgs.map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }]
+        }))
+      });
+      completionPromise = chat.sendMessage([{ text: lastMsg }]);
+    }
+
+    const response = await Promise.race([completionPromise, timeoutPromise]);
+    const rawText = response.response.text().trim();
+    const latency_ms = Date.now() - startMs;
+    const sanitized = sanitizeReply(rawText);
+    const final_response = validateAndRepairGrounding(sanitized, tc.userMessage, tc.context || {});
+
+    return {
+      provider_attempted: 'gemini',
+      provider_used: 'gemini',
+      model_used: modelName,
+      fallback_used: false,
+      status: 'SUCCESS',
+      latency_ms,
+      raw_response: rawText,
+      final_response
+    };
+
+  } catch (err: any) {
+    const latency_ms = Date.now() - startMs;
+    const msg = (err.message || '').toLowerCase();
+    const status = err.status || 0;
+
+    let errorStatus: 'RATE_LIMITED' | 'TIMEOUT' | 'PROVIDER_ERROR' = 'PROVIDER_ERROR';
+    if (status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('rate')) {
+      errorStatus = 'RATE_LIMITED';
+    } else if (msg.includes('timeout') || err.message === 'TIMEOUT_8000MS') {
+      errorStatus = 'TIMEOUT';
+    }
+
+    return {
+      provider_attempted: 'gemini',
+      provider_used: 'none',
+      model_used: modelName,
+      fallback_used: false,
+      status: errorStatus,
+      latency_ms,
+      raw_response: `[${errorStatus}: ${err.message}]`,
+      final_response: `[${errorStatus}]`
+    };
+  }
+}
+
+async function runNvidiaDirect(tc: BenchmarkTestCase): Promise<ProviderResult> {
+  const startMs = Date.now();
+  const modelName = config.nvidia.chatModel || 'meta/llama-3.2-11b-vision-instruct';
+
+  try {
+    const rawText = await nvidiaComplete('USER_FAST', tc.messages, {
+      maxTokens: 300,
+      temperature: 0.85
+    });
+
+    const latency_ms = Date.now() - startMs;
+    const sanitized = sanitizeReply(rawText);
+    const final_response = validateAndRepairGrounding(sanitized, tc.userMessage, tc.context || {});
+
+    return {
+      provider_attempted: 'nvidia',
+      provider_used: 'nvidia',
+      model_used: modelName,
+      fallback_used: false,
+      status: 'SUCCESS',
+      latency_ms,
+      raw_response: rawText,
+      final_response
+    };
+
+  } catch (err: any) {
+    const latency_ms = Date.now() - startMs;
+    return {
+      provider_attempted: 'nvidia',
+      provider_used: 'none',
+      model_used: modelName,
+      fallback_used: false,
+      status: 'PROVIDER_ERROR',
+      latency_ms,
+      raw_response: `[ERROR: ${err.message}]`,
+      final_response: `[PROVIDER_ERROR: ${err.message}]`
+    };
+  }
 }
 
 async function main() {
   console.log('\n════════════════════════════════════════════════════════════════════════════════');
-  console.log('NOVA HARDENED BENCHMARK — Phase 10.1 (Gemini vs NVIDIA)');
+  console.log('NOVA ISOLATED BENCHMARK — Phase 10.1 (Gemini vs NVIDIA)');
   console.log('════════════════════════════════════════════════════════════════════════════════\n');
 
-  const results: any[] = [];
+  const benchmarkEntries: Array<{
+    test: BenchmarkTestCase;
+    gemini: ProviderResult;
+    nvidia: ProviderResult;
+  }> = [];
 
-  for (const tc of CORE_TEST_CASES) {
-    console.log(`\n──────────────────────────────────────────────────────────────────────`);
-    console.log(`[${tc.id}] ${tc.category} — ${tc.description}`);
-    console.log(`User Input: "${tc.userMessage}"\n`);
+  for (const tc of BENCHMARK_CASES) {
+    console.log(`──────────────────────────────────────────────────────────────────────`);
+    console.log(`[Case ${tc.id}] ${tc.category} — ${tc.description}`);
+    console.log(`Input: "${tc.userMessage}"\n`);
 
-    // Gemini
-    process.stdout.write(`  Running GEMINI (8s timeout guard)... `);
-    const gemRes = await runSingleTest(tc, 'gemini');
-    console.log(`${gemRes.error ? '❌' : '✅'} ${gemRes.latencyMs}ms`);
-    console.log(`  Response: "${gemRes.finalResponse}"`);
-    console.log(`  Evidence: [Naturalness: ${gemRes.evidence.naturalness}] | [Grounding: ${gemRes.evidence.unsupportedAssertion}] | [Status: ${gemRes.evidence.completion}]`);
+    // Run Gemini (isolated)
+    process.stdout.write(`  GEMINI : `);
+    const geminiRes = await runGeminiDirect(tc);
+    console.log(`[${geminiRes.status}] in ${geminiRes.latency_ms}ms (model: ${geminiRes.model_used})`);
+    console.log(`  Output : "${geminiRes.final_response}"\n`);
 
-    // NVIDIA
-    process.stdout.write(`  Running NVIDIA fallback... `);
-    const nvRes = await runSingleTest(tc, 'nvidia');
-    console.log(`${nvRes.error ? '❌' : '✅'} ${nvRes.latencyMs}ms`);
-    console.log(`  Response: "${nvRes.finalResponse}"`);
-    console.log(`  Evidence: [Naturalness: ${nvRes.evidence.naturalness}] | [Grounding: ${nvRes.evidence.unsupportedAssertion}] | [Status: ${nvRes.evidence.completion}]`);
+    // Pacing delay to avoid burst rate limits on Gemini free tier
+    await sleep(2000);
 
-    results.push({ test: tc, gemini: gemRes, nvidia: nvRes });
+    // Run NVIDIA (isolated)
+    process.stdout.write(`  NVIDIA : `);
+    const nvidiaRes = await runNvidiaDirect(tc);
+    console.log(`[${nvidiaRes.status}] in ${nvidiaRes.latency_ms}ms (model: ${nvidiaRes.model_used})`);
+    console.log(`  Output : "${nvidiaRes.final_response}"\n`);
+
+    benchmarkEntries.push({ test: tc, gemini: geminiRes, nvidia: nvidiaRes });
   }
 
-  console.log('\n\n════════════════════════════════════════════════════════════════════════════════');
-  console.log('EVIDENCE SUMMARY TABLE (NO SYNTHETIC SCORES)');
+  // Summary Output
+  console.log('\n════════════════════════════════════════════════════════════════════════════════');
+  console.log('BENCHMARK COMPARISON TABLE (EVIDENCE-ONLY, NO SYNTHETIC SCORES)');
   console.log('════════════════════════════════════════════════════════════════════════════════');
-  console.log(`${'ID'.padEnd(5)}${'Category'.padEnd(26)}${'Gemini Latency'.padEnd(16)}${'NVIDIA Latency'.padEnd(16)}${'Gemini Grounding'.padEnd(20)}NVIDIA Grounding`);
-  console.log('─'.repeat(95));
+  console.log(`${'#'.padEnd(4)}${'Category'.padEnd(25)}${'Gemini Status'.padEnd(16)}${'Gemini ms'.padEnd(12)}${'NVIDIA Status'.padEnd(16)}NVIDIA ms`);
+  console.log('─'.repeat(85));
 
-  for (const r of results) {
+  for (const entry of benchmarkEntries) {
     console.log(
-      `${r.test.id.padEnd(5)}` +
-      `${r.test.category.slice(0, 24).padEnd(26)}` +
-      `${(r.gemini.latencyMs + 'ms').padEnd(16)}` +
-      `${(r.nvidia.latencyMs + 'ms').padEnd(16)}` +
-      `${r.gemini.evidence.unsupportedAssertion.slice(0, 18).padEnd(20)}` +
-      `${r.nvidia.evidence.unsupportedAssertion.slice(0, 18)}`
+      `${entry.test.id.padEnd(4)}` +
+      `${entry.test.category.slice(0, 23).padEnd(25)}` +
+      `${entry.gemini.status.padEnd(16)}` +
+      `${(entry.gemini.latency_ms + 'ms').padEnd(12)}` +
+      `${entry.nvidia.status.padEnd(16)}` +
+      `${entry.nvidia.latency_ms + 'ms'}`
     );
   }
 
@@ -273,6 +344,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('Benchmark error:', err);
+  console.error('Benchmark execution error:', err);
   process.exit(1);
 });

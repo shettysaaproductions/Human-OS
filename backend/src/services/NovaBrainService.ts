@@ -160,16 +160,15 @@ export function validateAndRepairGrounding(
     const exactNumberInContext = new RegExp(`\\b${numberStr}\\b`);
 
     if (!patternInContext.test(fullContextText) && !exactNumberInContext.test(fullContextText)) {
-      // Invented age detected — repair the age assertion gracefully
-      logger.warn('[GroundingValidator] Detected unsupported age assertion in reply', {
+      // Invented age detected — do not replace with a softened assumption.
+      // Use a genuinely grounded admission / clarification.
+      logger.warn('[GroundingValidator] Detected unsupported age assertion in reply, repairing to grounded clarification', {
         inventedAge: ageMatch[0],
         replySnippet: text.substring(0, 60),
       });
 
-      text = text.replace(
-        /\b\d+\s*(?:mahine|saal|months?|years?|yo)\s*(?:mein\s*toh|ka\s*hai|ki\s*hai|ka\s*ho\s*gaya|mein)?/gi,
-        'abhi toh'
-      );
+      // If the reply contains a hallucinated child age or development milestone based on invented age:
+      text = 'Mujhe uski age ya details abhi nahi pata yaar, kitne saal ka hai woh?';
     }
   }
 
