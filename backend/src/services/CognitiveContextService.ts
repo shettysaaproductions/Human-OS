@@ -24,6 +24,7 @@ import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { extractKeywords, stopWords } from '../utils/nlp';
 import { TurnAnalyzer, TurnAnalysisResult } from './TurnAnalyzer';
+import { canonicalizeKey } from '../lib/memoryKeySchema';
 
 export interface ContextItemProvenance {
   source: 'current_turn' | 'chat_history' | 'working_memory' | 'short_term_memory' | 'episodic_memory' | 'long_term_memory' | 'life_thread' | 'nova_action' | 'reminder' | 'user_profile' | 'presence';
@@ -612,11 +613,13 @@ export class CognitiveContextService {
         goals.push({ key: mem.key, value: mem.value, importance: mem.importance || 50 });
       }
 
-      const key = (mem.key || '').trim().toLowerCase();
-      if (!groupedByKey.has(key)) {
-        groupedByKey.set(key, []);
+      // Group by CANONICAL key — not raw key — so alias rows (e.g. mothers_name,
+      // mom_name) are treated as the same concept as mother_name.
+      const { canonical: groupKey } = canonicalizeKey((mem.key || '').trim());
+      if (!groupedByKey.has(groupKey)) {
+        groupedByKey.set(groupKey, []);
       }
-      groupedByKey.get(key)!.push(mem);
+      groupedByKey.get(groupKey)!.push(mem);
     }
 
     const durableFacts: DurableMemoryItem[] = [];
@@ -629,8 +632,12 @@ export class CognitiveContextService {
         detectedConflicts++;
       }
 
-      // Check if current turn explicitly corrects this key
-      const activeCorrection = corrections.find(c => c.key.toLowerCase() === key);
+      // Check if current turn explicitly corrects this canonical key
+      // Also check if corrections used an alias key (e.g. correction for 'mom_name' → apply to 'mother_name')
+      const activeCorrection = corrections.find(c => {
+        const { canonical: corrCanonical } = canonicalizeKey(c.key);
+        return corrCanonical === key;
+      });
 
       // Sort candidate memories:
       // 1. If active correction matches value -> top

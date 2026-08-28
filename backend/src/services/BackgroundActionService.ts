@@ -1,5 +1,6 @@
 import { logger } from '../lib/logger';
 import { supabaseAdmin } from '../lib/supabase';
+import { memoryRepository } from './memoryRepository';
 const TIMEZONE_OFFSETS: Record<string, number> = {
   IN: 5.5,
   US: -5,
@@ -217,17 +218,17 @@ export class BackgroundActionService {
            if (isTrash) {
              logger.info('[BackgroundAction] MemoryRepository quality gate: rejected', { memKey, memValue });
            } else {
-             logger.info('[BackgroundAction] Saving memory', action.data);
-             await supabaseAdmin.from('memories').upsert({
-               user_id: userId,
+             logger.info('[BackgroundAction] Saving memory via memoryRepository', { memKey });
+             await memoryRepository.upsertMemory(userId, {
                key: memKey,
                value: memValue,
-               memory_type: action.data.memory_type || 'semantic',
-               source_message: action.data.source || 'background_action',
-               is_archived: false,
-               last_accessed_at: new Date().toISOString(),
-               updated_at: new Date().toISOString()
-             }, { onConflict: 'user_id,key' });
+               type: (action.data.memory_type || 'semantic') as any,
+               shouldPersist: true,
+               source_authority: 'subconscious_inference',
+               importance: 50,
+               confidence: 0.7,
+               emotional_weight: 0,
+             }, action.data.source || 'background_action');
            }
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {

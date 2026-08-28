@@ -6,6 +6,7 @@ import { memoryRepository } from '../services/memoryRepository';
 import { cache, CACHE_NS } from '../lib/cache';
 import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
+import { canonicalizeKey } from '../lib/memoryKeySchema';
 
 // ── Hinglish vocative words that are NOT kinship facts ──────────────────────────
 // "Bhai, sun" = addressing the listener. "Mera bhai Amit hai" = kinship fact.
@@ -27,38 +28,49 @@ const GENERIC_ENTITY_VALUES_AGENT = new Set([
  * Removes generic entity values and vocative misclassifications.
  */
 function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
-  return memories.filter(mem => {
-    if (!mem.shouldPersist) return false;
-    const key: string = mem.key ?? '';
-    const value: string = (mem.value ?? '').trim();
+  return memories
+    .map(mem => {
+      // Agent-level key normalization (defense-in-depth before memoryRepository)
+      const { canonical, wasAliased } = canonicalizeKey(mem.key ?? '');
+      if (wasAliased) {
+        logger.info('[ConsolidatedMemoryAgent] Key normalized at agent level', { original: mem.key, canonical });
+        return { ...mem, key: canonical };
+      }
+      return mem;
+    })
+    .filter(mem => {
+      if (!mem.shouldPersist) return false;
+      const key: string = mem.key ?? '';
+      const value: string = (mem.value ?? '').trim();
 
-    // ── BUG-01: Generic entity blocklist ───────────────────────────────────
-    if (key.endsWith('_name') && GENERIC_ENTITY_VALUES_AGENT.has(value.toLowerCase())) {
-      logger.info('[ConsolidatedMemoryAgent] BLOCKED generic entity value (pre-DB filter)', { key, value });
-      return false;
-    }
-
-    // ── BUG-02: Hinglish vocative disambiguation ──────────────────────────
-    // Reject brother_name / bhai_name unless the source sentence contains a
-    // kinship-statement pattern (e.g. "mera bhai", "brother ka naam")
-    const isBrotherKey = key === 'brother_name' || key === 'bhai_name' || key === 'brother';
-    if (isBrotherKey) {
-      const lowerSrc = sourceMessage.toLowerCase();
-      const hasKinshipPattern = KINSHIP_PATTERNS.test(lowerSrc);
-      const hasVocativeOnly = HINGLISH_VOCATIVES.has(value.toLowerCase()) && !hasKinshipPattern;
-      if (hasVocativeOnly) {
-        logger.info('[ConsolidatedMemoryAgent] BLOCKED vocative as kinship fact', { key, value, sourceMessage: sourceMessage.substring(0, 80) });
+      // ── BUG-01: Generic entity blocklist ───────────────────────────────────
+      if (key.endsWith('_name') && GENERIC_ENTITY_VALUES_AGENT.has(value.toLowerCase())) {
+        logger.info('[ConsolidatedMemoryAgent] BLOCKED generic entity value (pre-DB filter)', { key, value });
         return false;
       }
-      if (!hasKinshipPattern) {
-        logger.info('[ConsolidatedMemoryAgent] BLOCKED brother_name without kinship evidence', { key, value });
-        return false;
-      }
-    }
 
-    return true;
-  });
+      // ── BUG-02: Hinglish vocative disambiguation ──────────────────────────
+      // Reject brother_name / bhai_name unless the source sentence contains a
+      // kinship-statement pattern (e.g. "mera bhai", "brother ka naam")
+      const isBrotherKey = key === 'brother_name' || key === 'bhai_name' || key === 'brother';
+      if (isBrotherKey) {
+        const lowerSrc = sourceMessage.toLowerCase();
+        const hasKinshipPattern = KINSHIP_PATTERNS.test(lowerSrc);
+        const hasVocativeOnly = HINGLISH_VOCATIVES.has(value.toLowerCase()) && !hasKinshipPattern;
+        if (hasVocativeOnly) {
+          logger.info('[ConsolidatedMemoryAgent] BLOCKED vocative as kinship fact', { key, value, sourceMessage: sourceMessage.substring(0, 80) });
+          return false;
+        }
+        if (!hasKinshipPattern) {
+          logger.info('[ConsolidatedMemoryAgent] BLOCKED brother_name without kinship evidence', { key, value });
+          return false;
+        }
+      }
+
+      return true;
+    });
 }
+
 
 /**
  * ConsolidatedMemoryAgent — Performs ALL 7 memory extractions in a SINGLE LLM call.
@@ -170,6 +182,22 @@ CRITICAL:
 - If the user mentions ANY important time, date, schedule, or appointment worth remembering long-term, extract it as a 'semantic' memory with type "important_dates".
 - Only extract what is genuinely present. Use null/empty arrays for absent types.
 - Do NOT extract insignificant daily chatter.
+
+CANONICAL KEY SCHEMA (MANDATORY — USE THESE EXACT KEYS):
+Do NOT invent aliases, plurals, or possessive variants. Use ONLY canonical keys:
+  wife_name      ← NOT wives_name, wife, biwi
+  mother_name    ← NOT mothers_name, mom_name, maa_name, mom, maa
+  father_name    ← NOT fathers_name, dad_name, papa
+  son_name       ← NOT sons_name, beta, son
+  daughter_name  ← NOT daughters_name, beti, daughter
+  sister_name    ← NOT sisters_name, sister, behen
+  brother_name   ← NOT brothers_name, bhai_name (and NEVER 'bhai' alone as a key)
+  husband_name   ← NOT husbands_name, pati
+  company_name   ← NOT business_name, business, company, startup_name
+  birth_date     ← NOT birthday, dob, bday, child_birthdate
+  marriage_date  ← NOT wedding_date, anniversary
+  preferred_name ← NOT name, user_name, my_name
+For any other concept, use descriptive snake_case that clearly expresses the concept.
 
 ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 - Each distinct fact MUST be a SEPARATE object in the "semantic_memories" array.

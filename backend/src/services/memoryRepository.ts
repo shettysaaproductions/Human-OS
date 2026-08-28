@@ -3,6 +3,7 @@ import { ExtractedMemory, Memory, SourceAuthority } from '../types/memory';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
+import { canonicalizeKey } from '../lib/memoryKeySchema';
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type, source_authority, protection_source, protected_at';
@@ -51,12 +52,27 @@ export class MemoryRepository {
   async upsertMemory(userId: string, memory: ExtractedMemory, sourceMessage: string): Promise<void> {
     if (!memory.shouldPersist) return;
 
-    const incomingAuthority = memory.source_authority ?? 'subconscious_inference';
+    // ── Layer 0: Canonical key normalization ──────────────────────────────────
+    // This MUST happen before any other check so that alias keys (e.g.
+    // mothers_name, sons_name, business_name) are resolved to their canonical
+    // counterparts before the authority guard or DB lookup.
+    const { canonical: canonicalKey, wasAliased } = canonicalizeKey(memory.key);
+    if (wasAliased) {
+      logger.info('[MemoryRepository] Key canonicalized', {
+        userId, originalKey: memory.key, canonicalKey
+      });
+    }
+    // Mutate the in-memory object so all downstream references use canonical key
+    const normalizedMemory: ExtractedMemory = wasAliased
+      ? { ...memory, key: canonicalKey }
+      : memory;
+
+    const incomingAuthority = normalizedMemory.source_authority ?? 'subconscious_inference';
 
     // ── Layer 1: Generic entity value blocklist ───────────────────────────────
-    if (isGenericEntityValue(memory.key, memory.value, incomingAuthority)) {
+    if (isGenericEntityValue(normalizedMemory.key, normalizedMemory.value, incomingAuthority)) {
       logger.info('[MemoryRepository] BLOCKED generic entity value', {
-        userId, key: memory.key, value: memory.value, authority: incomingAuthority
+        userId, key: normalizedMemory.key, value: normalizedMemory.value, authority: incomingAuthority
       });
       return;
     }
@@ -68,7 +84,7 @@ export class MemoryRepository {
           .from('memories')
           .select('id, importance, frequency, emotional_weight, source_authority')
           .eq('user_id', userId)
-          .eq('key', memory.key)
+          .eq('key', normalizedMemory.key)
           .maybeSingle()
       );
 
@@ -77,19 +93,19 @@ export class MemoryRepository {
         const existingRank = authorityRank(existing.source_authority);
         const incomingRank = authorityRank(incomingAuthority);
 
-        if (existingRank > incomingRank && !memory.correction_intent) {
+        if (existingRank > incomingRank && !normalizedMemory.correction_intent) {
           logger.info('[MemoryRepository] BLOCKED lower-authority overwrite', {
             userId,
-            key: memory.key,
+            key: normalizedMemory.key,
             existingAuthority: existing.source_authority,
             incomingAuthority,
           });
           return;
         }
 
-        if (memory.correction_intent) {
+        if (normalizedMemory.correction_intent) {
           logger.info('[MemoryRepository] CORRECTION accepted — superseding existing value', {
-            userId, key: memory.key,
+            userId, key: normalizedMemory.key,
             from: existing.source_authority, to: incomingAuthority,
           });
         }
@@ -101,48 +117,48 @@ export class MemoryRepository {
           supabaseAdmin
             .from('memories')
             .update({
-              value: memory.value,
-              importance: Math.max(newImportance, memory.importance),
-              confidence: memory.confidence,
+              value: normalizedMemory.value,
+              importance: Math.max(newImportance, normalizedMemory.importance),
+              confidence: normalizedMemory.confidence,
               frequency: newFrequency,
-              emotional_weight: memory.emotional_weight ?? existing.emotional_weight ?? 0,
+              emotional_weight: normalizedMemory.emotional_weight ?? existing.emotional_weight ?? 0,
               source_message: sourceMessage,
               source_authority: incomingAuthority,
               updated_at: new Date().toISOString(),
               // Retention semantics — Phase 6.1 UNCHANGED
-              ...(memory.is_protected ? {
-                protection_source: memory.protection_source || 'system',
+              ...(normalizedMemory.is_protected ? {
+                protection_source: normalizedMemory.protection_source || 'system',
                 protected_at: new Date().toISOString()
               } : {}),
             })
             .eq('id', existing.id)
         );
 
-        logger.debug('Memory updated', { key: memory.key, userId, frequency: newFrequency, authority: incomingAuthority });
+        logger.debug('Memory updated', { key: normalizedMemory.key, userId, frequency: newFrequency, authority: incomingAuthority });
       } else {
         await qt.track('upsert_memory_insert', 'memories', () =>
           supabaseAdmin
             .from('memories')
             .insert({
               user_id: userId,
-              memory_type: memory.type,
-              key: memory.key,
-              value: memory.value,
-              importance: memory.importance,
-              confidence: memory.confidence,
-              emotional_weight: memory.emotional_weight ?? 0,
+              memory_type: normalizedMemory.type,
+              key: normalizedMemory.key,
+              value: normalizedMemory.value,
+              importance: normalizedMemory.importance,
+              confidence: normalizedMemory.confidence,
+              emotional_weight: normalizedMemory.emotional_weight ?? 0,
               source_message: sourceMessage,
               source_authority: incomingAuthority,
               last_accessed_at: new Date().toISOString(),
               // Retention semantics — Phase 6.1 UNCHANGED
-              ...(memory.is_protected ? {
-                protection_source: memory.protection_source || 'system',
+              ...(normalizedMemory.is_protected ? {
+                protection_source: normalizedMemory.protection_source || 'system',
                 protected_at: new Date().toISOString()
               } : {}),
             })
         );
 
-        logger.debug('Memory inserted', { key: memory.key, userId, authority: incomingAuthority });
+        logger.debug('Memory inserted', { key: normalizedMemory.key, userId, authority: incomingAuthority });
       }
     } catch (err) {
       logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), memory });
