@@ -1392,10 +1392,11 @@ HINGLISH RULES:
         }
       }
 
-      // Coverage Check and Fast Repair
+      // Coverage Check and Fast Repair (only if remaining request budget permits)
       let coverage_repair_invoked = false;
       const uncoveredUnits = TurnAnalyzer.getUncoveredUnits(turnAnalysis, rawReply);
-      if (uncoveredUnits.length > 0 && rawReply !== FALLBACK_REPLY) {
+      const elapsedBudget = Date.now() - request_received_ms;
+      if (uncoveredUnits.length > 0 && rawReply !== FALLBACK_REPLY && elapsedBudget < 4000) {
         logger.warn('[Chat] Uncovered required units detected, injecting repair bubble', { uncoveredUnits });
         try {
           const { complete } = await import('../lib/nvidia');
@@ -1730,31 +1731,32 @@ HINGLISH RULES:
             const savedMsg = saveResult.data;
             logger.info('[Chat] AI response saved to DB', { requestId, userId, messageId: savedMsg.id });
             
-            // If this is the last bubble (where meta is attached), save the thoughts
+            // If this is the last bubble (where meta is attached), save thoughts asynchronously (never block reply)
             if (idx === finalBubbles.length - 1 && thoughts.length > 0) {
-              const thoughtsResult = await supabaseAdmin.from('nova_thoughts').insert({
-                chat_message_id: savedMsg.id,
-                user_id: userId,
-                thoughts: thoughts
+              Promise.resolve(
+                supabaseAdmin.from('nova_thoughts').insert({
+                  chat_message_id: savedMsg.id,
+                  user_id: userId,
+                  thoughts: thoughts
+                })
+              ).then(({ error }: any) => {
+                if (error) {
+                  logger.error('[Chat] FAILED to save thoughts to nova_thoughts', {
+                    requestId,
+                    userId,
+                    messageId: savedMsg.id,
+                    error: error.message
+                  });
+                }
+              }).catch((err: any) => {
+                logger.error('[Chat] nova_thoughts insert threw', { error: err });
               });
-              
-              if (thoughtsResult.error) {
-                logger.error('[Chat] FAILED to save thoughts to nova_thoughts', {
-                  requestId,
-                  userId,
-                  messageId: savedMsg.id,
-                  error: thoughtsResult.error.message
-                });
-              }
             }
 
-            // Send push for each bubble (with small delay between)
+            // Send push notification asynchronously (never block reply)
             if (pushToken) {
-              await sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)
+              sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)
                 .catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
-              if (idx < finalBubbles.length - 1) {
-                await new Promise(r => setTimeout(r, 800));
-              }
             }
           } else {
             logger.warn('[Chat] AI response save returned no data and no error', { requestId, userId });

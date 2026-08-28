@@ -150,14 +150,14 @@ class CognitiveModelRouter {
     try {
       let text: string;
       if (primaryProvider === 'gemini') {
-        // Reserve at least 2500ms for NVIDIA fallback if Gemini times out or stalls
+        // Reserve at least 3500ms for NVIDIA fallback if Gemini times out or stalls
         const elapsedSoFar = Date.now() - startMs;
         const totalRemainingBudget = overallTimeoutMs - elapsedSoFar;
 
-        // If interactive conversation, bound Gemini to at most ~5000ms (or totalBudget - 2500ms),
+        // If interactive conversation, bound Gemini to at most ~3000ms (or totalBudget - 3500ms),
         // guaranteeing that NVIDIA has sufficient remaining budget before the 8000ms deadline.
         const geminiMaxTimeout = workload === 'CONVERSATION'
-          ? Math.max(1500, Math.min(5000, totalRemainingBudget - 2500))
+          ? Math.max(1200, Math.min(3000, totalRemainingBudget - 3500))
           : totalRemainingBudget;
 
         const geminiDeadline = Date.now() + geminiMaxTimeout;
