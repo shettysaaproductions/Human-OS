@@ -70,6 +70,7 @@ export interface GeminiOptions {
   maxTokens?: number;
   temperature?: number;
   jsonMode?: boolean;
+  timeoutMs?: number;
 }
 
 // ── Key Pool Entry ────────────────────────────────────────────────────────────
@@ -248,6 +249,8 @@ export async function geminiComplete(
   // Last message is the current user turn; rest is history
   const lastMessage = history[history.length - 1];
   const historyMsgs = history.slice(0, -1);
+  let text: string;
+  const timeoutMs = options.timeoutMs ?? (options.jsonMode ? 30_000 : config.gemini.conversationTimeoutMs);
 
   return pool.execute(async (client) => {
     const model = client.getGenerativeModel({
@@ -262,14 +265,13 @@ export async function geminiComplete(
       },
     });
 
-    let text: string;
-
     if (historyMsgs.length === 0) {
       // Single-turn: use generateContent() directly with just the user text string.
       // systemInstruction is already embedded on the model via getGenerativeModel().
       // generateContent() accepts string | Part[] for single-turn (not Content[] with role).
       const response = await withGeminiTimeout(() =>
-        model.generateContent(lastMessage.content)
+        model.generateContent(lastMessage.content),
+        timeoutMs
       );
       text = response.response.text();
     } else {
@@ -282,7 +284,8 @@ export async function geminiComplete(
       });
 
       const response = await withGeminiTimeout(() =>
-        chat.sendMessage([{ text: lastMessage.content }])
+        chat.sendMessage([{ text: lastMessage.content }]),
+        timeoutMs
       );
       text = response.response.text();
     }
@@ -323,6 +326,7 @@ export async function* geminiStream(
 
   const lastMessage = history[history.length - 1];
   const historyMsgs = history.slice(0, -1);
+  const timeoutMs = options.timeoutMs ?? config.gemini.conversationTimeoutMs;
 
   // For streaming we can't use pool.execute() (generator can't be wrapped easily)
   // so we check availability first, then use first available key.
@@ -330,48 +334,57 @@ export async function* geminiStream(
     throw new Error('[Gemini] All keys are on cooldown or unconfigured');
   }
 
-  // Use a simple direct call for streaming — single attempt
+  // Collect chunks from execute callback
   let streamErr: any = null;
+  const chunks: string[] = [];
+
   await pool.execute(async (client) => {
     const model = client.getGenerativeModel({
       model: modelName,
       systemInstruction: systemInstruction || undefined,
       safetySettings: SAFETY_SETTINGS,
       generationConfig: {
-        maxOutputTokens: options.maxTokens ?? 300,
+        maxOutputTokens: options.maxTokens ?? 512,
         temperature: options.temperature ?? 0.85,
       },
     });
 
-    const chat = model.startChat({
-      history: historyMsgs.map(m => ({
-        role: m.role,
-        parts: [{ text: m.content }],
-      })),
-    });
+    if (historyMsgs.length === 0) {
+      const result = await withGeminiTimeout(
+        () => model.generateContentStream(lastMessage.content),
+        timeoutMs
+      );
+      for await (const chunk of result.stream) {
+        const t = chunk.text();
+        if (t) chunks.push(t);
+      }
+    } else {
+      const chat = model.startChat({
+        history: historyMsgs.map(m => ({
+          role: m.role,
+          parts: [{ text: m.content }],
+        })),
+      });
 
-    const result = await withGeminiTimeout(() =>
-      chat.sendMessageStream([{ text: lastMessage.content }])
-    );
+      const result = await withGeminiTimeout(
+        () => chat.sendMessageStream([{ text: lastMessage.content }]),
+        timeoutMs
+      );
 
-    // Collect chunks — we yield them outside this closure
-    // This is necessary because pool.execute returns a Promise, not an AsyncGenerator
-    const chunks: string[] = [];
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      if (text) chunks.push(text);
+      for await (const chunk of result.stream) {
+        const t = chunk.text();
+        if (t) chunks.push(t);
+      }
     }
-
-    // Store in closure for yielding below
-    (streamErr as any) = { __chunks: chunks };
     return null;
-  }).catch(err => { streamErr = err; });
+  }).catch(err => {
+    streamErr = err;
+  });
 
-  if (streamErr && !streamErr.__chunks) {
+  if (streamErr) {
     throw streamErr;
   }
 
-  const chunks: string[] = streamErr?.__chunks ?? [];
   for (const chunk of chunks) {
     yield chunk;
   }

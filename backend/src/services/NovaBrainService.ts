@@ -116,6 +116,95 @@ export function sanitizeReply(reply: string): string {
 }
 
 /**
+ * Deterministic Grounding & Anti-Fabrication Validator (Phase 10.1 Hardening)
+ *
+ * Inspects LLM responses (from both Gemini and NVIDIA) to detect and repair
+ * unsupported factual assertions (e.g., invented ages, false personal claims,
+ * self-hallucinations, and confident answers to unknown personal facts).
+ */
+export function validateAndRepairGrounding(
+  reply: string,
+  userMessage: string = '',
+  context: any = {}
+): string {
+  if (!reply) return reply;
+  let text = reply;
+
+  // 1. Repair Self-Contradictory / AI Spouse Hallucinations (e.g., "mere wife ka naam Sakshi hai")
+  text = text
+    .replace(/\bmere\s+wife\b/gi, 'tumhari wife')
+    .replace(/\bmeri\s+wife\b/gi, 'tumhari wife')
+    .replace(/\bmeri\s+biwi\b/gi, 'tumhari biwi')
+    .replace(/\bmere\s+husband\b/gi, 'tumhare husband')
+    .replace(/\bmere\s+pati\b/gi, 'tumhare pati');
+
+  // Build searchable context text to verify grounded assertions
+  const allContextStrings: string[] = [userMessage];
+  if (Array.isArray(context.memories)) {
+    context.memories.forEach((m: any) => allContextStrings.push(m.value || m.content || JSON.stringify(m)));
+  }
+  if (Array.isArray(context.workingMemories)) {
+    context.workingMemories.forEach((m: any) => allContextStrings.push(m.value || m.content || JSON.stringify(m)));
+  }
+  if (Array.isArray(context.recentMessages)) {
+    context.recentMessages.forEach((m: any) => allContextStrings.push(typeof m === 'string' ? m : (m.content || '')));
+  }
+  const fullContextText = allContextStrings.join(' ').toLowerCase();
+
+  // 2. Unsupported Age Invention Detection (e.g. Model asserts "5 mahine mein toh...")
+  const ageMatch = text.match(/\b(\d+)\s*(mahine|saal|months?|years?|yo)\b/i);
+  if (ageMatch) {
+    const numberStr = ageMatch[1];
+    const unitStr = ageMatch[2].toLowerCase();
+    const patternInContext = new RegExp(`\\b${numberStr}\\s*${unitStr.substring(0, 3)}`, 'i');
+    const exactNumberInContext = new RegExp(`\\b${numberStr}\\b`);
+
+    if (!patternInContext.test(fullContextText) && !exactNumberInContext.test(fullContextText)) {
+      // Invented age detected — repair the age assertion gracefully
+      logger.warn('[GroundingValidator] Detected unsupported age assertion in reply', {
+        inventedAge: ageMatch[0],
+        replySnippet: text.substring(0, 60),
+      });
+
+      text = text.replace(
+        /\b\d+\s*(?:mahine|saal|months?|years?|yo)\s*(?:mein\s*toh|ka\s*hai|ki\s*hai|ka\s*ho\s*gaya|mein)?/gi,
+        'abhi toh'
+      );
+    }
+  }
+
+  // 3. Unknown Personal Fact Question Guard (e.g. "mera favourite colour kya hai?")
+  const lowerUser = userMessage.toLowerCase();
+  const isAskingUnknownPersonalFact =
+    /\b(mera|meri|hum|humne|hum log)\s+(?:favourite|favorite|fav|kahan|kab|kaunsa)\b/i.test(lowerUser) ||
+    /\b(kal hum kahan gaye the|hum kal kahan the|mera favourite colour|mera favourite khana)\b/i.test(lowerUser);
+
+  if (isAskingUnknownPersonalFact) {
+    const hasGroundedAnswerInContext =
+      (context.memories && context.memories.length > 0) ||
+      (context.workingMemories && context.workingMemories.length > 0);
+
+    // If context is completely empty of relevant memories, ensure model doesn't fabricate an assertive specific answer
+    if (!hasGroundedAnswerInContext) {
+      const isFabricatingSpecificAnswer =
+        /\b(gaye the|gayee thi|tha hum|tumhara favourite|tera favourite)\s+([a-zA-Z]+)/i.test(text) &&
+        !/\b(yaad nahi|pata nahi|tu hi bata|batao na|yaad nahi aa raha)\b/i.test(text);
+
+      if (isFabricatingSpecificAnswer) {
+        logger.warn('[GroundingValidator] Detected confident answer to unknown personal fact, replacing with grounded admission');
+        if (lowerUser.includes('kahan gaye') || lowerUser.includes('kahan the')) {
+          text = 'Haha kal hum mile the kya? Mujhe toh lagta hai kal baat nahi hui thi!';
+        } else {
+          text = 'Mujhe abhi yaad nahi aa raha yaar, tu hi bata na!';
+        }
+      }
+    }
+  }
+
+  return text.trim();
+}
+
+/**
  * Builds the message list sent to the LLM.
  *
  * The caller (chat route) persists the user's message to chat_history BEFORE invoking
@@ -289,6 +378,7 @@ export class NovaBrainService {
 
       if (!reply) reply = NOVA_EMPTY_REPLY;
       reply = sanitizeReply(reply);
+      reply = validateAndRepairGrounding(reply, combinedUserMessage, context);
       logger.info(`[NOVA BRAIN] Call 1 reply: "${reply.substring(0, 80)}..."`);
 
     } catch (error) {

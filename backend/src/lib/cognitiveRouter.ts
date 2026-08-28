@@ -69,6 +69,7 @@ export interface RouterOptions {
   maxTokens?: number;
   temperature?: number;
   jsonMode?: boolean;
+  timeoutMs?: number;
 }
 
 // ── Routing Decision ──────────────────────────────────────────────────────────
@@ -143,10 +144,14 @@ class CognitiveModelRouter {
     try {
       let text: string;
       if (primaryProvider === 'gemini') {
+        const timeoutMs = options.timeoutMs ?? (
+          workload === 'CONVERSATION' ? config.gemini.conversationTimeoutMs : 30_000
+        );
         const geminiOpts = {
           maxTokens: options.maxTokens,
           temperature: options.temperature,
           jsonMode: options.jsonMode,
+          timeoutMs,
         };
         text = options.jsonMode
           ? await geminiComplete(messages, { ...geminiOpts, jsonMode: true })
@@ -222,7 +227,14 @@ class CognitiveModelRouter {
     const nvidiaProfile = WORKLOAD_TO_NVIDIA_PROFILE[workload];
 
     if (primaryProvider === 'gemini') {
-      const geminiOpts = { maxTokens: options.maxTokens, temperature: options.temperature };
+      const timeoutMs = options.timeoutMs ?? (
+        workload === 'CONVERSATION' ? config.gemini.conversationTimeoutMs : 30_000
+      );
+      const geminiOpts = {
+        maxTokens: options.maxTokens,
+        temperature: options.temperature,
+        timeoutMs,
+      };
       let geminiOk = false;
       let streamStarted = false;
 
