@@ -89,7 +89,6 @@ class GeminiPool {
 
   private static readonly COOLDOWN_RATELIMIT_MS = 60_000;  // 60s for 429
   private static readonly COOLDOWN_OVERLOAD_MS  = 30_000;  // 30s for 503/overload
-  private static readonly COOLDOWN_TIMEOUT_MS   = 15_000;  // 15s for timeout
 
   constructor() {
     const rawKeys = [config.gemini.apiKey1, config.gemini.apiKey2]
@@ -157,7 +156,6 @@ class GeminiPool {
 
         const isRateLimit = status === 429 || msg.includes('quota') || msg.includes('rate') || msg.includes('resource_exhausted');
         const isOverload  = status === 503 || msg.includes('overload') || msg.includes('unavailable');
-        const isTimeout   = err.name === 'GeminiTimeoutError';
         const isBadRequest = status === 400 || status === 401 || status === 403;
 
         if (isBadRequest) {
@@ -165,18 +163,23 @@ class GeminiPool {
           throw err;
         }
 
-        const cooldownMs = isRateLimit ? GeminiPool.COOLDOWN_RATELIMIT_MS
-          : isOverload ? GeminiPool.COOLDOWN_OVERLOAD_MS
-          : isTimeout  ? GeminiPool.COOLDOWN_TIMEOUT_MS
-          : 20_000; // generic error
-
-        keyEntry.cooldownUntil = Date.now() + cooldownMs;
-        keyEntry.consecutiveFailures++;
-
-        logger.warn(`[Gemini] Key ${keyEntry.index} failed (attempt ${attempt + 1}/${total}), cooling ${cooldownMs}ms`, {
-          status,
-          errorName: err.name,
-        });
+        // Only put a key on cooldown for definitive HTTP error codes.
+        // Timeouts and unknown errors rotate to next key but don't cooldown the current
+        // one — the key may be fine, the request may just have been slow.
+        if (isRateLimit || isOverload) {
+          const cooldownMs = isRateLimit ? GeminiPool.COOLDOWN_RATELIMIT_MS : GeminiPool.COOLDOWN_OVERLOAD_MS;
+          keyEntry.cooldownUntil = Date.now() + cooldownMs;
+          keyEntry.consecutiveFailures++;
+          logger.warn(`[Gemini] Key ${keyEntry.index} rate-limited/overloaded, cooling ${cooldownMs}ms`, { status });
+        } else {
+          // Timeout or unknown: rotate to next key, do NOT lock this key.
+          // It might work on retry or the next key might be faster.
+          keyEntry.consecutiveFailures++;
+          logger.warn(`[Gemini] Key ${keyEntry.index} failed (${err.name}), rotating to next key`, {
+            status,
+            errorName: err.name,
+          });
+        }
       }
     }
 
@@ -252,24 +255,38 @@ export async function geminiComplete(
       systemInstruction: systemInstruction || undefined,
       safetySettings: SAFETY_SETTINGS,
       generationConfig: {
-        maxOutputTokens: options.maxTokens ?? 300,
+        // 512 default — 300 was truncating Nova's conversational replies mid-sentence.
+        maxOutputTokens: options.maxTokens ?? 512,
         temperature: options.temperature ?? 0.85,
         ...(options.jsonMode ? { responseMimeType: 'application/json' } : {}),
       },
     });
 
-    const chat = model.startChat({
-      history: historyMsgs.map(m => ({
-        role: m.role,
-        parts: [{ text: m.content }],
-      })),
-    });
+    let text: string;
 
-    const response = await withGeminiTimeout(() =>
-      chat.sendMessage([{ text: lastMessage.content }])
-    );
+    if (historyMsgs.length === 0) {
+      // Single-turn: use generateContent() directly with just the user text string.
+      // systemInstruction is already embedded on the model via getGenerativeModel().
+      // generateContent() accepts string | Part[] for single-turn (not Content[] with role).
+      const response = await withGeminiTimeout(() =>
+        model.generateContent(lastMessage.content)
+      );
+      text = response.response.text();
+    } else {
+      // Multi-turn: use startChat() to preserve conversation history.
+      const chat = model.startChat({
+        history: historyMsgs.map(m => ({
+          role: m.role,
+          parts: [{ text: m.content }],
+        })),
+      });
 
-    const text = response.response.text();
+      const response = await withGeminiTimeout(() =>
+        chat.sendMessage([{ text: lastMessage.content }])
+      );
+      text = response.response.text();
+    }
+
     if (!text || text.trim() === '') {
       throw new Error('[Gemini] Empty response received');
     }
