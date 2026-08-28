@@ -51,6 +51,385 @@ ANTI-ROBOT RULE (SELF-NARRATION): Do NOT explain what you are doing. Just respon
 
 const TEST_CASES: TestCase[] = [
 
+  {
+    id: 'H4',
+    category: 'Hinglish Understanding',
+    description: 'Sab thik?',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'sab thik chal raha hai?' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'H5',
+    category: 'Hinglish Understanding',
+    description: 'haan acha',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'haan acha' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'H6',
+    category: 'Hinglish Understanding',
+    description: 'kal baat karte hai',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'chal kal baat karte hai yaar' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'H7',
+    category: 'Hinglish Understanding',
+    description: 'Traffic complaint',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'aaj toh andheri mein itna traffic tha pucho mat' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'H8',
+    category: 'Hinglish Understanding',
+    description: 'Food preference',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'aaj bahar ka khana khane ka mann hai' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'H9',
+    category: 'Hinglish Understanding',
+    description: 'Health issue',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'sir dukh raha hai subah se' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'H10',
+    category: 'Hinglish Understanding',
+    description: 'Weekend plan',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'weekend pe kya scene hai?' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'G3',
+    category: 'Hinglish Generation',
+    description: 'Cheer up',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'mood thoda down lag raha hai aaj' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'G4',
+    category: 'Hinglish Generation',
+    description: 'Congratulate',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'promotion mil gaya finally!' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'G5',
+    category: 'Hinglish Generation',
+    description: 'Sympathize',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'boss ne aaj bahut sunaya' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'G6',
+    category: 'Hinglish Generation',
+    description: 'Morning greet',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'good morning, uth gaya main' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'G7',
+    category: 'Hinglish Generation',
+    description: 'Night greet',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'chalo good night, nind aa rahi hai' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'M2',
+    category: 'Multi-Message Memory',
+    description: 'Recall earlier topic',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'toh wo meeting ka kya hua jo subah thi?' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'M3',
+    category: 'Multi-Message Memory',
+    description: 'Recall family',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'Maa ki tabiyat thik hai abhi' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'C2',
+    category: 'Correction Handling',
+    description: 'Not that city',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'nahi yaar, main pune me rehta hu mumbai me nahi' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'C3',
+    category: 'Correction Handling',
+    description: 'Wrong job',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'arre main software engineer nahi, designer hu' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'P3',
+    category: 'Pronoun Resolution',
+    description: 'Usne bola',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'usne toh bola tha ki aayega' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'P4',
+    category: 'Pronoun Resolution',
+    description: 'Wahan',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'kal wahan jana padega dobara' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'A2',
+    category: 'Ambiguity',
+    description: 'Just hmm',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'hmm' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'A3',
+    category: 'Ambiguity',
+    description: 'Ok',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'ok' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'A4',
+    category: 'Ambiguity',
+    description: 'Lol',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'lol' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'PC2',
+    category: 'Proactive Grounding',
+    description: 'Unknown info',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'kya lagta hai?' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'PC3',
+    category: 'Proactive Grounding',
+    description: 'No fabricated history',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'kal hum kahan gaye the?' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'PC4',
+    category: 'Proactive Grounding',
+    description: 'No fabricated facts',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'mera favourite colour kya hai?' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'M4',
+    category: 'Multi-Message Memory',
+    description: 'Follow up on health',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'ab better feel kar raha hu' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'M5',
+    category: 'Multi-Message Memory',
+    description: 'Contextual joke',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'wahi purana rona' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+  {
+    id: 'M6',
+    category: 'Multi-Message Memory',
+    description: 'Contextual update',
+    systemPrompt: NOVA_BASE_SYSTEM,
+    messages: [
+      { role: 'system', content: NOVA_BASE_SYSTEM },
+      { role: 'user', content: 'ho gaya submit' }
+    ],
+    evaluationCriteria: ['Responds naturally in Hinglish', 'Does NOT use formal pronouns'],
+    expectedSignals: [],
+    failureSignals: ['Aap', 'Aapka', 'As an AI']
+  },
+
+
   // ── HINGLISH UNDERSTANDING ───────────────────────────────────────────────────
 
   {
