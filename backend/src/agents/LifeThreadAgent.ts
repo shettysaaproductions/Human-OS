@@ -368,7 +368,8 @@ Respond ONLY with a JSON object in this exact schema:
           const prevState = targetThread.state as string;
           
           // BUG-NEGATION-RESUME: Detect explicit resumption deterministically in case LLM omits state
-          const lastUserMsg = recentChat.findLast(m => m.role === 'user')?.content?.toLowerCase() || '';
+          const reversedChat = [...recentChat].reverse();
+          const lastUserMsg = reversedChat.find((m: any) => m.role === 'user')?.content?.toLowerCase() || '';
           const isExplicitResume = /ab\s+(start|shuru|karenge|continue)|(next month|phir se|resume|dobara|wapas)\s+(start|shuru|karenge|karna)/i.test(lastUserMsg);
 
           let nextState = update.action === 'complete' ? 'completed' 

@@ -10,7 +10,8 @@ This document tracks identified bugs, limitations, and workarounds.
 - **Root Cause:** `chat.ts` filtered `negatedGoals` to only dispatch `suppress_life_thread` jobs for **permanent** drops (`isCurrent === false`). Temporary pauses (`isCurrent === true`) — e.g., "cloud kitchen abhi start nahi kar raha, usko hold pe rakha hai" — were silently dropped, so the thread stayed `ACTIVE`.
 - **Fix 1 — `chat.ts`:** Removed the `permanentNegations` filter. Now **all** negated goals (both temporary and permanent) are dispatched. The `is_current` flag is forwarded in the job payload.
 - **Fix 2 — `LifeThreadAgent.processSuppressJob`:** Reads `is_current` from payload to select target state: `true` → `waiting` (paused), `false` → `abandoned` (dropped). Defaults to `waiting` (safe/non-destructive) when flag is absent.
-- **Tests:** 7 regression tests added covering: isCurrent=true→waiting, isCurrent=false→abandoned, missing flag default, idempotency, no-match, malformed payload, invalid user_id. All 215 tests passing.
+- **Fix 3 — `LifeThreadAgent.buildPrompt` & `applyUpdate` (BUG-NEGATION-RESUME):** Separated paused threads into a `⏸️ PAUSED THREADS` block in the prompt with explicit strict instructions and Hinglish phrases (e.g. "ab start karunga") dictating a mandatory `state="active"` emission. Fixed `applyUpdate` to guard against missing states in LLM responses and append a `[STATE TRANSITION]` note to provenance rather than overwriting history.
+- **Tests:** 17 regression tests added covering: isCurrent=true→waiting, isCurrent=false→abandoned, explicit resume→active, unrelated messages ignoring waiting threads, missing flag default, idempotency, no-match, malformed payload, invalid user_id. All 226 tests passing.
 
 ---
 

@@ -323,8 +323,3 @@ User requested a major auto upgrade after analyzing 100 chat messages that revea
 3. Run `npx tsx scripts/cleanupTestMemories.ts` once to clean memory
 4. Manually redeploy Render after git push
 5. Do OTA update after Render is live
-
----
-
-## 2026-08-19
-- Fixed a parsing bug where Nova would fall back to "Mujhe thoda sochne de" when generating lists (like reminders). The prompt rule forbidding lists was overridden for direct requests, and XML parsing was made robust against truncation.
