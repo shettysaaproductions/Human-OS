@@ -64,6 +64,21 @@ async function runVerification() {
     const token = signInData.session.access_token;
     const authHeaders = { Authorization: `Bearer ${token}` };
 
+    // Helper to poll Supabase for memories
+    async function waitForMemories(expectedCount: number, timeoutMs = 15000) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        const { data } = await supabase
+          .from('memories')
+          .select('*')
+          .eq('user_id', testUserId);
+        if (data && data.length >= expectedCount) return data;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      const { data } = await supabase.from('memories').select('*').eq('user_id', testUserId);
+      return data || [];
+    }
+
     // ── Turn 1: Initial ambiguous statement ─────────────────────────────────
     console.log('\n--- Turn 1: "Mere bete ka naam Tiku hai" ---');
     const msg1Res = await axios.post(
@@ -76,16 +91,9 @@ async function runVerification() {
     );
     console.log(`Turn 1 reply: ${msg1Res.data?.reply || msg1Res.data?.message || JSON.stringify(msg1Res.data)}`);
 
-    // Wait 5s for background agent / DB writes
-    await new Promise(r => setTimeout(r, 5000));
-
-    const { data: memsTurn1 } = await supabase
-      .from('memories')
-      .select('*')
-      .eq('user_id', testUserId);
-
+    const memsTurn1 = await waitForMemories(1);
     console.log('DB Memories after Turn 1:');
-    console.table(memsTurn1?.map(m => ({ id: m.id, key: m.key, value: m.value, is_archived: m.is_archived })));
+    console.table(memsTurn1.map(m => ({ id: m.id, key: m.key, value: m.value, is_archived: m.is_archived, auth: m.source_authority })));
 
     // ── Turn 2: Explicit clarification ──────────────────────────────────────
     console.log('\n--- Turn 2: "I mean real name Shreshth hai, pyar se nickname Tiku rakha hai" ---');
@@ -99,16 +107,9 @@ async function runVerification() {
     );
     console.log(`Turn 2 reply: ${msg2Res.data?.reply || msg2Res.data?.message || JSON.stringify(msg2Res.data)}`);
 
-    // Wait 5s for background agent / DB writes
-    await new Promise(r => setTimeout(r, 5000));
-
-    const { data: memsTurn2 } = await supabase
-      .from('memories')
-      .select('*')
-      .eq('user_id', testUserId);
-
+    const memsTurn2 = await waitForMemories(2);
     console.log('DB Memories after Turn 2:');
-    console.table(memsTurn2?.map(m => ({ id: m.id, key: m.key, value: m.value, is_archived: m.is_archived })));
+    console.table(memsTurn2.map(m => ({ id: m.id, key: m.key, value: m.value, is_archived: m.is_archived, auth: m.source_authority })));
 
     // ── Turn 3: Analytics /memories endpoint check ─────────────────────────
     console.log('\n--- Testing GET /api/analytics/memories ---');
@@ -117,37 +118,40 @@ async function runVerification() {
       timeout: 15000
     });
 
+    const analyticsData = analyticsRes.data?.data || analyticsRes.data;
     console.log('Analytics response summary:', {
-      totalMemories: analyticsRes.data?.totalMemories,
-      categories: analyticsRes.data?.categories,
-      activeCanonicalMemories: analyticsRes.data?.memories?.map((m: any) => ({
+      totalMemories: analyticsData?.totalMemories,
+      categories: analyticsData?.categories,
+      recentMemories: analyticsData?.recentMemories?.map((m: any) => ({
         key: m.key,
         value: m.value,
-        type: m.type,
+        type: m.memory_type,
         is_archived: m.is_archived
       }))
     });
 
-    // Check assertions
-    const activeMems = memsTurn2?.filter(m => !m.is_archived) || [];
-    const sonName = activeMems.find(m => m.key === 'son_name')?.value;
-    const sonNickname = activeMems.find(m => m.key === 'son_nickname')?.value;
-    const hasUnscopedReal = activeMems.some(m => m.key === 'real_name');
-    const hasUnscopedNick = activeMems.some(m => m.key === 'nickname');
+    // Check assertions from active canonical memories returned by analytics
+    const activeMems = analyticsData?.recentMemories?.filter((m: any) => !m.is_archived) || [];
+    const sonName = activeMems.find((m: any) => m.key === 'son_name')?.value;
+    const sonNickname = activeMems.find((m: any) => m.key === 'son_nickname')?.value;
+    const hasUnscopedReal = activeMems.some((m: any) => m.key === 'real_name');
+    const hasUnscopedNick = activeMems.some((m: any) => m.key === 'nickname');
 
     console.log('\n================ VERIFICATION RESULTS ================');
     console.log(`son_name (active): ${sonName} ${sonName === 'Shreshth' ? '✅ PASS' : '❌ FAIL'}`);
     console.log(`son_nickname (active): ${sonNickname} ${sonNickname === 'Tiku' ? '✅ PASS' : '❌ FAIL'}`);
     console.log(`No unscoped real_name: ${!hasUnscopedReal ? '✅ PASS' : '❌ FAIL'}`);
     console.log(`No unscoped nickname: ${!hasUnscopedNick ? '✅ PASS' : '❌ FAIL'}`);
-    console.log(`Analytics endpoint excluded archived: ${!analyticsRes.data?.memories?.some((m: any) => m.is_archived) ? '✅ PASS' : '❌ FAIL'}`);
+    console.log(`Analytics endpoint excluded archived: ${!analyticsData?.recentMemories?.some((m: any) => m.is_archived) ? '✅ PASS' : '❌ FAIL'}`);
+    console.log(`Analytics total active canonical: ${analyticsData?.totalMemories}`);
 
   } finally {
     // 3. Clean up ephemeral test user
     console.log(`\nCleaning up ephemeral user ${testUserId}...`);
     await supabase.from('memories').delete().eq('user_id', testUserId);
-    await supabase.from('messages').delete().eq('user_id', testUserId);
+    await supabase.from('chat_history').delete().eq('user_id', testUserId);
     await supabase.from('reminders').delete().eq('user_id', testUserId);
+    await supabase.from('life_threads').delete().eq('user_id', testUserId);
     await supabase.auth.admin.deleteUser(testUserId);
     console.log('Ephemeral user cleaned up.');
   }

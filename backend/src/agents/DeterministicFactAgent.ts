@@ -51,7 +51,7 @@ export class DeterministicFactAgent {
           is_protected: isProtected,
           protection_source: isProtected ? 'user_explicit' : undefined,
           // Corrections from TurnAnalyzer carry correction_intent
-          correction_intent: fact.factClass === 'PROTECTED_FACT' || fact.isCorrection === true,
+          correction_intent: fact.factClass === 'PROTECTED_FACT' || fact.isCorrection === true || fact.is_correction === true,
         }, sourceMessage || 'Direct Fact Extraction');
 
 
