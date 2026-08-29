@@ -448,3 +448,75 @@ describe('Phase 7: TurnAnalyzer & Conversational Intelligence', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BUG-03: extractReminderIntent regression tests
+// ─────────────────────────────────────────────────────────────────────────────
+describe('BUG-03: extractReminderIntent', () => {
+  it('A. "3 baje yaad dila" → intent detected, not ambiguous', () => {
+    const result = TurnAnalyzer.extractReminderIntent('3 baje yaad dila');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(false);
+    expect(result!.timePhrase).toMatch(/3\s*baje/i);
+  });
+
+  it('B. "remind me in 20 minutes" → relative time, not ambiguous', () => {
+    const result = TurnAnalyzer.extractReminderIntent('remind me in 20 minutes to call the doctor');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(false);
+    expect(result!.timePhrase).toMatch(/20.*min/i);
+  });
+
+  it('C. "kal subah 9 baje yaad kara" → kal prefix, not ambiguous', () => {
+    const result = TurnAnalyzer.extractReminderIntent('kal subah 9 baje yaad kara');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(false);
+  });
+
+  it('D. "yaad dila" with no time → isAmbiguous=true', () => {
+    const result = TurnAnalyzer.extractReminderIntent('yaad dila');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(true);
+    expect(result!.timePhrase).toBe('');
+  });
+
+  it('E. "mujhe yaad rakhna" with no time → isAmbiguous=true', () => {
+    const result = TurnAnalyzer.extractReminderIntent('mujhe yaad rakhna gym jana hai');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(true);
+  });
+
+  it('F. "at 5pm remind me" → 5pm time, not ambiguous', () => {
+    const result = TurnAnalyzer.extractReminderIntent('at 5pm remind me to leave for office');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(false);
+    expect(result!.timePhrase).toMatch(/5\s*pm/i);
+  });
+
+  it('G. "in 2 hours remind me to eat" → relative hours, not ambiguous', () => {
+    const result = TurnAnalyzer.extractReminderIntent('in 2 hours remind me to eat');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(false);
+    expect(result!.timePhrase).toMatch(/2\s*hour/i);
+  });
+
+  it('H. "hello how are you" → null (no reminder intent)', () => {
+    const result = TurnAnalyzer.extractReminderIntent('hello how are you doing today');
+    expect(result).toBeNull();
+  });
+
+  it('I. "main kal gym jaunga" → null (no reminder keyword)', () => {
+    const result = TurnAnalyzer.extractReminderIntent('main kal gym jaunga');
+    expect(result).toBeNull();
+  });
+
+  it('J. analyze() populates reminderIntent in TurnAnalysisResult', () => {
+    const result = TurnAnalyzer.analyze([{ message: 'Yaad dila 6 baje gym time hai' }]);
+    expect(result.reminderIntent).not.toBeNull();
+    expect(result.reminderIntent!.isAmbiguous).toBe(false);
+  });
+
+  it('K. analyze() reminderIntent is null for non-reminder messages', () => {
+    const result = TurnAnalyzer.analyze([{ message: 'Meri wife ka naam Sakshi hai' }]);
+    expect(result.reminderIntent).toBeNull();
+  });
+});

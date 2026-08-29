@@ -306,24 +306,30 @@ export class NovaBrainService {
     context: any // Aggregated context from Temporal, Situational, Memory engines
   ): Promise<{ reply: string; subconscious_actions: any[] }> {
     
-    const criticalActionSuccessContext = ''; // No more LLM-blocking critical action evaluation
+    // BUG-03: Skip LLM-based extractCriticalAction if the deterministic path already
+    // created the reminder before this call. Prevents duplicate reminder rows.
+    const skipCriticalAction = context.deterministicReminderCreated === true;
     
-    for (const msg of messages) {
-        if (!msg.client_message_id) continue;
-        
-        // Critical Actions (synchronous, but we use the result directly without blocking the LLM)
-        try {
-            const actions = await extractCriticalAction(msg.message);
-            if (actions && actions.length > 0) {
-                await backgroundActions.processCriticalActions(_userId, msg.client_message_id, actions, context.userCountry || 'IN');
-                logger.info('[NOVA BRAIN] Synced critical reminder action.', { userId: _userId, messageId: msg.client_message_id });
-            }
-        } catch (e) {
-            logger.error(`[NOVA BRAIN] Sync critical action failed for ${msg.client_message_id}`, { error: e });
-        }
+    if (!skipCriticalAction) {
+      for (const msg of messages) {
+          if (!msg.client_message_id) continue;
+          
+          // Critical Actions (synchronous, but we use the result directly without blocking the LLM)
+          try {
+              const actions = await extractCriticalAction(msg.message);
+              if (actions && actions.length > 0) {
+                  await backgroundActions.processCriticalActions(_userId, msg.client_message_id, actions, context.userCountry || 'IN');
+                  logger.info('[NOVA BRAIN] Synced critical reminder action.', { userId: _userId, messageId: msg.client_message_id });
+              }
+          } catch (e) {
+              logger.error(`[NOVA BRAIN] Sync critical action failed for ${msg.client_message_id}`, { error: e });
+          }
+      }
+    } else {
+      logger.info('[NOVA BRAIN][BUG-03] Skipping extractCriticalAction — deterministic reminder already created.', { userId: _userId });
     }
 
-    // ── CALL 2: Subconscious Action Engine ────────────────────────────────────────────
+    // ── Conversation Prompt Assembly ──────────────────────────────────────────────────
     // The 49B model's ONLY job: be Nova. No tool JSON. No XML tags.
     const conversationSystemPrompt = promptBuilder.buildSystemPrompt(
       context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
@@ -340,13 +346,18 @@ export class NovaBrainService {
       context.turnAnalysisBlock
     );
 
+    // BUG-03: Inject deterministicReminderNote so LLM knows reminder state before responding
+    const deterministicReminderSection = context.deterministicReminderNote
+      ? `\n\n## REMINDER STATUS (DETERMINISTIC — DO NOT CONTRADICT)\n${context.deterministicReminderNote}\n`
+      : '';
+
     const conversationFullPrompt = [
       conversationSystemPrompt,
       context.memoryContext || '',
       context.temporalContextBlock || '',
       context.remindersContext || '',
+      deterministicReminderSection,
       context.lengthInstruction || '',
-      criticalActionSuccessContext,
       '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
     ].filter(Boolean).join('\n');
 
