@@ -252,10 +252,217 @@ describe('LifeThreadAgent', () => {
       ).rejects.toThrow('LifeThreadAgent[SUPPRESS][MALFORMED_PAYLOAD]');
     });
 
+
     it('[BUG-NEGATION-7] invalid user_id throws INVALID_USER_ID', async () => {
       await expect(
         agent.processSuppressJob({ payload: { user_id: 'bad-id', negated_concept: 'cloud kitchen' } })
       ).rejects.toThrow('LifeThreadAgent[SUPPRESS][INVALID_USER_ID]');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BUG-NEGATION-RESUME — Resume path tests
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('BUG-NEGATION-RESUME: resume lifecycle', () => {
+    const validUserId = '11111111-1111-1111-1111-111111111111';
+    const waitingThreadId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+
+    const waitingThread = {
+      id: waitingThreadId,
+      topic: 'Cloud Kitchen Start Plan',
+      state: 'waiting',
+      priority: 'medium',
+      provenance: '[PAUSED by user — 2026-08-30]\n[STATE TRANSITION: active -> waiting]'
+    };
+
+    function setupMocksForResume(llmResponse: string) {
+      // chat_history fetch: limit() resolves last
+      mockSupabase.limit.mockResolvedValueOnce({
+        data: [{ role: 'user', content: 'Ab cloud kitchen next month start karne wala hu' }]
+      });
+      // life_threads fetch (from().select().eq().in()) and nova_actions fetch (second .in())
+      mockSupabase.in
+        .mockResolvedValueOnce({ data: [waitingThread], error: null })  // life_threads
+        .mockResolvedValueOnce({ data: [], error: null });               // nova_actions
+      // LLM response
+      (chatCompletionBackground as jest.Mock).mockResolvedValueOnce(llmResponse);
+      // applyUpdate: update().eq().eq() — let the default `then` handler resolve it
+      mockSupabase.update.mockReturnThis();
+      // Do NOT call mockSupabase.eq.mockResolvedValue() — that breaks the .eq().in() chain
+    }
+
+    it('[RESUME-1] waiting thread + explicit resume → state set to active', async () => {
+      setupMocksForResume(JSON.stringify({
+        action: 'update',
+        thread_id: waitingThreadId,
+        state: 'active',
+        provenance: 'User is resuming cloud kitchen plan for next month',
+        reason: 'User explicitly said they will start next month',
+        actions: []
+      }));
+
+      await agent.processJob({
+        payload: { user_id: validUserId, turn_context: { negativeCorrectionConcepts: [] } }
+      });
+
+      const updateCall = mockSupabase.update.mock.calls[0]?.[0];
+      expect(updateCall).toBeDefined();
+      expect(updateCall.state).toBe('active');
+    });
+
+    it('[RESUME-2] waiting thread + unrelated message → update NOT called for that thread', async () => {
+      // chat_history fetch
+      mockSupabase.limit.mockResolvedValueOnce({
+        data: [{ role: 'user', content: 'Aaj mausam bahut acha hai' }]
+      });
+      mockSupabase.in
+        .mockResolvedValueOnce({ data: [waitingThread], error: null })
+        .mockResolvedValueOnce({ data: [], error: null });
+      (chatCompletionBackground as jest.Mock).mockResolvedValueOnce(JSON.stringify({
+        action: 'ignore',
+        reason: 'User is talking about weather, unrelated to life thread',
+        actions: []
+      }));
+
+      await agent.processJob({
+        payload: { user_id: validUserId, turn_context: { negativeCorrectionConcepts: [] } }
+      });
+
+      expect(mockSupabase.update).not.toHaveBeenCalled();
+    });
+
+    it('[RESUME-3] explicit resume uses exact same thread_id (no new thread created)', async () => {
+      setupMocksForResume(JSON.stringify({
+        action: 'update',
+        thread_id: waitingThreadId,
+        state: 'active',
+        provenance: 'User resuming cloud kitchen',
+        reason: 'User said ab start karne wala hu',
+        actions: []
+      }));
+
+      await agent.processJob({
+        payload: { user_id: validUserId, turn_context: { negativeCorrectionConcepts: [] } }
+      });
+
+      // insert should NOT have been called (no new thread created)
+      expect(mockSupabase.insert).not.toHaveBeenCalled();
+    });
+
+    it('[RESUME-4] applyUpdate sets state=active on the correct thread', async () => {
+      setupMocksForResume(JSON.stringify({
+        action: 'update',
+        thread_id: waitingThreadId,
+        state: 'active',
+        provenance: 'Resuming cloud kitchen next month',
+        reason: 'Explicit resume intent',
+        actions: []
+      }));
+
+      await agent.processJob({
+        payload: { user_id: validUserId, turn_context: { negativeCorrectionConcepts: [] } }
+      });
+
+      const updatePayload = mockSupabase.update.mock.calls[0]?.[0];
+      expect(updatePayload.state).toBe('active');
+    });
+
+    it('[RESUME-5] provenance on resume appends RESUMED and STATE TRANSITION note', async () => {
+      setupMocksForResume(JSON.stringify({
+        action: 'update',
+        thread_id: waitingThreadId,
+        state: 'active',
+        provenance: 'User restarting cloud kitchen plan',
+        reason: 'Explicit intent stated',
+        actions: []
+      }));
+
+      await agent.processJob({
+        payload: { user_id: validUserId, turn_context: { negativeCorrectionConcepts: [] } }
+      });
+
+      const updatePayload = mockSupabase.update.mock.calls[0]?.[0];
+      expect(updatePayload.provenance).toContain('[RESUMED by user');
+      expect(updatePayload.provenance).toContain('STATE TRANSITION: waiting -> active');
+      // Original provenance must be preserved
+      expect(updatePayload.provenance).toContain('[PAUSED by user');
+    });
+
+    it('[RESUME-6] pause still produces waiting (regression: pause not broken)', async () => {
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: waitingThreadId, topic: 'Cloud Kitchen Start Plan', state: 'active', provenance: 'User started goal' }],
+        error: null
+      });
+      mockSupabase.update.mockReturnThis();
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          is_current: true,
+          reason: 'cloud kitchen abhi start nahi kar raha'
+        }
+      });
+
+      const updatePayload = mockSupabase.update.mock.calls[0]?.[0];
+      expect(updatePayload.state).toBe('waiting');
+      expect(updatePayload.provenance).toContain('[PAUSED by user');
+    });
+
+    it('[RESUME-7] cancel produces abandoned (regression: permanent drop not broken)', async () => {
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: waitingThreadId, topic: 'Cloud Kitchen Start Plan', state: 'active', provenance: 'User started goal' }],
+        error: null
+      });
+      mockSupabase.update.mockReturnThis();
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          is_current: false,
+          reason: 'cloud kitchen cancel kar diya'
+        }
+      });
+
+      const updatePayload = mockSupabase.update.mock.calls[0]?.[0];
+      expect(updatePayload.state).toBe('abandoned');
+      expect(updatePayload.provenance).toContain('[ABANDONED by user');
+    });
+
+    it('[RESUME-8] LLM returns action=update without state → falls back to targetThread.state (no crash)', async () => {
+      setupMocksForResume(JSON.stringify({
+        action: 'update',
+        thread_id: waitingThreadId,
+        // state deliberately omitted
+        provenance: 'Some update',
+        reason: 'test',
+        actions: []
+      }));
+
+      await expect(agent.processJob({
+        payload: { user_id: validUserId, turn_context: { negativeCorrectionConcepts: [] } }
+      })).resolves.not.toThrow();
+    });
+
+    it('[RESUME-9] "ab start karunga" → LLM prompt contains RESUME instruction', () => {
+      // Access buildPrompt via reflection to verify the prompt text contains the resume rule
+      const threads = [{ id: waitingThreadId, topic: 'Cloud Kitchen', state: 'waiting', provenance: '' }];
+      const recentChat = [{ role: 'user', content: 'ab start karunga' }];
+      const prompt = (agent as any).buildPrompt(threads, [], recentChat);
+      expect(prompt).toContain('state = "active"');
+      expect(prompt).toContain('THIS IS MANDATORY');
+      expect(prompt).toContain(waitingThreadId);
+    });
+
+    it('[RESUME-10] all resume phrases appear in resume instruction', () => {
+      const threads = [{ id: waitingThreadId, topic: 'Cloud Kitchen', state: 'waiting', provenance: '' }];
+      const recentChat = [{ role: 'user', content: 'Ab cloud kitchen next month start karne wala hu' }];
+      const prompt = (agent as any).buildPrompt(threads, [], recentChat);
+      expect(prompt).toContain('ab start karunga');
+      expect(prompt).toContain('next month shuru karunga');
+      expect(prompt).toContain('resume karte hain');
+      expect(prompt).toContain('ab dobara shuru');
     });
   });
 });

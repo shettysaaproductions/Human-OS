@@ -257,13 +257,22 @@ export class LifeThreadAgent {
     // Amendment 3: Inject PAUSED threads so the LLM knows to resume rather than create duplicates
     const pausedThreads = activeThreads.filter(t => t.state === 'waiting');
     const pausedNote = pausedThreads.length > 0
-      ? `\n⏸️ PAUSED THREADS (WAITING FOR RESUMPTION):\n${pausedThreads.map(t => `  ID=${t.id} topic="${t.topic}" — PAUSED by user, awaiting resumption`).join('\n')}\nRULE FOR PAUSED THREADS:
-- DO NOT create a new duplicate thread for a goal that is already paused above.
-- If the user explicitly resumes, restarts, or schedules this paused goal (e.g. "ab start karne wala hu", "let's resume X", "starting next month"), emit "update" with that thread's "thread_id", set "state": "active", and update provenance with the new timeline.
-- If the conversation does not resume the goal, leave it alone or ignore.`
+      ? `\n⏸️ PAUSED THREADS (user previously put these goals on hold):
+${pausedThreads.map(t => `  ID=${t.id} topic="${t.topic}" state=waiting`).join('\n')}
+
+RULES FOR PAUSED THREADS:
+1. Do NOT create a new duplicate thread for a goal that already exists above as "waiting".
+2. RESUME: If the user explicitly says they are restarting, resuming, or scheduling a paused goal
+   (e.g. "ab start karunga", "next month shuru karunga", "resume karte hain", "ab dobara shuru", "starting next month"),
+   you MUST emit:
+     action = "update"
+     thread_id = <exact UUID from the paused thread above>
+     state = "active"   ← THIS IS MANDATORY. Do not omit. Do not return "waiting".
+   This un-pauses the thread. The goal is resuming, NOT being created fresh.
+3. UNRELATED: If the latest conversation has nothing to do with a paused thread, emit "ignore" for it.`
       : '';
 
-    return `You are Nova's cognitive Action & Goal processor. 
+    return `You are Nova's cognitive Action & Goal processor.
 Your task is to identify if the user's latest messages created a new goal/thread, updated an existing one, completed one, or abandoned one.
 AND you must decompose goals into explicitly trackable ACTIONS.
 
@@ -273,7 +282,7 @@ ${softLimitNote}
 ${candidateNote}
 ${pausedNote}
 
-Existing Active Threads:
+All Threads (active, waiting, blocked):
 ${JSON.stringify(activeThreads.map(t => ({ id: t.id, topic: t.topic, state: t.state, provenance: (t.provenance ?? '').substring(0, 120) })), null, 2)}
 
 Existing Active Actions:
@@ -283,8 +292,8 @@ Recent Conversation:
 ${JSON.stringify(recentChat, null, 2)}
 
 Based on the latest messages, decide the appropriate thread action:
-- "create": user stated a new meaningful goal/plan.
-- "update": user added information to an existing thread.
+- "create": user stated a brand-new goal/plan that does NOT overlap with any existing thread.
+- "update": user added information to an existing thread, OR user explicitly resumed a PAUSED (waiting) thread. When resuming, set state="active".
 - "complete": user indicated an existing thread is finished.
 - "abandon": user explicitly dropped this goal (NOT just corrected a concept within it).
 - "ignore": no meaningful thread activity.
@@ -305,11 +314,11 @@ Execution Classes for Actions:
 Respond ONLY with a JSON object in this exact schema:
 {
   "action": "create" | "update" | "complete" | "abandon" | "ignore",
-  "thread_id": "UUID of existing thread if updating/completing/abandoning",
+  "thread_id": "UUID of existing thread if updating/completing/abandoning/resuming",
   "topic": "Short descriptive topic (if creating)",
   "state": "active | waiting | blocked | completed | abandoned",
   "priority": "low | medium | high",
-  "provenance": "Brief explanation",
+  "provenance": "Brief explanation of what changed",
   "reason": "Why you chose this action",
   "actions": [
     {
@@ -354,16 +363,38 @@ Respond ONLY with a JSON object in this exact schema:
                           : update.action === 'abandon' ? 'abandoned' 
                           : update.state || targetThread.state;
 
-          await supabaseAdmin.from('life_threads')
+          // BUG-NEGATION-RESUME: Build provenance by APPENDING a state-transition note
+          // rather than replacing the entire provenance. This preserves history and
+          // prevents contradictory provenance text.
+          const prevState = targetThread.state as string;
+          const today = new Date().toISOString().slice(0, 10);
+          let provenanceNote = update.provenance ?? '';
+          // Append a transition note when state actually changes
+          if (nextState !== prevState) {
+            const transitionLabel = nextState === 'active' && prevState === 'waiting'
+              ? `[RESUMED by user — ${today}]\n[STATE TRANSITION: waiting -> active]`
+              : nextState === 'waiting' || nextState === 'abandoned'
+              ? `[${nextState === 'abandoned' ? 'ABANDONED' : 'PAUSED'} — ${today}]\n[STATE TRANSITION: ${prevState} -> ${nextState}]`
+              : `[STATE TRANSITION: ${prevState} -> ${nextState} — ${today}]`;
+            provenanceNote = provenanceNote
+              ? `${provenanceNote}\n${transitionLabel}`
+              : transitionLabel;
+          }
+          const newProvenance = (targetThread.provenance ?? '') + (provenanceNote ? `\n${provenanceNote}` : '');
+
+          const { error: updateErr } = await supabaseAdmin.from('life_threads')
             .update({
               state: nextState,
-              provenance: update.provenance || targetThread.provenance,
+              provenance: newProvenance,
               last_relevant_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
             .eq('id', update.thread_id)
             .eq('user_id', userId);
             
+          if (updateErr) {
+            throw new Error(`LifeThreadAgent[DB_UPDATE_FAILURE]: ${updateErr.message ?? JSON.stringify(updateErr)}`);
+          }
           logger.info(`LifeThreadAgent: Updated thread ${update.thread_id} to ${nextState} for user ${userId}`);
           
           // If thread completed/abandoned, automatically cancel pending actions if they are SAFE_AUTOMATIC
