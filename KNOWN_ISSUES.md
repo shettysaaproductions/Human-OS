@@ -1,7 +1,17 @@
 # Known Issues List (Active)
 
 This document tracks identified bugs, limitations, and workarounds.
-**Last Updated: Aug 28, 2026**
+**Last Updated: Aug 29, 2026**
+
+---
+
+## ✅ Resolved Aug 29, 2026 — Consolidated Reliability Pass (SHA: 4a31c39)
+
+- **BUG-04 — Life Thread Duplicate Rows (P1):** `BackgroundActionService.LifeThread.upsert` used exact `ilike` match only, so the LLM writing "Job interview prep" vs "Interview preparation" for the same goal created two rows. **Fixed:** Added Jaccard similarity helper (`_lifeThreadJaccard`, threshold 0.3) with a 20-row active-thread scan as a semantic candidate search step before any `INSERT`. If a semantically equivalent thread exists, it is updated in-place. Mirrors the same Jaccard approach already used in `LifeThreadAgent.ts`.
+- **BUG-05 — Phantom Outreach Entries Inflating ProactiveGate cooldown (P1):** `checkUnansweredConversations()` writes `followup:unanswered:*` entries to `nova_outreach_log` when a conversation is stuck. `ProactiveGate._acquireInternal()` step 4 counted ALL unreplied outreaches including these phantom entries, inflating `ignoredCount` → 720-min escalation gap that silently blocked all proactive outreach. NACE had already fixed this for session_start evaluations; now the same exclusion (`.not('logical_key', 'like', 'followup:unanswered:%')`) is applied in `ProactiveGate` itself.
+- **BUG-06 — Correction Concepts Never Reaching LifeThreadAgent (P1):** `TurnAnalyzer.analyze()` correctly extracts negated concepts (e.g. `negativeCorrectionConcepts: ["fashion"]`) but the result was never forwarded to the `extract_life_threads` background job. `NovaBrainService.generateInteraction()` enqueued the job with only `userMessage`/`novaReply` in `turn_context`. **Fixed:** `chat.ts` now includes `negativeCorrectionConcepts: turnAnalysis.negativeCorrectionConcepts || []` in `brainContext`; `NovaBrainService.ts` forwards it into the job's `turn_context`, so `LifeThreadAgent.updateThreadProvenanceForCorrection()` actually fires with real data.
+- **BUG-07 — Returning User Proactive Cognition (P2):** Was already fully implemented and wired. `presence.ts` → `session_start_cognition` job → `novaConsciousnessEngine.processUser(userId, { trigger: 'session_start', awayDurationMinutes })` → NACE session_start evaluation with returning-user context. No code changes required; confirmed as working.
+
 
 ---
 

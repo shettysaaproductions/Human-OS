@@ -1,4 +1,38 @@
 
+## [2026-08-29] Consolidated Reliability Pass — BUG-04/05/06/07 (SHA: 4a31c39)
+
+### Trigger
+Full codebase inspection to fix confirmed cognitive/memory/life-thread/follow-up/returning-user reliability issues in one implementation pass.
+
+### Changes Made
+
+**BUG-04 — LifeThread Semantic Dedup (`BackgroundActionService.ts`)**
+- Added `_lifeThreadJaccard()` similarity helper and `LIFE_THREAD_STOP_WORDS` set at file scope.
+- `LifeThread.upsert` handler now does a two-step match: (1) exact `ilike` match, (2) if no exact match, Jaccard semantic scan of all 20 active threads with threshold 0.3.
+- Prevents duplicate `life_threads` rows when the SubconsciousAgent LLM describes the same goal with different wording across turns.
+
+**BUG-05 — ProactiveGate Phantom Entry Exclusion (`ProactiveGate.ts`)**
+- Step 4 of `_acquireInternal()` (ignoredCount computation) now adds `.not('logical_key', 'like', 'followup:unanswered:%')` to filter out phantom entries written by `checkUnansweredConversations()`.
+- These entries represent conversations where Nova FAILED to reply (not where the user ignored Nova). Counting them as ignored was inflating escalation gaps to 720 min, silently blocking all real proactive outreach.
+- Mirrors the same exclusion NACE already applied for session_start evaluations (lines 305-309 in NACE).
+
+**BUG-06 — Correction Propagation Wire (`chat.ts` + `NovaBrainService.ts`)**
+- Root cause: `TurnAnalyzer.analyze()` correctly produces `negativeCorrectionConcepts` but the array was never forwarded to the `extract_life_threads` background job.
+- Fix 1 (`chat.ts`): Added `negativeCorrectionConcepts: turnAnalysis.negativeCorrectionConcepts || []` to `brainContext`.
+- Fix 2 (`NovaBrainService.ts`): Forwards `context.negativeCorrectionConcepts` into `extract_life_threads` job's `turn_context`.
+- `LifeThreadAgent.updateThreadProvenanceForCorrection()` now actually fires with real negated concepts.
+
+**BUG-07 — Returning User Proactive Cognition**
+- Full code inspection confirmed this is already completely wired end-to-end. No code changes needed.
+
+### Verification
+- `npm run build` exit 0, 0 TypeScript errors.
+- `npm test -- --coverage=false`: 18 suites, 199/199 tests passing.
+- Git pushed: `df69643..4a31c39` → main.
+- OTA published to `--branch production`.
+
+---
+
 ## [2026-08-25] Phase 10 — Unified Cognitive Context Fabric & Recall Quality
 
 ### Trigger
