@@ -21,6 +21,43 @@ function jaccardSimilarity(a: string, b: string): number {
   return intersection.size / union.size;
 }
 
+// ── BUG-NEGATION-RESUME FIX: Explicit resume detection ──────────────────────
+// Runs BEFORE the action branch so it applies to both action=update and action=create.
+// Covers common Hindi/English temporal resume phrases.
+const EXPLICIT_RESUME_RE = /\b(ab|phir\s*se|dobara|wapas|resume|restart|shuru\s*kar)\b.*\b(start|shuru|karenge|karna|karunga|karni|karenge|plan|continue)\b|\b(next\s+month|agli\s+baar|next\s+week|jald\s*hi|soon)\b.*\b(start|shuru|karenge|karna|karunga)\b/i;
+
+/**
+ * Returns true if the user message explicitly signals they are restarting/resuming a paused goal.
+ * This is intentionally broad — false positives are cheaper than missed resumes.
+ */
+function detectExplicitResume(msg: string): boolean {
+  return EXPLICIT_RESUME_RE.test(msg);
+}
+
+/**
+ * FIX 2: Find the best WAITING thread candidate for an explicit resume.
+ * Deliberately does NOT use JACCARD_CANDIDATE_THRESHOLD — a paused thread
+ * should be reachable even when the message is verbose (low Jaccard score).
+ * Algorithm: any token from the thread topic appears in the user message.
+ */
+function findBestWaitingCandidate(waitingThreads: any[], userMsg: string): any | null {
+  const msgTokens = tokenize(userMsg);
+  let bestThread: any = null;
+  let bestScore = 0;
+  for (const t of waitingThreads) {
+    const topicTokens = tokenize(t.topic ?? '');
+    const overlap = new Set([...topicTokens].filter(x => msgTokens.has(x)));
+    if (overlap.size > 0) {
+      const score = overlap.size / Math.max(topicTokens.size, 1);
+      if (score > bestScore) {
+        bestScore = score;
+        bestThread = t;
+      }
+    }
+  }
+  return bestThread;
+}
+
 // Minimum Jaccard score to include a thread as a merge CANDIDATE in the LLM prompt
 const JACCARD_CANDIDATE_THRESHOLD = 0.25;
 // Soft thread count threshold: at this count, strongly suggest update/complete over create
@@ -188,7 +225,10 @@ export class LifeThreadAgent {
       const pauseLabel = is_current === false ? 'ABANDONED' : 'PAUSED';
       const transitionNote = `\n[STATE TRANSITION: ${thread.state} -> ${targetState}]`;
       const note = `\n[${pauseLabel} by user: "${reason || negated_concept}" — ${new Date().toISOString().slice(0, 10)}]${transitionNote}`;
-      const { error: updErr } = await supabaseAdmin
+
+      // ── FIX 7: Concurrency guard — only transition from the current observed state ──
+      // Prevents a stale suppress from clobbering a thread that was already resumed/updated.
+      const { error: updErr, count } = await (supabaseAdmin
         .from('life_threads')
         .update({
           state: targetState,
@@ -197,11 +237,17 @@ export class LifeThreadAgent {
           updated_at: new Date().toISOString(),
         })
         .eq('id', thread.id)
-        .eq('user_id', user_id);
+        .eq('user_id', user_id)
+        .eq('state', thread.state) as any).select('id');
+
       if (updErr) {
         throw new Error(`LifeThreadAgent[SUPPRESS][DB_UPDATE_FAILURE]: ${updErr.message ?? JSON.stringify(updErr)}`);
       }
-      logger.info(`LifeThreadAgent[SUPPRESS]: Thread "${thread.topic}" transitioned to ${targetState}`, { userId: user_id, threadId: thread.id, negated_concept, targetState });
+      if (count === 0) {
+        logger.warn(`LifeThreadAgent[SUPPRESS][STALE_STATE]: Thread ${thread.id} was no longer in state "${thread.state}" when suppress write was attempted. Skipped.`, { userId: user_id, negated_concept, targetState });
+      } else {
+        logger.info(`LifeThreadAgent[SUPPRESS]: Thread "${thread.topic}" transitioned to ${targetState}`, { userId: user_id, threadId: thread.id, negated_concept, targetState });
+      }
     }
   }
 
@@ -347,51 +393,79 @@ Respond ONLY with a JSON object in this exact schema:
   private async applyUpdate(userId: string, update: LifeThreadUpdate, activeThreads: any[], activeActions: any[], sourceMessageId?: string, recentChat: any[] = []): Promise<void> {
     let resolvedThreadId = update.thread_id;
 
-    if (update.action !== 'ignore') {
-      if (update.action === 'create' && update.topic) {
-        const { data: newThread } = await supabaseAdmin.from('life_threads').insert({
-          user_id: userId,
-          topic: update.topic,
-          state: update.state || 'active',
-          priority: update.priority || 'medium',
-          provenance: update.provenance,
-          last_relevant_at: new Date().toISOString()
-        }).select('id').single();
-        if (newThread) {
-          resolvedThreadId = newThread.id;
-          logger.info(`LifeThreadAgent: Created thread "${update.topic}" for user ${userId}`);
+    if (update.action === 'ignore') {
+      // Nothing to do
+    } else {
+      // ── FIX 1: Compute explicit-resume BEFORE branching on action ───────────
+      // This ensures the resume redirect runs even when LLM returns action=create.
+      const reversedChat = [...recentChat].reverse();
+      const lastUserMsg = reversedChat.find((m: any) => m.role === 'user')?.content || '';
+      const isExplicitResume = detectExplicitResume(lastUserMsg);
+
+      // ── FIX 2: For action=create, intercept when an explicit resume matches a waiting thread ──
+      // This catches the case where the LLM emits "create" because the Jaccard filter
+      // suppressed the waiting thread from the deduplication hint block.
+      if (update.action === 'create' && isExplicitResume) {
+        const waitingThreads = activeThreads.filter(t => t.state === 'waiting');
+        const resumeCandidate = findBestWaitingCandidate(waitingThreads, lastUserMsg);
+        if (resumeCandidate) {
+          logger.info(`LifeThreadAgent[RESUME_REDIRECT]: LLM returned "create" but explicit resume detected. Redirecting to update thread "${resumeCandidate.topic}" (${resumeCandidate.id})`, { userId });
+          // Mutate the payload to redirect to resume
+          update = {
+            ...update,
+            action: 'update',
+            thread_id: resumeCandidate.id,
+            state: 'active',
+          };
         }
-      } 
-      else if ((update.action === 'update' || update.action === 'complete' || update.action === 'abandon') && update.thread_id) {
+      }
+
+      if (update.action === 'create' && update.topic) {
+        // ── FIX 3: Last-chance safety — even without explicit resume, prevent duplicate
+        // creation if a WAITING thread has substantial token overlap with the new topic.
+        const waitingThreads = activeThreads.filter(t => t.state === 'waiting');
+        const duplicateCandidate = findBestWaitingCandidate(waitingThreads, update.topic);
+        if (duplicateCandidate) {
+          logger.warn(`LifeThreadAgent[DEDUP_GUARD]: Blocking create for "${update.topic}" — waiting thread "${duplicateCandidate.topic}" (${duplicateCandidate.id}) already exists for same concept. LLM should have returned update.`, { userId });
+          // Do not insert. The existing waiting thread remains; this turn simply does not duplicate it.
+        } else {
+          const { data: newThread } = await supabaseAdmin.from('life_threads').insert({
+            user_id: userId,
+            topic: update.topic,
+            state: update.state || 'active',
+            priority: update.priority || 'medium',
+            provenance: update.provenance,
+            last_relevant_at: new Date().toISOString()
+          }).select('id').single();
+          if (newThread) {
+            resolvedThreadId = newThread.id;
+            logger.info(`LifeThreadAgent: Created thread "${update.topic}" for user ${userId}`);
+          }
+        }
+      } else if ((update.action === 'update' || update.action === 'complete' || update.action === 'abandon') && update.thread_id) {
         const targetThread = activeThreads.find(t => t.id === update.thread_id);
         if (targetThread) {
           const prevState = targetThread.state as string;
-          
-          // BUG-NEGATION-RESUME: Detect explicit resumption deterministically in case LLM omits state
-          const reversedChat = [...recentChat].reverse();
-          const lastUserMsg = reversedChat.find((m: any) => m.role === 'user')?.content?.toLowerCase() || '';
-          const isExplicitResume = /ab\s+(start|shuru|karenge|continue)|(next month|phir se|resume|dobara|wapas)\s+(start|shuru|karenge|karna)/i.test(lastUserMsg);
 
-          let nextState = update.action === 'complete' ? 'completed' 
-                          : update.action === 'abandon' ? 'abandoned' 
+          let nextState = update.action === 'complete' ? 'completed'
+                          : update.action === 'abandon' ? 'abandoned'
                           : update.state || targetThread.state;
 
-          // Force active if deterministically resumed
+          // Force active if deterministically resumed (handles LLM omitting state=active on an update)
           if (prevState === 'waiting' && isExplicitResume && update.action === 'update' && (!update.state || update.state === 'waiting')) {
             nextState = 'active';
           }
 
-          // BUG-NEGATION-RESUME: Build provenance by APPENDING a state-transition note
-          // rather than replacing the entire provenance. This preserves history and
-          // prevents contradictory provenance text.
+          // ── FIX 4: Build provenance by APPENDING state-transition note — never overwrite ──
           const today = new Date().toISOString().slice(0, 10);
           let provenanceNote = update.provenance ?? '';
-          // Append a transition note when state actually changes
           if (nextState !== prevState) {
             const transitionLabel = nextState === 'active' && prevState === 'waiting'
-              ? `[RESUMED by user — ${today}]\n[STATE TRANSITION: waiting -> active]`
-              : nextState === 'waiting' || nextState === 'abandoned'
-              ? `[${nextState === 'abandoned' ? 'ABANDONED' : 'PAUSED'} — ${today}]\n[STATE TRANSITION: ${prevState} -> ${nextState}]`
+              ? `[RESUMED by user: "${lastUserMsg.substring(0, 80)}" — ${today}]\n[STATE TRANSITION: waiting -> active]`
+              : nextState === 'waiting'
+              ? `[PAUSED — ${today}]\n[STATE TRANSITION: ${prevState} -> waiting]`
+              : nextState === 'abandoned'
+              ? `[ABANDONED — ${today}]\n[STATE TRANSITION: ${prevState} -> abandoned]`
               : `[STATE TRANSITION: ${prevState} -> ${nextState} — ${today}]`;
             provenanceNote = provenanceNote
               ? `${provenanceNote}\n${transitionLabel}`
@@ -399,7 +473,17 @@ Respond ONLY with a JSON object in this exact schema:
           }
           const newProvenance = (targetThread.provenance ?? '') + (provenanceNote ? `\n${provenanceNote}` : '');
 
-          const { error: updateErr } = await supabaseAdmin.from('life_threads')
+          // ── FIX 7: Concurrency guard — conditionally update based on expected prior state ──
+          // For resumes, only update if still in waiting. For completions/abandons, only if not already terminal.
+          let stateConditionColumn: string | null = null;
+          let stateConditionValue: string | null = null;
+          if (nextState === 'active' && prevState === 'waiting') {
+            // Resume: only proceed if still waiting (guard against stale writes)
+            stateConditionColumn = 'state';
+            stateConditionValue = 'waiting';
+          }
+
+          let updateQuery = supabaseAdmin.from('life_threads')
             .update({
               state: nextState,
               provenance: newProvenance,
@@ -408,18 +492,32 @@ Respond ONLY with a JSON object in this exact schema:
             })
             .eq('id', update.thread_id)
             .eq('user_id', userId);
-            
+
+          if (stateConditionColumn && stateConditionValue) {
+            updateQuery = (updateQuery as any).eq(stateConditionColumn, stateConditionValue);
+          }
+
+          const { error: updateErr, count } = await (updateQuery as any).select('id');
+
           if (updateErr) {
             throw new Error(`LifeThreadAgent[DB_UPDATE_FAILURE]: ${updateErr.message ?? JSON.stringify(updateErr)}`);
           }
-          logger.info(`LifeThreadAgent: Updated thread ${update.thread_id} to ${nextState} for user ${userId}`);
-          
-          // If thread completed/abandoned, automatically cancel pending actions if they are SAFE_AUTOMATIC
+
+          // Stale-state guard: 0 rows means the state already changed between when we read it and now
+          if (count === 0 && stateConditionValue) {
+            logger.warn(`LifeThreadAgent[STALE_STATE]: Thread ${update.thread_id} was no longer in state "${stateConditionValue}" when resume write was attempted. Write skipped to avoid stale overwrite.`, { userId, nextState });
+          } else {
+            logger.info(`LifeThreadAgent: Updated thread ${update.thread_id} to ${nextState} for user ${userId}`);
+          }
+
+          resolvedThreadId = update.thread_id;
+
+          // If thread completed/abandoned, automatically cancel pending actions
           if (nextState === 'completed' || nextState === 'abandoned') {
-             await supabaseAdmin.from('nova_actions')
-               .update({ state: nextState === 'completed' ? 'completed' : 'cancelled', updated_at: new Date().toISOString() })
-               .eq('source_thread_id', update.thread_id)
-               .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
+            await supabaseAdmin.from('nova_actions')
+              .update({ state: nextState === 'completed' ? 'completed' : 'cancelled', updated_at: new Date().toISOString() })
+              .eq('source_thread_id', update.thread_id)
+              .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
           }
         }
       }
