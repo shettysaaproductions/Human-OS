@@ -144,5 +144,119 @@ describe('LifeThreadAgent', () => {
     await expect(agent.processJob({ payload: {} })).rejects.toThrow('LifeThreadAgent[MALFORMED_PAYLOAD]');
     await expect(agent.processJob({ payload: { user_id: 'invalid-id', turn_context: {} } })).rejects.toThrow('LifeThreadAgent[INVALID_USER_ID]');
   });
+
+  // ─── BUG-NEGATION: processSuppressJob regression tests ────────────────────
+
+  describe('processSuppressJob', () => {
+    const validUserId = '00000000-0000-0000-0000-000000000001';
+
+    it('[BUG-NEGATION-1] isCurrent=true → transitions active thread to WAITING state', async () => {
+      // Simulate thread fetch returning an active cloud kitchen thread
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: 'thread-ck-1', topic: 'Start Cloud Kitchen', state: 'active', provenance: 'User wants to start cloud kitchen.' }],
+        error: null
+      });
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          is_current: true,
+          reason: 'User said: "cloud kitchen abhi start nahi kar raha, usko hold pe rakha hai"',
+        }
+      });
+
+      expect(mockSupabase.update).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'waiting' })
+      );
+    });
+
+    it('[BUG-NEGATION-2] isCurrent=false → transitions active thread to ABANDONED state', async () => {
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: 'thread-ck-2', topic: 'Start Cloud Kitchen', state: 'active', provenance: '' }],
+        error: null
+      });
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          is_current: false,
+          reason: 'User said: "cloud kitchen cancel kar diya"',
+        }
+      });
+
+      expect(mockSupabase.update).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'abandoned' })
+      );
+    });
+
+    it('[BUG-NEGATION-3] missing is_current defaults to WAITING (safe/non-destructive)', async () => {
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: 'thread-ck-3', topic: 'Cloud Kitchen Launch', state: 'active', provenance: '' }],
+        error: null
+      });
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          // is_current intentionally omitted
+          reason: 'some reason',
+        }
+      });
+
+      expect(mockSupabase.update).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'waiting' })
+      );
+    });
+
+    it('[BUG-NEGATION-4] idempotency: thread already in target state is NOT updated again', async () => {
+      // Thread is already waiting — should NOT emit another update
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: 'thread-ck-4', topic: 'Cloud Kitchen', state: 'waiting', provenance: '' }],
+        error: null
+      });
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          is_current: true,
+        }
+      });
+
+      expect(mockSupabase.update).not.toHaveBeenCalled();
+    });
+
+    it('[BUG-NEGATION-5] no matching thread → no update emitted', async () => {
+      mockSupabase.in.mockResolvedValueOnce({
+        data: [{ id: 'thread-gym', topic: 'Gym Routine', state: 'active', provenance: '' }],
+        error: null
+      });
+
+      await agent.processSuppressJob({
+        payload: {
+          user_id: validUserId,
+          negated_concept: 'cloud kitchen',
+          is_current: true,
+        }
+      });
+
+      expect(mockSupabase.update).not.toHaveBeenCalled();
+    });
+
+    it('[BUG-NEGATION-6] missing negated_concept throws MALFORMED_PAYLOAD', async () => {
+      await expect(
+        agent.processSuppressJob({ payload: { user_id: validUserId } })
+      ).rejects.toThrow('LifeThreadAgent[SUPPRESS][MALFORMED_PAYLOAD]');
+    });
+
+    it('[BUG-NEGATION-7] invalid user_id throws INVALID_USER_ID', async () => {
+      await expect(
+        agent.processSuppressJob({ payload: { user_id: 'bad-id', negated_concept: 'cloud kitchen' } })
+      ).rejects.toThrow('LifeThreadAgent[SUPPRESS][INVALID_USER_ID]');
+    });
+  });
 });
 

@@ -1226,22 +1226,25 @@ chatRouter.post(
       }
 
       // ── Amendment 3: Deterministic negation propagation ──────────────────────
-      // For each permanent negation (isCurrent = false), immediately queue a
-      // suppress_life_thread job to flip matching thread state to 'waiting'.
+      // Queue suppress_life_thread for ALL negated goals — both temporary pauses
+      // (isCurrent=true → state: 'waiting') and permanent drops
+      // (isCurrent=false → state: 'abandoned').
+      // BUG-NEGATION FIX: The previous code only dispatched isCurrent=false;
+      // "abhi nahi" / "hold pe rakha" (isCurrent=true) were silently dropped.
       // This runs BEFORE the LLM call so the PAUSED THREADS note in the
       // subsequent extract_life_threads prompt prevents re-creation.
       const negatedGoals = turnAnalysis.negatedGoals || [];
-      const permanentNegations = negatedGoals.filter(g => !g.isCurrent);
-      if (permanentNegations.length > 0) {
-        for (const neg of permanentNegations) {
+      if (negatedGoals.length > 0) {
+        for (const neg of negatedGoals) {
           try {
             await subconsciousQueue.add('suppress_life_thread', {
               user_id: userId,
               negated_concept: neg.concept,
               target_fact_key: neg.targetFactKey,
+              is_current: neg.isCurrent,   // true → waiting, false → abandoned
               reason: `User said: "${effectiveMessage.substring(0, 100)}"`,
             });
-            logger.info('[Chat][Amendment3] suppress_life_thread queued', { userId, concept: neg.concept });
+            logger.info('[Chat][Amendment3] suppress_life_thread queued', { userId, concept: neg.concept, isCurrent: neg.isCurrent });
           } catch (suppErr: any) {
             logger.error('[Chat][Amendment3] Failed to queue suppress_life_thread', { userId, concept: neg.concept, error: suppErr?.message });
           }

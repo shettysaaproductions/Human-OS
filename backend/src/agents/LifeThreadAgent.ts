@@ -148,7 +148,7 @@ export class LifeThreadAgent {
    * Does NOT call the LLM — purely deterministic.
    */
   async processSuppressJob(job: any): Promise<void> {
-    const { user_id, negated_concept, reason } = job.payload || {};
+    const { user_id, negated_concept, reason, is_current } = job.payload || {};
     if (!user_id || !LifeThreadAgent.UUID_RE.test(user_id)) {
       const err = new Error(`LifeThreadAgent[SUPPRESS][INVALID_USER_ID]: "${user_id}"`);
       (err as any).isPermanent = true;
@@ -159,6 +159,11 @@ export class LifeThreadAgent {
       (err as any).isPermanent = true;
       throw err;
     }
+
+    // is_current=true  → user temporarily paused → set state 'waiting'
+    // is_current=false → user permanently dropped → set state 'abandoned'
+    // Default to 'waiting' for safety (less destructive) if flag is absent.
+    const targetState = is_current === false ? 'abandoned' : 'waiting';
 
     const conceptLower = negated_concept.toLowerCase();
 
@@ -179,12 +184,13 @@ export class LifeThreadAgent {
     });
 
     for (const thread of matched) {
-      if (thread.state === 'waiting') continue; // already suppressed
-      const note = `\n[PAUSED by user: "${reason || negated_concept}" — ${new Date().toISOString().slice(0, 10)}]`;
+      if (thread.state === targetState) continue; // already in desired state
+      const pauseLabel = is_current === false ? 'ABANDONED' : 'PAUSED';
+      const note = `\n[${pauseLabel} by user: "${reason || negated_concept}" — ${new Date().toISOString().slice(0, 10)}]`;
       const { error: updErr } = await supabaseAdmin
         .from('life_threads')
         .update({
-          state: 'waiting',
+          state: targetState,
           provenance: (thread.provenance ?? '') + note,
           last_relevant_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -194,7 +200,7 @@ export class LifeThreadAgent {
       if (updErr) {
         throw new Error(`LifeThreadAgent[SUPPRESS][DB_UPDATE_FAILURE]: ${updErr.message ?? JSON.stringify(updErr)}`);
       }
-      logger.info(`LifeThreadAgent[SUPPRESS]: Thread "${thread.topic}" transitioned to waiting`, { userId: user_id, threadId: thread.id, negated_concept });
+      logger.info(`LifeThreadAgent[SUPPRESS]: Thread "${thread.topic}" transitioned to ${targetState}`, { userId: user_id, threadId: thread.id, negated_concept, targetState });
     }
   }
 

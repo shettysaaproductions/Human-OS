@@ -57,7 +57,25 @@ async function runLiveVerification() {
       { id: userBId, country: 'IN', preferred_name: 'TestUserB' }
     ]);
 
-    console.log(`✅ Users created: User A (${userAId}), User B (${userBId})\n`);
+    // Sign in User A to obtain JWT
+    console.log('  -> Signing in User A to obtain JWT token...');
+    const loginResA = await axios.post(`${BASE_URL}/auth/login`, {
+      email: testEmailA,
+      password: testPassword
+    });
+    const tokenA = loginResA.data?.access_token;
+    if (!tokenA) throw new Error('Failed to obtain JWT for User A');
+
+    // Sign in User B to obtain JWT
+    console.log('  -> Signing in User B to obtain JWT token...');
+    const loginResB = await axios.post(`${BASE_URL}/auth/login`, {
+      email: testEmailB,
+      password: testPassword
+    });
+    const tokenB = loginResB.data?.access_token;
+    if (!tokenB) throw new Error('Failed to obtain JWT for User B');
+
+    console.log(`✅ Users authenticated: User A (${userAId}), User B (${userBId})\n`);
 
     // 2. Test Conversation Isolation (Amendment 2)
     console.log('[2/5] Testing P0 Conversation Isolation...');
@@ -66,18 +84,20 @@ async function runLiveVerification() {
     // User A sends message with shared conversation ID
     console.log('  -> User A sending message with conversation_id:', sharedConversationId);
     const resA = await axios.post(`${BASE_URL}/chat`, {
-      userId: userAId,
       message: 'Hello, I am user A.',
       conversation_id: sharedConversationId
+    }, {
+      headers: { Authorization: `Bearer ${tokenA}` }
     });
     console.log('  -> User A response status:', resA.status);
 
     // User B sends message trying to reuse same conversation ID
     console.log('  -> User B attempting to send message with same conversation_id:', sharedConversationId);
     const resB = await axios.post(`${BASE_URL}/chat`, {
-      userId: userBId,
       message: 'Hello, I am user B.',
       conversation_id: sharedConversationId
+    }, {
+      headers: { Authorization: `Bearer ${tokenB}` }
     });
     console.log('  -> User B response status:', resB.status);
 
@@ -100,9 +120,10 @@ async function runLiveVerification() {
     const reminderMsg = 'kal shaam 4 baje office se nikalna hai yaad dila dena';
     console.log(`  -> User A sending: "${reminderMsg}"`);
     const resReminder = await axios.post(`${BASE_URL}/chat`, {
-      userId: userAId,
       message: reminderMsg,
       conversation_id: sharedConversationId
+    }, {
+      headers: { Authorization: `Bearer ${tokenA}` }
     });
     console.log('  -> Nova reply preview:', resReminder.data?.reply?.substring(0, 80));
 
@@ -132,9 +153,10 @@ async function runLiveVerification() {
     const goalMsg = 'Main ek cloud kitchen start karne ka plan kar raha hu';
     console.log(`  -> User A stating goal: "${goalMsg}"`);
     await axios.post(`${BASE_URL}/chat`, {
-      userId: userAId,
       message: goalMsg,
       conversation_id: sharedConversationId
+    }, {
+      headers: { Authorization: `Bearer ${tokenA}` }
     });
 
     console.log('  -> Waiting 5s for background life_threads worker...');
@@ -143,13 +165,15 @@ async function runLiveVerification() {
     const negationMsg = 'cloud kitchen abhi start nahi kar raha, usko hold pe rakha hai';
     console.log(`  -> User A negating goal: "${negationMsg}"`);
     await axios.post(`${BASE_URL}/chat`, {
-      userId: userAId,
       message: negationMsg,
       conversation_id: sharedConversationId
+    }, {
+      headers: { Authorization: `Bearer ${tokenA}` }
     });
 
     console.log('  -> Waiting 5s for suppress_life_thread worker...');
     await sleep(5000);
+
 
     const { data: threads } = await supabaseAdmin
       .from('life_threads')

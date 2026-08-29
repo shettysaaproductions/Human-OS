@@ -5,7 +5,15 @@ This document tracks identified bugs, limitations, and workarounds.
 
 ---
 
-## ✅ Resolved Aug 29, 2026 — Production Reliability Repair Pass v2 (Five Amendments)
+## ✅ Resolved Aug 30, 2026 — BUG-NEGATION: Life Thread Negation Not Applied for Temporary Pauses
+
+- **Root Cause:** `chat.ts` filtered `negatedGoals` to only dispatch `suppress_life_thread` jobs for **permanent** drops (`isCurrent === false`). Temporary pauses (`isCurrent === true`) — e.g., "cloud kitchen abhi start nahi kar raha, usko hold pe rakha hai" — were silently dropped, so the thread stayed `ACTIVE`.
+- **Fix 1 — `chat.ts`:** Removed the `permanentNegations` filter. Now **all** negated goals (both temporary and permanent) are dispatched. The `is_current` flag is forwarded in the job payload.
+- **Fix 2 — `LifeThreadAgent.processSuppressJob`:** Reads `is_current` from payload to select target state: `true` → `waiting` (paused), `false` → `abandoned` (dropped). Defaults to `waiting` (safe/non-destructive) when flag is absent.
+- **Tests:** 7 regression tests added covering: isCurrent=true→waiting, isCurrent=false→abandoned, missing flag default, idempotency, no-match, malformed payload, invalid user_id. All 215 tests passing.
+
+---
+
 
 - **P0 — Account / Conversation Isolation (Amendment 2):** Server-side ownership validation in `chat.ts` prevents any cross-user conversation_id reuse. If client submits a conversation_id belonging to another user, a fresh UUID is assigned immediately.
 - **P0 — Deterministic Reminder "kal shaam 4 baje" Parsing:** Fixed `TurnAnalyzer` regex capture group mapping to extract `rawTime = "4"` and `periodWord = "shaam"`. Updated `buildReminderSpecFromIntent` to convert using periodWord directly.
