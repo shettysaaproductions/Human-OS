@@ -4,6 +4,7 @@ import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { isGarbageMemoryValue } from '../lib/memoryFilters';
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type, source_authority, protection_source, protected_at';
@@ -75,6 +76,13 @@ export class MemoryRepository {
         userId, key: normalizedMemory.key, value: normalizedMemory.value, authority: incomingAuthority
       });
       return;
+    }
+
+    // ── Layer 1b: Shared garbage admission guard (Amendment 1 — defense-in-depth) ──────
+    // Catches garbage memories from ANY extraction path including ConsolidatedMemoryAgent,
+    // DeterministicFactAgent, SubconsciousAgent, or future agents.
+    if (isGarbageMemoryValue(normalizedMemory.key, normalizedMemory.value, 'memoryRepository')) {
+      return; // isGarbageMemoryValue already logs the blocked entry
     }
 
     try {

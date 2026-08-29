@@ -1,5 +1,48 @@
 
-## [2026-08-29] Consolidated Reliability Pass — BUG-04/05/06/07 (SHA: 4a31c39)
+## [2026-08-29] Production Reliability Repair Pass v2 — P0 Isolation, Reminders, Negation, Garbage Filter, Idempotent Proactive
+
+### Trigger
+Forensic audit and five architectural amendments to eliminate cross-user conversation leakage, deterministic reminder parsing failures, un-suppressed negated goal revival, garbage memory pollution, life thread worker failure serialization, and proactive dead windows.
+
+### Changes Made
+
+1. **P0 Conversation Isolation (`chat.ts` — Amendment 2)**
+   - Server-side global single-owner validation: If client passes `conversation_id` already containing rows belonging to another `user_id`, silently generates a fresh `conversation_id` for the authenticated user.
+   - Zero cross-user conversation context leakage across any read or write paths.
+
+2. **P0 Deterministic Reminders (`TurnAnalyzer.ts` + `ReminderEngine.ts`)**
+   - Fixed regex capture group bug where `"kal shaam 4 baje"` captured `"shaam"` as `rawTime` instead of `"4"`.
+   - Pattern now extracts `rawTime = "4"` and `periodWord = "shaam"` separately.
+   - `buildReminderSpecFromIntent` consumes `periodWord` to reliably compute 24h `time_of_day = "16:00"` and target date.
+
+3. **P0 Negated Project & Goal State (`TurnAnalyzer.ts`, `LifeThreadAgent.ts`, `chat.ts` — Amendment 3)**
+   - TurnAnalyzer detects structured `negatedGoals` (concept + targetFactKey + isCurrent).
+   - `chat.ts` synchronously dispatches `suppress_life_thread` job on turn detection before LLM call.
+   - `LifeThreadAgent.processSuppressJob` deterministically transitions matching thread state to `waiting` with user reason.
+   - `LifeThreadAgent.buildPrompt` injects `⛔ PAUSED THREADS` block forbidding the LLM from recreating paused goals.
+
+4. **P1 Garbage Memory Admission Guard (`lib/memoryFilters.ts`, `ConsolidatedMemoryAgent.ts`, `memoryRepository.ts` — Amendment 1)**
+   - Created centralized `isGarbageMemoryValue()` and `filterGarbageWorkingMemories()`.
+   - Blocks meta-labels (`User's active goals`), questions (`Kya karna chahiye?`), phatic utterances (`Main wapas aa gaya`, `theek hai`), and raw transcripts across semantic, working memory, and short-term memory paths in `ConsolidatedMemoryAgent` and `memoryRepository`.
+
+5. **P1 Life Thread Worker Failure Classification (`LifeThreadAgent.ts` — Amendment 4)**
+   - Strict UUID regex validation at entry.
+   - Distinguishes failure classes: `MALFORMED_PAYLOAD`, `INVALID_USER_ID`, `DB_FETCH_FAILURE`, `DB_UPDATE_FAILURE`, `EXTRACTION_FAILURE`, `APPLICATION_EXCEPTION`.
+   - Sanitized, readable error strings prevent `[object Object]` error log masking.
+
+6. **P1 Session-End Idempotent Proactive Evaluation (`routes/presence.ts`, `QueueService.ts`, `workers/queueWorker.ts` — Amendment 5)**
+   - When a user goes offline/away after an active session (>8 min inactivity), queues `session_end_proactive_check` with idempotent key `session_end:{userId}:{sessionStart}`.
+   - Routes through `NovaConsciousnessEngine.processUser(userId, { trigger: 'session_end' })` and passes through `ProactiveGate` without modifying gate rules.
+
+7. **Observability (`lib/cognitiveEventBus.ts`)**
+   - Lightweight structured `[COGNITIVE_EVENT]` logger tracking memory proposals, blocks, reminder scheduling, thread suppressions, and session transitions.
+
+### Verification
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0.
+- `npm test -- --coverage=false`: 19 suites, 208/208 unit tests passing (100%).
+
+---
 
 ### Trigger
 Full codebase inspection to fix confirmed cognitive/memory/life-thread/follow-up/returning-user reliability issues in one implementation pass.

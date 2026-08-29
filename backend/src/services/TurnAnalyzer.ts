@@ -33,10 +33,31 @@ export interface ReminderIntent {
   text: string;
   /** The extracted time phrase (e.g., "3 baje", "in 20 min", "kal subah 9") */
   timePhrase: string;
-  /** Raw time string for parsing by ReminderEngine */
+  /** Raw time string for parsing by ReminderEngine (always numeric) */
   rawTime: string;
+  /** Period-of-day word extracted separately (shaam/subah/raat/dopahar) */
+  periodWord?: string;
   /** True if intent was detected but no time phrase found — let LLM clarify */
   isAmbiguous: boolean;
+}
+
+/**
+ * Amendment 3: Structured negated goal — carries the negated concept AND
+ * which memory key it targets for deterministic state propagation.
+ */
+export interface NegatedGoal {
+  /** The raw negated concept string (e.g. "cloud kitchen") */
+  concept: string;
+  /**
+   * The canonical memory/working_memory key this negation targets.
+   * e.g. "current_project", "current_focus"
+   */
+  targetFactKey?: string;
+  /**
+   * true if the negation is temporary / currently paused ("abhi nahi")
+   * false if permanent ("kabhi nahi", "completely dropped")
+   */
+  isCurrent: boolean;
 }
 
 export interface TurnAnalysisResult {
@@ -48,8 +69,10 @@ export interface TurnAnalysisResult {
   hasCorrections: boolean;
   /** BUG-03: Deterministic reminder intent if found */
   reminderIntent?: ReminderIntent | null;
-  /** BUG-06: Negated concept nouns from corrections (e.g. ["fashion", "fashion ka shop"]) */
+  /** BUG-06 / Amendment 3: Negated concept nouns from corrections (legacy string array) */
   negativeCorrectionConcepts?: string[];
+  /** Amendment 3: Structured negated goals with targetFactKey for deterministic propagation */
+  negatedGoals?: NegatedGoal[];
 }
 
 export interface ExtractedFact {
@@ -240,6 +263,9 @@ export class TurnAnalyzer {
       }
     }
 
+    const fullText = messages.map(m => m.message || '').join(' ');
+    const negatedGoals = this.extractNegatedGoals(fullText);
+
     return {
       units,
       hasQuestions: units.some(u => u.type === 'question'),
@@ -248,9 +274,11 @@ export class TurnAnalyzer {
       hasActions: units.some(u => u.type === 'action'),
       hasCorrections: units.some(u => u.type === 'correction'),
       // BUG-03: Deterministic reminder extraction across all clauses
-      reminderIntent: this.extractReminderIntent(messages.map(m => m.message || '').join(' ')),
-      // BUG-06: Negated concept extraction for life-thread correction propagation
-      negativeCorrectionConcepts: this.extractNegatedConcepts(messages.map(m => m.message || '').join(' ')),
+      reminderIntent: this.extractReminderIntent(fullText),
+      // BUG-06 legacy: string array for backward compat
+      negativeCorrectionConcepts: negatedGoals.map(g => g.concept),
+      // Amendment 3: structured negated goals with targetFactKey + isCurrent
+      negatedGoals,
     };
   }
 
@@ -264,38 +292,55 @@ export class TurnAnalyzer {
     const lower = text.toLowerCase();
 
     // Step 1: Check for reminder intent keywords
-    const REMINDER_INTENT_RE = /\b(yaad dila|yaad dilao|remind me|reminder.*set|yaad kara|yaad kar dena|mujhe yaad|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/i;
+    const REMINDER_INTENT_RE = /\b(yaad dila|yaad dilao|remind me|reminder.*set|yaad kara|yaad kar dena|mujhe yaad|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena|bata dena|yaad karna)\b/i;
     if (!REMINDER_INTENT_RE.test(lower)) return null;
 
-    // Step 2: Extract time phrase
-    const TIME_PATTERNS: RegExp[] = [
-      /(\d{1,2}(?::\d{2})?\s*(?:am|pm|baje))/i,         // "3 pm", "9:30 am", "5 baje"
-      /in\s+(\d+)\s*min(?:utes?)?/i,                       // "in 20 minutes"
-      /in\s+(\d+)\s*hour(?:s)?/i,                          // "in 2 hours"
-      /(\d{1,2})\s*baje/i,                                 // "3 baje"
-      /kal\s+(\w+\s+)?(?:subah|shaam|raat)?\s*(\d{1,2}(?::\d{2})?)/i, // "kal 9 baje"
-      /aaj\s+(\w+\s+)?(?:subah|shaam|raat)?\s*(\d{1,2}(?::\d{2})?)/i, // "aaj shaam 6"
-      /at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i,          // "at 5pm"
+    // Step 2: Extract time phrase.
+    // CRITICAL: kal/aaj patterns use THREE capture groups:
+    //   m[1] = day word (kal/aaj)
+    //   m[2] = period word (shaam/subah/raat/dopahar) — may be undefined
+    //   m[3] = numeric hour (ALWAYS the rawTime)
+    // Do NOT use m[1] ?? m[2] ?? m[0] — that returns the period word instead of the number.
+    const TIME_PATTERNS: Array<{ re: RegExp; extractRaw: (m: RegExpMatchArray) => string; extractPeriod?: (m: RegExpMatchArray) => string }> = [
+      // "in 20 minutes" / "in 2 hours"
+      { re: /in\s+(\d+)\s*min(?:utes?)?/i,  extractRaw: m => m[1] + 'min' },
+      { re: /in\s+(\d+)\s*hour(?:s)?/i,     extractRaw: m => m[1] + 'hour' },
+      // "kal shaam 4 baje" / "kal 9 baje" / "kal 9:30"
+      { re: /(kal|aaj)\s+(?:(subah|shaam|raat|dopahar)\s+)?(\d{1,2}(?::\d{2})?)\s*(?:baje)?/i,
+        extractRaw: m => m[3],
+        extractPeriod: m => m[2] || '' },
+      // "shaam 4 baje" (no kal/aaj prefix)
+      { re: /(subah|shaam|raat|dopahar)\s+(\d{1,2}(?::\d{2})?)\s*(?:baje)?/i,
+        extractRaw: m => m[2],
+        extractPeriod: m => m[1] },
+      // "3 pm" / "9:30 am" / "5 baje" with suffix
+      { re: /(\d{1,2}(?::\d{2})?)\s*(?:am|pm|baje)/i, extractRaw: m => m[1] },
+      // "at 5pm" / "at 17:00"
+      { re: /at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i, extractRaw: m => m[1] },
+      // bare "5 baje" (digit followed by baje)
+      { re: /(\d{1,2})\s*baje/i, extractRaw: m => m[1] },
     ];
 
     let timePhrase = '';
     let rawTime = '';
+    let periodWord = '';
 
-    for (const pattern of TIME_PATTERNS) {
-      const m = lower.match(pattern);
+    for (const { re, extractRaw, extractPeriod } of TIME_PATTERNS) {
+      const m = lower.match(re);
       if (m) {
         timePhrase = m[0].trim();
-        rawTime = m[1] ?? m[2] ?? m[0];
+        rawTime = extractRaw(m)?.trim() ?? '';
+        periodWord = extractPeriod ? (extractPeriod(m)?.trim() ?? '') : '';
         break;
       }
     }
 
-    if (!timePhrase) {
+    if (!timePhrase || !rawTime) {
       // Intent detected but no time — ambiguous, let LLM ask for clarification
       return { text, timePhrase: '', rawTime: '', isAmbiguous: true };
     }
 
-    return { text, timePhrase, rawTime, isAmbiguous: false };
+    return { text, timePhrase, rawTime, periodWord: periodWord || undefined, isAmbiguous: false };
   }
 
   /**
@@ -307,29 +352,72 @@ export class TurnAnalyzer {
    *   "fashion ka shop nahi" → ["fashion ka shop", "fashion"]
    *   "koi ladki nahi hai" → ["ladki"]
    */
-  public static extractNegatedConcepts(text: string): string[] {
+  /**
+   * Amendment 3: Extract negated concepts WITH structured metadata.
+   * Returns NegatedGoal[] — each entry has concept string + targetFactKey + isCurrent flag.
+   * Also populates the legacy string-array field (negativeCorrectionConcepts) for backward compat.
+   */
+  public static extractNegatedGoals(text: string): NegatedGoal[] {
     const lower = text.toLowerCase();
-    const concepts: string[] = [];
+    const results: NegatedGoal[] = [];
 
-    // Pattern: "<noun phrase> nahi/nahi tha/nahi thi/nai"
-    const NEGATION_PATTERNS: RegExp[] = [
-      /([\w\s]+?)\s+(?:ka|ki|ke)?\s+(?:shop|dukaan|business|kaam|kaam\s+nahi)\s+nahi(?:\s+(?:tha|thi|hai))?/gi,
-      /([\w]+(?:\s+[\w]+)?)\s+nahi(?:\s+(?:tha|thi|hai))?\b/gi,
-      /koi\s+([\w\s]+?)\s+nahi/gi,
+    // ── Pattern set: captures the SUBJECT of the negation ──────────────────────
+    // Each entry: { re, isCurrent }
+    // isCurrent=true  → user paused/deferred ("abhi nahi", "filhaal nahi")
+    // isCurrent=false → user dropped permanently ("kabhi nahi", "cancel kar diya")
+    const NEGATION_PATTERNS: Array<{ re: RegExp; isCurrent: boolean }> = [
+      // "cloud kitchen abhi start nahi kar raha" — subject precedes negation clause
+      { re: /([a-z][a-z\s]{2,30}?)\s+(?:abhi|filhaal|abhi ke liye)\s+(?:start\s+)?(?:nahi|nahin|mat)(?:\s+(?:kar|ho|chal|bana))?/gi, isCurrent: true },
+      // "abhi cloud kitchen nahi" — subject follows abhi
+      { re: /(?:abhi|filhaal)\s+([a-z][a-z\s]{2,25}?)\s+(?:nahi|nahin|nai)/gi, isCurrent: true },
+      // "cloud kitchen postpone/cancel kar diya" — subject precedes action
+      { re: /([a-z][a-z\s]{2,25}?)\s+(?:postpone|cancel|band|rok)\s+(?:kar|ho|diya|karna|dena)/gi, isCurrent: false },
+      // "<noun> ka shop/business nahi" — confirmed production pattern
+      { re: /([a-z][a-z\s]{1,20}?)\s+(?:ka|ki|ke)?\s+(?:shop|dukaan|business|kaam)\s+nahi/gi, isCurrent: false },
+      // bare "<noun> nahi tha/thi"
+      { re: /([a-z][a-z\s]{2,25}?)\s+nahi(?:\s+(?:tha|thi|hai))?\b/gi, isCurrent: false },
+      // "koi <noun> nahi"
+      { re: /koi\s+([a-z][a-z\s]{1,20}?)\s+nahi/gi, isCurrent: false },
     ];
 
-    for (const pattern of NEGATION_PATTERNS) {
+    // Noise words to strip from captured concepts
+    const NOISE = new Set(['main','mein','mai','to','kya','yeh','woh','tha','thi','nahi','kar','chal','ho','bhi','toh','na','hi','ke','ka','ki','ek']);
+
+    const seenConcepts = new Set<string>();
+
+    for (const { re, isCurrent } of NEGATION_PATTERNS) {
       let m: RegExpExecArray | null;
-      pattern.lastIndex = 0;
-      while ((m = pattern.exec(lower)) !== null) {
-        const concept = m[1]?.trim();
-        if (concept && concept.length > 2 && !['main','mein','mai','to','kya','yeh','woh'].includes(concept)) {
-          concepts.push(concept);
+      re.lastIndex = 0;
+      while ((m = re.exec(lower)) !== null) {
+        const raw = m[1]?.trim() ?? '';
+        // Filter out noise-only matches
+        const tokens = raw.split(/\s+/).filter(t => t.length > 1 && !NOISE.has(t));
+        const concept = tokens.join(' ').trim();
+        if (concept.length < 2 || seenConcepts.has(concept)) continue;
+        seenConcepts.add(concept);
+
+        // Attempt to match to a known memory key heuristically
+        // (chat.ts will do the authoritative DB match against actual memory values)
+        let targetFactKey: string | undefined;
+        if (/kitchen|restaurant|food|cafe|startup|business|shop|project|venture/i.test(concept)) {
+          targetFactKey = 'current_project';
+        } else if (/gym|diet|workout|exercise|fitness/i.test(concept)) {
+          targetFactKey = 'current_focus';
         }
+
+        results.push({ concept, targetFactKey, isCurrent });
       }
     }
 
-    return [...new Set(concepts)];
+    return results;
+  }
+
+  /**
+   * BUG-06 legacy shim — returns just the concept strings for backward compatibility.
+   * New callers should use extractNegatedGoals() for full structured results.
+   */
+  public static extractNegatedConcepts(text: string): string[] {
+    return this.extractNegatedGoals(text).map(g => g.concept);
   }
 
   private static splitIntoClauses(text: string): string[] {

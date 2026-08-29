@@ -52,10 +52,27 @@ interface LifeThreadUpdate {
 }
 
 export class LifeThreadAgent {
+  // Amendment 4: UUID regex for payload validation
+  private static readonly UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   async processJob(job: any): Promise<void> {
-    const { user_id, turn_context, message_id } = job.payload;
-    if (!user_id || !turn_context) {
-      throw new Error('LifeThreadAgent: Missing user_id or turn_context');
+    const { user_id, turn_context, message_id } = job.payload || {};
+
+    // ── Amendment 4: Classify failure modes at entry ──────────────────────────
+    if (!user_id) {
+      const err = new Error('LifeThreadAgent[MALFORMED_PAYLOAD]: user_id is missing from job payload');
+      (err as any).isPermanent = true;
+      throw err;
+    }
+    if (!LifeThreadAgent.UUID_RE.test(user_id)) {
+      const err = new Error(`LifeThreadAgent[INVALID_USER_ID]: "${user_id}" is not a valid UUID — job aborted`);
+      (err as any).isPermanent = true;
+      throw err;
+    }
+    if (!turn_context) {
+      const err = new Error('LifeThreadAgent[MALFORMED_PAYLOAD]: turn_context is missing from job payload');
+      (err as any).isPermanent = true;
+      throw err;
     }
 
     // 1. Fetch active threads
@@ -64,8 +81,11 @@ export class LifeThreadAgent {
       .select('*')
       .eq('user_id', user_id)
       .in('state', ['active', 'waiting', 'blocked']);
-      
-    if (fetchErr) throw fetchErr;
+
+    if (fetchErr) {
+      // Amendment 4: DB/query failures must produce readable error strings
+      throw new Error(`LifeThreadAgent[DB_FETCH_FAILURE]: ${fetchErr.message ?? JSON.stringify(fetchErr)}`);
+    }
 
     // 1b. Fetch active actions
     const { data: activeActions } = await supabaseAdmin
@@ -96,23 +116,86 @@ export class LifeThreadAgent {
     // 3. Prompt LLM to analyze (with BUG-04 dedup context injected)
     const threads = activeThreads || [];
     const prompt = this.buildPrompt(threads, activeActions || [], recentChat);
-    const responseText = await chatCompletionBackground([
-      { role: 'user', content: prompt }
-    ], { temperature: 0.1 });
-    
+    let responseText: string;
+    try {
+      responseText = await chatCompletionBackground([
+        { role: 'user', content: prompt }
+      ], { temperature: 0.1 });
+    } catch (llmErr: any) {
+      // Amendment 4: classify LLM/extraction failures separately
+      throw new Error(`LifeThreadAgent[EXTRACTION_FAILURE]: LLM call failed — ${llmErr?.message ?? String(llmErr)}`);
+    }
+
     // 4. Parse the action
     let result: LifeThreadUpdate;
     try {
       const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/\{[\s\S]*\}/);
       const jsonStr = jsonMatch ? jsonMatch[0].replace(/```json|```/g, '') : responseText;
       result = JSON.parse(jsonStr) as LifeThreadUpdate;
-    } catch (e) {
-      logger.error('LifeThreadAgent: Failed to parse LLM response', { responseText });
-      return;
+    } catch (e: any) {
+      // Amendment 4: classify parse failures
+      throw new Error(`LifeThreadAgent[APPLICATION_EXCEPTION]: JSON parse failed — ${e?.message ?? String(e)} | raw: ${responseText?.slice(0, 200)}`);
     }
 
     // 5. Apply the action deterministically
     await this.applyUpdate(user_id, result, threads, activeActions || [], message_id);
+  }
+
+  /**
+   * Amendment 3: Deterministic thread suppression.
+   * Called synchronously from chat.ts after a negation is detected.
+   * Transitions the matching thread to `waiting` state and adds a provenance note.
+   * Does NOT call the LLM — purely deterministic.
+   */
+  async processSuppressJob(job: any): Promise<void> {
+    const { user_id, negated_concept, reason } = job.payload || {};
+    if (!user_id || !LifeThreadAgent.UUID_RE.test(user_id)) {
+      const err = new Error(`LifeThreadAgent[SUPPRESS][INVALID_USER_ID]: "${user_id}"`);
+      (err as any).isPermanent = true;
+      throw err;
+    }
+    if (!negated_concept) {
+      const err = new Error('LifeThreadAgent[SUPPRESS][MALFORMED_PAYLOAD]: negated_concept missing');
+      (err as any).isPermanent = true;
+      throw err;
+    }
+
+    const conceptLower = negated_concept.toLowerCase();
+
+    const { data: threads, error: fetchErr } = await supabaseAdmin
+      .from('life_threads')
+      .select('id, topic, state, provenance')
+      .eq('user_id', user_id)
+      .in('state', ['active', 'waiting', 'blocked']);
+
+    if (fetchErr) {
+      throw new Error(`LifeThreadAgent[SUPPRESS][DB_FETCH_FAILURE]: ${fetchErr.message ?? JSON.stringify(fetchErr)}`);
+    }
+
+    const matched = (threads || []).filter(t => {
+      const topicLower = (t.topic ?? '').toLowerCase();
+      const provLower = (t.provenance ?? '').toLowerCase();
+      return topicLower.includes(conceptLower) || provLower.includes(conceptLower);
+    });
+
+    for (const thread of matched) {
+      if (thread.state === 'waiting') continue; // already suppressed
+      const note = `\n[PAUSED by user: "${reason || negated_concept}" — ${new Date().toISOString().slice(0, 10)}]`;
+      const { error: updErr } = await supabaseAdmin
+        .from('life_threads')
+        .update({
+          state: 'waiting',
+          provenance: (thread.provenance ?? '') + note,
+          last_relevant_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', thread.id)
+        .eq('user_id', user_id);
+      if (updErr) {
+        throw new Error(`LifeThreadAgent[SUPPRESS][DB_UPDATE_FAILURE]: ${updErr.message ?? JSON.stringify(updErr)}`);
+      }
+      logger.info(`LifeThreadAgent[SUPPRESS]: Thread "${thread.topic}" transitioned to waiting`, { userId: user_id, threadId: thread.id, negated_concept });
+    }
   }
 
   /**
@@ -149,8 +232,6 @@ export class LifeThreadAgent {
 
   private buildPrompt(activeThreads: any[], activeActions: any[], recentChat: any[]): string {
     // BUG-04: Pre-filter candidate similar threads using Jaccard similarity
-    // The LLM gets the full thread list AND is told which ones look similar,
-    // so it can make an informed merge/create decision.
     const lastUserMsg = [...recentChat].reverse().find(m => m.role === 'user')?.content ?? '';
     const similarCandidates = activeThreads
       .map(t => ({ thread: t, score: jaccardSimilarity(t.topic ?? '', lastUserMsg) }))
@@ -167,6 +248,12 @@ export class LifeThreadAgent {
       ? `\nSIMILAR THREADS DETECTED (Jaccard filter — these may be the same real-world goal):\n${similarCandidates.map(x => `  ID=${x.thread.id} topic="${x.thread.topic}" state=${x.thread.state} score=${x.score.toFixed(2)}`).join('\n')}\n⚠️ DEDUPLICATION RULE: If the current conversation clearly relates to the same real-world objective as any candidate above, emit "update" for that thread instead of "create". When uncertain, CREATE (preserve information — do not destroy a unique goal).`
       : '';
 
+    // Amendment 3: Inject PAUSED threads so the LLM knows not to recreate them
+    const pausedThreads = activeThreads.filter(t => t.state === 'waiting');
+    const pausedNote = pausedThreads.length > 0
+      ? `\n⛔ PAUSED THREADS (DO NOT RE-ACTIVATE OR RECREATE):\n${pausedThreads.map(t => `  ID=${t.id} topic="${t.topic}" — PAUSED by user, awaiting resumption`).join('\n')}\nRULE: NEVER "create" a new thread whose topic overlaps with a PAUSED thread above. The user explicitly paused this goal. Only the user can resume it.`
+      : '';
+
     return `You are Nova's cognitive Action & Goal processor. 
 Your task is to identify if the user's latest messages created a new goal/thread, updated an existing one, completed one, or abandoned one.
 AND you must decompose goals into explicitly trackable ACTIONS.
@@ -175,6 +262,7 @@ A "Life Thread" tracks unresolved plans, goals, commitments, or waiting states.
 An "Action" is a concrete step required to advance or complete a Life Thread.
 ${softLimitNote}
 ${candidateNote}
+${pausedNote}
 
 Existing Active Threads:
 ${JSON.stringify(activeThreads.map(t => ({ id: t.id, topic: t.topic, state: t.state, provenance: (t.provenance ?? '').substring(0, 120) })), null, 2)}

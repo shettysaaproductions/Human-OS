@@ -107,7 +107,15 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
   - **Weekly memory auto-decay** (`index.ts` nightly maintenance): `MemoryDecayService.processWeeklyDecay()` auto-runs weekly. Free-tier hygiene complete: short-term cleanup (daily) + chat pruning (nightly, extracts first) + long-term decay (weekly).
   - **NVIDIA 3-tier fallback** (`nvidia.ts`): 49B key1 → 49B key2 → last-resort 8B extraction model. User always gets a real reply under free-tier 429/5xx pressure.
   - **Prod smoke test** (`scripts/prod_test_nova.ts` v3): 3-message throwaway user (`npm run boot:prodtest`), ALWAYS cleans up user+data; verifies memory save/recall, reminder schedule+fire, presence/read-state brief, sleep/busy lock.
-- ✅ **Aug 9 Session — Zero-Drop Messaging Guarantee + Reminder Hardening:**
+- ✅ **Aug 29 Session — Production Reliability Repair Pass v2 (5 Amendments):**
+  - **P0 Conversation Isolation (`chat.ts`):** Single-owner check for `conversation_id`. If ID contains rows from another user, auto-assigns fresh UUID. Zero cross-user context leakage.
+  - **P0 Deterministic Reminders (`TurnAnalyzer.ts` + `ReminderEngine.ts`):** Fixed regex capture group bug for `"kal shaam 4 baje"`. Captures `rawTime = "4"` and `periodWord = "shaam"`, parses to 16:00 IST / target date reliably.
+  - **P0 Negated Project & Goal State (`TurnAnalyzer.ts`, `chat.ts`, `LifeThreadAgent.ts`):** Structured `negatedGoals` extraction, synchronous `suppress_life_thread` dispatch to transition matching thread to `waiting`, and `⛔ PAUSED THREADS` block in prompt to block resurrection.
+  - **P1 Common Garbage Memory Filter (`lib/memoryFilters.ts`):** Common admission boundary for `ConsolidatedMemoryAgent` (semantic, working memory, short term) and `memoryRepository`. Rejects meta-labels, questions, and phatic utterances.
+  - **P1 LifeThread Worker Failure Classification (`LifeThreadAgent.ts`):** Strict UUID validation and classified errors (`MALFORMED_PAYLOAD`, `INVALID_USER_ID`, `DB_FETCH_FAILURE`, etc.) for clean serialized logs.
+  - **P1 Session-End Idempotent Proactive Evaluation (`routes/presence.ts`, `QueueService.ts`):** Adds `session_end_proactive_check` with stable job identity `session_end:{userId}:{sessionStart}` evaluating through `NovaConsciousnessEngine` and `ProactiveGate`.
+  - **Tests:** 19 suites, 208/208 tests passing (100%). `npm run build` exit 0.
+- ✅ **Aug 28 Session — Memory Canonicalization (BUG-08–BUG-18 Schema Overhaul):**
   - **100% Reply Guarantee** (`chat.ts`): Added `FALLBACK_REPLY` = `"Arre yaar, mera network thoda slow chal raha hai. Ek baar phir se bhejega?"`. Now saved + pushed in ALL failure paths (async LLM timeout, async LLM error, outer crash catch, 3 streaming/SSE error events). Deliberately NOT in `REJECT_PREFIXES`/`MOBILE_FALLBACK_FILTER` so it renders as a bubble (clears typing) instead of being silently dropped.
   - **Resume-safe Polling** (`useChatStore.ts`): Poll timeout does ONE final `checkProactiveMessages()` fetch before clearing typing — fixes "reply invisible until restart" when app was backgrounded. `MAX_REPLY_WAIT_MS` 90s→120s; proactive fetch limit 10→20; typing-rhythm guard for multi-bubble replies.
   - **Push Re-hydration** (`ChatScreen.tsx`): 500ms delay before history fetch on notification tap.

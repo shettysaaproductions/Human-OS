@@ -5,6 +5,17 @@ This document tracks identified bugs, limitations, and workarounds.
 
 ---
 
+## ✅ Resolved Aug 29, 2026 — Production Reliability Repair Pass v2 (Five Amendments)
+
+- **P0 — Account / Conversation Isolation (Amendment 2):** Server-side ownership validation in `chat.ts` prevents any cross-user conversation_id reuse. If client submits a conversation_id belonging to another user, a fresh UUID is assigned immediately.
+- **P0 — Deterministic Reminder "kal shaam 4 baje" Parsing:** Fixed `TurnAnalyzer` regex capture group mapping to extract `rawTime = "4"` and `periodWord = "shaam"`. Updated `buildReminderSpecFromIntent` to convert using periodWord directly.
+- **P0 — Negated Project & Goal State Persistence (Amendment 3):** `TurnAnalyzer` extracts structured `negatedGoals`. `chat.ts` dispatches `suppress_life_thread` deterministic state flip to `waiting`. `LifeThreadAgent.buildPrompt` injects `⛔ PAUSED THREADS` block preventing LLM resurrection of negated goals.
+- **P1 — Garbage Memory Admission Guard (Amendment 1):** Created `memoryFilters.ts` (`isGarbageMemoryValue`, `filterGarbageWorkingMemories`). Guarded `ConsolidatedMemoryAgent` semantic, working memory, and short-term paths, plus defense-in-depth in `memoryRepository`.
+- **P1 — Life Thread Worker Error Serialization & Classification (Amendment 4):** Added UUID validation and structured failure classification (`MALFORMED_PAYLOAD`, `INVALID_USER_ID`, `DB_FETCH_FAILURE`, `EXTRACTION_FAILURE`, `APPLICATION_EXCEPTION`) eliminating `[object Object]` unreadable error logs.
+- **P1 — Session-End Idempotent Proactive Evaluation (Amendment 5):** Added `session_end_proactive_check` in `presence.ts` with stable job identity `session_end:{userId}:{sessionStart}` evaluating via `NovaConsciousnessEngine` and `ProactiveGate`.
+
+---
+
 ## ✅ Resolved Aug 29, 2026 — Consolidated Reliability Pass (SHA: 4a31c39)
 
 - **BUG-04 — Life Thread Duplicate Rows (P1):** `BackgroundActionService.LifeThread.upsert` used exact `ilike` match only, so the LLM writing "Job interview prep" vs "Interview preparation" for the same goal created two rows. **Fixed:** Added Jaccard similarity helper (`_lifeThreadJaccard`, threshold 0.3) with a 20-row active-thread scan as a semantic candidate search step before any `INSERT`. If a semantically equivalent thread exists, it is updated in-place. Mirrors the same Jaccard approach already used in `LifeThreadAgent.ts`.

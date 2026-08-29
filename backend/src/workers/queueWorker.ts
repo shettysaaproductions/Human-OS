@@ -113,6 +113,9 @@ export function startWorkers() {
       await processWithBackoff(job, subconsciousAgent.processJob.bind(subconsciousAgent), 'extract_subconscious_actions');
     } else if (job.job_type === 'extract_life_threads') {
       await processWithBackoff(job, lifeThreadAgent.processJob.bind(lifeThreadAgent), 'extract_life_threads');
+    } else if (job.job_type === 'suppress_life_thread') {
+      // Amendment 3: Deterministic thread suppression — no LLM call, isPermanent on bad payload
+      await processWithBackoff(job, lifeThreadAgent.processSuppressJob.bind(lifeThreadAgent), 'suppress_life_thread');
     } else if (job.job_type === 'session_start_cognition') {
       await processWithBackoff(job, async (j) => {
         const userId = j.payload?.user_id;
@@ -125,11 +128,22 @@ export function startWorkers() {
           });
         }
       }, 'session_start_cognition');
-
+    } else if (job.job_type === 'session_end_proactive_check') {
+      // Amendment 5: Session-end proactive evaluation — passed through NovaConsciousnessEngine
+      await processWithBackoff(job, async (j) => {
+        const userId = j.payload?.user_id;
+        if (userId) {
+          await novaConsciousnessEngine.processUser(userId, {
+            trigger: 'session_end',
+            awayDurationMinutes: j.payload?.awayDurationMinutes ?? null,
+          });
+        }
+      }, 'session_end_proactive_check');
     } else {
       logger.warn(`Unknown subconscious job type: ${job.job_type}`);
     }
   });
+
 
   maintenanceQueue.process(async (job) => {
     logger.info(`[QueueWorker] Starting maintenance job: ${job.job_type}`, { jobId: job.id });

@@ -120,13 +120,15 @@ export function resolveUserTzOffsetHours(profile?: { timezone_offset?: number | 
  *   - "N baje" / "N am/pm" / "at N" / "shaam/subah/dopahar/raat" → time_of_day (24h)
  *   - "HH:MM"              → time_of_day
  */
-export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: string; rawTime: string; isAmbiguous: boolean }, userTzOffsetHours: number = 5.5): ReminderSpec {
+export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: string; rawTime: string; isAmbiguous: boolean; periodWord?: string }, userTzOffsetHours: number = 5.5): ReminderSpec {
   const fullText = intent.text;
   const textLower = fullText.toLowerCase();
+  // Period word from TurnAnalyzer (authoritative — extracted from same regex that captured rawTime)
+  const explicitPeriod = (intent.periodWord || '').toLowerCase();
 
   // Strip reminder-intent keywords and time phrases from the text to get a clean title
   let title = fullText
-    .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/gi, '')
+    .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena|bata dena|yaad karna)\b/gi, '')
     .replace(/\b(kal|aaj|subah|shaam|dopahar|raat|morning|evening|afternoon|night)\b/gi, '')
     .replace(/\b\d{1,2}(?::\d{2})?\s*(am|pm|baje)?\b/gi, '')
     .replace(/\b(in\s+\d+\s*min(utes?)?|in\s+\d+\s*hour(s)?)\b/gi, '')
@@ -136,7 +138,7 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
   // Fallback to original text cleaned if title became empty
   if (!title || title.length < 3) {
     title = intent.text
-      .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/gi, '')
+      .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena|bata dena|yaad karna)\b/gi, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
   }
@@ -152,6 +154,15 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
   if (inHrMatch) {
     return { title, relative_value: parseInt(inHrMatch[1], 10), relative_unit: 'hours', is_auto: false };
   }
+  // rawTime may also carry the 'min'/'hour' suffix from extractRaw
+  if (intent.rawTime.endsWith('min')) {
+    const v = parseInt(intent.rawTime, 10);
+    if (!isNaN(v)) return { title, relative_value: v, relative_unit: 'minutes', is_auto: false };
+  }
+  if (intent.rawTime.endsWith('hour')) {
+    const v = parseInt(intent.rawTime, 10);
+    if (!isNaN(v)) return { title, relative_value: v, relative_unit: 'hours', is_auto: false };
+  }
 
   // 2. Tomorrow prefix: "kal"
   const hasKal = /\bkal\b/i.test(textLower);
@@ -162,12 +173,19 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
     dateStr = nowLocal.toISOString().slice(0, 10);
   }
 
-  // 3. Detect time of day
-  const isPM = /\b(pm|shaam|dopahar|evening|afternoon)\b/i.test(textLower);
-  const isAM = /\b(am|subah|morning)\b/i.test(textLower);
-  const isRaat = /\b(raat|night)\b/i.test(textLower);
+  // 3. Detect time of day — prefer explicit periodWord from TurnAnalyzer, then scan text
+  const isPM = explicitPeriod === 'shaam' || explicitPeriod === 'dopahar' ||
+    /\b(pm|shaam|dopahar|evening|afternoon)\b/i.test(textLower);
+  const isAM = explicitPeriod === 'subah' ||
+    /\b(am|subah|morning)\b/i.test(textLower);
+  const isRaat = explicitPeriod === 'raat' ||
+    /\b(raat|night)\b/i.test(textLower);
 
-  const timeNumMatch = textLower.match(/(\d{1,2})(?::(\d{2}))?/);
+  // Use rawTime numeric portion for parsing (TurnAnalyzer always puts the number in rawTime)
+  const numericRawTime = intent.rawTime.replace(/[^0-9:]/g, '') || '';
+  const timeNumMatch = numericRawTime.match(/(\d{1,2})(?::(\d{2}))?/) ||
+    textLower.match(/(\d{1,2})(?::(\d{2}))?/);
+
   if (timeNumMatch) {
     let hh = parseInt(timeNumMatch[1], 10);
     const mm = timeNumMatch[2] ? parseInt(timeNumMatch[2], 10) : 0;
@@ -207,6 +225,7 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
 }
 
 export class ReminderEngine {
+
   public tzOffsetHours: number;
 
   constructor(tzOffsetHours: number = 5.5) {

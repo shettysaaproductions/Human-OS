@@ -74,9 +74,11 @@ describe('LifeThreadAgent', () => {
       })
     );
 
+    const testUserId = '00000000-0000-0000-0000-000000000001';
+
     await agent.processJob({
       payload: {
-        user_id: 'u1',
+        user_id: testUserId,
         turn_context: {
           userMessage: 'I finished the interview! It went well.',
           novaReply: 'That is awesome!'
@@ -99,6 +101,8 @@ describe('LifeThreadAgent', () => {
   });
 
   it('should create a new active thread when detecting a new goal', async () => {
+    const testUserId = '00000000-0000-0000-0000-000000000001';
+
     mockSupabase.limit.mockResolvedValueOnce({
       data: [{ role: 'user', content: 'I am going to start a new cloud kitchen business.' }]
     });
@@ -119,7 +123,7 @@ describe('LifeThreadAgent', () => {
 
     await agent.processJob({
       payload: {
-        user_id: 'u1',
+        user_id: testUserId,
         turn_context: {
           userMessage: 'I am going to start a new cloud kitchen business.',
           novaReply: 'That sounds exciting!'
@@ -131,8 +135,14 @@ describe('LifeThreadAgent', () => {
       expect.objectContaining({
         state: 'active',
         topic: 'cloud kitchen business',
-        user_id: 'u1'
+        user_id: testUserId
       })
     );
   });
+
+  it('should throw classified error when user_id is missing or malformed', async () => {
+    await expect(agent.processJob({ payload: {} })).rejects.toThrow('LifeThreadAgent[MALFORMED_PAYLOAD]');
+    await expect(agent.processJob({ payload: { user_id: 'invalid-id', turn_context: {} } })).rejects.toThrow('LifeThreadAgent[INVALID_USER_ID]');
+  });
 });
+

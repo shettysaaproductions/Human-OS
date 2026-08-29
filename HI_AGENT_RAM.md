@@ -74,6 +74,15 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 29 Session — Production Reliability Repair Pass v2 (5 Amendments):**
+  - **P0 Conversation Isolation (`chat.ts`):** Single-owner check for `conversation_id`. If ID contains rows from another user, auto-assigns fresh UUID. Zero cross-user context leakage.
+  - **P0 Deterministic Reminders (`TurnAnalyzer.ts` + `ReminderEngine.ts`):** Fixed regex capture group bug for `"kal shaam 4 baje"`. Captures `rawTime = "4"` and `periodWord = "shaam"`, parses to 16:00 IST / target date reliably.
+  - **P0 Negated Project & Goal State (`TurnAnalyzer.ts`, `chat.ts`, `LifeThreadAgent.ts`):** Structured `negatedGoals` extraction, synchronous `suppress_life_thread` dispatch to transition matching thread to `waiting`, and `⛔ PAUSED THREADS` block in prompt to block resurrection.
+  - **P1 Common Garbage Memory Filter (`lib/memoryFilters.ts`):** Common admission boundary for `ConsolidatedMemoryAgent` (semantic, working memory, short term) and `memoryRepository`. Rejects meta-labels, questions, and phatic utterances.
+  - **P1 LifeThread Worker Failure Classification (`LifeThreadAgent.ts`):** Strict UUID validation and classified errors (`MALFORMED_PAYLOAD`, `INVALID_USER_ID`, `DB_FETCH_FAILURE`, etc.) for clean serialized logs.
+  - **P1 Session-End Idempotent Proactive Evaluation (`routes/presence.ts`, `QueueService.ts`):** Adds `session_end_proactive_check` with stable job identity `session_end:{userId}:{sessionStart}` evaluating through `NovaConsciousnessEngine` and `ProactiveGate`.
+  - **Tests:** 19 suites, 208/208 tests passing (100%). `npm run build` exit 0.
+
 - ✅ **Aug 28 Session — Memory Canonicalization (BUG-08–BUG-18 Schema Overhaul):**
   - **NEW: `lib/memoryKeySchema.ts`** — Single authoritative canonical key map. 12 concept groups, 70+ aliases. Exposes `canonicalizeKey()`, `isAliasKey()`, `sameCanonicalConcept()`. ZERO external dependencies.
   - **`memoryRepository.ts` — Layer 0 Normalization:** `upsertMemory` now calls `canonicalizeKey()` as its FIRST operation before any authority check or DB lookup. Alias keys (e.g. `mothers_name`, `sons_name`, `business_name`) are silently collapsed to canonical form before writing.

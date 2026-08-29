@@ -7,6 +7,7 @@ import { cache, CACHE_NS } from '../lib/cache';
 import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { isGarbageMemoryValue, filterGarbageWorkingMemories } from '../lib/memoryFilters';
 
 // ── Hinglish vocative words that are NOT kinship facts ──────────────────────────
 // "Bhai, sun" = addressing the listener. "Mera bhai Amit hai" = kinship fact.
@@ -268,6 +269,10 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     const semanticMemories = filterSemanticMemories(rawSemanticMemories, messageId);
     for (const mem of semanticMemories) {
       if (mem.shouldPersist) {
+        // Amendment 1: Common garbage admission boundary — shared helper used by all paths
+        if (isGarbageMemoryValue(mem.key ?? '', mem.value ?? '', 'ConsolidatedMemoryAgent:semantic')) {
+          continue;
+        }
         await memoryRepository.upsertMemory(userId, {
           ...mem,
           // LLM extractions are always subconscious_inference (lowest authority)
@@ -280,7 +285,9 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     }
 
     // ── Working memories ──
-    const workingMemories = parsed.working_memories || [];
+    const rawWorkingMemories = parsed.working_memories || [];
+    // Amendment 1: Filter garbage before insert
+    const workingMemories = filterGarbageWorkingMemories(rawWorkingMemories, 'ConsolidatedMemoryAgent:working');
     if (workingMemories.length > 0) {
       const wmInserts = workingMemories.map((wm: any) => {
         const expires = new Date();
@@ -351,15 +358,18 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     // ── Short term memory ──
     if (parsed.short_term) {
       const st = parsed.short_term;
-      const expires = new Date();
-      expires.setHours(expires.getHours() + (st.expires_in_hours || 6));
-      await supabaseAdmin.from('short_term_memory').insert({
-        user_id: userId,
-        key: st.key,
-        value: st.value,
-        expires_at: expires.toISOString()
-      });
-      totalCreated++;
+      // Amendment 1: Guard short_term path too
+      if (!isGarbageMemoryValue(st.key ?? '', st.value ?? '', 'ConsolidatedMemoryAgent:short_term')) {
+        const expires = new Date();
+        expires.setHours(expires.getHours() + (st.expires_in_hours || 6));
+        await supabaseAdmin.from('short_term_memory').insert({
+          user_id: userId,
+          key: st.key,
+          value: st.value,
+          expires_at: expires.toISOString()
+        });
+        totalCreated++;
+      }
     }
 
     return totalCreated;

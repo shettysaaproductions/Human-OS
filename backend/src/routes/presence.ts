@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { subconsciousQueue } from '../services/QueueService';
 
+
 const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
@@ -87,12 +88,13 @@ router.post('/', async (req: Request, res: Response) => {
       }
 
 
-      // Detect "silent visit" (online -> offline/away transition without a message)
+      // Detect "silent visit" or session end (online → offline/away transition)
       if (status === 'offline' || status === 'away') {
         const prevOnline = latestHistory?.status === 'online';
         if (prevOnline) {
           const sessionStart = new Date(latestHistory.created_at).toISOString();
-          
+          const sessionStartSafe = sessionStart.replace(/[^0-9T]/g, '').slice(0, 15); // "20260829T174500"
+
           // Did user send a message during this session?
           const { data: msgDuringSession } = await supabaseAdmin
             .from('chat_history')
@@ -103,7 +105,7 @@ router.post('/', async (req: Request, res: Response) => {
             .limit(1);
 
           if (!msgDuringSession || msgDuringSession.length === 0) {
-            // It's a silent visit! Increment count in working_memory
+            // Silent visit — increment counter
             const { data: silentVisitWm } = await supabaseAdmin
               .from('working_memory')
               .select('value')
@@ -112,16 +114,44 @@ router.post('/', async (req: Request, res: Response) => {
               .maybeSingle();
 
             const currentCount = parseInt(silentVisitWm?.value || '0', 10);
-            
+
             await supabaseAdmin.from('working_memory').upsert([
               { user_id: userId, key: 'silent_visit_count', value: String(currentCount + 1), updated_at: new Date().toISOString() },
               { user_id: userId, key: 'last_silent_visit_at', value: updateData.last_active_at, updated_at: new Date().toISOString() }
             ], { onConflict: 'user_id, key' });
-            
+
             logger.info('[Presence] Recorded silent visit', { userId, currentCount: currentCount + 1 });
+          }
+
+          // Amendment 5: Session-end proactive check — idempotent per session.
+          // job_id = "session_end:{userId}:{sessionStart}" ensures at most ONE
+          // scheduled evaluation per session regardless of how many offline/away
+          // events fire. ProactiveGate is NOT bypassed — it evaluates eligibility.
+          const sessionAwayMinutes = Math.round(
+            (Date.now() - new Date(latestHistory.created_at).getTime()) / 60000
+          );
+          const INACTIVITY_THRESHOLD_MINUTES = 8;
+          if (sessionAwayMinutes >= INACTIVITY_THRESHOLD_MINUTES) {
+            const proactiveJobId = `session_end:${userId}:${sessionStartSafe}`;
+            subconsciousQueue.add('session_end_proactive_check', {
+              user_id: userId,
+              session_start: sessionStart,
+              awayDurationMinutes: sessionAwayMinutes,
+              trigger: 'session_end',
+              // Idempotency key: prevents duplicate jobs for the same session
+              _idempotency_key: proactiveJobId,
+            }).catch((err) =>
+              logger.error('[Presence][Amendment5] Failed to queue session_end_proactive_check', {
+                userId, error: err?.message
+              })
+            );
+            logger.info('[Presence][Amendment5] session_end_proactive_check queued', {
+              userId, sessionAwayMinutes, jobId: proactiveJobId
+            });
           }
         }
       }
+
     }
 
     res.status(200).json({ success: true });

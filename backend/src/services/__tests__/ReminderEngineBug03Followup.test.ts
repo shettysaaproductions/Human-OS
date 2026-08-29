@@ -60,6 +60,25 @@ describe('BUG-03 Follow-up: Cross-Turn Idempotency and Timezone Handling', () =>
     expect(parsed[0].trigger_at!.toISOString()).toBe('2026-08-29T10:30:00.000Z');
   });
 
+  it('1b. kal shaam 4 baje with periodWord parses to tomorrow 16:00 IST', () => {
+    const spec = buildReminderSpecFromIntent({
+      text: 'kal shaam 4 baje office se nikalna hai yaad dila dena',
+      timePhrase: 'kal shaam 4 baje',
+      rawTime: '4',
+      periodWord: 'shaam',
+      isAmbiguous: false
+    }, 5.5);
+
+    expect(spec.time_of_day).toBe('16:00');
+    expect(spec.date).toBe('2026-08-30');
+    const parsed = engineIST.parse(spec);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].trigger_at).not.toBeNull();
+    // 16:00 IST on 2026-08-30 = 10:30:00 UTC on 2026-08-30
+    expect(parsed[0].trigger_at!.toISOString()).toBe('2026-08-30T10:30:00.000Z');
+  });
+
+
   // ── 2. 4 AM IST parses correctly when explicitly specified ─────────────────
   it('2. 4 AM IST parses correctly when explicitly specified (22:30 UTC of today/tomorrow morning)', () => {
     const spec = buildReminderSpecFromIntent({

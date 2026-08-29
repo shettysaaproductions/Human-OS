@@ -6,7 +6,7 @@ import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
-import { memoryQueue } from '../services/QueueService';
+import { memoryQueue, subconsciousQueue } from '../services/QueueService';
 import { extractKeywords } from '../utils/nlp';
 
 import { supabaseAdmin } from '../lib/supabase';
@@ -551,7 +551,38 @@ chatRouter.post(
       
       const requestId = client_message_id || crypto.randomUUID();
       logger.info('[Chat] Request started', { requestId, userId, messageLength: primaryMessage.length, isAsync: async_mode, isProactive: is_proactive });
+
+      // ── Amendment 2: Conversation ownership validation ──────────────────────
+      // conversation_id belongs to exactly one user. If the client-supplied ID
+      // already has rows for a different user, silently generate a fresh one.
+      // If no rows exist yet, the current user claims it (safe — last-write-wins
+      // on the first message insert with user_id acts as the claim).
       let activeConversationId = conversation_id || crypto.randomUUID();
+      if (conversation_id) {
+        try {
+          const { data: ownerCheck } = await supabaseAdmin
+            .from('chat_history')
+            .select('user_id')
+            .eq('conversation_id', conversation_id)
+            .neq('user_id', userId)
+            .limit(1)
+            .maybeSingle();
+          if (ownerCheck) {
+            // Another user owns this conversation_id — do NOT cross streams
+            const rescoped = crypto.randomUUID();
+            logger.warn('[Chat][Amendment2] conversation_id belongs to another user — rescoping', {
+              userId, requestedConversationId: conversation_id, newConversationId: rescoped
+            });
+            activeConversationId = rescoped;
+          }
+        } catch (ownerErr: any) {
+          // Non-fatal — fall through with original ID; worst case is a harmless fresh conversation
+          logger.warn('[Chat][Amendment2] Ownership check failed — proceeding with new conversation_id', {
+            userId, error: ownerErr?.message
+          });
+          activeConversationId = crypto.randomUUID();
+        }
+      }
 
       const isStreaming = req.headers.accept === 'text/event-stream';
       if (isStreaming) {
@@ -1194,6 +1225,28 @@ chatRouter.post(
         deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time.';
       }
 
+      // ── Amendment 3: Deterministic negation propagation ──────────────────────
+      // For each permanent negation (isCurrent = false), immediately queue a
+      // suppress_life_thread job to flip matching thread state to 'waiting'.
+      // This runs BEFORE the LLM call so the PAUSED THREADS note in the
+      // subsequent extract_life_threads prompt prevents re-creation.
+      const negatedGoals = turnAnalysis.negatedGoals || [];
+      const permanentNegations = negatedGoals.filter(g => !g.isCurrent);
+      if (permanentNegations.length > 0) {
+        for (const neg of permanentNegations) {
+          try {
+            await subconsciousQueue.add('suppress_life_thread', {
+              user_id: userId,
+              negated_concept: neg.concept,
+              target_fact_key: neg.targetFactKey,
+              reason: `User said: "${effectiveMessage.substring(0, 100)}"`,
+            });
+            logger.info('[Chat][Amendment3] suppress_life_thread queued', { userId, concept: neg.concept });
+          } catch (suppErr: any) {
+            logger.error('[Chat][Amendment3] Failed to queue suppress_life_thread', { userId, concept: neg.concept, error: suppErr?.message });
+          }
+        }
+      }
 
       const brainContext = {
         memories,

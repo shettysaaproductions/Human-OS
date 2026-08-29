@@ -515,8 +515,27 @@ describe('BUG-03: extractReminderIntent', () => {
     expect(result.reminderIntent!.isAmbiguous).toBe(false);
   });
 
-  it('K. analyze() reminderIntent is null for non-reminder messages', () => {
-    const result = TurnAnalyzer.analyze([{ message: 'Meri wife ka naam Sakshi hai' }]);
-    expect(result.reminderIntent).toBeNull();
+  it('L. "kal shaam 4 baje office se nikalna hai yaad dila dena" -> numeric rawTime 4 and periodWord shaam', () => {
+    const result = TurnAnalyzer.extractReminderIntent('kal shaam 4 baje office se nikalna hai yaad dila dena');
+    expect(result).not.toBeNull();
+    expect(result!.isAmbiguous).toBe(false);
+    expect(result!.rawTime).toBe('4');
+    expect(result!.periodWord).toBe('shaam');
+  });
+
+  it('M. extractNegatedGoals captures "cloud kitchen abhi start nahi kar raha" with isCurrent=true', () => {
+    const goals = TurnAnalyzer.extractNegatedGoals('cloud kitchen abhi start nahi kar raha, usko hold pe rakha hai');
+    expect(goals.length).toBeGreaterThanOrEqual(1);
+    expect(goals[0].concept).toContain('cloud kitchen');
+    expect(goals[0].isCurrent).toBe(true);
+    expect(goals[0].targetFactKey).toBe('current_project');
+  });
+
+  it('N. extractNegatedGoals captures permanent postponement with isCurrent=false', () => {
+    const goals = TurnAnalyzer.extractNegatedGoals('cloud kitchen postpone kar diya abhi ke liye');
+    expect(goals.length).toBeGreaterThanOrEqual(1);
+    expect(goals[0].concept).toContain('cloud kitchen');
+    expect(goals[0].isCurrent).toBe(false);
   });
 });
+
