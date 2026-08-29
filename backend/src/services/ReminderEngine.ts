@@ -65,8 +65,149 @@ export interface ParsedReminder {
   notes?: string;
 }
 
+export interface ScheduledReminderRow {
+  id?: string;
+  user_id: string;
+  text: string;
+  trigger_at: string | null;
+  status: string;
+  alreadyExists?: boolean;
+  [key: string]: any;
+}
+
+/**
+ * Resolves a user's timezone offset in fractional hours from their profile data.
+ * Priority: (1) timezone_offset (in minutes), (2) timezone (IANA string), (3) country code map.
+ * Default: 5.5 (Asia/Kolkata / IST).
+ */
+export function resolveUserTzOffsetHours(profile?: { timezone_offset?: number | null; timezone?: string | null; country?: string | null }): number {
+  if (profile?.timezone_offset !== undefined && profile?.timezone_offset !== null) {
+    return profile.timezone_offset / 60;
+  }
+  if (profile?.timezone) {
+    try {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-US', { timeZone: profile.timezone, timeZoneName: 'shortOffset' });
+      const parts = formatter.formatToParts(now);
+      const tzPart = parts.find(p => p.type === 'timeZoneName')?.value;
+      if (tzPart) {
+        const m = tzPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
+        if (m) {
+          const sign = m[1] === '-' ? -1 : 1;
+          const hours = parseInt(m[2], 10);
+          const mins = m[3] ? parseInt(m[3], 10) : 0;
+          return sign * (hours + mins / 60);
+        }
+      }
+    } catch { /* fallback to country code map */ }
+  }
+  const TIMEZONE_OFFSETS: Record<string, number> = {
+    IN: 5.5, US: -5, UK: 0, GB: 0, AU: 10, AE: 4, SA: 3, PK: 5, BD: 6, SG: 8, JP: 9, DE: 1, FR: 1, CA: -5, NZ: 12, ZA: 2, NG: 1, KE: 3, BR: -3
+  };
+  if (profile?.country && TIMEZONE_OFFSETS[profile.country.toUpperCase()] !== undefined) {
+    return TIMEZONE_OFFSETS[profile.country.toUpperCase()];
+  }
+  return 5.5; // Default IST
+}
+
+/**
+ * BUG-03: Converts a deterministically-extracted ReminderIntent into a ReminderSpec
+ * that ReminderEngine can parse and schedule. Pure deterministic logic — no LLM.
+ *
+ * Handles:
+ *   - "in N minutes/hours" → relative_value + relative_unit
+ *   - "kal [N baje|at N]"  → tomorrow's date + time_of_day
+ *   - "N baje" / "N am/pm" / "at N" / "shaam/subah/dopahar/raat" → time_of_day (24h)
+ *   - "HH:MM"              → time_of_day
+ */
+export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: string; rawTime: string; isAmbiguous: boolean }, userTzOffsetHours: number = 5.5): ReminderSpec {
+  const fullText = intent.text;
+  const textLower = fullText.toLowerCase();
+
+  // Strip reminder-intent keywords and time phrases from the text to get a clean title
+  let title = fullText
+    .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/gi, '')
+    .replace(/\b(kal|aaj|subah|shaam|dopahar|raat|morning|evening|afternoon|night)\b/gi, '')
+    .replace(/\b\d{1,2}(?::\d{2})?\s*(am|pm|baje)?\b/gi, '')
+    .replace(/\b(in\s+\d+\s*min(utes?)?|in\s+\d+\s*hour(s)?)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // Fallback to original text cleaned if title became empty
+  if (!title || title.length < 3) {
+    title = intent.text
+      .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+  if (!title) title = 'Reminder';
+  title = title.substring(0, 80);
+
+  // 1. Relative time: "in N min", "in N hours"
+  const inMinMatch = textLower.match(/in\s+(\d+)\s*min(?:utes?)?/);
+  if (inMinMatch) {
+    return { title, relative_value: parseInt(inMinMatch[1], 10), relative_unit: 'minutes', is_auto: false };
+  }
+  const inHrMatch = textLower.match(/in\s+(\d+)\s*hour(?:s)?/);
+  if (inHrMatch) {
+    return { title, relative_value: parseInt(inHrMatch[1], 10), relative_unit: 'hours', is_auto: false };
+  }
+
+  // 2. Tomorrow prefix: "kal"
+  const hasKal = /\bkal\b/i.test(textLower);
+  let dateStr: string | undefined = undefined;
+  if (hasKal) {
+    const nowLocal = new Date(Date.now() + userTzOffsetHours * 3600000);
+    nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
+    dateStr = nowLocal.toISOString().slice(0, 10);
+  }
+
+  // 3. Detect time of day
+  const isPM = /\b(pm|shaam|dopahar|evening|afternoon)\b/i.test(textLower);
+  const isAM = /\b(am|subah|morning)\b/i.test(textLower);
+  const isRaat = /\b(raat|night)\b/i.test(textLower);
+
+  const timeNumMatch = textLower.match(/(\d{1,2})(?::(\d{2}))?/);
+  if (timeNumMatch) {
+    let hh = parseInt(timeNumMatch[1], 10);
+    const mm = timeNumMatch[2] ? parseInt(timeNumMatch[2], 10) : 0;
+
+    if (hh > 12 && hh <= 23) {
+      const timeStr = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      return { title, date: dateStr, time_of_day: timeStr, is_auto: false };
+    }
+
+    if (isPM) {
+      if (hh < 12) hh += 12;
+    } else if (isAM) {
+      if (hh === 12) hh = 0;
+    } else if (isRaat) {
+      if (hh >= 7 && hh <= 11) hh += 12;
+      else if (hh === 12) hh = 0;
+    } else {
+      // Bare "N baje" or "at N"
+      // In everyday reminder context, 1..6 o'clock defaults to PM (13:00..18:00)
+      if (hh >= 1 && hh <= 6) {
+        hh += 12;
+      } else if (hh >= 7 && hh <= 11) {
+        const nowLocal = new Date(Date.now() + userTzOffsetHours * 3600000);
+        const currentLocalHour = nowLocal.getUTCHours();
+        if (currentLocalHour >= hh && (hh + 12) > currentLocalHour) {
+          hh += 12;
+        }
+      }
+    }
+
+    const timeStr = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    return { title, date: dateStr, time_of_day: timeStr, is_auto: false };
+  }
+
+  // Fallback: relative 5 minutes
+  return { title, relative_value: 5, relative_unit: 'minutes', is_auto: false };
+}
+
 export class ReminderEngine {
-  private tzOffsetHours: number;
+  public tzOffsetHours: number;
 
   constructor(tzOffsetHours: number = 5.5) {
     this.tzOffsetHours = tzOffsetHours;
@@ -204,7 +345,6 @@ export class ReminderEngine {
       parsed.recurrence_limit = spec.recurrence_limit;
     }
     if (spec.end_at) {
-      // Try parse end_at as ISO or "YYYY-MM-DD HH:MM"
       const endDate = new Date(spec.end_at.replace(' ', 'T'));
       if (!isNaN(endDate.getTime())) {
         parsed.end_at = endDate;
@@ -215,45 +355,139 @@ export class ReminderEngine {
   }
 
   /**
-   * Insert one or more parsed reminders into the database.
+   * Insert one or more parsed reminders into the database with cross-turn active idempotency.
+   * If an equivalent active reminder already exists for this user (same normalized text,
+   * same trigger time within 60s, same recurrence, status=active), the existing reminder
+   * is reused and returned with `alreadyExists: true` without creating a duplicate row.
    */
-  async scheduleAll(userId: string, parsedReminders: ParsedReminder[]): Promise<any[]> {
-    const rows = parsedReminders
-      .filter(r => r.text)   // safety net: never insert null text
-      .map(r => ({
-      user_id: userId,
-      text: r.text || 'Reminder',
-      trigger_at: r.trigger_at ? r.trigger_at.toISOString() : null, // null = event-triggered
-      recurrence_type: r.recurrence_type || null,
-      recurrence_interval: r.recurrence_interval || null,
-      recurrence_limit: r.recurrence_limit || null,
-      recurrence_count: 0,
-      active_days: r.active_days || null,
-      active_months: r.active_months || null,
-      active_year: r.active_year || null,
-      end_at: r.end_at ? r.end_at.toISOString() : null,
-      is_auto: r.is_auto,
-      notes: r.notes || null,
-      status: 'active',
-      purpose: r.purpose || null,
-      urgency: r.urgency || 'medium',
-      event_trigger: r.event_trigger || null,
-      end_condition: r.end_condition || 'until_cancelled',
-    }));
+  async scheduleAll(userId: string, parsedReminders: ParsedReminder[]): Promise<ScheduledReminderRow[]> {
+    const valid = parsedReminders.filter(r => r.text);
+    if (valid.length === 0) return [];
 
-    const { data, error } = await supabaseAdmin
-      .from('reminders')
-      .insert(rows)
-      .select('*');
+    // Query currently active reminders for this user to check for active equivalent duplicates
+    let activeList: any[] = [];
+    try {
+      const { data: existingActive, error: fetchError } = await supabaseAdmin
+        .from('reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active');
 
-    if (error) throw error;
-    return data || [];
+      if (fetchError) {
+        logger.warn('[ReminderEngine] Failed to query active reminders for deduplication check', { error: fetchError.message });
+      } else if (existingActive) {
+        activeList = existingActive;
+      }
+    } catch (fetchErr: any) {
+      logger.warn('[ReminderEngine] Active reminder query threw exception', { error: fetchErr.message });
+    }
+
+    const results: ScheduledReminderRow[] = [];
+    const rowsToInsert: any[] = [];
+    const insertIndices: number[] = [];
+
+    const normalizeText = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const getTokens = (str: string) =>
+      (str || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 3 && !['muje','mujhe','mera','meri','mere','karo','karna','liye','baje','remind','yaad'].includes(w));
+
+    const hasCoreTokenOverlap = (s1: string, s2: string): boolean => {
+      const t1 = getTokens(s1);
+      const t2 = getTokens(s2);
+      if (t1.length === 0 || t2.length === 0) return false;
+      const common = t1.filter(token => t2.includes(token));
+      return common.length > 0 && common.length >= Math.min(t1.length, t2.length) * 0.5;
+    };
+
+    for (let i = 0; i < valid.length; i++) {
+      const r = valid[i];
+      const targetTriggerTime = r.trigger_at ? r.trigger_at.getTime() : null;
+      const normTargetText = normalizeText(r.text);
+
+      // Find if an equivalent active reminder already exists
+      const match = activeList.find(existing => {
+        // 1. Text equivalence
+        const normExistingText = normalizeText(existing.text);
+        const textMatches = normExistingText === normTargetText ||
+          (normTargetText.length >= 6 && normExistingText.length >= 6 &&
+           (normExistingText.includes(normTargetText) || normTargetText.includes(normExistingText))) ||
+          hasCoreTokenOverlap(existing.text, r.text);
+        if (!textMatches) return false;
+
+        // 2. Time equivalence
+        if (targetTriggerTime !== null) {
+          if (!existing.trigger_at) return false;
+          const existingTime = new Date(existing.trigger_at).getTime();
+          if (Math.abs(existingTime - targetTriggerTime) > 60000) return false;
+        } else {
+          // Event-triggered reminder
+          if (existing.trigger_at) return false;
+          if (normalizeText(existing.event_trigger || '') !== normalizeText(r.event_trigger || '')) return false;
+        }
+
+        // 3. Recurrence equivalence
+        const recTypeMatch = (existing.recurrence_type || null) === (r.recurrence_type || null);
+        const recIntervalMatch = (existing.recurrence_interval || null) === (r.recurrence_interval || null);
+        if (!recTypeMatch || !recIntervalMatch) return false;
+
+        return true;
+      });
+
+      if (match) {
+        logger.info('[ReminderEngine] Active equivalent reminder found — reusing existing row', {
+          id: match.id,
+          text: match.text,
+          trigger_at: match.trigger_at
+        });
+        results[i] = { ...match, alreadyExists: true };
+      } else {
+        insertIndices.push(i);
+        rowsToInsert.push({
+          user_id: userId,
+          text: r.text || 'Reminder',
+          trigger_at: r.trigger_at ? r.trigger_at.toISOString() : null,
+          recurrence_type: r.recurrence_type || null,
+          recurrence_interval: r.recurrence_interval || null,
+          recurrence_limit: r.recurrence_limit || null,
+          recurrence_count: 0,
+          active_days: r.active_days || null,
+          active_months: r.active_months || null,
+          active_year: r.active_year || null,
+          end_at: r.end_at ? r.end_at.toISOString() : null,
+          is_auto: r.is_auto,
+          notes: r.notes || null,
+          status: 'active',
+          purpose: r.purpose || null,
+          urgency: r.urgency || 'medium',
+          event_trigger: r.event_trigger || null,
+          end_condition: r.end_condition || 'until_cancelled',
+        });
+      }
+    }
+
+    if (rowsToInsert.length > 0) {
+      const { data: inserted, error: insertError } = await supabaseAdmin
+        .from('reminders')
+        .insert(rowsToInsert)
+        .select('*');
+
+      if (insertError) throw insertError;
+      (inserted || []).forEach((row, idx) => {
+        const origIdx = insertIndices[idx];
+        results[origIdx] = { ...row, alreadyExists: false };
+      });
+    }
+
+    return results;
   }
 
   /**
-   * Parse and schedule in one step. Returns inserted rows.
+   * Parse and schedule in one step. Returns scheduled rows (newly created or reused).
    */
-  async parseAndSchedule(userId: string, spec: ReminderSpec): Promise<any[]> {
+  async parseAndSchedule(userId: string, spec: ReminderSpec): Promise<ScheduledReminderRow[]> {
     const parsed = this.parse(spec);
     return this.scheduleAll(userId, parsed);
   }
@@ -278,7 +512,7 @@ export class ReminderEngine {
   }
 
   /**
-   * Format trigger date(s) for human-readable confirmation
+   * Format trigger date(s) for human-readable confirmation using the engine's timezone offset
    */
   formatConfirmation(parsedReminders: ParsedReminder[]): string {
     // Event-triggered reminder — no fixed time.
@@ -288,12 +522,16 @@ export class ReminderEngine {
     }
     if (parsedReminders.length === 1) {
       const r = parsedReminders[0];
-      const localTime = r.trigger_at!.toLocaleTimeString('en-IN', {
-        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
-      });
-      const localDate = r.trigger_at!.toLocaleDateString('en-IN', {
-        day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
-      });
+      const localDateObj = new Date(r.trigger_at!.getTime() + this.tzOffsetHours * 3600000);
+      const hh = localDateObj.getUTCHours();
+      const mm = localDateObj.getUTCMinutes();
+      const ampm = hh >= 12 ? 'PM' : 'AM';
+      const hh12 = hh % 12 || 12;
+      const localTime = `${String(hh12).padStart(2, '0')}:${String(mm).padStart(2, '0')} ${ampm}`;
+      
+      const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const localDate = `${localDateObj.getUTCDate()} ${MONTH_SHORT[localDateObj.getUTCMonth()]} ${localDateObj.getUTCFullYear()}`;
+
       let msg = `"${r.text}" at ${localTime} on ${localDate}`;
       if (r.recurrence_type && r.recurrence_interval) {
         msg += ` (repeats every ${r.recurrence_interval} ${r.recurrence_type})`;
@@ -307,11 +545,14 @@ export class ReminderEngine {
       return msg;
     }
 
-    const times = parsedReminders.map(r =>
-      r.trigger_at!.toLocaleTimeString('en-IN', {
-        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
-      })
-    );
+    const times = parsedReminders.map(r => {
+      const localDateObj = new Date(r.trigger_at!.getTime() + this.tzOffsetHours * 3600000);
+      const hh = localDateObj.getUTCHours();
+      const mm = localDateObj.getUTCMinutes();
+      const ampm = hh >= 12 ? 'PM' : 'AM';
+      const hh12 = hh % 12 || 12;
+      return `${String(hh12).padStart(2, '0')}:${String(mm).padStart(2, '0')} ${ampm}`;
+    });
     return `"${parsedReminders[0].text}" at ${times.join(', ')}`;
   }
 

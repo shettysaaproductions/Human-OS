@@ -17,8 +17,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
-import { ReminderEngine, ReminderSpec } from '../services/ReminderEngine';
-import { ReminderIntent } from '../services/TurnAnalyzer';
+import { ReminderEngine, resolveUserTzOffsetHours, buildReminderSpecFromIntent } from '../services/ReminderEngine';
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
@@ -135,88 +134,6 @@ function isExcessiveRequest(message: string): boolean {
     if (match[2] === 'essays' && num > 5) return true;
   }
   return false;
-}
-
-/**
- * BUG-03: Converts a deterministically-extracted ReminderIntent into a ReminderSpec
- * that ReminderEngine can parse and schedule. Pure deterministic logic — no LLM.
- *
- * Time phrase priority (first match wins):
- *   - "in N minutes/hours" → relative_value + relative_unit
- *   - "kal [N baje|at N]"  → tomorrow's date + time_of_day
- *   - "N baje" / "N am/pm" / "at N" → time_of_day (today if future, else tomorrow)
- *   - "HH:MM"              → time_of_day
- */
-function buildReminderSpecFromIntent(intent: ReminderIntent, _tzOffsetHours: number = 5.5): ReminderSpec {
-  const lower = intent.timePhrase.toLowerCase().trim();
-  const rawLower = intent.rawTime.toLowerCase().trim();
-
-  // Strip reminder-intent keywords from the full text to get a clean title
-  const title = intent.text
-    .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena)\b/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-    .substring(0, 80) || 'Reminder';
-
-  // ── Relative: "in N minutes" / "in N hours" ───────────────────────────────
-  const inMinMatch = lower.match(/in\s+(\d+)\s*min(?:utes?)?/);
-  if (inMinMatch) {
-    return { title, relative_value: parseInt(inMinMatch[1], 10), relative_unit: 'minutes', is_auto: false };
-  }
-  const inHrMatch = lower.match(/in\s+(\d+)\s*hour(?:s)?/);
-  if (inHrMatch) {
-    return { title, relative_value: parseInt(inHrMatch[1], 10), relative_unit: 'hours', is_auto: false };
-  }
-
-  // ── Tomorrow prefix: "kal N baje" / "kal at N" ────────────────────────────
-  if (/^kal\b/.test(lower)) {
-    const numMatch = lower.match(/(\d{1,2})(?::(\d{2}))?/);
-    if (numMatch) {
-      const hh = parseInt(numMatch[1], 10);
-      const mm = numMatch[2] ? parseInt(numMatch[2], 10) : 0;
-      const tomorrow = new Date();
-      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-      const dateStr = tomorrow.toISOString().slice(0, 10); // "YYYY-MM-DD"
-      const timeStr = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-      return { title, date: dateStr, time_of_day: timeStr, is_auto: false };
-    }
-  }
-
-  // ── Time of day: "N baje" / "N am" / "N pm" / "at N" / "HH:MM" ──────────
-  // Check for PM/AM suffix
-  const ampmMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
-  if (ampmMatch) {
-    let hh = parseInt(ampmMatch[1], 10);
-    const mm = ampmMatch[2] ? parseInt(ampmMatch[2], 10) : 0;
-    if (ampmMatch[3] === 'pm' && hh < 12) hh += 12;
-    if (ampmMatch[3] === 'am' && hh === 12) hh = 0;
-    return { title, time_of_day: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, is_auto: false };
-  }
-
-  // "N baje" — Indian time (treat as 24h if >= 1 and <= 23)
-  const bajeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*baje/);
-  if (bajeMatch) {
-    const hh = parseInt(bajeMatch[1], 10);
-    const mm = bajeMatch[2] ? parseInt(bajeMatch[2], 10) : 0;
-    return { title, time_of_day: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, is_auto: false };
-  }
-
-  // "at N" or bare "HH:MM"
-  const atMatch = lower.match(/(?:at\s+)?(\d{1,2}):(\d{2})/);
-  if (atMatch) {
-    const hh = parseInt(atMatch[1], 10);
-    const mm = parseInt(atMatch[2], 10);
-    return { title, time_of_day: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, is_auto: false };
-  }
-
-  // Fallback: rawTime might be just a number — treat as hour
-  const rawNum = parseInt(rawLower, 10);
-  if (!isNaN(rawNum) && rawNum >= 1 && rawNum <= 23) {
-    return { title, time_of_day: `${String(rawNum).padStart(2, '0')}:00`, is_auto: false };
-  }
-
-  // Ultimate fallback: 5 minutes from now
-  return { title, relative_value: 5, relative_unit: 'minutes', is_auto: false };
 }
 
 import { MessageFormatter } from '../services/MessageFormatter';
@@ -1238,15 +1155,26 @@ chatRouter.post(
       const reminderIntent = turnAnalysis.reminderIntent;
       if (reminderIntent && !reminderIntent.isAmbiguous) {
         try {
-          const userTzHours = 5.5; // IST — will use profile.country later if added to profile
+          const userTzHours = resolveUserTzOffsetHours(profile);
           const spec = buildReminderSpecFromIntent(reminderIntent, userTzHours);
           const engine = new ReminderEngine(userTzHours);
           const parsed = engine.parse(spec);
-          const created = await engine.scheduleAll(userId, parsed);
-          if (created && created.length > 0) {
+          const scheduled = await engine.scheduleAll(userId, parsed);
+          if (scheduled && scheduled.length > 0) {
             deterministicReminderCreated = true;
-            deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. Do NOT say you are "setting" it — it is already set. Just confirm the time casually.`;
-            logger.info('[Chat][BUG-03] Deterministic reminder created', { userId, reminderId: created[0].id, trigger_at: created[0].trigger_at });
+            const isAlreadyActive = scheduled.some((r: any) => r.alreadyExists);
+            if (isAlreadyActive) {
+              deterministicReminderNote = `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. Inform the user naturally that it's already set (e.g. "Already laga hua hai yaar — 4 baje office se nikalne ka reminder set hai"). Do NOT claim you just created a new one.`;
+            } else {
+              deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. Do NOT say you are "setting" it — it is already set. Just confirm the time casually.`;
+            }
+            logger.info('[Chat][BUG-03] Deterministic reminder handled', {
+              userId,
+              reminderId: scheduled[0].id,
+              alreadyExists: isAlreadyActive,
+              trigger_at: scheduled[0].trigger_at,
+              userTzHours
+            });
           }
         } catch (e) {
           logger.error('[Chat][BUG-03] Deterministic reminder failed — LLM may still create it via subconscious_actions', {
@@ -1257,6 +1185,7 @@ chatRouter.post(
       } else if (reminderIntent?.isAmbiguous) {
         deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time.';
       }
+
 
       const brainContext = {
         memories,
