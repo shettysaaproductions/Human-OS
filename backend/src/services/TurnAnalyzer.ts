@@ -266,6 +266,11 @@ export class TurnAnalyzer {
     const fullText = messages.map(m => m.message || '').join(' ');
     const negatedGoals = this.extractNegatedGoals(fullText);
 
+    // BUG-06 legacy / BUG-NEGATION-RESUME: Only propagate FACTUAL CORRECTIONS (isCurrent = false)
+    // Temporal pauses (isCurrent = true) must NOT be mixed into negativeCorrectionConcepts,
+    // otherwise LifeThreadAgent will inject [CONCEPT SUPERSEDED] into provenance.
+    const factualCorrections = negatedGoals.filter(g => !g.isCurrent).map(g => g.concept);
+
     return {
       units,
       hasQuestions: units.some(u => u.type === 'question'),
@@ -275,9 +280,9 @@ export class TurnAnalyzer {
       hasCorrections: units.some(u => u.type === 'correction'),
       // BUG-03: Deterministic reminder extraction across all clauses
       reminderIntent: this.extractReminderIntent(fullText),
-      // BUG-06 legacy: string array for backward compat
-      negativeCorrectionConcepts: negatedGoals.map(g => g.concept),
-      // Amendment 3: structured negated goals with targetFactKey + isCurrent
+      // BUG-06 legacy: string array for backward compat (factual only)
+      negativeCorrectionConcepts: factualCorrections,
+      // Amendment 3: structured negated goals with targetFactKey + isCurrent (both pauses and drops)
       negatedGoals,
     };
   }

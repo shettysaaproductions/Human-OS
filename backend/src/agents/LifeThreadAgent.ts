@@ -138,7 +138,7 @@ export class LifeThreadAgent {
     }
 
     // 5. Apply the action deterministically
-    await this.applyUpdate(user_id, result, threads, activeActions || [], message_id);
+    await this.applyUpdate(user_id, result, threads, activeActions || [], message_id, recentChat);
   }
 
   /**
@@ -186,7 +186,8 @@ export class LifeThreadAgent {
     for (const thread of matched) {
       if (thread.state === targetState) continue; // already in desired state
       const pauseLabel = is_current === false ? 'ABANDONED' : 'PAUSED';
-      const note = `\n[${pauseLabel} by user: "${reason || negated_concept}" — ${new Date().toISOString().slice(0, 10)}]`;
+      const transitionNote = `\n[STATE TRANSITION: ${thread.state} -> ${targetState}]`;
+      const note = `\n[${pauseLabel} by user: "${reason || negated_concept}" — ${new Date().toISOString().slice(0, 10)}]${transitionNote}`;
       const { error: updErr } = await supabaseAdmin
         .from('life_threads')
         .update({
@@ -269,7 +270,12 @@ RULES FOR PAUSED THREADS:
      thread_id = <exact UUID from the paused thread above>
      state = "active"   ← THIS IS MANDATORY. Do not omit. Do not return "waiting".
    This un-pauses the thread. The goal is resuming, NOT being created fresh.
-3. UNRELATED: If the latest conversation has nothing to do with a paused thread, emit "ignore" for it.`
+3. UNRELATED: If the latest conversation has nothing to do with a paused thread, emit "ignore" for it.
+
+❌ INVALIDATED / SUPERSEDED CONCEPTS:
+If a thread's provenance contains [CONCEPT SUPERSEDED: ...], it means that specific concept was factually corrected (e.g. "it's not a cloud kitchen, it's a fashion shop").
+A temporal PAUSE (e.g. "putting it on hold", "abhi start nahi kar raha") is NOT a supersession.
+Do NOT treat paused threads as unrelated just because they have historical pause notes in their provenance. Only a true factual invalidation prevents the old concept from being considered current.`
       : '';
 
     return `You are Nova's cognitive Action & Goal processor.
@@ -338,7 +344,7 @@ Respond ONLY with a JSON object in this exact schema:
 }`;
   }
 
-  private async applyUpdate(userId: string, update: LifeThreadUpdate, activeThreads: any[], activeActions: any[], sourceMessageId?: string): Promise<void> {
+  private async applyUpdate(userId: string, update: LifeThreadUpdate, activeThreads: any[], activeActions: any[], sourceMessageId?: string, recentChat: any[] = []): Promise<void> {
     let resolvedThreadId = update.thread_id;
 
     if (update.action !== 'ignore') {
@@ -359,14 +365,24 @@ Respond ONLY with a JSON object in this exact schema:
       else if ((update.action === 'update' || update.action === 'complete' || update.action === 'abandon') && update.thread_id) {
         const targetThread = activeThreads.find(t => t.id === update.thread_id);
         if (targetThread) {
-          const nextState = update.action === 'complete' ? 'completed' 
+          const prevState = targetThread.state as string;
+          
+          // BUG-NEGATION-RESUME: Detect explicit resumption deterministically in case LLM omits state
+          const lastUserMsg = recentChat.findLast(m => m.role === 'user')?.content?.toLowerCase() || '';
+          const isExplicitResume = /ab\s+(start|shuru|karenge|continue)|(next month|phir se|resume|dobara|wapas)\s+(start|shuru|karenge|karna)/i.test(lastUserMsg);
+
+          let nextState = update.action === 'complete' ? 'completed' 
                           : update.action === 'abandon' ? 'abandoned' 
                           : update.state || targetThread.state;
+
+          // Force active if deterministically resumed
+          if (prevState === 'waiting' && isExplicitResume && update.action === 'update' && (!update.state || update.state === 'waiting')) {
+            nextState = 'active';
+          }
 
           // BUG-NEGATION-RESUME: Build provenance by APPENDING a state-transition note
           // rather than replacing the entire provenance. This preserves history and
           // prevents contradictory provenance text.
-          const prevState = targetThread.state as string;
           const today = new Date().toISOString().slice(0, 10);
           let provenanceNote = update.provenance ?? '';
           // Append a transition note when state actually changes
