@@ -254,10 +254,13 @@ export class LifeThreadAgent {
       ? `\nSIMILAR THREADS DETECTED (Jaccard filter — these may be the same real-world goal):\n${similarCandidates.map(x => `  ID=${x.thread.id} topic="${x.thread.topic}" state=${x.thread.state} score=${x.score.toFixed(2)}`).join('\n')}\n⚠️ DEDUPLICATION RULE: If the current conversation clearly relates to the same real-world objective as any candidate above, emit "update" for that thread instead of "create". When uncertain, CREATE (preserve information — do not destroy a unique goal).`
       : '';
 
-    // Amendment 3: Inject PAUSED threads so the LLM knows not to recreate them
+    // Amendment 3: Inject PAUSED threads so the LLM knows to resume rather than create duplicates
     const pausedThreads = activeThreads.filter(t => t.state === 'waiting');
     const pausedNote = pausedThreads.length > 0
-      ? `\n⛔ PAUSED THREADS (DO NOT RE-ACTIVATE OR RECREATE):\n${pausedThreads.map(t => `  ID=${t.id} topic="${t.topic}" — PAUSED by user, awaiting resumption`).join('\n')}\nRULE: NEVER "create" a new thread whose topic overlaps with a PAUSED thread above. The user explicitly paused this goal. Only the user can resume it.`
+      ? `\n⏸️ PAUSED THREADS (WAITING FOR RESUMPTION):\n${pausedThreads.map(t => `  ID=${t.id} topic="${t.topic}" — PAUSED by user, awaiting resumption`).join('\n')}\nRULE FOR PAUSED THREADS:
+- DO NOT create a new duplicate thread for a goal that is already paused above.
+- If the user explicitly resumes, restarts, or schedules this paused goal (e.g. "ab start karne wala hu", "let's resume X", "starting next month"), emit "update" with that thread's "thread_id", set "state": "active", and update provenance with the new timeline.
+- If the conversation does not resume the goal, leave it alone or ignore.`
       : '';
 
     return `You are Nova's cognitive Action & Goal processor. 

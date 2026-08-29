@@ -525,17 +525,24 @@ describe('BUG-03: extractReminderIntent', () => {
 
   it('M. extractNegatedGoals captures "cloud kitchen abhi start nahi kar raha" with isCurrent=true', () => {
     const goals = TurnAnalyzer.extractNegatedGoals('cloud kitchen abhi start nahi kar raha, usko hold pe rakha hai');
-    expect(goals.length).toBeGreaterThanOrEqual(1);
-    expect(goals[0].concept).toContain('cloud kitchen');
+    expect(goals.length).toBe(1);
+    expect(goals[0].concept).toBe('cloud kitchen');
     expect(goals[0].isCurrent).toBe(true);
     expect(goals[0].targetFactKey).toBe('current_project');
   });
 
-  it('N. extractNegatedGoals captures permanent postponement with isCurrent=false', () => {
-    const goals = TurnAnalyzer.extractNegatedGoals('cloud kitchen postpone kar diya abhi ke liye');
-    expect(goals.length).toBeGreaterThanOrEqual(1);
-    expect(goals[0].concept).toContain('cloud kitchen');
+  it('N. extractNegatedGoals captures permanent cancellation with isCurrent=false', () => {
+    const goals = TurnAnalyzer.extractNegatedGoals('cloud kitchen cancel kar diya');
+    expect(goals.length).toBe(1);
+    expect(goals[0].concept).toBe('cloud kitchen');
     expect(goals[0].isCurrent).toBe(false);
+  });
+
+  it('O. extractNegatedGoals cleans noise and does not emit spurious tokens like start', () => {
+    const goals = TurnAnalyzer.extractNegatedGoals('cloud kitchen abhi start nahi kar raha');
+    expect(goals.length).toBe(1);
+    expect(goals[0].concept).toBe('cloud kitchen');
+    expect(goals[0].isCurrent).toBe(true);
   });
 });
 

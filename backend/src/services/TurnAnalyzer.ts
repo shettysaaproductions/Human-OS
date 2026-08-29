@@ -359,31 +359,35 @@ export class TurnAnalyzer {
    */
   public static extractNegatedGoals(text: string): NegatedGoal[] {
     const lower = text.toLowerCase();
-    const results: NegatedGoal[] = [];
+
+    // Check if the overall turn context has temporal deferral/pause markers
+    const hasTemporalPause = /\b(abhi|filhaal|abhi ke liye|hold pe|hold par|baad mein|baad me|pause|temporary|temporarily)\b/i.test(lower);
 
     // ── Pattern set: captures the SUBJECT of the negation ──────────────────────
-    // Each entry: { re, isCurrent }
-    // isCurrent=true  → user paused/deferred ("abhi nahi", "filhaal nahi")
-    // isCurrent=false → user dropped permanently ("kabhi nahi", "cancel kar diya")
     const NEGATION_PATTERNS: Array<{ re: RegExp; isCurrent: boolean }> = [
-      // "cloud kitchen abhi start nahi kar raha" — subject precedes negation clause
-      { re: /([a-z][a-z\s]{2,30}?)\s+(?:abhi|filhaal|abhi ke liye)\s+(?:start\s+)?(?:nahi|nahin|mat)(?:\s+(?:kar|ho|chal|bana))?/gi, isCurrent: true },
+      // "cloud kitchen abhi start nahi kar raha" / "cloud kitchen abhi nahi"
+      { re: /([a-z][a-z\s]{2,30}?)\s+(?:abhi|filhaal|abhi ke liye)\s+(?:start\s+)?(?:nahi|nahin|mat)(?:\s+(?:kar|ho|chal|bana|karna|raha|rahe|rahi))?/gi, isCurrent: true },
+      // "cloud kitchen hold pe / pause pe rakha hai"
+      { re: /([a-z][a-z\s]{2,30}?)\s+(?:ko|usko|isko)?\s*(?:hold|pause)\s+pe\s+(?:rakha|dala|kar)/gi, isCurrent: true },
       // "abhi cloud kitchen nahi" — subject follows abhi
       { re: /(?:abhi|filhaal)\s+([a-z][a-z\s]{2,25}?)\s+(?:nahi|nahin|nai)/gi, isCurrent: true },
       // "cloud kitchen postpone/cancel kar diya" — subject precedes action
       { re: /([a-z][a-z\s]{2,25}?)\s+(?:postpone|cancel|band|rok)\s+(?:kar|ho|diya|karna|dena)/gi, isCurrent: false },
       // "<noun> ka shop/business nahi" — confirmed production pattern
       { re: /([a-z][a-z\s]{1,20}?)\s+(?:ka|ki|ke)?\s+(?:shop|dukaan|business|kaam)\s+nahi/gi, isCurrent: false },
-      // bare "<noun> nahi tha/thi"
+      // bare "<noun> nahi tha/thi/hai"
       { re: /([a-z][a-z\s]{2,25}?)\s+nahi(?:\s+(?:tha|thi|hai))?\b/gi, isCurrent: false },
       // "koi <noun> nahi"
       { re: /koi\s+([a-z][a-z\s]{1,20}?)\s+nahi/gi, isCurrent: false },
     ];
 
     // Noise words to strip from captured concepts
-    const NOISE = new Set(['main','mein','mai','to','kya','yeh','woh','tha','thi','nahi','kar','chal','ho','bhi','toh','na','hi','ke','ka','ki','ek']);
+    const NOISE = new Set([
+      'main','mein','mai','to','kya','yeh','woh','tha','thi','the','nahi','nahin','mat','kar','chal','ho','bhi','toh','na','hi','ke','ka','ki','ek',
+      'start','shuru','karna','kare','raha','rahi','rahe','usko','isko','mera','meri','mere','apna','apni','apne','hai','abhi','filhaal'
+    ]);
 
-    const seenConcepts = new Set<string>();
+    const conceptMap = new Map<string, NegatedGoal>();
 
     for (const { re, isCurrent } of NEGATION_PATTERNS) {
       let m: RegExpExecArray | null;
@@ -393,11 +397,12 @@ export class TurnAnalyzer {
         // Filter out noise-only matches
         const tokens = raw.split(/\s+/).filter(t => t.length > 1 && !NOISE.has(t));
         const concept = tokens.join(' ').trim();
-        if (concept.length < 2 || seenConcepts.has(concept)) continue;
-        seenConcepts.add(concept);
+        if (concept.length < 2) continue;
+
+        // If the sentence has temporal pause markers, force isCurrent = true (waiting/paused)
+        const finalIsCurrent = hasTemporalPause ? true : isCurrent;
 
         // Attempt to match to a known memory key heuristically
-        // (chat.ts will do the authoritative DB match against actual memory values)
         let targetFactKey: string | undefined;
         if (/kitchen|restaurant|food|cafe|startup|business|shop|project|venture/i.test(concept)) {
           targetFactKey = 'current_project';
@@ -405,11 +410,43 @@ export class TurnAnalyzer {
           targetFactKey = 'current_focus';
         }
 
-        results.push({ concept, targetFactKey, isCurrent });
+        // If concept already seen, keep the more specific/safe entry
+        if (conceptMap.has(concept)) {
+          const existing = conceptMap.get(concept)!;
+          if (finalIsCurrent && !existing.isCurrent) {
+            existing.isCurrent = true;
+          }
+          if (targetFactKey && !existing.targetFactKey) {
+            existing.targetFactKey = targetFactKey;
+          }
+        } else {
+          // Check if any existing concept is substring or superstring
+          let merged = false;
+          for (const [existingKey, existingGoal] of conceptMap.entries()) {
+            if (existingKey.includes(concept) || concept.includes(existingKey)) {
+              if (concept.length < existingKey.length) {
+                conceptMap.delete(existingKey);
+                conceptMap.set(concept, {
+                  concept,
+                  targetFactKey: targetFactKey || existingGoal.targetFactKey,
+                  isCurrent: finalIsCurrent || existingGoal.isCurrent
+                });
+              } else {
+                if (finalIsCurrent) existingGoal.isCurrent = true;
+                if (targetFactKey) existingGoal.targetFactKey = targetFactKey;
+              }
+              merged = true;
+              break;
+            }
+          }
+          if (!merged) {
+            conceptMap.set(concept, { concept, targetFactKey, isCurrent: finalIsCurrent });
+          }
+        }
       }
     }
 
-    return results;
+    return Array.from(conceptMap.values());
   }
 
   /**
