@@ -1207,6 +1207,9 @@ chatRouter.post(
         recentMessages,
         memoryContext,
         turnAnalysisBlock,
+        // BUG-06: Forward negated correction concepts so NovaBrainService can pass them
+        // to the extract_life_threads job → LifeThreadAgent.updateThreadProvenanceForCorrection()
+        negativeCorrectionConcepts: turnAnalysis.negativeCorrectionConcepts || [],
         deterministicReminderCreated,
         deterministicReminderNote,
         lengthInstruction: primaryMessage.length < 20

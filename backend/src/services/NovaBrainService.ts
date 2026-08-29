@@ -417,7 +417,11 @@ export class NovaBrainService {
           messageId: jobMessageId,
           conversationId: context.conversationId || '',
           userMessage: combinedUserMessage,
-          novaReply: reply
+          novaReply: reply,
+          // BUG-06: Pass negated correction concepts so LifeThreadAgent can mark superseded
+          // concepts within threads without killing the entire thread (e.g. "fashion ka shop nahi"
+          // annotates "fashion" as superseded but keeps the underlying business-goal thread alive)
+          negativeCorrectionConcepts: context.negativeCorrectionConcepts || [],
         }
       });
     }).catch(err => {

@@ -165,6 +165,12 @@ export class ProactiveGate {
         .eq('user_id', userId)
         .is('replied_at', null)
         .gte('created_at', since)
+        // BUG-05: Exclude phantom 'followup:unanswered:*' entries written by the stuck-
+        // conversation scanner. These are not real ignored messages — they are rescue
+        // outreaches for a conversation Nova FAILED to reply to. Counting them as ignored
+        // inflates escalation gaps (1h → 3h → 6h → 12h) and silently blocks all real
+        // outreach. Only genuine NACE/followup proactive messages count toward escalation.
+        .not('logical_key', 'like', 'followup:unanswered:%')
         .order('created_at', { ascending: false });
 
       ignoredCount = unreplied?.length ?? 0;

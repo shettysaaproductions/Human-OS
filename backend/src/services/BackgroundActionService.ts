@@ -1,6 +1,33 @@
 import { logger } from '../lib/logger';
 import { supabaseAdmin } from '../lib/supabase';
 import { memoryRepository } from './memoryRepository';
+
+// ── BUG-04: Life Thread identity helpers ────────────────────────────────────
+// Jaccard similarity is used as a cheap CANDIDATE FILTER for thread dedup in
+// the LifeThread.upsert tool handler. When the SubconsciousAgent LLM uses
+// slightly different wording for the same real-world goal (e.g. "Job interview
+// prep" vs "Interview preparation"), Jaccard prevents a duplicate row from
+// being created and updates the best-match existing thread instead.
+const LIFE_THREAD_STOP_WORDS = new Set(['a','an','the','is','in','on','at','to','for','of','and','or','with','ka','ki','ke','hai','mera','meri','karna','karo','karna']);
+
+function _lifeThreadJaccard(a: string, b: string): number {
+  const tokenize = (t: string) => new Set(
+    t.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !LIFE_THREAD_STOP_WORDS.has(w))
+  );
+  const sa = tokenize(a);
+  const sb = tokenize(b);
+  if (sa.size === 0 && sb.size === 0) return 1;
+  if (sa.size === 0 || sb.size === 0) return 0;
+  let intersection = 0;
+  for (const w of sa) if (sb.has(w)) intersection++;
+  const union = new Set([...sa, ...sb]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+// Minimum Jaccard score to treat an existing thread as the same real-world goal.
+// Set higher than LifeThreadAgent's 0.25 because tool-call topics are shorter and more precise.
+const BAS_JACCARD_UPSERT_THRESHOLD = 0.3;
+
 const TIMEZONE_OFFSETS: Record<string, number> = {
   IN: 5.5,
   US: -5,
@@ -371,14 +398,17 @@ export class BackgroundActionService {
         // ── LifeThread tool handlers ──────────────────────────────────────────────
         else if (action.tool === 'LifeThread' && action.action === 'upsert') {
           // Create or update a life thread. Idempotent by topic (normalized).
+          // BUG-04: Before creating, run Jaccard semantic candidate search to detect
+          // threads that represent the same real-world goal with different wording.
           const topic = String(action.data?.topic || '').trim().substring(0, 500);
           const state = action.data?.state || 'active';
           const priority = action.data?.priority || 'medium';
           const provenance = String(action.data?.provenance || '').substring(0, 500);
           if (!topic) { logger.warn('[BackgroundAction] LifeThread.upsert missing topic', { userId }); }
           else {
-            // Check for existing active thread with same topic (case-insensitive)
-            const { data: existing } = await supabaseAdmin
+            // Step 1: Exact case-insensitive match (fastest — no scoring needed)
+            let existingThread: { id: string; state: string } | null = null;
+            const { data: exactMatch } = await supabaseAdmin
               .from('life_threads')
               .select('id, state')
               .eq('user_id', userId)
@@ -386,13 +416,40 @@ export class BackgroundActionService {
               .in('state', ['active', 'waiting', 'blocked'])
               .limit(1)
               .maybeSingle();
-            if (existing) {
+            existingThread = exactMatch || null;
+
+            // Step 2: BUG-04 — Jaccard semantic candidate search (if no exact match)
+            // Handles cases like "Job interview prep" vs "Interview preparation" which
+            // the LLM writes differently on different turns for the same real-world goal.
+            if (!existingThread) {
+              const { data: allActive } = await supabaseAdmin
+                .from('life_threads')
+                .select('id, topic, state')
+                .eq('user_id', userId)
+                .in('state', ['active', 'waiting', 'blocked'])
+                .limit(20); // safety cap — rare to have >10 active threads
+
+              if (allActive && allActive.length > 0) {
+                let bestScore = BAS_JACCARD_UPSERT_THRESHOLD;
+                let bestMatch: { id: string; state: string } | null = null;
+                for (const t of allActive) {
+                  const score = _lifeThreadJaccard(topic, t.topic ?? '');
+                  if (score > bestScore) { bestScore = score; bestMatch = t; }
+                }
+                if (bestMatch) {
+                  existingThread = bestMatch;
+                  logger.info('[BackgroundAction] LifeThread.upsert semantic match', { userId, topic, matchedId: bestMatch.id, score: bestScore.toFixed(2) });
+                }
+              }
+            }
+
+            if (existingThread) {
               await supabaseAdmin.from('life_threads').update({
                 state, priority, provenance: provenance || undefined,
                 last_relevant_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
-              }).eq('id', existing.id);
-              logger.info('[BackgroundAction] LifeThread updated', { userId, id: existing.id, topic, state });
+              }).eq('id', existingThread.id);
+              logger.info('[BackgroundAction] LifeThread updated', { userId, id: existingThread.id, topic, state });
             } else {
               await supabaseAdmin.from('life_threads').insert({
                 user_id: userId, topic, state, priority, provenance,
