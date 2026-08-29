@@ -20,34 +20,60 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: mother ──────────────────────────────────────────────────────────
   mother_name: [
     'mothers_name', 'moms_name', 'mom_name', 'maa_name', 'maa', 'mom',
-    'mother', 'mummy_name', 'mata_name', 'maa_ka_naam', 'mothers_name',
+    'mother', 'mummy_name', 'mata_name', 'maa_ka_naam', 'mother_real_name',
+  ],
+  mother_nickname: [
+    'mothers_nickname', 'mom_nickname', 'moms_nickname', 'maa_ka_nickname', 'mummy_ka_nickname',
+    'mother_nick_name', 'mom_nick_name',
   ],
   // ── Family: father ──────────────────────────────────────────────────────────
   father_name: [
     'fathers_name', 'dads_name', 'dad_name', 'papa_name', 'pita_name',
-    'dad', 'father', 'papa', 'baap_name',
+    'dad', 'father', 'papa', 'baap_name', 'father_real_name',
+  ],
+  father_nickname: [
+    'fathers_nickname', 'dad_nickname', 'dads_nickname', 'papa_ka_nickname',
+    'father_nick_name', 'dad_nick_name',
   ],
   // ── Family: wife ────────────────────────────────────────────────────────────
   wife_name: [
     'wives_name', 'wife', 'biwi', 'patni', 'biwi_name', 'patni_name',
-    'spouse_name',
+    'spouse_name', 'wife_real_name',
+  ],
+  wife_nickname: [
+    'wives_nickname', 'wife_nick_name', 'biwi_ka_nickname', 'patni_ka_nickname',
+    'spouse_nickname',
   ],
   // ── Family: husband ─────────────────────────────────────────────────────────
   husband_name: [
     'husbands_name', 'husband', 'pati', 'shauhar', 'pati_name', 'shauhar_name',
+    'husband_real_name',
+  ],
+  husband_nickname: [
+    'husbands_nickname', 'husband_nick_name', 'pati_ka_nickname', 'shauhar_ka_nickname',
   ],
   // ── Family: son ─────────────────────────────────────────────────────────────
   son_name: [
-    'sons_name', 'son', 'beta', 'beta_name', 'bete_ka_naam',
+    'sons_name', 'son', 'beta', 'beta_name', 'bete_ka_naam', 'son_real_name',
     'child_name',  // only when context indicates male child
+  ],
+  son_nickname: [
+    'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam',
+    'child_nickname', 'child_nick_name',
   ],
   // ── Family: daughter ────────────────────────────────────────────────────────
   daughter_name: [
-    'daughters_name', 'daughter', 'beti', 'beti_name',
+    'daughters_name', 'daughter', 'beti', 'beti_name', 'daughter_real_name',
+  ],
+  daughter_nickname: [
+    'daughters_nickname', 'daughter_nick_name', 'beti_ka_nickname', 'beti_ka_pyar_ka_naam',
   ],
   // ── Family: sister ──────────────────────────────────────────────────────────
   sister_name: [
-    'sisters_name', 'sister', 'behen', 'behen_name', 'didi_name',
+    'sisters_name', 'sister', 'behen', 'behen_name', 'didi_name', 'sister_real_name',
+  ],
+  sister_nickname: [
+    'sisters_nickname', 'sister_nick_name', 'behen_ka_nickname', 'didi_ka_nickname',
   ],
   // ── Family: brother ─────────────────────────────────────────────────────────
   brother_name: [
@@ -56,7 +82,10 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     // they are separately blocked as vocative values in the agent filter.
     // But if LLM emits key='brother' or key='bhai' with a proper-name value,
     // we canonicalize the key but still validate the value separately.
-    'brother', 'bhai',
+    'brother', 'bhai', 'brother_real_name',
+  ],
+  brother_nickname: [
+    'brothers_nickname', 'brother_nick_name', 'bhai_ka_nickname', 'bhaiya_ka_nickname',
   ],
   // ── Work: company ───────────────────────────────────────────────────────────
   company_name: [

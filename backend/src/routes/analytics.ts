@@ -1,10 +1,24 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { SourceAuthority } from '../types/memory';
 
 export const analyticsRouter = Router();
 
-// GET /analytics/memories
+const AUTHORITY_RANK: Record<SourceAuthority, number> = {
+  subconscious_inference: 1,
+  confirmed_memory:       2,
+  deterministic:          3,
+  explicit_user:          4,
+  needs_review:           0,
+};
+
+function authorityRank(a?: string | null): number {
+  return AUTHORITY_RANK[(a ?? 'subconscious_inference') as SourceAuthority] ?? 1;
+}
+
+// GET /analytics/memories — active canonical memories for UI
 analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -13,37 +27,63 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       return;
     }
 
-    // 1. Total memories
-    const { count, error: countError } = await supabaseAdmin
-      .from('memories')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId);
-
-    if (countError) throw countError;
-
-    // 2. Categories breakdown
-    // In a production app, we'd use a view or RPC for GROUP BY, but we can aggregate here for MVP
+    // 1. Fetch all active, non-archived memories
     const { data: allMemories, error: memoriesError } = await supabaseAdmin
       .from('memories')
-      .select('id, memory_type, created_at, key, value, importance')
+      .select('id, memory_type, created_at, updated_at, key, value, importance, is_archived, source_authority')
       .eq('user_id', userId)
+      .eq('is_archived', false)
       .order('created_at', { ascending: false });
 
     if (memoriesError) throw memoriesError;
 
-    const categories = (allMemories || []).reduce((acc: any, mem: any) => {
+    // 2. Canonicalize aliases and deduplicate semantic concepts
+    // Group by canonical key and keep the single active canonical record with highest authority / latest timestamp
+    const canonicalMap = new Map<string, any>();
+    for (const mem of (allMemories || [])) {
+      const { canonical } = canonicalizeKey(mem.key || '');
+      const normalizedMem = { ...mem, key: canonical };
+
+      if (!canonicalMap.has(canonical)) {
+        canonicalMap.set(canonical, normalizedMem);
+      } else {
+        const existing = canonicalMap.get(canonical)!;
+        const existingRank = authorityRank(existing.source_authority);
+        const currentRank = authorityRank(mem.source_authority);
+        if (currentRank > existingRank) {
+          canonicalMap.set(canonical, normalizedMem);
+        } else if (currentRank === existingRank) {
+          const existingTime = new Date(existing.updated_at || existing.created_at).getTime();
+          const currentTime = new Date(mem.updated_at || mem.created_at).getTime();
+          if (currentTime > existingTime) {
+            canonicalMap.set(canonical, normalizedMem);
+          }
+        }
+      }
+    }
+
+    const uniqueCanonicalMemories = Array.from(canonicalMap.values());
+
+    // 3. Categories breakdown based on active canonical concepts
+    const categories = uniqueCanonicalMemories.reduce((acc: any, mem: any) => {
       const type = mem.memory_type || 'uncategorized';
       acc[type] = (acc[type] || 0) + 1;
       return acc;
     }, {});
 
-    // 3. Recent memories
-    const recent = (allMemories || []).slice(0, 10);
+    // 4. Recent memories (sorted by updated_at / created_at desc)
+    uniqueCanonicalMemories.sort((a, b) => {
+      const tA = new Date(a.updated_at || a.created_at).getTime();
+      const tB = new Date(b.updated_at || b.created_at).getTime();
+      return tB - tA;
+    });
+
+    const recent = uniqueCanonicalMemories.slice(0, 10);
 
     res.status(200).json({
       success: true,
       data: {
-        totalMemories: count || 0,
+        totalMemories: uniqueCanonicalMemories.length,
         categories,
         recentMemories: recent
       }

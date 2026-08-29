@@ -3,7 +3,16 @@ import { MemoryType } from '../types/memory';
 import { logger } from '../lib/logger';
 
 function getMemoryTypeForKey(key: string): MemoryType {
-  if (['mother_name', 'father_name', 'wife_name', 'husband_name', 'sister_name', 'brother_name'].includes(key)) {
+  if ([
+    'mother_name', 'mother_nickname',
+    'father_name', 'father_nickname',
+    'wife_name', 'wife_nickname',
+    'husband_name', 'husband_nickname',
+    'son_name', 'son_nickname',
+    'daughter_name', 'daughter_nickname',
+    'sister_name', 'sister_nickname',
+    'brother_name', 'brother_nickname'
+  ].includes(key)) {
     return 'family';
   }
   if (['company_name', 'job_title', 'workplace', 'profession'].includes(key)) {

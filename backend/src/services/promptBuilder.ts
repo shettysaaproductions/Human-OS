@@ -374,6 +374,27 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
       const critical = memories.filter(m => CRITICAL_TYPES.includes(m.memory_type));
       const others = memories.filter(m => !CRITICAL_TYPES.includes(m.memory_type));
 
+      // Group relationship name + nickname pairs for family members
+      const handledFamilyKeys = new Set<string>();
+      const familyEntityLines: string[] = [];
+
+      const RELATIONS = ['son', 'daughter', 'wife', 'husband', 'mother', 'father', 'sister', 'brother'];
+      for (const rel of RELATIONS) {
+        const nameKey = `${rel}_name`;
+        const nickKey = `${rel}_nickname`;
+
+        const nameMem = memories.find(m => m.key === nameKey);
+        const nickMem = memories.find(m => m.key === nickKey);
+
+        if (nameMem && nickMem) {
+          handledFamilyKeys.add(nameKey);
+          handledFamilyKeys.add(nickKey);
+          const nameVal = (nameMem.value || '').trim();
+          const nickVal = (nickMem.value || '').trim();
+          familyEntityLines.push(`- [FAMILY] User's ${rel}: name: ${nameVal}, nickname: ${nickVal} (both "${nameVal}" and "${nickVal}" refer to the user's ${rel}) (IMPORTANT)`);
+        }
+      }
+
       const formatMemory = (mem: Memory) => {
         const text = (mem.value || (mem as any).content || '').trim();
         const body = text ? `: ${text}` : '';
@@ -381,18 +402,25 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
         return `- [${mem.memory_type.toUpperCase()}] ${mem.key.replace(/_/g, ' ')}${body}${importance}`;
       };
 
-      if (critical.length > 0) {
+      if (critical.length > 0 || familyEntityLines.length > 0) {
         finalPrompt += `\n\n### 🔴 CRITICAL LIFE FACTS — ZERO TOLERANCE FOR FORGETTING
 These are non-negotiable facts about the user's real life. You MUST remember them in EVERY reply where they are relevant, and NEVER contradict or forget them:`;
+        for (const line of familyEntityLines) {
+          finalPrompt += `\n${line}`;
+        }
         for (const mem of critical) {
-          finalPrompt += `\n${formatMemory(mem)}`;
+          if (!handledFamilyKeys.has(mem.key)) {
+            finalPrompt += `\n${formatMemory(mem)}`;
+          }
         }
       }
 
       if (others.length > 0) {
-        if (critical.length > 0) finalPrompt += `\n\nOther long-term memories:`;
+        if (critical.length > 0 || familyEntityLines.length > 0) finalPrompt += `\n\nOther long-term memories:`;
         for (const mem of others) {
-          finalPrompt += `\n${formatMemory(mem)}`;
+          if (!handledFamilyKeys.has(mem.key)) {
+            finalPrompt += `\n${formatMemory(mem)}`;
+          }
         }
       }
     }

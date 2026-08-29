@@ -65,8 +65,8 @@ export interface TurnContext {
   memories?: Array<{ key?: string; value?: string; memory_type?: string }>;
 }
 
-const FEMININE_RELATIONS = ['mother_name', 'sister_name', 'wife_name', 'daughter_name', 'grandmother_name'];
-const MASCULINE_RELATIONS = ['father_name', 'brother_name', 'husband_name', 'son_name', 'grandfather_name'];
+const FEMININE_RELATIONS = ['mother_name', 'mother_nickname', 'sister_name', 'sister_nickname', 'wife_name', 'wife_nickname', 'daughter_name', 'daughter_nickname', 'grandmother_name'];
+const MASCULINE_RELATIONS = ['father_name', 'father_nickname', 'brother_name', 'brother_nickname', 'husband_name', 'husband_nickname', 'son_name', 'son_nickname', 'grandfather_name'];
 const ALL_PERSON_RELATIONS = [...FEMININE_RELATIONS, ...MASCULINE_RELATIONS];
 
 export class TurnAnalyzer {
@@ -138,12 +138,16 @@ export class TurnAnalyzer {
             let oldValue: string | undefined;
             let relationship: string | undefined;
 
-            if (factKey === 'UNKNOWN_RELATION') {
+            let unitType: SemanticUnitType = 'fact';
+            if (factKey === 'UNKNOWN_RELATION' || factKey === 'UNKNOWN_REAL_NAME' || factKey === 'UNKNOWN_NICKNAME') {
               const antecedent = this.resolveAntecedent(clause, units, context);
               if (antecedent) {
                 factKey = antecedent.factKey;
                 oldValue = antecedent.oldValue;
                 relationship = antecedent.relationship;
+                if (antecedent.isCorrection) {
+                  unitType = 'correction';
+                }
               }
             }
 
@@ -151,10 +155,10 @@ export class TurnAnalyzer {
               unitId: crypto.randomUUID(),
               sourceMessageId,
               order: i === 0 ? order : ++order,
-              type: 'fact',
+              type: unitType,
               text: fact.text,
-              importance: fact.isProtected ? 9 : 8,
-              responseRequired: false,
+              importance: fact.isProtected ? 9 : (unitType === 'correction' ? 9 : 8),
+              responseRequired: unitType === 'correction',
               acknowledgementPreferred: true,
               memoryCandidate: true,
               actionCandidate: false,
@@ -334,9 +338,12 @@ export class TurnAnalyzer {
     const result: string[] = [];
 
     for (const p of primary) {
-      // If the sentence contains multiple distinct fact clauses separated by commas / 'and'
-      if (p.includes(',') || /\band\b/i.test(p)) {
-        const parts = p.split(/,\s*(?:and\s+)?|\s+and\s+/i).map(s => s.trim()).filter(Boolean);
+      // If the sentence contains multiple distinct fact clauses separated by commas, 'and', 'aur', or boundary words like 'pyar se', 'nickname', 'actually'
+      const hasConjunction = p.includes(',') || /\b(and|aur)\b/i.test(p) || /(?<=\b(?:hai|is|tha|thi|named))\s+(?=pyar\s+se\b|nick\s*name\b|actual\b|real\s+name\b|naam\b)/i.test(p);
+      if (hasConjunction) {
+        const parts = p.split(/,\s*(?:and\s+|aur\s+)?|\s+(?:and|aur)\s+|(?<=\b(?:hai|is|tha|thi|named))\s+(?=pyar\s+se\b|nick\s*name\b|actual\b|real\s+name\b)/i)
+          .map(s => s.trim())
+          .filter(Boolean);
         if (parts.length > 1 && parts.some(part => this.extractFacts(part).length > 0)) {
           result.push(...parts);
           continue;
@@ -351,30 +358,58 @@ export class TurnAnalyzer {
     clause: string,
     unitsSoFar: SemanticUnit[],
     context?: TurnContext
-  ): { factKey: string; oldValue?: string; relationship: string } | null {
+  ): { factKey: string; oldValue?: string; relationship: string; isCorrection?: boolean } | null {
     const lower = clause.toLowerCase();
     
-    const isFem = /\b(she|her|hers|uski|iski)\b/i.test(lower);
-    const isMasc = /\b(he|him|his|uske|iska)\b/i.test(lower);
-    const isNeutral = /\b(they|them|their|unka|unki|woh|uska)\b/i.test(lower);
-    const isGenericCorrection = /\b(actually|instead|correction:?|galat|nahi yaar)\b/i.test(lower);
+    const isFem = /\b(she|her|hers|uski|iski|didi|behen|beti|biwi|patni|maa|mummy|daughter|sister|wife|mother)\b/i.test(lower);
+    const isMasc = /\b(he|him|his|uske|iska|bhai|bhaiya|beta|bete|pati|shauhar|papa|dad|son|brother|husband|father)\b/i.test(lower);
+    const isNeutral = /\b(they|them|their|unka|unki|woh|uska|child|baccha|bacha|person)\b/i.test(lower);
+    const isGenericCorrection = /\b(actually|instead|correction:?|galat|nahi yaar|i mean|mean|real name|actual name|asli naam)\b/i.test(lower);
+    const isNicknameIntent = /\b(nick\s*name|nickname|pyar\s+se|pyar\s+ka\s+naam)\b/i.test(lower);
+    const isRealNameIntent = /\b(real\s+name|actual\s+name|formal\s+name|asli\s+naam)\b/i.test(lower);
 
-    if (!isFem && !isMasc && !isNeutral && !isGenericCorrection) {
+    if (!isFem && !isMasc && !isNeutral && !isGenericCorrection && !isNicknameIntent && !isRealNameIntent) {
       return null;
     }
+
+    const mapKeyForIntent = (baseKey: string, baseVal?: string, rel?: string) => {
+      const relationship = rel || baseKey.replace(/_(name|nickname)$/g, '');
+      if (isNicknameIntent) {
+        return {
+          factKey: `${relationship}_nickname`,
+          oldValue: undefined,
+          relationship,
+          isCorrection: false
+        };
+      }
+      if (isRealNameIntent) {
+        return {
+          factKey: `${relationship}_name`,
+          oldValue: baseVal,
+          relationship,
+          isCorrection: true
+        };
+      }
+      return {
+        factKey: baseKey,
+        oldValue: baseVal,
+        relationship,
+        isCorrection: isGenericCorrection
+      };
+    };
 
     // 1. Search backwards in current turn's already processed units
     for (let i = unitsSoFar.length - 1; i >= 0; i--) {
       const u = unitsSoFar[i];
       if (u.factKey && ALL_PERSON_RELATIONS.includes(u.factKey)) {
         if (isFem && FEMININE_RELATIONS.includes(u.factKey)) {
-          return { factKey: u.factKey, oldValue: u.factValue, relationship: u.factKey.replace(/_name/g, '') };
+          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
         }
         if (isMasc && MASCULINE_RELATIONS.includes(u.factKey)) {
-          return { factKey: u.factKey, oldValue: u.factValue, relationship: u.factKey.replace(/_name/g, '') };
+          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
         }
-        if ((isNeutral || (!isFem && !isMasc)) && ALL_PERSON_RELATIONS.includes(u.factKey)) {
-          return { factKey: u.factKey, oldValue: u.factValue, relationship: u.factKey.replace(/_name/g, '') };
+        if ((isNeutral || (!isFem && !isMasc) || isGenericCorrection || isNicknameIntent || isRealNameIntent) && ALL_PERSON_RELATIONS.includes(u.factKey)) {
+          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
         }
       }
     }
@@ -390,21 +425,36 @@ export class TurnAnalyzer {
         for (const f of facts) {
           if (f.key && ALL_PERSON_RELATIONS.includes(f.key)) {
             if (isFem && FEMININE_RELATIONS.includes(f.key)) {
-              return { factKey: f.key, oldValue: f.value, relationship: f.key.replace(/_name/g, '') };
+              return mapKeyForIntent(f.key, f.value, f.key.replace(/_(name|nickname)$/g, ''));
             }
             if (isMasc && MASCULINE_RELATIONS.includes(f.key)) {
-              return { factKey: f.key, oldValue: f.value, relationship: f.key.replace(/_name/g, '') };
+              return mapKeyForIntent(f.key, f.value, f.key.replace(/_(name|nickname)$/g, ''));
             }
-            if ((isNeutral || (!isFem && !isMasc)) && ALL_PERSON_RELATIONS.includes(f.key)) {
-              return { factKey: f.key, oldValue: f.value, relationship: f.key.replace(/_name/g, '') };
+            if ((isNeutral || (!isFem && !isMasc) || isGenericCorrection || isNicknameIntent || isRealNameIntent) && ALL_PERSON_RELATIONS.includes(f.key)) {
+              return mapKeyForIntent(f.key, f.value, f.key.replace(/_(name|nickname)$/g, ''));
             }
           }
         }
       }
     }
 
-    // Note: Do NOT search long-term memories for conversational pronouns (her/him/she/he).
-    // An antecedent must be established in the active conversation turn or recent messages.
+    // 3. Check context.memories ONLY for explicit nickname / real-name clarifications
+    if ((isNicknameIntent || isRealNameIntent) && context?.memories && Array.isArray(context.memories)) {
+      for (const m of context.memories) {
+        if (m.key && ALL_PERSON_RELATIONS.includes(m.key)) {
+          if (isFem && FEMININE_RELATIONS.includes(m.key)) {
+            return mapKeyForIntent(m.key, m.value, m.key.replace(/_(name|nickname)$/g, ''));
+          }
+          if (isMasc && MASCULINE_RELATIONS.includes(m.key)) {
+            return mapKeyForIntent(m.key, m.value, m.key.replace(/_(name|nickname)$/g, ''));
+          }
+          if (ALL_PERSON_RELATIONS.includes(m.key)) {
+            return mapKeyForIntent(m.key, m.value, m.key.replace(/_(name|nickname)$/g, ''));
+          }
+        }
+      }
+    }
+
     return null;
   }
 
@@ -419,49 +469,120 @@ export class TurnAnalyzer {
       ? 'TRANSIENT_FACT'
       : 'HIGH_CONFIDENCE_DURABLE_FACT';
 
+    // ── Family Relationships: Real/Formal Names & Direct Nicknames ───────────
+
+    // Mother nickname
+    let m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) facts.push({ key: 'mother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+
     // Mother name
-    let m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) {
-      facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
-    } else {
-      m = lower.match(/\b(?:my|meri)\s+(?:mummy|mom|mother|maa)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (facts.every(f => f.key !== 'mother_nickname')) {
+      m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) {
+        facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      } else {
+        m = lower.match(/\b(?:my|meri)\s+(?:mummy|mom|mother|maa)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
+
+    // Father nickname
+    m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) facts.push({ key: 'father_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Father name
-    m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) {
-      facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
-    } else {
-      m = lower.match(/\b(?:my|mere)\s+(?:papa|dad|father|pita)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (facts.every(f => f.key !== 'father_nickname')) {
+      m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) {
+        facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      } else {
+        m = lower.match(/\b(?:my|mere)\s+(?:papa|dad|father|pita)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
 
-    // Wife name — covers both "meri wife ka naam Sakshi hai" and "my wife is Sakshi"
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    // Wife nickname
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) facts.push({ key: 'wife_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+
+    // Wife name
+    if (facts.every(f => f.key !== 'wife_nickname')) {
+      m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Husband nickname
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) facts.push({ key: 'husband_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Husband name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (facts.every(f => f.key !== 'husband_nickname')) {
+      m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Sister nickname
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister|didi)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) facts.push({ key: 'sister_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Sister name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
-        lower.match(/\b(?:meri|mere|my)\s+(?:behen|sister)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
-    if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (facts.every(f => f.key !== 'sister_nickname')) {
+      m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+          lower.match(/\b(?:meri|mere|my)\s+(?:behen|sister)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
+      if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Brother nickname
+    m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother|bhaiya)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m) facts.push({ key: 'brother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Brother name
-    m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
-        lower.match(/\b(?:mera|mere|my)\s+(?:bhai|brother)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
-    if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (facts.every(f => f.key !== 'brother_nickname')) {
+      m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+          lower.match(/\b(?:mera|mere|my)\s+(?:bhai|brother)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
+      if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
 
-    // Son name — covers "mere bete ka naam Shresht hai" and "my son is Shresht"
-    m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'son_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    // Son nickname
+    m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+        lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)\s+ko\s+pyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulate|bulati|rakha|bolte|hai)\b/i);
+    if (m) facts.push({ key: 'son_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+
+    // Son name
+    if (facts.every(f => f.key !== 'son_nickname')) {
+      m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'son_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Daughter nickname
+    m = lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+        lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)\s+ko\s+pyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulate|bulati|rakha|bolte|hai)\b/i);
+    if (m) facts.push({ key: 'daughter_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
     // Daughter name
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'daughter_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (facts.every(f => f.key !== 'daughter_nickname')) {
+      m = lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'daughter_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Generic Nickname (requires antecedent resolution)
+    m = lower.match(/\b(?:pyar\s+se\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|rakha\s+hai\s+|to\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+rakha|\s+hai|\s+is|[.,;!]|$)/i) ||
+        lower.match(/\bpyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulata|bulate|bulati|bolte|rakha|rakhi)\b/i);
+    if (m && facts.every(f => !f.key.endsWith('_nickname'))) {
+      const cleanNick = this.cleanValue(m[1]);
+      if (!this.isStopPronoun(cleanNick)) {
+        facts.push({ key: 'UNKNOWN_NICKNAME', value: cleanNick, text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // Generic Real / Formal Name (requires antecedent resolution)
+    m = lower.match(/\b(?:real\s+name|actual\s+name|formal\s+name|asli\s+naam)\s+(?:is\s+|hai\s+|to\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (m && facts.every(f => !f.key.endsWith('_name'))) {
+      const cleanReal = this.cleanValue(m[1]);
+      if (!this.isStopPronoun(cleanReal)) {
+        facts.push({ key: 'UNKNOWN_REAL_NAME', value: cleanReal, text, isProtected: isExplicitRemember, factClass });
+      }
+    }
 
     // Company / Job
     m = lower.match(/\b(?:started|founded|created|built)\s+(?:a\s+)?(?:company|startup|agency|firm|business)(?:\s+(?:called|named))?\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);

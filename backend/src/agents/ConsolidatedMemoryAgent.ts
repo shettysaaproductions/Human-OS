@@ -28,11 +28,35 @@ const GENERIC_ENTITY_VALUES_AGENT = new Set([
  * Removes generic entity values and vocative misclassifications.
  */
 function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
+  const lowerSrc = sourceMessage.toLowerCase();
+  
+  // Detect family relation in source message for mapping unscoped keys
+  let detectedRelation: string | null = null;
+  if (/\b(beta|bete|son|child|bacha|baccha)\b/i.test(lowerSrc)) detectedRelation = 'son';
+  else if (/\b(beti|daughter)\b/i.test(lowerSrc)) detectedRelation = 'daughter';
+  else if (/\b(wife|biwi|patni)\b/i.test(lowerSrc)) detectedRelation = 'wife';
+  else if (/\b(husband|pati|shauhar)\b/i.test(lowerSrc)) detectedRelation = 'husband';
+  else if (/\b(mom|mother|maa|mummy|mata)\b/i.test(lowerSrc)) detectedRelation = 'mother';
+  else if (/\b(dad|father|papa|pita)\b/i.test(lowerSrc)) detectedRelation = 'father';
+  else if (/\b(sister|behen|didi)\b/i.test(lowerSrc)) detectedRelation = 'sister';
+  else if (/\b(brother|bhai|bhaiya)\b/i.test(lowerSrc)) detectedRelation = 'brother';
+
   return memories
     .map(mem => {
+      let key = (mem.key ?? '').toLowerCase().trim();
+
+      // Map unscoped real_name / nickname to relation-scoped canonical keys
+      if (detectedRelation) {
+        if (key === 'real_name' || key === 'formal_name' || key === 'actual_name') {
+          key = `${detectedRelation}_name`;
+        } else if (key === 'nickname' || key === 'nick_name' || key === 'pyar_ka_naam') {
+          key = `${detectedRelation}_nickname`;
+        }
+      }
+
       // Agent-level key normalization (defense-in-depth before memoryRepository)
-      const { canonical, wasAliased } = canonicalizeKey(mem.key ?? '');
-      if (wasAliased) {
+      const { canonical, wasAliased } = canonicalizeKey(key);
+      if (wasAliased || key !== (mem.key ?? '')) {
         logger.info('[ConsolidatedMemoryAgent] Key normalized at agent level', { original: mem.key, canonical });
         return { ...mem, key: canonical };
       }
@@ -42,6 +66,12 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
       if (!mem.shouldPersist) return false;
       const key: string = mem.key ?? '';
       const value: string = (mem.value ?? '').trim();
+
+      // Block unscoped generic real_name / nickname without relationship context
+      if ((key === 'real_name' || key === 'nickname' || key === 'nick_name') && !detectedRelation) {
+        logger.info('[ConsolidatedMemoryAgent] BLOCKED unscoped generic name/nickname key', { key, value });
+        return false;
+      }
 
       // ── BUG-01: Generic entity blocklist ───────────────────────────────────
       if (key.endsWith('_name') && GENERIC_ENTITY_VALUES_AGENT.has(value.toLowerCase())) {
@@ -54,7 +84,6 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
       // kinship-statement pattern (e.g. "mera bhai", "brother ka naam")
       const isBrotherKey = key === 'brother_name' || key === 'bhai_name' || key === 'brother';
       if (isBrotherKey) {
-        const lowerSrc = sourceMessage.toLowerCase();
         const hasKinshipPattern = KINSHIP_PATTERNS.test(lowerSrc);
         const hasVocativeOnly = HINGLISH_VOCATIVES.has(value.toLowerCase()) && !hasKinshipPattern;
         if (hasVocativeOnly) {
@@ -185,18 +214,19 @@ CRITICAL:
 
 CANONICAL KEY SCHEMA (MANDATORY — USE THESE EXACT KEYS):
 Do NOT invent aliases, plurals, or possessive variants. Use ONLY canonical keys:
-  wife_name      ← NOT wives_name, wife, biwi
-  mother_name    ← NOT mothers_name, mom_name, maa_name, mom, maa
-  father_name    ← NOT fathers_name, dad_name, papa
-  son_name       ← NOT sons_name, beta, son
-  daughter_name  ← NOT daughters_name, beti, daughter
-  sister_name    ← NOT sisters_name, sister, behen
-  brother_name   ← NOT brothers_name, bhai_name (and NEVER 'bhai' alone as a key)
-  husband_name   ← NOT husbands_name, pati
+  wife_name / wife_nickname
+  mother_name / mother_nickname
+  father_name / father_nickname
+  son_name / son_nickname          ← use son_name for real/formal name and son_nickname for nickname
+  daughter_name / daughter_nickname
+  sister_name / sister_nickname
+  brother_name / brother_nickname   ← NEVER 'bhai' alone as a key
+  husband_name / husband_nickname
   company_name   ← NOT business_name, business, company, startup_name
   birth_date     ← NOT birthday, dob, bday, child_birthdate
   marriage_date  ← NOT wedding_date, anniversary
   preferred_name ← NOT name, user_name, my_name
+RULE FOR NICKNAMES: NEVER output generic unscoped "real_name" or "nickname". For family members, ALWAYS use <relation>_name for the real name and <relation>_nickname for the nickname.
 For any other concept, use descriptive snake_case that clearly expresses the concept.
 
 ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):

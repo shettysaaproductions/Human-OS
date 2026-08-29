@@ -377,8 +377,8 @@ export class CognitiveContextService {
       recentMessages = recentMessages.slice(-maxRecentMessages);
     }
 
-    // Extract pronoun / entity antecedents from recent turns
-    const activeAntecedents = this.extractConversationalAntecedents(recentMessages, effectiveMessage);
+    // Extract pronoun / entity antecedents from recent turns and long-term memory
+    const activeAntecedents = this.extractConversationalAntecedents(recentMessages, effectiveMessage, (memoriesRes.data as any[]) || []);
 
     // ── 4. Turn Analysis (TurnAnalyzer integration) ─────────────────────────
     let turnAnalysis: TurnAnalysisResult | undefined;
@@ -738,12 +738,13 @@ export class CognitiveContextService {
    */
   private extractConversationalAntecedents(
     recentMessages: { role: string; content: string }[],
-    effectiveMessage: string
+    effectiveMessage: string,
+    rawMemories: any[] = []
   ): AntecedentEntity[] {
     const antecedents: AntecedentEntity[] = [];
     const allRecentText = recentMessages.map(m => m.content).concat([effectiveMessage]).join('\n');
 
-    // Patterns for entity introduction
+    // 1. Patterns for direct conversational entity introduction
     const patterns = [
       { regex: /(?:my\s+)?(sister|didi|behen)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'sister', gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
       { regex: /(?:my\s+)?(brother|bhai|bhaiya)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'brother', gender: 'masculine' as const, pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
@@ -766,6 +767,45 @@ export class CognitiveContextService {
             pronounCandidates: p.pronouns,
             sourceMessage: match[0]
           });
+        }
+      }
+    }
+
+    // 2. Match known family member formal names and nicknames from memories
+    if (rawMemories && rawMemories.length > 0 && effectiveMessage) {
+      const lowerEffective = effectiveMessage.toLowerCase();
+      const familyMeta: Record<string, { relation: string; gender: 'masculine' | 'feminine' | 'neutral'; pronouns: string[] }> = {
+        son: { relation: 'son', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+        daughter: { relation: 'daughter', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
+        wife: { relation: 'wife', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
+        husband: { relation: 'husband', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+        mother: { relation: 'mother', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
+        father: { relation: 'father', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+        sister: { relation: 'sister', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
+        brother: { relation: 'brother', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+      };
+
+      for (const [rel, meta] of Object.entries(familyMeta)) {
+        const nameMem = rawMemories.find(m => !m.is_archived && (m.key === `${rel}_name` || m.key === `${rel}_real_name`));
+        const nickMem = rawMemories.find(m => !m.is_archived && (m.key === `${rel}_nickname` || m.key === `${rel}_nick_name`));
+
+        const nameVal = nameMem?.value?.trim();
+        const nickVal = nickMem?.value?.trim();
+
+        const matchesName = nameVal && nameVal.length > 1 && new RegExp(`\\b${nameVal}\\b`, 'i').test(lowerEffective);
+        const matchesNick = nickVal && nickVal.length > 1 && new RegExp(`\\b${nickVal}\\b`, 'i').test(lowerEffective);
+
+        if (matchesName || matchesNick) {
+          const displayEntity = nameVal && nickVal ? `${nameVal} (${nickVal})` : (nameVal || nickVal || rel);
+          if (!antecedents.some(a => a.relation === meta.relation)) {
+            antecedents.push({
+              entity: displayEntity,
+              relation: meta.relation,
+              gender: meta.gender,
+              pronounCandidates: meta.pronouns,
+              sourceMessage: effectiveMessage
+            });
+          }
         }
       }
     }
