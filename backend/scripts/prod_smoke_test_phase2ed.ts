@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from '../src/lib/supabase';
 import { semanticCompressionService } from '../src/services/SemanticCompressionService';
+import { cognitiveContextService } from '../src/services/CognitiveContextService';
 import { MemoryPromotionCandidate } from '../src/types/memory';
 
 async function runPhase2edSmokeTest() {
@@ -137,6 +138,21 @@ async function runPhase2edSmokeTest() {
     } else {
       throw new Error(`INVARIANT VIOLATED: Scenario E was not rejected (status=${resE.status})`);
     }
+
+    // ── 3. VERIFY TRUST BOUNDARY: PROPOSED MEMORY EXCLUDED FROM NOVA CONTEXT ──
+    console.log('\n--- VERIFYING TRUST BOUNDARY: COGNITIVE CONTEXT RETRIEVAL ---');
+    const ctx = await cognitiveContextService.assembleContext(testUserId, {
+      message: 'Tell me about my career and food preferences',
+    });
+
+    const activeFactKeys = ctx.memories.durableFacts.map(f => f.key);
+    console.log(`• Total Durable Facts retrieved in context: ${activeFactKeys.length}`);
+    console.log(`• Proposed key 'career_chronology' in durableFacts? ${activeFactKeys.includes('career_chronology') ? 'YES ❌' : 'NO ✅'}`);
+
+    if (activeFactKeys.includes('career_chronology')) {
+      throw new Error('TRUST BOUNDARY VIOLATED: Proposed compressed memory entered normal durable context!');
+    }
+    console.log('✅ PASS: Proposed compressed memory is STRICTLY EXCLUDED from normal Nova context.');
 
     // ── 3. VERIFY SOURCE DATA WAS NEVER DELETED ─────────────────────────────
     console.log('\n--- VERIFYING SOURCE PRESERVATION INVARIANTS ---');

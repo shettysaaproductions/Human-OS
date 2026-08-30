@@ -142,13 +142,13 @@ describe('Phase 2E-D: SemanticCompressionService', () => {
     expect(result.proposal?.source_authority).toBe('subconscious_inference');
     expect(result.proposal?.archive_candidate).toBe(true);
 
-    // Verify written through memoryRepository
+    // Verify written through memoryRepository with compression_status: 'proposed'
     expect(memoryRepository.upsertMemory).toHaveBeenCalledWith(
       userId,
       expect.objectContaining({
         key: 'work_history',
         source_authority: 'subconscious_inference',
-        compression_status: 'compressed',
+        compression_status: 'proposed',
       }),
       expect.any(String)
     );
@@ -464,5 +464,48 @@ describe('Phase 2E-D: SemanticCompressionService', () => {
     const updated = service.getProposals(userId);
     expect(updated[0].status).toBe('invalidated');
     expect(updated[0].invalidated_reason).toContain('Disproven');
+  });
+
+  // 29. Explicit promotion transitions proposed memory to trusted
+  test('29. Explicit promotion transitions proposed memory to trusted state in DB and proposal store', async () => {
+    const mockUpdate = jest.fn().mockReturnValue(createChainableMock());
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'memories') {
+        const chain = createChainableMock({
+          data: {
+            id: 'mem-to-promote',
+            user_id: userId,
+            key: 'work_history',
+            value: 'Promoted fact',
+            compression_status: 'proposed',
+          },
+        });
+        chain.update = mockUpdate;
+        return chain;
+      }
+      return createChainableMock();
+    });
+
+    (service as any).proposalStore.set(userId, [
+      {
+        proposal_id: 'prop-promote-1',
+        user_id: userId,
+        key: 'work_history',
+        value: 'Promoted fact',
+        written_memory_id: 'mem-to-promote',
+        status: 'proposed',
+      },
+    ]);
+
+    const success = await service.promoteProposalToTrusted(userId, 'prop-promote-1');
+
+    expect(success).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compression_status: 'trusted',
+      })
+    );
+    const updated = service.getProposals(userId);
+    expect(updated[0].status).toBe('verified');
   });
 });

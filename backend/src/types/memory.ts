@@ -139,7 +139,7 @@ export type CognitiveCategory = 'EVENT' | 'FACT' | 'PREFERENCE' | 'GOAL' | 'IDEN
 
 export type CognitiveLifecycleState = 'COGNITIVE_RAM' | 'EPISODIC' | 'SEMANTIC' | 'ARCHIVED';
 
-export type LifecycleStatus = 'pending' | 'promoted' | 'compressed' | 'rejected';
+export type LifecycleStatus = 'pending' | 'promoted' | 'compressed' | 'proposed' | 'trusted' | 'rejected' | 'invalidated';
 
 export interface MemorySourceReference {
   type: 'turn' | 'episodic_memory' | 'working_memory' | 'memory';

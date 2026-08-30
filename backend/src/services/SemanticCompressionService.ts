@@ -551,7 +551,7 @@ Return JSON ONLY matching this schema:
       confidence: Math.min(draft.confidence, verification.confidence),
       source_authority: 'subconscious_inference' as SourceAuthority, // Strict non-impersonation
       source_references: draft.source_references,
-      compression_status: 'compressed',
+      compression_status: 'proposed', // Stored as PROPOSED, excluded from normal context until promoted
     };
 
     // Route write through authoritative MemoryRepository
@@ -592,7 +592,7 @@ Return JSON ONLY matching this schema:
       source_authority: readback.source_authority || 'subconscious_inference',
       source_references: draft.source_references,
       verification_result: verification,
-      status: 'verified',
+      status: 'proposed',
       written_memory_id: readback.id,
       archive_candidate: true, // Marker for Phase 2E-E proposal review, source is NOT deleted
       fingerprint: draft.fingerprint,
@@ -643,6 +643,51 @@ Return JSON ONLY matching this schema:
       reason,
     });
 
+    return true;
+  }
+
+  /**
+   * Explicit trust transition API (Phase 2E-E foundation).
+   * Promotes a verified proposal from 'proposed' to 'trusted'.
+   * Auto-trust promotion is DISABLED by default.
+   */
+  async promoteProposalToTrusted(userId: string, proposalId: string): Promise<boolean> {
+    const userProposals = this.proposalStore.get(userId) || [];
+    const target = userProposals.find(p => p.proposal_id === proposalId);
+    if (!target || (target.status !== 'proposed' && target.status !== 'verified') || !target.written_memory_id) {
+      return false;
+    }
+
+    const { data: currentMem } = await qt.track('verify_promotion_safety', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .select('id, key, value, compression_status')
+        .eq('id', target.written_memory_id)
+        .eq('user_id', userId)
+        .maybeSingle()
+    );
+
+    if (!currentMem || currentMem.compression_status !== 'proposed') {
+      logger.warn('[SemanticCompression] Cannot promote proposal: memory not in proposed state', {
+        userId,
+        proposalId,
+      });
+      return false;
+    }
+
+    await qt.track('promote_to_trusted', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .update({ compression_status: 'trusted', updated_at: new Date().toISOString() })
+        .eq('id', target.written_memory_id)
+    );
+
+    target.status = 'verified';
+    logger.info('[SemanticCompression] Explicitly promoted proposal to trusted memory', {
+      userId,
+      proposalId,
+      key: target.key,
+    });
     return true;
   }
 

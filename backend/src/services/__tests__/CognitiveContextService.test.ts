@@ -55,6 +55,7 @@ describe('CognitiveContextService', () => {
       memories: {
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
+        or: jest.fn().mockReturnThis(),
         order: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue({
           data: [
@@ -124,14 +125,16 @@ describe('CognitiveContextService', () => {
     };
 
     (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
-      if (overrides[table]) return overrides[table];
-      return defaultTables[table] || {
+      const base = defaultTables[table] || {
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
+        or: jest.fn().mockReturnThis(),
         order: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue({ data: [], error: null }),
         maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null })
       };
+      if (overrides[table]) return { ...base, ...overrides[table] };
+      return base;
     });
   }
 
@@ -292,5 +295,105 @@ describe('CognitiveContextService', () => {
     });
 
     expect(ctx.memories.durableFacts.length).toBeLessThanOrEqual(5);
+  });
+
+  test('G. Phase 2E-D Trust Boundary: Excludes proposed/rejected/invalidated memories and includes legacy NULL and trusted', async () => {
+    const mixedMemories = [
+      {
+        id: 'mem-legacy',
+        key: 'legacy_fact',
+        value: 'Legacy factual memory',
+        memory_type: 'personal',
+        importance: 85,
+        confidence: 0.9,
+        updated_at: new Date().toISOString(),
+        is_archived: false,
+        compression_status: null, // Legacy NULL -> TRUSTED
+      },
+      {
+        id: 'mem-trusted',
+        key: 'trusted_fact',
+        value: 'Explicitly verified and promoted fact',
+        memory_type: 'personal',
+        importance: 90,
+        confidence: 0.95,
+        updated_at: new Date().toISOString(),
+        is_archived: false,
+        compression_status: 'trusted', // Explicit 'trusted' -> TRUSTED
+      },
+      {
+        id: 'mem-proposed',
+        key: 'proposed_fact',
+        value: 'Unpromoted compressed proposal',
+        memory_type: 'personal',
+        importance: 80,
+        confidence: 0.85,
+        updated_at: new Date().toISOString(),
+        is_archived: false,
+        compression_status: 'proposed', // PROPOSED -> MUST BE EXCLUDED
+      },
+      {
+        id: 'mem-rejected',
+        key: 'rejected_fact',
+        value: 'Rejected compressed draft',
+        memory_type: 'personal',
+        importance: 70,
+        confidence: 0.5,
+        updated_at: new Date().toISOString(),
+        is_archived: false,
+        compression_status: 'rejected', // REJECTED -> MUST BE EXCLUDED
+      },
+      {
+        id: 'mem-invalidated',
+        key: 'invalidated_fact',
+        value: 'Invalidated proposal',
+        memory_type: 'personal',
+        importance: 75,
+        confidence: 0.6,
+        updated_at: new Date().toISOString(),
+        is_archived: false,
+        compression_status: 'invalidated', // INVALIDATED -> MUST BE EXCLUDED
+      },
+      {
+        id: 'mem-archived',
+        key: 'archived_fact',
+        value: 'Archived memory',
+        memory_type: 'personal',
+        importance: 80,
+        confidence: 0.9,
+        updated_at: new Date().toISOString(),
+        is_archived: true, // ARCHIVED -> MUST BE EXCLUDED
+        compression_status: null,
+      },
+    ];
+
+    setupMocks({
+      memories: {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        or: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue({ data: mixedMemories, error: null })
+      }
+    });
+
+    const ctx = await cognitiveContextService.assembleContext('user-123', {
+      message: 'Hello Nova'
+    });
+
+    const factKeys = ctx.memories.durableFacts.map(f => f.key);
+
+    // 1. Legacy NULL appears
+    expect(factKeys).toContain('legacy_fact');
+    // 2. Explicitly promoted 'trusted' appears
+    expect(factKeys).toContain('trusted_fact');
+    // 3. 'proposed' does NOT appear
+    expect(factKeys).not.toContain('proposed_fact');
+    // 4. 'rejected' does NOT appear
+    expect(factKeys).not.toContain('rejected_fact');
+    // 5. 'invalidated' does NOT appear
+    expect(factKeys).not.toContain('invalidated_fact');
+    // 6. 'is_archived: true' does NOT appear
+    expect(factKeys).not.toContain('archived_fact');
   });
 });

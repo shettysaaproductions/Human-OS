@@ -219,8 +219,24 @@ export class CognitiveContextService {
     });
 
     const memoriesPromise = qt.track('get_all_memories', 'memories', () =>
-      supabaseAdmin.from('memories').select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at').eq('user_id', userId).eq('is_archived', false).order('importance', { ascending: false }).limit(50)
-    ).catch(err => {
+      supabaseAdmin
+        .from('memories')
+        .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+        .or('compression_status.is.null,compression_status.eq.trusted')
+        .order('importance', { ascending: false })
+        .limit(50)
+    ).then((res: any) => {
+      // Defensive in-memory trust boundary filter
+      if (res && Array.isArray(res.data)) {
+        res.data = res.data.filter((m: any) =>
+          !m.is_archived &&
+          (m.compression_status === null || m.compression_status === undefined || m.compression_status === 'trusted')
+        );
+      }
+      return res;
+    }).catch(err => {
       logger.warn('[CognitiveContext] Memories fetch failed', { error: err.message });
       degradedSources.push('memories');
       return { data: [] };
