@@ -23,6 +23,8 @@ import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
 import { TurnAnalyzer } from '../services/TurnAnalyzer';
 import { cognitiveContextService } from '../services/CognitiveContextService';
+import { cognitiveDoubtService } from '../services/CognitiveDoubtService';
+import { doubtEligibilityEngine } from '../services/DoubtEligibilityEngine';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1273,13 +1275,56 @@ chatRouter.post(
         }
       }
 
+      // ── Phase 2B: Cognitive Doubt Subsystem ──────────────────────────────────
+      // 1. Detect knowledge gaps (e.g. family count gap)
+      try {
+        await cognitiveDoubtService.detectFamilyKnowledgeGap(userId, effectiveMessage, turnId);
+      } catch (gapErr: any) {
+        logger.debug('[Chat] detectFamilyKnowledgeGap non-fatal error', { error: gapErr?.message });
+      }
+
+      // 2. Resolution matching on incoming turn
+      try {
+        const resolution = await cognitiveDoubtService.checkResolutionOnUserTurn(userId, turnId, effectiveMessage);
+        if (resolution.matched) {
+          logger.info('[Chat] Cognitive doubt resolved by user turn', {
+            doubtId: resolution.doubtId,
+            category: resolution.category,
+            reason: resolution.reason,
+          });
+        }
+      } catch (resErr: any) {
+        logger.debug('[Chat] Doubt resolution check non-fatal error', { error: resErr?.message });
+      }
+
+      // 3. Doubt Eligibility & Context Injection (Max 1 doubt per turn)
+      let effectiveSituationBrief = situationBrief;
+      try {
+        const doubtDecision = await doubtEligibilityEngine.evaluateEligibility({
+          userId,
+          turnId,
+          currentMessageText: effectiveMessage,
+          isDistressed: situationBrief?.toLowerCase().includes('distress') || situationBrief?.toLowerCase().includes('stressed'),
+          isCloseEnded: effectiveMessage.trim().length <= 5 && ['ok', 'haan', 'theek', 'k', 'yes', 'no'].includes(effectiveMessage.toLowerCase().trim()),
+        });
+
+        if (doubtDecision.eligible && doubtDecision.supervisoryDirective) {
+          effectiveSituationBrief = (effectiveSituationBrief ? `${effectiveSituationBrief}\n\n` : '') + doubtDecision.supervisoryDirective;
+          if (doubtDecision.doubt) {
+            cognitiveDoubtService.markPresented(doubtDecision.doubt.id).catch(() => {});
+          }
+        }
+      } catch (eligErr: any) {
+        logger.debug('[Chat] Doubt eligibility non-fatal error', { error: eligErr?.message });
+      }
+
       const brainContext = {
         memories,
         workingMemories,
         profile,
         shortTermMemories,
         recentCrossSessionContext,
-        situationBrief,
+        situationBrief: effectiveSituationBrief,
         temporalContextBlock,
         remindersContext,
         recentMessages,
