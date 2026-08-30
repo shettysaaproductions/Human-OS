@@ -14,7 +14,7 @@ jest.mock('../../lib/supabase', () => {
     update: jest.fn().mockReturnThis(),
     delete: jest.fn().mockReturnThis(),
     single: jest.fn().mockResolvedValue({ data: { id: '123' }, error: null }),
-    maybeSingle: jest.fn().mockResolvedValue({ data: { id: '123' }, error: null }),
+    maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
     then: jest.fn((resolve) => resolve({ data: [], error: null })),
   };
   return { supabaseAdmin: mockQuery };
