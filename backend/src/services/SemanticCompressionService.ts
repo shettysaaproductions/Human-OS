@@ -496,10 +496,10 @@ Return JSON ONLY matching this schema:
   }> {
     // 1. Build bounded evidence packet & cross-user check
     const packet = await this.buildCompressionEvidencePacket(userId, candidate);
-    if (!packet) {
+    if (!packet || packet.hasMissingProvenance) {
       return {
         status: 'rejected',
-        reason: 'Failed to build evidence packet or cross-user reference detected',
+        reason: 'Failed to build evidence packet, missing source provenance, or cross-user reference detected',
       };
     }
 
