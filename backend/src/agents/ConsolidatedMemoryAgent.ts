@@ -292,14 +292,10 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
         
         // Phase 2E-B: Route subconscious semantic extractions to WorkingMemory as candidates
         // instead of writing directly to durable semantic memory.
-        const expires = new Date();
-        expires.setHours(expires.getHours() + 72); // 72 hours for candidate facts
-
         candidateInserts.push({
           user_id: userId,
           key: mem.key,
           value: mem.value,
-          expires_at: expires.toISOString(),
           promotion_status: 'CANDIDATE'
         });
       }
