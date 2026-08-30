@@ -2,20 +2,23 @@
  * CandidateSynthesisService.ts — Phase 2E-C Nightly Candidate Synthesis Engine
  *
  * ARCHITECTURAL INVARIANTS:
- * 1. DRY-RUN / CANDIDATE-ONLY: This service synthesizes potential promotion candidates.
- *    It MUST NOT promote anything into durable semantic memory (0 writes to `memories`).
- * 2. ZERO MODEL CALLS ON EMPTY BATCHES: If a user has 0 eligible working/episodic records,
+ * 1. DATABASE-BACKED RUN CLAIM: Exactly ONE logical nightly synthesis run per calendar day
+ *    (`candidate_synthesis:YYYY-MM-DD`). Multiple processes attempting the same run will see
+ *    ALREADY_RUNNING or ALREADY_COMPLETED and perform 0 LLM calls.
+ * 2. PRE-CALL USER BATCH CLAIMING: Within a nightly run, each user batch MUST be claimed
+ *    via distributed database lease (`candidate_synthesis_claims`) BEFORE any Gemini LLM call.
+ * 3. STRICT MODEL BUDGET: Max 1 Gemini call per user per logical nightly run across all processes.
+ * 4. DRY-RUN / CANDIDATE-ONLY: Synthesizes potential promotion candidates only.
+ *    MUST NOT promote anything into durable semantic memory (0 writes to `memories`).
+ * 5. ZERO MODEL CALLS ON EMPTY BATCHES: If a user has 0 eligible working/episodic records,
  *    skip LLM execution entirely.
- * 3. STRICT USER ISOLATION: Every batch is strictly bounded to ONE user. Never combine
- *    users or leak cross-user evidence.
- * 4. FREQUENCY != TRUTH: Repeated trivial events (e.g. eating pizza 5x) must NEVER
+ * 6. STRICT USER ISOLATION: Every batch is strictly bounded to ONE user.
+ * 7. FREQUENCY != TRUTH: Repeated trivial events (e.g. eating pizza 5x) must NEVER
  *    automatically become personality traits, preferences, or psychological claims.
- * 5. CANONICAL KEY NORMALIZATION: All candidate keys are normalized via `canonicalizeKey()`.
- * 6. DEDUPLICATION AGAINST CANONICAL MEMORY: Does not generate duplicate candidates for
- *    facts that are already canonical in semantic memory (e.g. `wife_name = Sakshi`).
- * 7. SOURCE CITATIONS: Every candidate must cite valid `working_memory` or `episodic_memory`
- *    source references present in the input evidence.
- * 8. NO SOURCE DELETION: Never deletes or archives source working/episodic records in this phase.
+ * 8. CANONICAL KEY NORMALIZATION: All candidate keys are normalized via `canonicalizeKey()`.
+ * 9. DEDUPLICATION AGAINST CANONICAL MEMORY: Does not generate duplicate candidates for
+ *    facts that are already canonical in semantic memory.
+ * 10. NO SOURCE DELETION: Never deletes or archives source working/episodic records.
  */
 
 import { supabaseAdmin } from '../lib/supabase';
@@ -40,6 +43,7 @@ export const CANDIDATE_SYNTHESIS_LIMITS = {
   MAX_INPUT_TOKENS: 1500,
   MAX_OUTPUT_TOKENS: 512,
   MAX_RETRIES: 2,
+  LEASE_DURATION_MINUTES: 5,
   CANDIDATE_TTL_DAYS: 7,
 } as const;
 
@@ -87,6 +91,19 @@ export interface CandidateSynthesisResult {
   candidatesDeduplicated: number;
   candidatesRejected: number;
   error?: string;
+  reason?: string;
+}
+
+export function getLogicalRunId(targetDate: Date = new Date()): string {
+  // Compute date string in IST timezone (Asia/Kolkata)
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const dateStr = formatter.format(targetDate);
+  return `candidate_synthesis:${dateStr}`;
 }
 
 export function getCanonicalKeyString(rawKey: string): string {
@@ -112,6 +129,241 @@ export class CandidateSynthesisService {
   // In-memory candidate storage with bounded user maps (Phase 2E-C holding buffer)
   private candidateStore: Map<string, MemoryPromotionCandidate[]> = new Map();
   private fingerprintStore: Set<string> = new Set();
+
+  /**
+   * Claims a logical nightly synthesis run in the database.
+   * Guarantees only ONE active or completed run per calendar day.
+   */
+  async claimNightlyRun(runId: string): Promise<{
+    claimed: boolean;
+    status: 'claimed' | 'already_running' | 'already_completed';
+  }> {
+    try {
+      const { data: existing } = await qt.track('check_nightly_run', 'candidate_synthesis_runs', () =>
+        supabaseAdmin
+          .from('candidate_synthesis_runs')
+          .select('id, status, started_at')
+          .eq('id', runId)
+          .maybeSingle()
+      );
+
+      if (!existing) {
+        // Attempt insert
+        const { error: insertErr } = await qt.track('insert_nightly_run', 'candidate_synthesis_runs', () =>
+          supabaseAdmin.from('candidate_synthesis_runs').insert({
+            id: runId,
+            status: 'running',
+            started_at: new Date().toISOString(),
+          })
+        );
+
+        if (!insertErr) {
+          return { claimed: true, status: 'claimed' };
+        }
+
+        // Conflict check
+        const { data: secondCheck } = await supabaseAdmin
+          .from('candidate_synthesis_runs')
+          .select('id, status, started_at')
+          .eq('id', runId)
+          .maybeSingle();
+
+        if (secondCheck?.status === 'completed') {
+          return { claimed: false, status: 'already_completed' };
+        }
+        return { claimed: false, status: 'already_running' };
+      }
+
+      if (existing.status === 'completed') {
+        return { claimed: false, status: 'already_completed' };
+      }
+
+      if (existing.status === 'running') {
+        // Stale run check (older than 2 hours)
+        const ageMs = Date.now() - new Date(existing.started_at).getTime();
+        if (ageMs > 2 * 60 * 60 * 1000) {
+          logger.warn('[CandidateSynthesis] Reclaiming stale nightly run (> 2h old)', { runId, ageMs });
+          return { claimed: true, status: 'claimed' };
+        }
+        return { claimed: false, status: 'already_running' };
+      }
+
+      // If failed previously, allow retry if > 30 minutes old
+      return { claimed: true, status: 'claimed' };
+    } catch (err) {
+      logger.error('[CandidateSynthesis] Error in claimNightlyRun, failing safely', { runId, err });
+      return { claimed: false, status: 'already_running' };
+    }
+  }
+
+  /**
+   * Acquires a database-backed distributed lease on a specific user before calling Gemini.
+   */
+  async claimUserBatch(
+    runId: string,
+    userId: string
+  ): Promise<{ claimed: boolean; reason?: string }> {
+    try {
+      const leaseUntil = new Date(
+        Date.now() + CANDIDATE_SYNTHESIS_LIMITS.LEASE_DURATION_MINUTES * 60 * 1000
+      ).toISOString();
+
+      // 1. Try initial atomic insert
+      const { data: inserted, error: insertErr } = await qt.track('insert_user_claim', 'candidate_synthesis_claims', () =>
+        supabaseAdmin
+          .from('candidate_synthesis_claims')
+          .insert({
+            run_id: runId,
+            user_id: userId,
+            status: 'claimed',
+            claimed_at: new Date().toISOString(),
+            lease_until: leaseUntil,
+            attempt_count: 1,
+            model_called: false,
+          })
+          .select('id')
+          .maybeSingle()
+      );
+
+      if (!insertErr && inserted?.id) {
+        return { claimed: true };
+      }
+
+      // 2. If row exists, check existing claim state
+      const { data: existing } = await qt.track('get_user_claim', 'candidate_synthesis_claims', () =>
+        supabaseAdmin
+          .from('candidate_synthesis_claims')
+          .select('id, status, lease_until, attempt_count')
+          .eq('run_id', runId)
+          .eq('user_id', userId)
+          .maybeSingle()
+      );
+
+      if (!existing) {
+        return { claimed: false, reason: 'claim_fetch_failed' };
+      }
+
+      if (existing.status === 'completed') {
+        return { claimed: false, reason: 'already_completed' };
+      }
+
+      if (existing.status === 'claimed') {
+        const isLeaseActive = new Date(existing.lease_until).getTime() > Date.now();
+        if (isLeaseActive) {
+          return { claimed: false, reason: 'active_lease' };
+        }
+
+        // Expired lease (crashed process recovery)
+        if (existing.attempt_count >= CANDIDATE_SYNTHESIS_LIMITS.MAX_RETRIES) {
+          await supabaseAdmin
+            .from('candidate_synthesis_claims')
+            .update({ status: 'failed', error: 'Max retries exceeded' })
+            .eq('id', existing.id);
+          return { claimed: false, reason: 'max_retries_exceeded' };
+        }
+
+        // Reclaim expired lease
+        const { data: reclaimed } = await qt.track('reclaim_user_lease', 'candidate_synthesis_claims', () =>
+          supabaseAdmin
+            .from('candidate_synthesis_claims')
+            .update({
+              status: 'claimed',
+              claimed_at: new Date().toISOString(),
+              lease_until: leaseUntil,
+              attempt_count: existing.attempt_count + 1,
+            })
+            .eq('id', existing.id)
+            .eq('status', 'claimed')
+            .lte('lease_until', new Date().toISOString())
+            .select('id')
+            .maybeSingle()
+        );
+
+        if (reclaimed?.id) {
+          logger.info('[CandidateSynthesis] Successfully reclaimed expired user lease', { runId, userId });
+          return { claimed: true };
+        }
+
+        return { claimed: false, reason: 'reclaim_race_lost' };
+      }
+
+      if (existing.status === 'failed') {
+        if (existing.attempt_count < CANDIDATE_SYNTHESIS_LIMITS.MAX_RETRIES) {
+          const { data: retried } = await supabaseAdmin
+            .from('candidate_synthesis_claims')
+            .update({
+              status: 'claimed',
+              claimed_at: new Date().toISOString(),
+              lease_until: leaseUntil,
+              attempt_count: existing.attempt_count + 1,
+              error: null,
+            })
+            .eq('id', existing.id)
+            .select('id')
+            .maybeSingle();
+
+          if (retried?.id) return { claimed: true };
+        }
+        return { claimed: false, reason: 'previously_failed' };
+      }
+
+      return { claimed: false, reason: 'unhandled_claim_state' };
+    } catch (err) {
+      logger.error('[CandidateSynthesis] Error in claimUserBatch', { runId, userId, err });
+      return { claimed: false, reason: 'error' };
+    }
+  }
+
+  /**
+   * Completes a user claim record in the database.
+   */
+  async completeUserClaim(
+    runId: string,
+    userId: string,
+    result: { modelCalled: boolean; candidatesCount: number; error?: string }
+  ): Promise<void> {
+    try {
+      await qt.track('complete_user_claim', 'candidate_synthesis_claims', () =>
+        supabaseAdmin
+          .from('candidate_synthesis_claims')
+          .update({
+            status: result.error ? 'failed' : 'completed',
+            model_called: result.modelCalled,
+            candidates_count: result.candidatesCount,
+            error: result.error || null,
+          })
+          .eq('run_id', runId)
+          .eq('user_id', userId)
+      );
+    } catch (err) {
+      logger.error('[CandidateSynthesis] Failed to complete user claim in DB', { runId, userId, err });
+    }
+  }
+
+  /**
+   * Completes a logical nightly run in the database.
+   */
+  async completeNightlyRun(
+    runId: string,
+    stats: { totalUsers: number; candidatesCreated: number; modelCalls: number }
+  ): Promise<void> {
+    try {
+      await qt.track('complete_nightly_run', 'candidate_synthesis_runs', () =>
+        supabaseAdmin
+          .from('candidate_synthesis_runs')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            total_users: stats.totalUsers,
+            candidates_created: stats.candidatesCreated,
+            model_calls: stats.modelCalls,
+          })
+          .eq('id', runId)
+      );
+    } catch (err) {
+      logger.error('[CandidateSynthesis] Failed to complete nightly run in DB', { runId, err });
+    }
+  }
 
   /**
    * Builds a compact, bounded evidence packet scoped strictly to ONE user.
@@ -451,16 +703,40 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
   }
 
   /**
-   * Executes candidate synthesis for a single isolated user.
+   * Executes candidate synthesis for a single isolated user, acquiring a database claim if runId is provided.
    */
-  async synthesizeCandidatesForUser(userId: string): Promise<CandidateSynthesisResult> {
+  async synthesizeCandidatesForUser(userId: string, runId?: string): Promise<CandidateSynthesisResult> {
+    // 1. If runId provided, acquire distributed database lease BEFORE any work
+    if (runId) {
+      const claimResult = await this.claimUserBatch(runId, userId);
+      if (!claimResult.claimed) {
+        logger.info('[CandidateSynthesis] User batch skipped — lease not acquired', {
+          runId,
+          userId,
+          reason: claimResult.reason,
+        });
+        return {
+          userId,
+          status: 'skipped',
+          modelCalls: 0,
+          candidatesGenerated: [],
+          candidatesDeduplicated: 0,
+          candidatesRejected: 0,
+          reason: claimResult.reason,
+        };
+      }
+    }
+
     try {
-      // 1. Build bounded evidence packet
+      // 2. Build bounded evidence packet
       const packet = await this.buildEvidencePacket(userId);
 
-      // 2. Check for empty batch -> 0 LLM calls
+      // 3. Check for empty batch -> 0 LLM calls
       if (!packet) {
         logger.debug('[CandidateSynthesis] Empty batch, 0 LLM calls', { userId });
+        if (runId) {
+          await this.completeUserClaim(runId, userId, { modelCalled: false, candidatesCount: 0 });
+        }
         return {
           userId,
           status: 'empty_batch',
@@ -471,14 +747,21 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
         };
       }
 
-      // 3. Invoke Gemini
+      // 4. Invoke Gemini (Guaranteed max 1 call per claimed user)
       const rawCandidates = await this.evaluateWithGemini(packet);
 
-      // 4. Validate & Normalize
+      // 5. Validate & Normalize
       const { valid, deduplicated, rejected } = this.validateAndNormalizeCandidates(userId, rawCandidates, packet);
 
-      // 5. Store Candidates (CANDIDATE ONLY — ZERO semantic memory writes)
+      // 6. Store Candidates (CANDIDATE ONLY — ZERO semantic memory writes)
       await this.storeCandidates(userId, valid);
+
+      if (runId) {
+        await this.completeUserClaim(runId, userId, {
+          modelCalled: true,
+          candidatesCount: valid.length,
+        });
+      }
 
       logger.info('[CandidateSynthesis] User synthesis complete', {
         userId,
@@ -501,10 +784,18 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
         error: err instanceof Error ? err.message : String(err),
       });
 
+      if (runId) {
+        await this.completeUserClaim(runId, userId, {
+          modelCalled: false,
+          candidatesCount: 0,
+          error: err.message,
+        });
+      }
+
       return {
         userId,
         status: 'failed',
-        modelCalls: 1,
+        modelCalls: 0,
         candidatesGenerated: [],
         candidatesDeduplicated: 0,
         candidatesRejected: 0,
@@ -523,16 +814,37 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
   }
 
   /**
-   * Nightly cron runner for all active users (bounded, isolated per user).
+   * Nightly cron runner for all active users (database-locked, isolated per user).
    */
-  async runNightlyCandidateSynthesisForAllUsers(): Promise<{
+  async runNightlyCandidateSynthesisForAllUsers(overrideRunId?: string): Promise<{
+    runId: string;
     usersProcessed: number;
     candidatesCreated: number;
     totalModelCalls: number;
+    status: 'completed' | 'already_running' | 'already_completed' | 'failed';
   }> {
-    logger.info('[CandidateSynthesis] Starting nightly candidate synthesis for all active users...');
+    const runId = overrideRunId || getLogicalRunId();
+    logger.info('[CandidateSynthesis] Attempting nightly candidate synthesis run claim...', { runId });
 
-    // Fetch active users with working or episodic records
+    // 1. Acquire database-backed logical run claim
+    const runClaim = await this.claimNightlyRun(runId);
+    if (!runClaim.claimed) {
+      logger.info('[CandidateSynthesis] Nightly run skipped — already running or completed', {
+        runId,
+        status: runClaim.status,
+      });
+      return {
+        runId,
+        usersProcessed: 0,
+        candidatesCreated: 0,
+        totalModelCalls: 0,
+        status: runClaim.status === 'already_completed' ? 'already_completed' : 'already_running',
+      };
+    }
+
+    logger.info('[CandidateSynthesis] Nightly run claim acquired. Starting synthesis batch...', { runId });
+
+    // 2. Fetch active users
     const { data: users } = await qt.track('synth_active_users', 'profiles', () =>
       supabaseAdmin
         .from('profiles')
@@ -546,10 +858,12 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
 
     for (const u of users || []) {
       try {
-        const res = await this.synthesizeCandidatesForUser(u.id);
-        usersProcessed++;
-        candidatesCreated += res.candidatesGenerated.length;
-        totalModelCalls += res.modelCalls;
+        const res = await this.synthesizeCandidatesForUser(u.id, runId);
+        if (res.status === 'completed' || res.status === 'empty_batch') {
+          usersProcessed++;
+          candidatesCreated += res.candidatesGenerated.length;
+          totalModelCalls += res.modelCalls;
+        }
       } catch (userErr) {
         logger.error('[CandidateSynthesis] Individual user error, continuing batch', {
           userId: u.id,
@@ -558,16 +872,26 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
       }
     }
 
-    logger.info('[CandidateSynthesis] Nightly synthesis finished', {
+    // 3. Mark nightly run completed in database
+    await this.completeNightlyRun(runId, {
+      totalUsers: usersProcessed,
+      candidatesCreated,
+      modelCalls: totalModelCalls,
+    });
+
+    logger.info('[CandidateSynthesis] Nightly synthesis run completed and recorded', {
+      runId,
       usersProcessed,
       candidatesCreated,
       totalModelCalls,
     });
 
     return {
+      runId,
       usersProcessed,
       candidatesCreated,
       totalModelCalls,
+      status: 'completed',
     };
   }
 }
