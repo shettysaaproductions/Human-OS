@@ -207,6 +207,14 @@ async function main(): Promise<void> {
           await maintenanceQueue.add('compact_chat_history', { trigger: 'boot' });
           await selfImprovementService.runReview();
 
+          // Phase 2E-C: Nightly Candidate Synthesis for all active users (03:00 IST window)
+          try {
+            const { candidateSynthesisService } = await import('./services/CandidateSynthesisService');
+            await candidateSynthesisService.runNightlyCandidateSynthesisForAllUsers();
+          } catch (synthErr) {
+            logger.error('Error during nightly candidate synthesis', { error: synthErr instanceof Error ? synthErr.message : String(synthErr) });
+          }
+
           // Weekly memory decay — free-tier hygiene: never let unimportant long-term
           // memories pile up forever. Runs at most once per 7 days (guarded by date).
           const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();

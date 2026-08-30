@@ -154,12 +154,21 @@ export interface MemoryRetentionMetadata {
 }
 
 export interface MemoryPromotionCandidate {
-  source_records: (WorkingMemory | EpisodicMemory)[];
-  proposed_category: CognitiveCategory;
-  proposed_memory_type: MemoryType;
+  candidate_id: string;
+  user_id: string;
+  category: CognitiveCategory;
   proposed_key: string;
   proposed_value: string;
+  source_references: MemorySourceReference[];
   confidence: number;
+  importance_estimate: number;
+  reason: string;
+  created_at: string;
+  status: 'candidate' | 'rejected' | 'expired';
+  fingerprint?: string;
+  expires_at?: string;
+  proposed_memory_type?: MemoryType;
+  source_records?: (WorkingMemory | EpisodicMemory)[];
 }
 
 export interface MemoryCompressionCandidate {
