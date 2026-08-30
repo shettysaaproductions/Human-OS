@@ -37,6 +37,9 @@ export interface Memory {
   last_accessed_at?: Date;
   /** Information authority — who said this fact */
   source_authority?: SourceAuthority;
+  /** Phase 2E Lifecycle Metadata */
+  source_references?: MemorySourceReference[];
+  compression_status?: LifecycleStatus;
   created_at: Date;
   updated_at: Date;
 }
@@ -67,6 +70,9 @@ export interface WorkingMemory {
   value: string;
   created_at: Date;
   expires_at?: Date;
+  /** Phase 2E Lifecycle Metadata */
+  promotion_status?: LifecycleStatus;
+  compression_status?: LifecycleStatus;
 }
 
 export interface EpisodicMemory {
@@ -77,6 +83,10 @@ export interface EpisodicMemory {
   emotional_valence: number;
   source_message_id?: string;
   created_at: Date;
+  /** Phase 2E Lifecycle Metadata */
+  is_archived?: boolean;
+  promotion_status?: LifecycleStatus;
+  compression_status?: LifecycleStatus;
 }
 
 export interface KgNode {
@@ -116,4 +126,44 @@ export interface Reflection {
   summary: string;
   key_takeaways: Record<string, any>;
   created_at: Date;
+}
+
+// ============================================================================
+// PHASE 2E: MEMORY LIFECYCLE FOUNDATION TYPES
+// ============================================================================
+
+export type CognitiveCategory = 'EVENT' | 'FACT' | 'PREFERENCE' | 'GOAL' | 'IDENTITY' | 'PATTERN';
+
+export type CognitiveLifecycleState = 'COGNITIVE_RAM' | 'EPISODIC' | 'SEMANTIC' | 'ARCHIVED';
+
+export type LifecycleStatus = 'pending' | 'promoted' | 'compressed' | 'rejected';
+
+export interface MemorySourceReference {
+  type: 'turn' | 'episodic_memory' | 'working_memory' | 'memory';
+  id: string;
+  turn_id?: string;
+  source_message_id?: string;
+}
+
+export interface MemoryRetentionMetadata {
+  retention_class?: CognitiveLifecycleState;
+  retention_score?: number;
+  last_retrieved_at?: Date;
+  promotion_status?: LifecycleStatus;
+  compression_status?: LifecycleStatus;
+}
+
+export interface MemoryPromotionCandidate {
+  source_records: (WorkingMemory | EpisodicMemory)[];
+  proposed_category: CognitiveCategory;
+  proposed_memory_type: MemoryType;
+  proposed_key: string;
+  proposed_value: string;
+  confidence: number;
+}
+
+export interface MemoryCompressionCandidate {
+  source_records: (Memory | EpisodicMemory | WorkingMemory)[];
+  proposed_memory: Memory;
+  rationale: string;
 }
