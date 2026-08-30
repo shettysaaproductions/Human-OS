@@ -1,4 +1,4 @@
-﻿import { MemoryRepository } from '../memoryRepository';
+import { MemoryRepository } from '../memoryRepository';
 import { supabaseAdmin } from '../../lib/supabase';
 import { logger } from '../../lib/logger';
 
@@ -45,15 +45,22 @@ describe('MemoryRepository', () => {
     emotional_weight: 3,
   };
 
-  beforeEach(() => {
+    beforeEach(() => {
     jest.clearAllMocks();
     repository = new MemoryRepository();
-    // Default: no existing memory found (new insert path)
-    (supabaseAdmin.from('memories').maybeSingle as jest.Mock).mockResolvedValue({ data: null, error: null });
-    // Default: select (for fallback) returns empty
-    (supabaseAdmin.from('memories').select as jest.Mock).mockReturnThis();
-    (supabaseAdmin.from('memories').order as jest.Mock).mockReturnThis();
-    (supabaseAdmin.from('memories').limit as jest.Mock).mockResolvedValue({ data: [], error: null });
+    // Default: select -> eq -> eq -> eq resolves to empty array (new insert path)
+    const chain: any = {};
+    chain.select = jest.fn().mockReturnValue(chain);
+    chain.eq = jest.fn().mockReturnValue(chain);
+    chain.order = jest.fn().mockReturnValue(chain);
+    chain.limit = jest.fn().mockReturnValue(chain);
+    chain.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+    chain.single = jest.fn().mockResolvedValue({ data: { id: 'new-id' }, error: null });
+    chain.insert = jest.fn().mockReturnValue(chain);
+    chain.update = jest.fn().mockReturnValue(chain);
+    chain.then = (resolve: any) => resolve({ data: [], error: null });
+
+    (supabaseAdmin.from as jest.Mock).mockReturnValue(chain);
   });
 
   describe('upsertMemory', () => {
@@ -81,23 +88,40 @@ describe('MemoryRepository', () => {
       expect(insertPayload.source_message).toBe('source');
     });
 
-    it('should not include last_accessed_at in UPDATE payload', async () => {
-      // Simulate existing memory (update path)
-      (supabaseAdmin.from('memories').maybeSingle as jest.Mock).mockResolvedValue({
-        data: { id: 'mem-1', importance: 50, frequency: 2, emotional_weight: 3 },
-        error: null,
-      });
-      (supabaseAdmin.from('memories').update as jest.Mock).mockResolvedValue({ error: null }).mockReturnThis();
+    it('should update and reinforce existing memory when identical value is asserted', async () => {
+      // Simulate existing memory with same value (reinforcement path)
+      const existingMem = {
+        id: 'mem-1',
+        user_id: userId,
+        key: 'test-key',
+        value: 'test value',
+        importance: 50,
+        frequency: 2,
+        emotional_weight: 3,
+        source_authority: 'subconscious_inference',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+      };
+
+      const chain: any = {};
+      chain.select = jest.fn().mockReturnValue(chain);
+      chain.eq = jest.fn().mockReturnValue(chain);
+      chain.order = jest.fn().mockReturnValue(chain);
+      chain.limit = jest.fn().mockReturnValue(chain);
+      chain.insert = jest.fn().mockReturnValue(chain);
+      chain.update = jest.fn().mockReturnValue(chain);
+      chain.then = (resolve: any) => resolve({ data: [existingMem], error: null });
+
+      (supabaseAdmin.from as jest.Mock).mockReturnValue(chain);
 
       await repository.upsertMemory(userId, mockMemory, 'source');
 
       // Should NOT have called .insert()
       expect(supabaseAdmin.from('memories').insert).not.toHaveBeenCalled();
-      // Should have called .update()
+      // Should have called .update() to reinforce
       expect(supabaseAdmin.from('memories').update).toHaveBeenCalledTimes(1);
       const updatePayload = (supabaseAdmin.from('memories').update as jest.Mock).mock.calls[0][0];
-      // UPDATE does not set last_accessed_at (the RPC or searchMemories does that)
-      expect(updatePayload.last_accessed_at).toBeUndefined();
+      expect(updatePayload.frequency).toBe(3);
     });
   });
 });

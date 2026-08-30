@@ -8,7 +8,7 @@ import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { deterministicGuardian } from './DeterministicGuardianService';
 
 // Explicit column list — never use select('*') on memories
-const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type, source_authority, protection_source, protected_at';
+const MEMORY_COLUMNS = 'id, user_id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, updated_at, is_archived, memory_type, source_authority, protection_source, protected_at, compression_status, lifecycle_state, superseded_by, superseded_at, supersession_reason';
 
 // ── Authority rank (higher = more authoritative) ──────────────────────────────
 const AUTHORITY_RANK: Record<SourceAuthority, number> = {
@@ -39,32 +39,45 @@ function isGenericEntityValue(key: string, value: string, authority?: string): b
   return GENERIC_ENTITY_VALUES.has(value.toLowerCase().trim());
 }
 
+/**
+ * Identifies if a memory value or statement describes a historical/past fact
+ * (e.g. "Worked at Company A in 2023", "ex-founder", "formerly").
+ */
+function isHistoricalFact(val: string, sourceMessage?: string, factClass?: string, isHistorical?: boolean): boolean {
+  if (isHistorical === true || factClass === 'HISTORICAL_FACT') return true;
+  const historicalPattern = /\b(in\s+(?:19\d\d|20[0-2]\d)|pehle|formerly|previously|used to|worked at.*in\s+\d{4}|ex-|past|purana|purani)\b/i;
+  if (historicalPattern.test(val)) return true;
+  if (sourceMessage && historicalPattern.test(sourceMessage)) return true;
+  return false;
+}
+
 export class MemoryRepository {
   /**
-   * Upserts a memory with authority-aware overwrite protection.
+   * Phase 2F-A: Upserts a memory with authoritative supersession and state preservation.
    *
-   * Authority rules:
-   *   1. Generic entity value blocklist — rejects relational nouns as _name values
-   *      from subconscious_inference sources (defense layer 1 — extraction boundary).
-   *   2. Authority hierarchy guard — a lower-authority source cannot overwrite
-   *      a higher-authority existing fact unless correction_intent = true (layer 2).
-   *   3. is_protected / protection_source are UNCHANGED — they govern Phase 6.1
-   *      retention/pruning and are completely orthogonal to authority.
+   * Invariants:
+   * 1. EXPLICIT CORRECTION SUPERSESSION: When a new higher-authority fact arrives for an
+   *    existing CURRENT canonical key with a conflicting value, supersede ONLY that conflicting
+   *    current representation.
+   * 2. PROVENANCE PRESERVATION: The old row is marked `is_archived = true`, `lifecycle_state = 'SUPERSEDED'`,
+   *    and linked via `superseded_by = new_memory_id`. Zero physical DELETEs occur.
+   * 3. HISTORICAL PRESERVATION: Distinct historical facts (e.g. "Worked at Company A in 2023")
+   *    are assigned `lifecycle_state = 'HISTORICAL'` and are NOT superseded by current facts.
+   * 4. PROPOSED MEMORY SAFETY: Proposed memories (`compression_status = 'proposed'`) NEVER supersede
+   *    or overwrite CURRENT facts.
+   * 5. IDEMPOTENCY: Repeated identical assertions reinforce frequency/importance without supersession churn.
+   * 6. AUTHORITY HIERARCHY: Lower authority cannot supersede higher authority without explicit correction intent.
    */
   async upsertMemory(userId: string, memory: ExtractedMemory, sourceMessage: string): Promise<void> {
     if (!memory.shouldPersist) return;
 
     // ── Layer 0: Canonical key normalization ──────────────────────────────────
-    // This MUST happen before any other check so that alias keys (e.g.
-    // mothers_name, sons_name, business_name) are resolved to their canonical
-    // counterparts before the authority guard or DB lookup.
     const { canonical: canonicalKey, wasAliased } = canonicalizeKey(memory.key);
     if (wasAliased) {
       logger.info('[MemoryRepository] Key canonicalized', {
         userId, originalKey: memory.key, canonicalKey
       });
     }
-    // Mutate the in-memory object so all downstream references use canonical key
     const normalizedMemory: ExtractedMemory = wasAliased
       ? { ...memory, key: canonicalKey }
       : memory;
@@ -79,75 +92,91 @@ export class MemoryRepository {
       return;
     }
 
-    // ── Layer 1b: Shared garbage admission guard (Amendment 1 — defense-in-depth) ──────
-    // Catches garbage memories from ANY extraction path including ConsolidatedMemoryAgent,
-    // DeterministicFactAgent, SubconsciousAgent, or future agents.
+    // ── Layer 1b: Shared garbage admission guard ──────────────────────────────
     if (isGarbageMemoryValue(normalizedMemory.key, normalizedMemory.value, 'memoryRepository')) {
-      return; // isGarbageMemoryValue already logs the blocked entry
+      return;
     }
 
+    // ── Layer 1c: Proposed & Historical Classification ────────────────────────
+    const isProposed = normalizedMemory.compression_status === 'proposed';
+    const isHistorical = normalizedMemory.lifecycle_state === 'HISTORICAL' ||
+      isHistoricalFact(normalizedMemory.value, sourceMessage, (normalizedMemory as any).factClass, normalizedMemory.is_historical);
+    const incomingLifecycleState: string = isProposed
+      ? 'PROPOSED'
+      : isHistorical
+      ? 'HISTORICAL'
+      : 'CURRENT';
+
     try {
-      // 1. Check if memory exists — fetch authority alongside existing columns
-      const { data: existing } = await qt.track('upsert_memory_check', 'memories', () =>
+      // ── Layer 2: Query ALL active/unarchived rows for this canonical key ────
+      const { data: existingRows, error: fetchErr } = await qt.track('upsert_memory_check', 'memories', () =>
         supabaseAdmin
           .from('memories')
-          .select('id, importance, frequency, emotional_weight, source_authority')
+          .select('id, user_id, key, value, importance, confidence, frequency, emotional_weight, source_authority, is_archived, protection_source, lifecycle_state, compression_status, created_at, updated_at')
           .eq('user_id', userId)
           .eq('key', normalizedMemory.key)
-          .maybeSingle()
+          .eq('is_archived', false)
       );
 
-      if (existing) {
-        // ── Layer 2: Authority hierarchy guard ───────────────────────────────
-        const existingRank = authorityRank(existing.source_authority);
-        const incomingRank = authorityRank(incomingAuthority);
+      if (fetchErr) {
+        throw new Error(`Failed to query existing memories: ${fetchErr.message}`);
+      }
 
-        if (existingRank > incomingRank && !normalizedMemory.correction_intent) {
-          logger.info('[MemoryRepository] BLOCKED lower-authority overwrite', {
-            userId,
-            key: normalizedMemory.key,
-            existingAuthority: existing.source_authority,
-            incomingAuthority,
-          });
-          return;
-        }
+      const activeRows = (existingRows || []) as any[];
 
-        if (normalizedMemory.correction_intent) {
-          logger.info('[MemoryRepository] CORRECTION accepted — superseding existing value', {
-            userId, key: normalizedMemory.key,
-            from: existing.source_authority, to: incomingAuthority,
-          });
-        }
+      // Filter out PROPOSED or INVALIDATED rows from consideration as existing CURRENT facts
+      const currentActiveRows = activeRows.filter(r =>
+        !r.is_archived &&
+        r.lifecycle_state !== 'SUPERSEDED' &&
+        r.lifecycle_state !== 'INVALIDATED' &&
+        r.compression_status !== 'proposed'
+      );
 
-        const newImportance = Math.min((existing.importance || 50) + 5, 100);
-        const newFrequency = (existing.frequency || 1) + 1;
+      // Check for exact matching value (Idempotent update / Reinforcement)
+      const matchingRow = currentActiveRows.find(
+        r => (r.value || '').toLowerCase().trim() === (normalizedMemory.value || '').toLowerCase().trim()
+      );
 
-        await qt.track('upsert_memory_update', 'memories', () =>
+      if (matchingRow) {
+        // Idempotent reinforcement: Increment frequency and importance safely
+        const newImportance = Math.min((matchingRow.importance || 50) + 5, 100);
+        const newFrequency = (matchingRow.frequency || 1) + 1;
+
+        await qt.track('upsert_memory_reinforce', 'memories', () =>
           supabaseAdmin
             .from('memories')
             .update({
-              value: normalizedMemory.value,
               importance: Math.max(newImportance, normalizedMemory.importance),
-              confidence: normalizedMemory.confidence,
+              confidence: Math.max(matchingRow.confidence || 0.8, normalizedMemory.confidence),
               frequency: newFrequency,
-              emotional_weight: normalizedMemory.emotional_weight ?? existing.emotional_weight ?? 0,
+              emotional_weight: normalizedMemory.emotional_weight ?? matchingRow.emotional_weight ?? 0,
               source_message: sourceMessage,
-              source_authority: incomingAuthority,
+              source_authority: authorityRank(incomingAuthority) >= authorityRank(matchingRow.source_authority)
+                ? incomingAuthority
+                : matchingRow.source_authority,
               updated_at: new Date().toISOString(),
-              // Retention semantics — Phase 6.1 UNCHANGED
+              last_accessed_at: new Date().toISOString(),
               ...(normalizedMemory.is_protected ? {
                 protection_source: normalizedMemory.protection_source || 'system',
                 protected_at: new Date().toISOString()
               } : {}),
-              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
-              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
             })
-            .eq('id', existing.id)
+            .eq('id', matchingRow.id)
+            .eq('user_id', userId)
         );
 
-        logger.debug('Memory updated', { key: normalizedMemory.key, userId, frequency: newFrequency, authority: incomingAuthority });
-      } else {
-        await qt.track('upsert_memory_insert', 'memories', () =>
+        logger.debug('[MemoryRepository] Memory reinforced (idempotent)', {
+          key: normalizedMemory.key,
+          userId,
+          memoryId: matchingRow.id,
+          frequency: newFrequency
+        });
+        return;
+      }
+
+      // If incoming memory is PROPOSED, insert it as PROPOSED without superseding any CURRENT rows
+      if (isProposed) {
+        await qt.track('upsert_memory_insert_proposed', 'memories', () =>
           supabaseAdmin
             .from('memories')
             .insert({
@@ -160,8 +189,165 @@ export class MemoryRepository {
               emotional_weight: normalizedMemory.emotional_weight ?? 0,
               source_message: sourceMessage,
               source_authority: incomingAuthority,
+              is_archived: false,
+              lifecycle_state: 'PROPOSED',
+              compression_status: 'proposed',
+              source_references: normalizedMemory.source_references,
               last_accessed_at: new Date().toISOString(),
-              // Retention semantics — Phase 6.1 UNCHANGED
+            })
+        );
+        return;
+      }
+
+      // If incoming memory is HISTORICAL, insert it as HISTORICAL (do NOT supersede CURRENT rows)
+      if (isHistorical) {
+        await qt.track('upsert_memory_insert_historical', 'memories', () =>
+          supabaseAdmin
+            .from('memories')
+            .insert({
+              user_id: userId,
+              memory_type: normalizedMemory.type,
+              key: normalizedMemory.key,
+              value: normalizedMemory.value,
+              importance: normalizedMemory.importance,
+              confidence: normalizedMemory.confidence,
+              emotional_weight: normalizedMemory.emotional_weight ?? 0,
+              source_message: sourceMessage,
+              source_authority: incomingAuthority,
+              is_archived: false,
+              lifecycle_state: 'HISTORICAL',
+              last_accessed_at: new Date().toISOString(),
+              ...(normalizedMemory.is_protected ? {
+                protection_source: normalizedMemory.protection_source || 'system',
+                protected_at: new Date().toISOString()
+              } : {}),
+              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
+            })
+        );
+        logger.info('[MemoryRepository] Historical memory preserved & inserted', {
+          key: normalizedMemory.key,
+          userId,
+          value: normalizedMemory.value
+        });
+        return;
+      }
+
+      // Find conflicting CURRENT row(s) to supersede
+      // (Exclude rows that are explicitly HISTORICAL)
+      const conflictingCurrentRow = currentActiveRows.find(
+        r => r.lifecycle_state !== 'HISTORICAL' && !isHistoricalFact(r.value)
+      );
+
+      if (conflictingCurrentRow) {
+        // Authority hierarchy check:
+        const existingRank = authorityRank(conflictingCurrentRow.source_authority);
+        const incomingRank = authorityRank(incomingAuthority);
+
+        if (existingRank > incomingRank && !normalizedMemory.correction_intent) {
+          logger.info('[MemoryRepository] BLOCKED lower-authority overwrite', {
+            userId,
+            key: normalizedMemory.key,
+            existingAuthority: conflictingCurrentRow.source_authority,
+            incomingAuthority,
+          });
+          return;
+        }
+
+        // Authoritative Supersession Execution:
+        // 1. Mark conflicting old row as SUPERSEDED first (frees the unique partial index slot)
+        const supersededTimestamp = new Date().toISOString();
+        const { error: supersedeErr } = await qt.track('upsert_memory_mark_superseded', 'memories', () =>
+          supabaseAdmin
+            .from('memories')
+            .update({
+              is_archived: true,
+              lifecycle_state: 'SUPERSEDED',
+              superseded_at: supersededTimestamp,
+              supersession_reason: `Authoritative correction: superseded by ${incomingAuthority} fact`,
+              updated_at: supersededTimestamp,
+            })
+            .eq('id', conflictingCurrentRow.id)
+            .eq('user_id', userId)
+        );
+
+        if (supersedeErr) {
+          throw new Error(`Failed to archive superseded memory: ${supersedeErr.message}`);
+        }
+
+        // 2. Insert NEW memory row as CURRENT
+        const { data: newRow, error: insertErr } = await qt.track('upsert_memory_insert_superseding', 'memories', () =>
+          supabaseAdmin
+            .from('memories')
+            .insert({
+              user_id: userId,
+              memory_type: normalizedMemory.type,
+              key: normalizedMemory.key,
+              value: normalizedMemory.value,
+              importance: Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance),
+              confidence: normalizedMemory.confidence,
+              emotional_weight: normalizedMemory.emotional_weight ?? conflictingCurrentRow.emotional_weight ?? 0,
+              source_message: sourceMessage,
+              source_authority: incomingAuthority,
+              is_archived: false,
+              lifecycle_state: 'CURRENT',
+              last_accessed_at: new Date().toISOString(),
+              ...(normalizedMemory.is_protected || conflictingCurrentRow.protection_source ? {
+                protection_source: normalizedMemory.protection_source || conflictingCurrentRow.protection_source || 'system',
+                protected_at: new Date().toISOString()
+              } : {}),
+              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
+            })
+            .select('id')
+            .single()
+        );
+
+        if (insertErr || !newRow) {
+          throw new Error(`Failed to insert superseding memory: ${insertErr?.message}`);
+        }
+
+        const newMemoryId = newRow.id;
+
+        // 3. Back-link superseded_by on the old row
+        await qt.track('upsert_memory_link_superseded', 'memories', () =>
+          supabaseAdmin
+            .from('memories')
+            .update({
+              superseded_by: newMemoryId,
+            })
+            .eq('id', conflictingCurrentRow.id)
+            .eq('user_id', userId)
+        );
+
+        logger.info('[MemoryRepository] Conflicting CURRENT memory SUPERSEDED cleanly', {
+          userId,
+          key: normalizedMemory.key,
+          oldMemoryId: conflictingCurrentRow.id,
+          oldValue: conflictingCurrentRow.value,
+          newMemoryId,
+          newValue: normalizedMemory.value,
+          incomingAuthority,
+          supersededAt: supersededTimestamp,
+        });
+      } else {
+        // No conflicting CURRENT row found: clean fresh insert
+        await qt.track('upsert_memory_insert_fresh', 'memories', () =>
+          supabaseAdmin
+            .from('memories')
+            .insert({
+              user_id: userId,
+              memory_type: normalizedMemory.type,
+              key: normalizedMemory.key,
+              value: normalizedMemory.value,
+              importance: normalizedMemory.importance,
+              confidence: normalizedMemory.confidence,
+              emotional_weight: normalizedMemory.emotional_weight ?? 0,
+              source_message: sourceMessage,
+              source_authority: incomingAuthority,
+              is_archived: false,
+              lifecycle_state: incomingLifecycleState,
+              last_accessed_at: new Date().toISOString(),
               ...(normalizedMemory.is_protected ? {
                 protection_source: normalizedMemory.protection_source || 'system',
                 protected_at: new Date().toISOString()
@@ -171,7 +357,12 @@ export class MemoryRepository {
             })
         );
 
-        logger.debug('Memory inserted', { key: normalizedMemory.key, userId, authority: incomingAuthority });
+        logger.debug('[MemoryRepository] Fresh memory inserted', {
+          key: normalizedMemory.key,
+          userId,
+          authority: incomingAuthority,
+          lifecycleState: incomingLifecycleState
+        });
       }
 
       // Phase 2A: Non-blocking Guardian mutation observation trigger

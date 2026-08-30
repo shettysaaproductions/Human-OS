@@ -18,6 +18,8 @@ export type SourceAuthority =
   | 'explicit_user'           // User directly stated / explicitly corrected
   | 'needs_review';           // Reconciliation script: evidence ambiguous
 
+export type LifecycleState = 'CURRENT' | 'HISTORICAL' | 'SUPERSEDED' | 'INVALIDATED' | 'PROPOSED';
+
 export interface Memory {
   id: string;
   user_id: string;
@@ -40,6 +42,11 @@ export interface Memory {
   /** Phase 2E Lifecycle Metadata */
   source_references?: MemorySourceReference[];
   compression_status?: LifecycleStatus;
+  /** Phase 2F Lifecycle State & Supersession Provenance */
+  lifecycle_state?: LifecycleState;
+  superseded_by?: string | null;
+  superseded_at?: Date | string | null;
+  supersession_reason?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -64,6 +71,9 @@ export interface ExtractedMemory {
   /** Phase 2E Lifecycle Metadata */
   source_references?: MemorySourceReference[];
   compression_status?: LifecycleStatus;
+  /** Phase 2F Lifecycle State */
+  lifecycle_state?: LifecycleState;
+  is_historical?: boolean;
 }
 
 export interface WorkingMemory {

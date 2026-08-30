@@ -174,9 +174,23 @@ export class CognitiveContextService {
   /**
    * Assembles a bounded, ranked, conflict-resolved Canonical Cognitive Context.
    */
-  async assembleContext(userId: string, options: ContextAssemblyOptions = {}): Promise<CognitiveContext> {
+  async assembleContext(userIdOrOptions: string | (ContextAssemblyOptions & { userId: string; effectiveMessage?: string }), maybeOptions: ContextAssemblyOptions = {}): Promise<CognitiveContext> {
     const startTime = Date.now();
     this.metrics.context_assemblies++;
+
+    let userId: string;
+    let options: ContextAssemblyOptions;
+
+    if (typeof userIdOrOptions === 'string') {
+      userId = userIdOrOptions;
+      options = maybeOptions;
+    } else {
+      userId = userIdOrOptions.userId;
+      options = {
+        ...userIdOrOptions,
+        message: userIdOrOptions.message || userIdOrOptions.effectiveMessage,
+      };
+    }
 
     const degradedSources: string[] = [];
     let itemsConsidered = 0;
@@ -221,17 +235,19 @@ export class CognitiveContextService {
     const memoriesPromise = qt.track('get_all_memories', 'memories', () =>
       supabaseAdmin
         .from('memories')
-        .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status')
+        .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status, lifecycle_state, superseded_by')
         .eq('user_id', userId)
         .eq('is_archived', false)
-        .or('compression_status.is.null,compression_status.eq.trusted')
         .order('importance', { ascending: false })
         .limit(50)
     ).then((res: any) => {
-      // Defensive in-memory trust boundary filter
+      // Defensive in-memory trust boundary & supersession filter
       if (res && Array.isArray(res.data)) {
         res.data = res.data.filter((m: any) =>
           !m.is_archived &&
+          m.lifecycle_state !== 'SUPERSEDED' &&
+          m.lifecycle_state !== 'INVALIDATED' &&
+          !m.superseded_by &&
           (m.compression_status === null || m.compression_status === undefined || m.compression_status === 'trusted')
         );
       }
