@@ -45,8 +45,8 @@ export class DeterministicFactAgent {
           importance: isProtected ? 90 : 75,
           confidence: 0.95,
           shouldPersist: true,
-          // Authority: deterministic facts always outrank subconscious_inference
-          source_authority: 'deterministic',
+          // Authority: explicit facts outrank deterministic facts
+          source_authority: isProtected ? 'explicit_user' : 'deterministic',
           // Retention semantics (Phase 6.1 — unchanged)
           is_protected: isProtected,
           protection_source: isProtected ? 'user_explicit' : undefined,

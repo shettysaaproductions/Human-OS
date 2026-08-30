@@ -2,7 +2,6 @@ import { BaseAgent } from './BaseAgent';
 import { Job } from '../services/QueueService';
 import { complete } from '../lib/nvidia';
 import { supabaseAdmin } from '../lib/supabase';
-import { memoryRepository } from '../services/memoryRepository';
 import { cache, CACHE_NS } from '../lib/cache';
 import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
@@ -282,21 +281,33 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     // Apply pre-DB filters (BUG-01 generic value + BUG-02 vocative guard)
     // source_message_id is used as the source text for vocative check
     const semanticMemories = filterSemanticMemories(rawSemanticMemories, messageId);
+    
+    const candidateInserts: any[] = [];
     for (const mem of semanticMemories) {
       if (mem.shouldPersist) {
         // Amendment 1: Common garbage admission boundary — shared helper used by all paths
         if (isGarbageMemoryValue(mem.key ?? '', mem.value ?? '', 'ConsolidatedMemoryAgent:semantic')) {
           continue;
         }
-        await memoryRepository.upsertMemory(userId, {
-          ...mem,
-          // LLM extractions are always subconscious_inference (lowest authority)
-          // The memoryRepository authority guard will block any attempt to overwrite
-          // deterministic or explicit_user facts with these.
-          source_authority: 'subconscious_inference',
-        }, messageId);
-        totalCreated++;
+        
+        // Phase 2E-B: Route subconscious semantic extractions to WorkingMemory as candidates
+        // instead of writing directly to durable semantic memory.
+        const expires = new Date();
+        expires.setHours(expires.getHours() + 72); // 72 hours for candidate facts
+
+        candidateInserts.push({
+          user_id: userId,
+          key: mem.key,
+          value: mem.value,
+          expires_at: expires.toISOString(),
+          promotion_status: 'CANDIDATE'
+        });
       }
+    }
+    
+    if (candidateInserts.length > 0) {
+      await supabaseAdmin.from('working_memory').insert(candidateInserts);
+      totalCreated += candidateInserts.length;
     }
 
     // ── Working memories ──
