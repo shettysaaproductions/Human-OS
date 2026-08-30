@@ -5,6 +5,7 @@ import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
+import { deterministicGuardian } from './DeterministicGuardianService';
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, is_archived, memory_type, source_authority, protection_source, protected_at';
@@ -168,6 +169,13 @@ export class MemoryRepository {
 
         logger.debug('Memory inserted', { key: normalizedMemory.key, userId, authority: incomingAuthority });
       }
+
+      // Phase 2A: Non-blocking Guardian mutation observation trigger
+      setImmediate(() => {
+        deterministicGuardian.runMutationScan(userId, 'memory', normalizedMemory.key).catch(gErr => {
+          logger.debug('[MemoryRepository] Guardian observation non-fatal error', { error: gErr?.message });
+        });
+      });
     } catch (err) {
       logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), memory });
       throw err;

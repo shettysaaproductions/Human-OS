@@ -1971,6 +1971,15 @@ HINGLISH RULES:
         }, 60000));
       }
 
+      // Phase 2A: Asynchronous Read-Only Post-Turn Guardian Observation (Non-blocking)
+      setImmediate(() => {
+        import('../services/DeterministicGuardianService').then(({ deterministicGuardian }) => {
+          deterministicGuardian.runPostTurnScan(userId, turnId, userMessageId).catch(gErr => {
+            logger.debug('[Chat] Guardian post-turn observation non-fatal error', { error: gErr?.message });
+          });
+        }).catch(() => {});
+      });
+
       if (asyncDeadlineTimer) {
         clearTimeout(asyncDeadlineTimer);
       }

@@ -32,6 +32,7 @@
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { deterministicGuardian } from './DeterministicGuardianService';
 
 // ── Cooldown table (mirrors NACE getEscalatedGap) ─────────────────────────────
 // ignoredCount = number of unreplied Nova outreaches since user's last message
@@ -310,6 +311,19 @@ export class ProactiveGate {
         .from('nova_outreach_log')
         .update({ message: actualMessage, updated_at: new Date().toISOString() })
         .eq('id', outreachId);
+
+      // Phase 2A: Non-blocking Guardian outreach observation trigger
+      setImmediate(() => {
+        Promise.resolve(
+          supabaseAdmin.from('nova_outreach_log').select('user_id').eq('id', outreachId).maybeSingle()
+        ).then(({ data }: any) => {
+          if (data?.user_id) {
+            deterministicGuardian.runOutreachScan(data.user_id, outreachId).catch(gErr => {
+              logger.debug('[ProactiveGate] Guardian outreach observation non-fatal error', { error: gErr?.message });
+            });
+          }
+        }).catch(() => {});
+      });
     } catch (e) {
       logger.warn('[ProactiveGate] commit() failed — outreach log may have placeholder', { outreachId, error: String(e) });
     }

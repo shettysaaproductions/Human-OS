@@ -21,6 +21,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { canonicalizeLifeThreadKey, CanonicalLifeThreadKeyResult } from '../lib/lifeThreadKeySchema';
+import { deterministicGuardian } from './DeterministicGuardianService';
 
 export type LifeThreadState = 'active' | 'waiting' | 'blocked' | 'completed' | 'abandoned' | 'superseded';
 export type LifeThreadPriority = 'low' | 'medium' | 'high';
@@ -261,6 +262,8 @@ export class LifeThreadRepository {
         userId, id: existingThread.id, canonicalKey, state: targetState, wasResumed
       });
 
+      this.notifyGuardian(userId, existingThread.id);
+
       return { thread: updated as LifeThreadRow, isNew: false, wasResumed };
     }
 
@@ -318,6 +321,8 @@ export class LifeThreadRepository {
       logger.info('[LifeThreadRepo] Thread created successfully', {
         userId, id: created.id, canonicalKey, state: initialState
       });
+
+      this.notifyGuardian(userId, created.id);
 
       return { thread: created as LifeThreadRow, isNew: true };
     } catch (err: any) {
@@ -400,6 +405,8 @@ export class LifeThreadRepository {
     logger.info('[LifeThreadRepo] State transitioned', {
       userId, threadId, from: thread.state, to: targetState, authority: opts.sourceAuthority
     });
+
+    this.notifyGuardian(userId, updated.id);
 
     return updated as LifeThreadRow;
   }
@@ -551,6 +558,17 @@ export class LifeThreadRepository {
       .update({ state: nextActionState, updated_at: new Date().toISOString() })
       .eq('source_thread_id', threadId)
       .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']);
+  }
+
+  /**
+   * Non-blocking Guardian mutation observation trigger (Phase 2A)
+   */
+  private notifyGuardian(userId: string, threadId?: string): void {
+    setImmediate(() => {
+      deterministicGuardian.runMutationScan(userId, 'life_thread', threadId).catch(gErr => {
+        logger.debug('[LifeThreadRepo] Guardian observation non-fatal error', { error: gErr?.message });
+      });
+    });
   }
 }
 
