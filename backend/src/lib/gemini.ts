@@ -188,8 +188,12 @@ export class GeminiPool {
         break; // Stop immediately to preserve remaining budget for NVIDIA fallback
       }
 
-      // Dynamically allocate budget for this slot attempt
-      const slotTimeoutMs = Math.min(2500, Math.max(600, remainingMs - 500));
+      // Dynamically allocate budget for this slot attempt:
+      // If deadlineMs is specified (interactive chat), use fast 2.5s slot rotation.
+      // Otherwise (background/guardian reasoning), allow full slot timeout.
+      const slotTimeoutMs = deadlineMs
+        ? Math.min(2500, Math.max(600, remainingMs - 500))
+        : remainingMs;
 
       try {
         const result = await operation(keyEntry.client, slot, slotTimeoutMs);
