@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">76.23% </span>
+                <span class="strong">76.47% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>154/202</span>
+                <span class='fraction'>156/204</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">59.35% </span>
+                <span class="strong">60.86% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>92/155</span>
+                <span class='fraction'>98/161</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">77.71% </span>
+                <span class="strong">77.95% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>143/184</span>
+                <span class='fraction'>145/186</span>
             </div>
         
             
@@ -879,7 +879,18 @@
 <a name='L814'></a><a href='#L814'>814</a>
 <a name='L815'></a><a href='#L815'>815</a>
 <a name='L816'></a><a href='#L816'>816</a>
-<a name='L817'></a><a href='#L817'>817</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
+<a name='L817'></a><a href='#L817'>817</a>
+<a name='L818'></a><a href='#L818'>818</a>
+<a name='L819'></a><a href='#L819'>819</a>
+<a name='L820'></a><a href='#L820'>820</a>
+<a name='L821'></a><a href='#L821'>821</a>
+<a name='L822'></a><a href='#L822'>822</a>
+<a name='L823'></a><a href='#L823'>823</a>
+<a name='L824'></a><a href='#L824'>824</a>
+<a name='L825'></a><a href='#L825'>825</a>
+<a name='L826'></a><a href='#L826'>826</a>
+<a name='L827'></a><a href='#L827'>827</a>
+<a name='L828'></a><a href='#L828'>828</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
@@ -1281,6 +1292,8 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">16x</span>
 <span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
 <span class="cline-any cline-yes">16x</span>
 <span class="cline-any cline-yes">16x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1292,7 +1305,13 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1425,8 +1444,11 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -2097,10 +2119,13 @@ export class NovaBrainService {
     // The queue will durably process this in the background to ensure at-least-once extraction.
     logger.info('[NOVA BRAIN] Enqueuing non-critical subconscious extraction job');
     const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
+    // P0-A: Use canonical turn_id from context if available; fall back to jobMessageId
+    const jobTurnId: string = (context as any).turnId || jobMessageId;
     import('./QueueService').then(({ subconsciousQueue }) =&gt; {
       subconsciousQueue.add('extract_subconscious_actions', {
         userId: _userId,
         messageId: jobMessageId,
+        turnId: jobTurnId,              // P0-A: canonical turn identity
         conversationId: context.conversationId || '',
         message: combinedUserMessage,
         userMessage: combinedUserMessage,
@@ -2112,9 +2137,14 @@ export class NovaBrainService {
         user_id: _userId,
         turn_context: {
           messageId: jobMessageId,
+          turnId: jobTurnId,            // P0-A: canonical turn identity
           conversationId: context.conversationId || '',
           userMessage: combinedUserMessage,
-          novaReply: reply
+          novaReply: reply,
+          // BUG-06: Pass negated correction concepts so LifeThreadAgent can mark superseded
+          // concepts within threads without killing the entire thread (e.g. "fashion ka shop nahi"
+          // annotates "fashion" as superseded but keeps the underlying business-goal thread alive)
+          negativeCorrectionConcepts: context.negativeCorrectionConcepts || [],
         }
       });
     }).catch(<span class="fstat-no" title="function not covered" >err </span>=&gt; {
@@ -2241,10 +2271,13 @@ export class NovaBrainService {
     // We enqueue the extraction job for all interactions.
     logger.info('[NOVA BRAIN] Stream: Enqueuing subconscious extraction job');
       const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
+      // P0-A: Use canonical turn_id from context if available
+      const jobTurnId: string = (context as any).turnId || jobMessageId;
       import('./QueueService').then(({ subconsciousQueue }) =&gt; {
         subconsciousQueue.add('extract_subconscious_actions', {
           userId: _userId,
           messageId: jobMessageId,
+          turnId: jobTurnId,            // P0-A: canonical turn identity
           conversationId: context.conversationId || '',
           message: messages.map(m =&gt; m.message).join('\n\n'),
           userMessage: messages.map(m =&gt; m.message).join('\n\n'),
@@ -2518,7 +2551,7 @@ export const novaBrain = new NovaBrainService();
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-08-29T10:20:09.884Z
+                at 2026-08-30T15:16:27.309Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

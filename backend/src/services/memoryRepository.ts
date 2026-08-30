@@ -139,6 +139,8 @@ export class MemoryRepository {
                 protection_source: normalizedMemory.protection_source || 'system',
                 protected_at: new Date().toISOString()
               } : {}),
+              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
             })
             .eq('id', existing.id)
         );
@@ -164,6 +166,8 @@ export class MemoryRepository {
                 protection_source: normalizedMemory.protection_source || 'system',
                 protected_at: new Date().toISOString()
               } : {}),
+              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
             })
         );
 

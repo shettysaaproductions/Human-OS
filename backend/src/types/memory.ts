@@ -61,6 +61,9 @@ export interface ExtractedMemory {
   source_authority?: SourceAuthority;
   /** True when this write is an explicit user correction — may overwrite higher-authority values */
   correction_intent?: boolean;
+  /** Phase 2E Lifecycle Metadata */
+  source_references?: MemorySourceReference[];
+  compression_status?: LifecycleStatus;
 }
 
 export interface WorkingMemory {
@@ -176,3 +179,50 @@ export interface MemoryCompressionCandidate {
   proposed_memory: Memory;
   rationale: string;
 }
+
+export interface CompressionDraft {
+  draft_id: string;
+  user_id: string;
+  candidate_id?: string;
+  category: CognitiveCategory;
+  proposed_key: string;
+  proposed_value: string;
+  proposed_memory_type: MemoryType;
+  source_references: MemorySourceReference[];
+  confidence: number;
+  importance: number;
+  reason: string;
+  temporal_summary?: string;
+  fingerprint: string;
+  created_at: string;
+}
+
+export interface CompressionVerificationResult {
+  decision: 'approve' | 'reject' | 'uncertain';
+  confidence: number;
+  unsupported_claims: string[];
+  temporal_conflict: boolean;
+  temporal_accurate: boolean;
+  reason: string;
+  verifier_model: 'gemini-flash-high' | 'gemini-pro-high';
+  escalated: boolean;
+  escalation_reason?: string;
+}
+
+export interface VerifiedSemanticProposal {
+  proposal_id: string;
+  user_id: string;
+  key: string;
+  value: string;
+  memory_type: MemoryType;
+  source_authority: SourceAuthority;
+  source_references: MemorySourceReference[];
+  verification_result: CompressionVerificationResult;
+  status: 'proposed' | 'written' | 'verified' | 'failed' | 'invalidated';
+  written_memory_id?: string;
+  archive_candidate: boolean;
+  fingerprint: string;
+  created_at: string;
+  invalidated_reason?: string;
+}
+
