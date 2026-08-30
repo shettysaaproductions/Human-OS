@@ -226,3 +226,47 @@ export interface VerifiedSemanticProposal {
   invalidated_reason?: string;
 }
 
+// ============================================================================
+// PHASE 2E-E: RETENTION MATRIX & FADING ENGINE TYPES
+// ============================================================================
+
+export type RetentionDecision =
+  | 'KEEP'
+  | 'COMPRESS_CANDIDATE'
+  | 'ARCHIVE_CANDIDATE'
+  | 'FADE_CANDIDATE'
+  | 'HUMAN_REVIEW'
+  | 'INDETERMINATE';
+
+export type RetentionClass =
+  | 'PROTECTED'
+  | 'DURABLE_FACT'
+  | 'ACTIVE_GOAL'
+  | 'IMPORTANT_EPISODE'
+  | 'CURRENT_PREFERENCE'
+  | 'TEMPORARY_CONTEXT'
+  | 'LOW_VALUE_EVENT'
+  | 'EXPIRED';
+
+export type RetentionPriority = 'NOW' | 'NEXT' | 'LATER' | 'BACKGROUND';
+
+export interface MemoryRetentionProposal {
+  proposal_id: string;
+  user_id: string;
+  target_id: string;
+  target_type: 'memory' | 'working_memory' | 'episodic_memory';
+  target_key?: string;
+  target_value?: string;
+  retention_class: RetentionClass;
+  decision: RetentionDecision;
+  reasons: string[];
+  evidence: Record<string, any>;
+  confidence: number;
+  priority: RetentionPriority;
+  created_at: string;
+  expires_at: string;
+  fingerprint: string;
+  evaluated_by: 'deterministic_rules' | 'gemini-flash-high';
+}
+
+
