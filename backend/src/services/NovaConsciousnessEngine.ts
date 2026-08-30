@@ -768,7 +768,10 @@ ${sessionStartContextNote}`;
       const conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
       try {
-        await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine');
+        await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine', undefined, {
+          sourceType: 'nace_outreach',
+          outreachLogId: outreachId || undefined,
+        });
         // Commit actual message to gate log (was written as placeholder on acquire)
         await proactiveGate.commit(outreachId, message);
       } catch (saveErr) {

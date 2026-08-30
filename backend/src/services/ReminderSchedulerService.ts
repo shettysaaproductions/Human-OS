@@ -174,7 +174,11 @@ export class ReminderSchedulerService {
 
         conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-        await saveAssistantMessage(reminder.user_id, conversationId, message, 'ReminderSchedulerService');
+        await saveAssistantMessage(
+          reminder.user_id, conversationId, message,
+          'ReminderSchedulerService', undefined,
+          { sourceType: 'reminder' }   // P0-C: attribution
+        );
         break; // Success
       } catch (insertErr) {
         retryCount++;

@@ -400,10 +400,13 @@ export class NovaBrainService {
     // The queue will durably process this in the background to ensure at-least-once extraction.
     logger.info('[NOVA BRAIN] Enqueuing non-critical subconscious extraction job');
     const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
+    // P0-A: Use canonical turn_id from context if available; fall back to jobMessageId
+    const jobTurnId: string = (context as any).turnId || jobMessageId;
     import('./QueueService').then(({ subconsciousQueue }) => {
       subconsciousQueue.add('extract_subconscious_actions', {
         userId: _userId,
         messageId: jobMessageId,
+        turnId: jobTurnId,              // P0-A: canonical turn identity
         conversationId: context.conversationId || '',
         message: combinedUserMessage,
         userMessage: combinedUserMessage,
@@ -415,6 +418,7 @@ export class NovaBrainService {
         user_id: _userId,
         turn_context: {
           messageId: jobMessageId,
+          turnId: jobTurnId,            // P0-A: canonical turn identity
           conversationId: context.conversationId || '',
           userMessage: combinedUserMessage,
           novaReply: reply,
@@ -548,10 +552,13 @@ export class NovaBrainService {
     // We enqueue the extraction job for all interactions.
     logger.info('[NOVA BRAIN] Stream: Enqueuing subconscious extraction job');
       const jobMessageId = context.messageId || context.userMessageId || ('msg_' + Date.now());
+      // P0-A: Use canonical turn_id from context if available
+      const jobTurnId: string = (context as any).turnId || jobMessageId;
       import('./QueueService').then(({ subconsciousQueue }) => {
         subconsciousQueue.add('extract_subconscious_actions', {
           userId: _userId,
           messageId: jobMessageId,
+          turnId: jobTurnId,            // P0-A: canonical turn identity
           conversationId: context.conversationId || '',
           message: messages.map(m => m.message).join('\n\n'),
           userMessage: messages.map(m => m.message).join('\n\n'),

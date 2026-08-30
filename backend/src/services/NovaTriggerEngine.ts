@@ -70,7 +70,11 @@ export class NovaTriggerEngine {
 
         const conversationId = latestChat?.conversation_id || crypto.randomUUID();
 
-        await saveAssistantMessage(userId, conversationId, message, 'NovaTriggerEngine');
+        await saveAssistantMessage(
+          userId, conversationId, message,
+          'NovaTriggerEngine', undefined,
+          { sourceType: 'nace_outreach' }   // P0-C: attribution
+        );
 
         // Also save to outreach log (schema columns are outreach_type/created_at,
         // NOT type/sent_at — the old insert failed every time)

@@ -138,7 +138,22 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
   }
 
   protected async execute(job: Job): Promise<number> {
-    const { userId, messageId, message } = job.payload;
+    const { userId, messageId, message, questionClauses, turnId: _turnId } = job.payload;
+
+    // P0-B: Build the question-clause suppression instruction if we have clause data.
+    // This is the PRIMARY fix for question text being stored as memory values.
+    const questionClauseList: string[] = Array.isArray(questionClauses) ? questionClauses : [];
+    const questionSuppressionBlock = questionClauseList.length > 0
+      ? `
+
+CRITICAL — DO NOT EXTRACT FROM QUESTIONS:
+The following text segments from this message are QUESTIONS, not statements of fact.
+You MUST NOT extract any memory from these question segments:
+${questionClauseList.map((q, i) => `  ${i + 1}. "${q}"`).join('\n')}
+These are things the user is ASKING ABOUT, not telling you. Extracting them as facts would be wrong.
+If the entire user message is a question, return empty arrays for all memory types.
+`
+      : '';
 
     // Check cache first
     const cacheKey = `memory_extraction:${hashMessage(message)}`;
@@ -153,7 +168,7 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
         role: 'system',
         content: `You are the Unified Memory Extraction Agent for HumanOS.
 Analyze the user's message and extract ALL relevant memory types in ONE structured JSON response.
-
+${questionSuppressionBlock}
 Return ONLY a valid JSON object with these exact keys (omit empty arrays/objects if nothing to extract):
 
 {

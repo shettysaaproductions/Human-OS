@@ -89,7 +89,9 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
  */
 async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string, context?: { asyncMode?: boolean; source?: string }): Promise<void> {
   try {
-    await saveAssistantMessage(userId, conversationId, content, 'SystemFallback', replyToId);
+    await saveAssistantMessage(userId, conversationId, content, 'SystemFallback', replyToId, {
+      sourceType: 'conversational',   // P0-C: fallback still originated from a user turn
+    });
   } catch (err) {
     const isAsync = context?.asyncMode === true;
     const source = context?.source || 'unknown';
@@ -730,6 +732,21 @@ chatRouter.post(
 
       const userMessageId = savedMessages[savedMessages.length - 1].id;
 
+      // ── P0-A: Canonical Turn ID ───────────────────────────────────────────────
+      // One turn_id per user chat turn. All background jobs derived from this turn
+      // must carry the same turn_id so they can be traced, ordered, and
+      // correlated in logs even if they complete out of order.
+      // Prefer the saved DB row id (which equals client_message_id when a valid UUID
+      // was supplied) so the turn_id is stable and matches what the client sent.
+      // Falls back to a fresh UUID if the save failed or the id is a synthetic key.
+      const turnId: string = (
+        userMessageId &&
+        !userMessageId.startsWith('msg_') &&
+        !userMessageId.startsWith('proactive_')
+      ) ? userMessageId : crypto.randomUUID();
+
+      logger.info('[Chat][P0-A] Turn ID assigned', { userId, turnId, userMessageId });
+
       // If the user signalled sleep/unavailability, write the DB lock IMMEDIATELY so
       // NACE + follow-up engines stay silent — don't wait for the reactive sleep-guard.
       // Otherwise cancel any pending follow-ups since the user replied.
@@ -1178,8 +1195,13 @@ chatRouter.post(
           factClass: data.factClass
         }));
         try {
-          await memoryQueue.add('extract_deterministic_fact', { userId, facts: payloadFacts, sourceMessage: effectiveMessage });
-          logger.info('[Chat] Durable fact persistence intent queued', { userId, count: payloadFacts.length, facts: payloadFacts });
+          await memoryQueue.add('extract_deterministic_fact', {
+            userId,
+            turnId,                     // P0-A: canonical turn identity
+            facts: payloadFacts,
+            sourceMessage: effectiveMessage
+          });
+          logger.info('[Chat] Durable fact persistence intent queued', { userId, turnId, count: payloadFacts.length, facts: payloadFacts });
         } catch (e) {
           logger.error('[Chat] Failed to queue deterministic facts', { error: e instanceof Error ? e.message : String(e) });
         }
@@ -1275,7 +1297,11 @@ chatRouter.post(
         conversationId: activeConversationId,
         requestId: requestId,
         userMessageId: userMessageId,
-        messageId: userMessageId
+        messageId: userMessageId,
+        // P0-A: canonical turn identity — propagated to all background jobs
+        turnId,
+        // P0-B: question clause texts — forwarded to memory extraction jobs
+        questionClauses: turnAnalysis.questionClauses || [],
       };
 
 
@@ -1795,6 +1821,8 @@ HINGLISH RULES:
             content: msgText,
             reply_to_id: idx === 0 ? replyTargetId : null,
             reply_to_content: idx === 0 ? replyTargetContent : null,
+            // P0-C: causal attribution — this is a direct conversational reply
+            source_type: 'conversational',
             meta: idx === finalBubbles.length - 1 ? {
               situationBrief: situationBrief || null,
               subconsciousActions: extractedActions,
@@ -1904,7 +1932,14 @@ HINGLISH RULES:
         const isFiller = primaryMessage.length < 10 && !shouldExtractShortTermMemory(primaryMessage);
 
         if (!isFiller) {
-          const payload = { userId, messageId: userMessageId, message: primaryMessage };
+          // P0-A + P0-B: include turnId (traceability) and questionClauses (admission guard)
+          const payload = {
+            userId,
+            messageId: userMessageId,
+            message: primaryMessage,
+            turnId,                           // P0-A
+            questionClauses: brainContext.questionClauses,  // P0-B
+          };
           memoryQueue.add('extract_all_memories', payload).catch(err => {
             logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });
           });

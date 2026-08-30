@@ -25,6 +25,19 @@ const GARBAGE_VALUE_PATTERNS: RegExp[] = [
   /^\[?(system|assistant|user)\]?:/i, // Raw role-prefixed text
   /^(active goals?|current goals?|long.?term goals?|user's goals?)$/i,
   /^(pending tasks?|upcoming tasks?|active tasks?)$/i,
+
+  // ── P0-B: Hinglish interrogative question-word guard ─────────────────────
+  // Catches question fragments extracted FROM questions WITHOUT a trailing "?".
+  // These are defense-in-depth; the primary fix is passing questionClauses to
+  // ConsolidatedMemoryAgent (which blocks extraction before the LLM call).
+  //
+  // Matches values that START with a Hinglish/English question word (with or
+  // without trailing words). Short interrogative phrases like "kaunsa hold pe hai"
+  // or "abhi ke sabse important goals" that are clearly question fragments.
+  /^(kya|kaise|kahan|kab|kaun|kaunsa|kyun|kitna|kitne|kitni)\s+/i,
+  /^(what|where|when|why|who|how|which)\s+/i,
+  // Question-final patterns without "?": e.g. "aur kya hai" "toh kya karna chahiye"
+  /\b(kya hai|kya hoga|kya karna|kya karein|kya karun|kya hua)\s*$/i,
 ];
 
 // ── Key-level garbage patterns ───────────────────────────────────────────────

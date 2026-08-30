@@ -73,6 +73,13 @@ export interface TurnAnalysisResult {
   negativeCorrectionConcepts?: string[];
   /** Amendment 3: Structured negated goals with targetFactKey for deterministic propagation */
   negatedGoals?: NegatedGoal[];
+  /**
+   * P0-B: Text of every clause classified as 'question'.
+   * Forwarded to ConsolidatedMemoryAgent so the LLM is instructed NOT
+   * to extract durable memories from these specific clauses.
+   * An empty array means no question clauses were detected.
+   */
+  questionClauses?: string[];
 }
 
 export interface ExtractedFact {
@@ -271,6 +278,12 @@ export class TurnAnalyzer {
     // otherwise LifeThreadAgent will inject [CONCEPT SUPERSEDED] into provenance.
     const factualCorrections = negatedGoals.filter(g => !g.isCurrent).map(g => g.concept);
 
+    // P0-B: Collect text of all question-classified clauses.
+    // Used by ConsolidatedMemoryAgent to suppress extraction from question text.
+    const questionClauses = units
+      .filter(u => u.type === 'question')
+      .map(u => u.text);
+
     return {
       units,
       hasQuestions: units.some(u => u.type === 'question'),
@@ -284,6 +297,8 @@ export class TurnAnalyzer {
       negativeCorrectionConcepts: factualCorrections,
       // Amendment 3: structured negated goals with targetFactKey + isCurrent (both pauses and drops)
       negatedGoals,
+      // P0-B: Question clause texts for admission-guard forwarding
+      questionClauses,
     };
   }
 
