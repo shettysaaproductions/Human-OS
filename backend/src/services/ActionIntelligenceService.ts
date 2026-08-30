@@ -108,6 +108,36 @@ export class ActionIntelligenceService {
       
     return true;
   }
+
+  /**
+   * Phase 2C Safe Deterministic Repair Operation: Cancel Action
+   * Safely cancels an orphaned or invalid action through canonical path.
+   */
+  async cancelAction(userId: string, actionId: string, reason: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('nova_actions')
+        .update({
+          state: 'cancelled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', actionId)
+        .eq('user_id', userId)
+        .in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked'])
+        .select('id');
+
+      if (error) {
+        logger.error('[ActionIntelligence] Failed to cancel action', { userId, actionId, error: error.message });
+        return false;
+      }
+
+      logger.info('[ActionIntelligence] Action cancelled via canonical service', { userId, actionId, reason });
+      return (data || []).length > 0;
+    } catch (err: any) {
+      logger.error('[ActionIntelligence] cancelAction error', { userId, actionId, error: err?.message });
+      return false;
+    }
+  }
 }
 
 export const actionIntelligenceService = new ActionIntelligenceService();

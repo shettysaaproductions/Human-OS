@@ -531,6 +531,24 @@ export class ReminderEngine {
   }
 
   /**
+   * Phase 2C Safe Deterministic Repair Operation: Mark Expired Reminder
+   */
+  async expireReminder(userId: string, id: string): Promise<boolean> {
+    const { data, error } = await supabaseAdmin
+      .from('reminders')
+      .update({ status: 'expired', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .select('id');
+    if (error) {
+      logger.error('[ReminderEngine] Failed to expire reminder', { id, error: error.message });
+      return false;
+    }
+    return !!(data && data.length > 0);
+  }
+
+  /**
    * Format trigger date(s) for human-readable confirmation using the engine's timezone offset
    */
   formatConfirmation(parsedReminders: ParsedReminder[]): string {

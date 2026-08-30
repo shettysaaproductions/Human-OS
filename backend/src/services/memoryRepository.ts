@@ -339,6 +339,74 @@ export class MemoryRepository {
       return [];
     }
   }
+
+  /**
+   * Phase 2C Safe Deterministic Repair Operation: Archive Memory
+   * Safely marks a memory as archived without physical deletion.
+   */
+  async archiveMemory(userId: string, memoryId: string, reason: string): Promise<boolean> {
+    try {
+      const { data, error } = await qt.track('mem_repo_archive', 'memories', () =>
+        supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', memoryId)
+          .eq('user_id', userId)
+          .select('id')
+      );
+
+      if (error) {
+        logger.error('[MemoryRepository] Failed to archive memory', { userId, memoryId, error: error.message });
+        return false;
+      }
+
+      logger.info('[MemoryRepository] Memory archived via canonical repository', { userId, memoryId, reason });
+      return (data || []).length > 0;
+    } catch (err: any) {
+      logger.error('[MemoryRepository] archiveMemory error', { userId, memoryId, error: err?.message });
+      return false;
+    }
+  }
+
+  /**
+   * Phase 2C Safe Deterministic Repair Operation: Key Canonicalization
+   * Normalizes an aliased key to its canonical schema equivalent.
+   */
+  async canonicalizeMemoryKey(
+    userId: string,
+    memoryId: string,
+    oldKey: string,
+    newCanonicalKey: string
+  ): Promise<boolean> {
+    try {
+      const { data, error } = await qt.track('mem_repo_canonicalize_key', 'memories', () =>
+        supabaseAdmin
+          .from('memories')
+          .update({
+            key: newCanonicalKey,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', memoryId)
+          .eq('user_id', userId)
+          .eq('key', oldKey)
+          .select('id')
+      );
+
+      if (error) {
+        logger.error('[MemoryRepository] Failed to canonicalize memory key', { userId, memoryId, oldKey, newCanonicalKey, error: error.message });
+        return false;
+      }
+
+      logger.info('[MemoryRepository] Memory key canonicalized via canonical repository', { userId, memoryId, oldKey, newCanonicalKey });
+      return (data || []).length > 0;
+    } catch (err: any) {
+      logger.error('[MemoryRepository] canonicalizeMemoryKey error', { userId, memoryId, error: err?.message });
+      return false;
+    }
+  }
 }
 
 export const memoryRepository = new MemoryRepository();

@@ -24,6 +24,8 @@ import {
   GuardianScanReport,
   GuardianAnomalyRecord,
 } from '../types/guardian';
+import { canonicalStateReconciler } from './CanonicalStateReconciler';
+import { RepairOrderDraft } from '../types/canonicalRepair';
 
 export class DeterministicGuardianService {
   /**
@@ -1289,6 +1291,71 @@ export class DeterministicGuardianService {
       map[d.severity] = (map[d.severity] || 0) + 1;
     }
     return map;
+  }
+
+  /**
+   * Phase 2C Safe Deterministic Repair Generator & Dispatcher
+   * Converts approved Watchtower anomalies into typed Repair Orders for CanonicalStateReconciler.
+   */
+  async evaluateAndDispatchRepairs(userId: string, anomalies: GuardianAnomalyDraft[]): Promise<number> {
+    let dispatchedCount = 0;
+
+    for (const anomaly of anomalies) {
+      try {
+        let repairDraft: RepairOrderDraft | null = null;
+
+        // REPAIR A: Memory Alias Canonicalization (W-003)
+        if (anomaly.anomalyCode === 'W-003' && anomaly.targetEntityId) {
+          repairDraft = {
+            userId,
+            repairType: 'MEMORY_ALIAS_CANONICALIZATION',
+            targetEntityId: anomaly.targetEntityId,
+            expectedCurrentState: { key: anomaly.evidence.alias_key },
+            proposedState: { canonical_key: anomaly.evidence.canonical_key },
+            evidence: anomaly.evidence,
+            authority: 'watchtower_repair',
+          };
+        }
+
+        // REPAIR B: Generic Relational Noise Memory (W-002)
+        else if (anomaly.anomalyCode === 'W-002' && anomaly.targetEntityId) {
+          repairDraft = {
+            userId,
+            repairType: 'GENERIC_RELATIONAL_NOISE',
+            targetEntityId: anomaly.targetEntityId,
+            expectedCurrentState: { value: anomaly.evidence.value },
+            proposedState: { is_archived: true },
+            evidence: anomaly.evidence,
+            authority: 'watchtower_repair',
+          };
+        }
+
+        // REPAIR E: Expired Deterministic Reminder (W-019)
+        else if (anomaly.anomalyCode === 'W-019' && anomaly.targetEntityId) {
+          repairDraft = {
+            userId,
+            repairType: 'EXPIRED_REMINDER_STATE',
+            targetEntityId: anomaly.targetEntityId,
+            expectedCurrentState: { status: 'active' },
+            proposedState: { status: 'expired' },
+            evidence: anomaly.evidence,
+            authority: 'watchtower_repair',
+          };
+        }
+
+        if (repairDraft) {
+          const order = await canonicalStateReconciler.submitRepairOrder(repairDraft);
+          if (order) {
+            await canonicalStateReconciler.executeRepair(order.id);
+            dispatchedCount++;
+          }
+        }
+      } catch (err: any) {
+        logger.debug('[DeterministicGuardian] evaluateAndDispatchRepairs non-fatal error', { error: err?.message });
+      }
+    }
+
+    return dispatchedCount;
   }
 }
 
