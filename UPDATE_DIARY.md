@@ -1,4 +1,23 @@
 
+## [2026-08-30] Phase 2A Watchtower Read-Only Deterministic Guardian & Live Anomaly Classification
+
+### Trigger
+Phase 2A architecture deployment: build a zero-LLM deterministic Watchtower to observe cognitive state consistency and classify internal anomalies in production with zero core-state mutation.
+
+### Changes Made
+1. **Deterministic Watchtower Engine (`DeterministicGuardianService.ts` & `guardianFingerprint.ts`)**
+   - Implemented 22 deterministic anomaly detectors (W-001..W-022) with stable SHA-256 fingerprinting.
+   - Non-blocking asynchronous observation hooks attached to `chat.ts`, `lifeThreadRepository.ts`, `memoryRepository.ts`, and `ProactiveGate.ts`.
+   - Migration `043_p2a_guardian_schema.sql` created for `nova_guardian_runs` and `nova_guardian_anomalies`.
+2. **Production Baseline Scan & Forensic Classification**
+   - Full baseline scan executed: 0 LLM calls, 0 core-state mutations.
+   - W-001 (Question / Meta Memory): 4 detected (2 real historical extraction defects e.g. `"kaunsa hold pe hai"`, 2 legacy meta-descriptions; 0 false positives).
+   - W-002 (Authority Inversion): 2 detected (legacy relational nouns `"wife"`, `"son"` in `*_name` keys stored prior to family name validation rules; 0 false positives).
+   - W-014 (Missing Turn Attribution): 47 detected in baseline scan (all 47 confirmed pre-Phase-0 historical messages created prior to Phase 0 deployment boundary `2026-08-30T11:43:30Z`; 0 post-Phase-0 attribution bugs observed).
+   - Core data integrity preserved: All flagged historical records left untouched (no automatic cleanup).
+
+---
+
 ## [2026-08-29] Production Reliability Repair Pass v2 — P0 Isolation, Reminders, Negation, Garbage Filter, Idempotent Proactive
 
 ### Trigger

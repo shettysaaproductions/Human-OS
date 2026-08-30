@@ -1,7 +1,16 @@
 # Known Issues List (Active)
 
 This document tracks identified bugs, limitations, and workarounds.
-**Last Updated: Aug 29, 2026**
+**Last Updated: Aug 30, 2026**
+
+---
+
+## 🔍 Phase 2A Watchtower Read-Only Guardian Baseline Scan & Classification (Aug 30, 2026)
+
+- **Scan Invariant:** 100% Deterministic, 0 LLM tokens, Read-Only (0 core-state mutations across `memories`, `life_threads`, `reminders`, `chat_history`, `working_memory`).
+- **W-001 (Question / Meta Memory):** 4 detected in baseline user partition (2 real historical extraction bugs e.g. `"kaunsa hold pe hai"`, 2 legacy meta-descriptions; 0 false positives). **Action:** Retained untouched. No automatic cleanup or mutation performed.
+- **W-002 (Authority Inversion):** 2 detected (legacy relational nouns `"wife"` in `wife_name` and `"son"` in `son_name` stored under `subconscious_inference` prior to family name validation rules; 0 false positives). **Action:** Retained untouched.
+- **W-014 (Missing Turn Attribution):** 47 detected in baseline scan (all 47 are pre-Phase-0 historical messages created prior to Phase 0 deployment boundary `2026-08-30T11:43:30Z`; 0 post-Phase-0 attribution bugs observed; causal provenance on active turns is fully intact). **Action:** Retained as legacy records.
 
 ---
 

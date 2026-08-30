@@ -29,6 +29,7 @@ Reference: [NOVA_ARCHITECTURE.md](./NOVA_ARCHITECTURE.md)
 **All 7 engines are LIVE in production on Render.**
 
 ### ✅ Recently Completed
+- **Phase 2A Watchtower Read-Only Guardian (Aug 30, 2026):** Built zero-LLM deterministic Watchtower with 22 anomaly detectors (W-001..W-022) across memories, life threads, reminders, background jobs, auth profiles, and turn attribution. Migration `043_p2a_guardian_schema.sql` creates `nova_guardian_runs` and `nova_guardian_anomalies`. Executed live baseline scan: detected 4 W-001 (2 real historical extraction bugs, 2 legacy), 2 W-002 (legacy relational nouns), 47 W-014 (pre-Phase-0 historical messages). Confirmed 0 post-Phase-0 attribution bugs, 0 LLM calls, and 0 core-state mutations (100% read-only).
 - **Memory Canonicalization (Aug 28, 2026):** Created `lib/memoryKeySchema.ts` — single canonical key map (12 concepts, 70+ aliases). `memoryRepository.upsertMemory` now normalizes keys as Layer 0. `BackgroundActionService` bypass eliminated. `CognitiveContextService` groups by canonical key. LLM prompt updated with canonical schema. Production reconciliation: 15 alias rows collapsed (9 renamed, 6 archived). Git SHA `b0b942e`. OTA published to production, Runtime 1.1.0.
 - **Auto Upgrade Protocol Execution**: Strict anti-robot patches applied to `promptBuilder.ts` (Anti-formality "Aap", anti-echoing)
 - **True WhatsApp Async Messaging**: Network request returns 202 instantly, bypassing Android OS suspending threads.
