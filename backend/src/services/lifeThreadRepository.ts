@@ -22,6 +22,26 @@ import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { canonicalizeLifeThreadKey, CanonicalLifeThreadKeyResult } from '../lib/lifeThreadKeySchema';
 import { deterministicGuardian } from './DeterministicGuardianService';
+import {
+  LifeThreadCultivationStage,
+  LifeThreadCategory,
+  LifeThreadBlocker,
+  LifeThreadMilestone,
+  LifeThreadNextUsefulStep,
+  LifeThreadEvidenceProvenance,
+  evaluateGoalAuthority,
+} from '../types/lifeThreadCultivation';
+
+export type {
+  LifeThreadCultivationStage,
+  LifeThreadCategory,
+  LifeThreadBlocker,
+  LifeThreadMilestone,
+  LifeThreadNextUsefulStep,
+  LifeThreadEvidenceProvenance,
+};
+
+export { evaluateGoalAuthority };
 
 export type LifeThreadState = 'active' | 'waiting' | 'blocked' | 'completed' | 'abandoned' | 'superseded';
 export type LifeThreadPriority = 'low' | 'medium' | 'high';
@@ -49,6 +69,12 @@ export interface LifeThreadRow {
   state: LifeThreadState;
   priority: LifeThreadPriority;
   provenance: string | null;
+  cultivation_stage?: LifeThreadCultivationStage;
+  category?: LifeThreadCategory;
+  blockers?: LifeThreadBlocker[];
+  milestones?: LifeThreadMilestone[];
+  next_useful_step?: LifeThreadNextUsefulStep | null;
+  last_cultivated_at?: string | null;
   related_memories?: any;
   related_goals?: any;
   last_turn_id?: string | null;
@@ -67,6 +93,7 @@ export interface ThreadMutationOpts {
   sourceMessageId?: string;
   sourceMessageSeq?: number;
   sourceAuthority: LifeThreadMutationSource;
+  evidenceProvenance?: LifeThreadEvidenceProvenance;
   reason?: string;
   provenanceNote?: string;
   isExplicitResume?: boolean;
@@ -80,6 +107,13 @@ export interface CreateOrUpdateThreadSpec {
   topic: string;
   state?: LifeThreadState;
   priority?: LifeThreadPriority;
+  cultivationStage?: LifeThreadCultivationStage;
+  category?: LifeThreadCategory;
+  blockers?: LifeThreadBlocker[];
+  milestones?: LifeThreadMilestone[];
+  nextUsefulStep?: LifeThreadNextUsefulStep | null;
+  lastCultivatedAt?: string | null;
+  nextRelevantTime?: string | null;
   provenance?: string;
 }
 
@@ -211,6 +245,26 @@ export class LifeThreadRepository {
         }
       }
 
+      // ── Layer 2.5: Goal Authority Invariant Enforcement (Phase 3D-A) ───────
+      let targetStage = spec.cultivationStage || existingThread.cultivation_stage || 'DISCOVERY';
+      if (opts.evidenceProvenance) {
+        const isUserOriginated = existingThread.mutation_source === 'user_explicit' ||
+          existingThread.provenance?.includes('CREATED by user_explicit') || false;
+        const authority = evaluateGoalAuthority(opts.evidenceProvenance, isUserOriginated);
+
+        if (authority.isPassiveCompliance || !authority.canStrengthenExistingGoal) {
+          // Passive compliance or system-generated evidence cannot escalate priority or stage
+          if (spec.priority && spec.priority !== existingThread.priority && spec.priority === 'high') {
+            spec.priority = existingThread.priority;
+          }
+          if (targetStage === 'IN_PROGRESS' || targetStage === 'PLANNING') {
+            if (existingThread.cultivation_stage === 'DISCOVERY' || !existingThread.cultivation_stage) {
+              targetStage = 'DISCOVERY';
+            }
+          }
+        }
+      }
+
       // ── Layer 3: Provenance Telemetry Append ───────────────────────────────
       let transitionNote = '';
       if (wasResumed) {
@@ -231,6 +285,13 @@ export class LifeThreadRepository {
         state: targetState,
         priority: spec.priority || existingThread.priority,
         provenance: updatedProvenance,
+        cultivation_stage: targetStage,
+        category: spec.category || existingThread.category || 'GENERAL',
+        blockers: spec.blockers !== undefined ? spec.blockers : (existingThread.blockers || []),
+        milestones: spec.milestones !== undefined ? spec.milestones : (existingThread.milestones || []),
+        next_useful_step: spec.nextUsefulStep !== undefined ? spec.nextUsefulStep : (existingThread.next_useful_step ?? null),
+        last_cultivated_at: spec.lastCultivatedAt || existingThread.last_cultivated_at || null,
+        next_relevant_time: spec.nextRelevantTime !== undefined ? spec.nextRelevantTime : (existingThread.next_relevant_time ?? null),
         last_turn_id: opts.turnId || existingThread.last_turn_id,
         source_message_id: opts.sourceMessageId || existingThread.source_message_id,
         source_message_seq: opts.sourceMessageSeq ?? existingThread.source_message_seq,
@@ -269,6 +330,16 @@ export class LifeThreadRepository {
 
     // ── New Thread Insert Path ────────────────────────────────────────────────
     const initialState = spec.state || 'active';
+    let initialStage: LifeThreadCultivationStage = spec.cultivationStage || 'DISCOVERY';
+
+    // Goal Authority Check for new thread
+    if (opts.evidenceProvenance) {
+      const authority = evaluateGoalAuthority(opts.evidenceProvenance, false);
+      if (!authority.canCreateCommittedGoal && (initialStage === 'IN_PROGRESS' || initialStage === 'PLANNING')) {
+        initialStage = 'DISCOVERY';
+      }
+    }
+
     const initialProvenance = `[CREATED by ${opts.sourceAuthority}: "${displayTopic}" — ${today}]` +
       (opts.provenanceNote ? `\n[NOTE: ${opts.provenanceNote}]` : '');
 
@@ -278,6 +349,13 @@ export class LifeThreadRepository {
       canonical_key: canonicalKey,
       state: initialState,
       priority: spec.priority || 'medium',
+      cultivation_stage: initialStage,
+      category: spec.category || 'GENERAL',
+      blockers: spec.blockers || [],
+      milestones: spec.milestones || [],
+      next_useful_step: spec.nextUsefulStep || null,
+      last_cultivated_at: spec.lastCultivatedAt || nowIso,
+      next_relevant_time: spec.nextRelevantTime || null,
       provenance: initialProvenance,
       last_turn_id: opts.turnId || null,
       source_message_id: opts.sourceMessageId || null,
