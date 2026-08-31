@@ -158,13 +158,16 @@ export class ContextualTimingEngine {
         ),
       ]);
 
-      const timezone = profileRes.data?.timezone || '';
-      const nowLocal = this.deriveLocalDateTime(nowUtc, timezone);
-      const localHour = nowLocal.getHours() + nowLocal.getMinutes() / 60;
+      const rawTimezone = profileRes.data?.timezone || '';
+      const isTzValid = this.isValidTimezone(rawTimezone);
+      const timezone = isTzValid ? rawTimezone.trim() : '';
+      const nowLocal = isTzValid ? this.deriveLocalDateTime(nowUtc, timezone) : nowUtc;
+      const localHour = isTzValid ? nowLocal.getHours() + nowLocal.getMinutes() / 60 : 0;
 
       // Quiet Hours Evaluation (Default: 23:00 to 07:30 local)
+      // If timezone is invalid/missing, isQuietHours is true (conservative fail-safe)
       const isQuietHours =
-        !timezone ||
+        !isTzValid ||
         localHour >= WATCHTOWER_TIMING_LIMITS.DEFAULT_QUIET_HOURS_START ||
         localHour < WATCHTOWER_TIMING_LIMITS.DEFAULT_QUIET_HOURS_END;
 
@@ -393,7 +396,7 @@ export class ContextualTimingEngine {
     }
 
     // ── GATE 8: MISSING TIMEZONE / CONTEXT FAIL-SAFE ─────────────────────────
-    if (!ctx.timezone || ctx.timezone.trim() === '') {
+    if (!ctx.timezone || !this.isValidTimezone(ctx.timezone)) {
       return this.buildDecision(
         userId,
         attention,
@@ -401,10 +404,10 @@ export class ContextualTimingEngine {
         'DEFER',
         'LOW_CONFIDENCE',
         sourceClass,
-        'MISSING_CONTEXT',
+        'MISSING_TIMEZONE',
         ctx,
         expiresAt,
-        'User timezone missing; defaulting conservatively to defer.'
+        'User timezone missing, invalid, or uncertain; defaulting to WAIT/DEFER fail-safe.'
       );
     }
 
@@ -653,11 +656,29 @@ export class ContextualTimingEngine {
     };
   }
 
+  /**
+   * Validates if a timezone string is a recognized, valid IANA or standard timezone.
+   * Returns false for missing, malformed, non-string, or invalid timezone identifiers.
+   */
+  isValidTimezone(tz: string | null | undefined): boolean {
+    if (!tz || typeof tz !== 'string') return false;
+    const trimmed = tz.trim();
+    if (!trimmed) return false;
+    const lower = trimmed.toLowerCase();
+    if (lower === 'null' || lower === 'undefined' || lower === 'none' || lower === 'invalid') return false;
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: trimmed });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private deriveLocalDateTime(utcDate: Date, timezone: string): Date {
-    if (!timezone) return utcDate;
+    if (!this.isValidTimezone(timezone)) return utcDate;
     try {
       const options: Intl.DateTimeFormatOptions = {
-        timeZone: timezone,
+        timeZone: timezone.trim(),
         year: 'numeric',
         month: 'numeric',
         day: 'numeric',

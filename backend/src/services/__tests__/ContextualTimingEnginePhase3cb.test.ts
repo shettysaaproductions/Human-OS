@@ -255,7 +255,7 @@ describe('Phase 3C-B: Deterministic Contextual Timing Engine', () => {
     expect(decision.timingState).toBe('WAIT');
     expect(decision.outreachEligibility).toBe('DEFER');
     expect(decision.confidence).toBe('LOW_CONFIDENCE');
-    expect(decision.reasonCode).toBe('MISSING_CONTEXT');
+    expect(decision.reasonCode).toBe('MISSING_TIMEZONE');
   });
 
   it('9. Relevant active conversation: Topic match allows immediate turn relevance', () => {
@@ -425,7 +425,7 @@ describe('Phase 3C-B: Deterministic Contextual Timing Engine', () => {
     const decision = contextualTimingEngine.evaluateTiming(user1, baseAttention, noTzCtx);
     expect(decision.timingState).toBe('WAIT');
     expect(decision.confidence).toBe('LOW_CONFIDENCE');
-    expect(decision.reasonCode).toBe('MISSING_CONTEXT');
+    expect(decision.reasonCode).toBe('MISSING_TIMEZONE');
   });
 
   it('Adversarial Case G: User said "later" -> WAIT until defer_until', () => {

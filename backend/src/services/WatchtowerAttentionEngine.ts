@@ -203,6 +203,38 @@ export class WatchtowerAttentionEngine {
   }
 
   /**
+   * Normalizes semantic / LLM-derived urgency to the mandatory LLM_PRIORITY_CEILING (85).
+   * Only independent deterministic product rules (e.g. overdue reminder, imminent hard deadline)
+   * can produce scores in the 86–100 range.
+   */
+  normalizeSemanticUrgency(
+    rawUrgency: any,
+    hasDeterministicUrgency: boolean = false
+  ): number {
+    let parsed: number;
+    if (typeof rawUrgency === 'number') {
+      parsed = isNaN(rawUrgency) || rawUrgency < 0 ? 10 : rawUrgency;
+    } else if (typeof rawUrgency === 'string') {
+      const lower = rawUrgency.toLowerCase().trim();
+      if (lower === 'urgent' || lower === 'critical' || lower === 'high') parsed = 85;
+      else if (lower === 'medium' || lower === 'next') parsed = 65;
+      else if (lower === 'low') parsed = 30;
+      else {
+        const num = parseFloat(lower);
+        parsed = isNaN(num) ? 10 : num;
+      }
+    } else {
+      parsed = 10;
+    }
+
+    const ceiling = WATCHTOWER_ATTENTION_LIMITS.LLM_PRIORITY_CEILING; // 85
+    if (!hasDeterministicUrgency && parsed > ceiling) {
+      return ceiling;
+    }
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+  }
+
+  /**
    * Computes deterministic priority scores across all 9 components.
    */
   computeDeterministicScores(
@@ -227,14 +259,17 @@ export class WatchtowerAttentionEngine {
     if (targetType === 'reminder') {
       const normUrgency = (data.urgency || '').toLowerCase();
       importance = normUrgency === 'high' ? 85 : normUrgency === 'medium' ? 65 : 45;
+      let hasDeterministicUrgency = false;
+
       if (data.trigger_at) {
         const triggerMs = new Date(data.trigger_at).getTime();
         const diffHours = (triggerMs - now) / (1000 * 60 * 60);
 
         if (diffHours < 0 && diffHours > -24) {
-          // Triggered recently (<24h overdue)
+          // Triggered recently (<24h overdue) -> Deterministic urgent rule >=86
           urgency = 90;
           deadlineProximity = 95;
+          hasDeterministicUrgency = true;
         } else if (diffHours >= 0 && diffHours <= 24) {
           // Due in next 24h
           urgency = 85;
@@ -252,6 +287,12 @@ export class WatchtowerAttentionEngine {
           urgency = 15;
           deadlineProximity = 15;
         }
+      }
+
+      // Check if LLM / semantic priority is passed, and clamp it to ceiling
+      if (data.llm_priority !== undefined || data.llm_urgency !== undefined) {
+        const rawLlm = data.llm_priority !== undefined ? data.llm_priority : data.llm_urgency;
+        urgency = this.normalizeSemanticUrgency(rawLlm, hasDeterministicUrgency);
       }
 
       // Check handled status
@@ -284,12 +325,23 @@ export class WatchtowerAttentionEngine {
         }
       }
 
+      // Semantic/LLM priority normalization: cannot exceed LLM_PRIORITY_CEILING (85)
+      if (data.llm_priority !== undefined || data.llm_urgency !== undefined) {
+        const rawLlm = data.llm_priority !== undefined ? data.llm_priority : data.llm_urgency;
+        urgency = this.normalizeSemanticUrgency(rawLlm, false);
+      } else {
+        urgency = this.normalizeSemanticUrgency(urgency, false);
+      }
+
       if (data.state === 'completed' || data.state === 'archived') {
         alreadyHandledPenalty = 90;
       }
     } else if (targetType === 'cognitive_doubt') {
-      importance = data.urgency === 'high' ? 75 : 60;
-      urgency = data.priority === 'NEXT' ? 65 : 30;
+      importance = this.normalizeSemanticUrgency(data.urgency === 'high' ? 75 : 60, false);
+      urgency = this.normalizeSemanticUrgency(
+        data.llm_priority !== undefined ? data.llm_priority : (data.priority === 'NEXT' ? 65 : 30),
+        false
+      );
       confidence = Math.round((data.confidence || 0.8) * 100);
 
       // Check doubt cooldown and lifetime presentation bounds
@@ -305,7 +357,7 @@ export class WatchtowerAttentionEngine {
       else importance = 25;
 
       // Internal technical issues have low direct user-facing urgency
-      urgency = data.category === 'repair_required' ? 50 : 20;
+      urgency = this.normalizeSemanticUrgency(data.category === 'repair_required' ? 50 : 20, false);
       confidence = 90;
 
       if (data.status === 'resolved' || data.status === 'consumed') {

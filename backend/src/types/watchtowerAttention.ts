@@ -92,4 +92,5 @@ export const WATCHTOWER_ATTENTION_LIMITS = {
   MAX_URGENT_PER_USER: 1,
   ATTENTION_DEFAULT_TTL_HOURS: 72, // 3 days default TTL
   DEFERRED_COOLDOWN_HOURS: 4,      // 4 hours before re-evaluating deferred attention
+  LLM_PRIORITY_CEILING: 85,        // LLM/semantic priority ceiling; >=86 requires deterministic product rules
 } as const;

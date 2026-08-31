@@ -183,8 +183,11 @@ export class WatchtowerProactiveIntegrationService {
 
         summary.eligibleDecisionsCount += 1;
 
-        // Construct unique logical key for atomic deduplication
-        const logicalKey = `watchtower:${att.targetType}:${att.targetId || att.fingerprint || att.id}`;
+        const isUrgent = att.attentionClass === 'URGENT';
+        // Construct evidence-versioned unique logical key for atomic deduplication
+        // (same target + same evidence version = deduplicated; changed evidence = new logical key)
+        const evidenceVersion = att.evidence?.data?.updated_at || att.evidence?.data?.version || att.fingerprint || att.id || 'v1';
+        const logicalKey = `watchtower:${att.targetType}:${att.targetId || 'global'}:${evidenceVersion}`;
         const topic = att.evidence?.data?.topic || att.evidence?.data?.text || att.reason || att.targetType;
 
         // ── STEP 4: UNIVERSAL USER BURDEN EVALUATION ─────────────────────────
@@ -195,7 +198,7 @@ export class WatchtowerProactiveIntegrationService {
             topic,
             logicalKey,
             targetId: att.targetId,
-            isUrgent: att.attentionClass === 'URGENT',
+            isUrgent,
             deadlineMinutes: att.scores?.deadlineProximity ? Math.max(0, (100 - att.scores.deadlineProximity) * 2) : null,
             deferUntil: att.deferUntil,
             status: att.status,
@@ -251,8 +254,10 @@ export class WatchtowerProactiveIntegrationService {
         const gateRes = await proactiveGate.acquire(userId, {
           outreachType: 'proactive',
           logicalKey,
+          logicalKeyWindowMinutes: isUrgent ? 60 : 720,
+          isUrgent,
           proposedMessage: `[Watchtower ${att.targetType}: ${topic}]`,
-          skipQuietHoursCheck: att.attentionClass === 'URGENT' && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false,
+          skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false,
         });
 
         if (!gateRes.allowed) {

@@ -53,7 +53,7 @@ export interface GateOptions {
   outreachType: string;
   /** Logical idempotency key — same key within the de-dup window = blocked. */
   logicalKey: string;
-  /** Window in minutes during which the same logicalKey cannot fire again. Default 60. */
+  /** Window in minutes during which the same logicalKey cannot fire again. Default 720 (12h) for non-urgent, 60 for urgent. */
   logicalKeyWindowMinutes?: number;
   /** Proposed message text — checked for near-duplicate against recent outreach. */
   proposedMessage?: string;
@@ -63,6 +63,8 @@ export interface GateOptions {
   skipMinGapCheck?: boolean;
   /** Timezone offset in MINUTES (e.g. 330 for IST). */
   timezoneOffsetMinutes?: number;
+  /** Whether the outreach is urgent, allowing a shorter dedupe window. */
+  isUrgent?: boolean;
 }
 
 // In-process lock per user to serialize concurrent acquire calls on the same instance
@@ -94,10 +96,11 @@ export class ProactiveGate {
   }
 
   private async _acquireInternal(userId: string, opts: GateOptions): Promise<GateDecision> {
+    const defaultWindow = (opts.isUrgent || opts.outreachType === 'reminder') ? 60 : 720;
     const {
       outreachType,
       logicalKey,
-      logicalKeyWindowMinutes = 60,
+      logicalKeyWindowMinutes = defaultWindow,
       proposedMessage,
       skipQuietHoursCheck = false,
       skipMinGapCheck = false,

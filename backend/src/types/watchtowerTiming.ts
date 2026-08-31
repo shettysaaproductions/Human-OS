@@ -89,6 +89,7 @@ export type TimingReasonCode =
   | 'DEADLINE_IMMINENT'
   | 'READY_NOW'
   | 'MISSING_CONTEXT'
+  | 'MISSING_TIMEZONE'
   | 'EXPIRED'
   | 'LOW_PRIORITY'
   | 'INTERNAL_SIGNAL'
@@ -123,6 +124,7 @@ export const WATCHTOWER_TIMING_LIMITS = {
   MAX_TOUCHES_24H_HARD_CAP: 5,     // Hard limit for combined requested + proactive touches
   MAX_TOUCHES_1H_LIMIT: 1,         // Max 1 unsolicited touch per hour
   MIN_TOUCH_GAP_MINUTES: 120,      // 2 hours minimum gap between proactive touches
+  NON_URGENT_DEDUPE_WINDOW_MINUTES: 720, // 12 hours deduplication window for non-urgent autonomous proactive
   CONSECUTIVE_IGNORED_CAP: 3,      // 3 ignored outreaches -> 24h suppression
   TIMING_LOG_TTL_DAYS: 7,          // Bounded log retention: 7 days
 } as const;

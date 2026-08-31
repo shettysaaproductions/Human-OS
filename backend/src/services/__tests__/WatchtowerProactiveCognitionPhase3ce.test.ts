@@ -460,7 +460,7 @@ describe('Phase 3C-E: Final Integrated Proactive Cognition Adversarial Validatio
     expect(decision.timingState).toBe('WAIT');
     expect(decision.outreachEligibility).toBe('DEFER');
     expect(decision.confidence).toBe('LOW_CONFIDENCE');
-    expect(decision.reasonCode).toBe('MISSING_CONTEXT');
+    expect(decision.reasonCode).toBe('MISSING_TIMEZONE');
   });
 
   it('15. Multi-user isolation: User 1 and User 2 run in complete isolation', async () => {
