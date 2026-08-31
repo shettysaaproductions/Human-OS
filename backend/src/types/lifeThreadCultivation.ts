@@ -214,3 +214,40 @@ export interface LifeThreadSynthesisDecision {
   wasContradictory?: boolean;
   synthesizedAt: string;
 }
+
+export type UserConversationalResponseType =
+  | 'ACCEPT'
+  | 'REJECT'
+  | 'LATER'
+  | 'STOP'
+  | 'DONE'
+  | 'PASSIVE_COMPLIANCE'
+  | 'UNKNOWN';
+
+export interface ConversationalWeavingPacket {
+  threadId: string;
+  topic: string;
+  canonicalKey: string;
+  cultivationStage: LifeThreadCultivationStage;
+  naturalBridge: string;
+  proposedNextUsefulStep?: LifeThreadNextUsefulStep | null;
+  activeBlockerSummary?: string | null;
+  confidence: 'HIGH' | 'MEDIUM';
+  relevanceReason: string;
+  isSensitiveContextSuppressed?: boolean;
+}
+
+export interface LifeThreadWeavingDecision {
+  userId: string;
+  shouldWeave: boolean;
+  packet?: ConversationalWeavingPacket;
+  suppressionReason?: string;
+  classifiedUserResponse?: {
+    type: UserConversationalResponseType;
+    confidence: number;
+    rawText: string;
+    hasExplicitCommitment: boolean;
+  };
+  evaluatedAt: string;
+}
+
