@@ -55,6 +55,10 @@ export class LifeThreadConversationWeaver {
       lower.includes('stop asking') ||
       lower.includes('drop this topic') ||
       lower.includes('forget this goal') ||
+      lower.includes('cancel') ||
+      lower.includes('not doing this anymore') ||
+      lower.includes('do not want to do this anymore') ||
+      lower.includes("don't want to do this anymore") ||
       lower.includes('mat poocho') ||
       lower.includes('band karo yeh')
     ) {
