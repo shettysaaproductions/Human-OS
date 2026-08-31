@@ -699,7 +699,34 @@ export class ContextualTimingEngine {
       );
 
       if (error || !data) return [];
-      return data as WatchtowerAttentionDecision[];
+      return data.map((r: any) => ({
+        id: r.id,
+        userId: r.userId || r.user_id,
+        targetType: r.targetType || r.target_type,
+        targetId: r.targetId || r.target_id,
+        attentionClass: r.attentionClass || r.attention_class,
+        status: r.status,
+        scores: r.scores || {
+          importance: r.importance || 0,
+          urgency: r.urgency || 0,
+          goalRelevance: r.goal_relevance || 0,
+          deadlineProximity: r.deadline_proximity || 0,
+          novelty: r.novelty || 0,
+          confidence: r.confidence || 0,
+          recency: r.recency || 0,
+          alreadyHandledPenalty: r.already_handled_penalty || 0,
+          interruptionCost: r.interruption_cost || 0,
+          compositeScore: r.composite_score || 0,
+        },
+        evidence: r.evidence || {},
+        reason: r.reason,
+        recommendedAction: r.recommendedAction || r.recommended_action,
+        deferUntil: r.deferUntil || r.defer_until,
+        fingerprint: r.fingerprint,
+        createdAt: r.createdAt || r.created_at,
+        updatedAt: r.updatedAt || r.updated_at,
+        expiresAt: r.expiresAt || r.expires_at,
+      })) as WatchtowerAttentionDecision[];
     } catch (err: any) {
       logger.warn('[ContextualTimingEngine] Error fetching attention decisions', { userId, error: err?.message });
       return [];

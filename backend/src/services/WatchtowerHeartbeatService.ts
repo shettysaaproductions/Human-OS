@@ -24,6 +24,7 @@ import { canonicalStateReconciler } from './CanonicalStateReconciler';
 import { memoryRetentionEngine } from './MemoryRetentionEngine';
 import { sourceDependencyService } from './SourceDependencyService';
 import { watchtowerAttentionEngine } from './WatchtowerAttentionEngine';
+import { watchtowerProactiveIntegrationService } from './WatchtowerProactiveIntegrationService';
 import { RepairType } from '../types/canonicalRepair';
 import {
   HeartbeatLeaseAcquireResult,
@@ -507,6 +508,17 @@ export class WatchtowerHeartbeatService {
         await watchtowerAttentionEngine.evaluateUserAttention(userId);
       } catch (attErr: any) {
         logger.warn('[WatchtowerHeartbeat] Attention evaluation non-fatal error', { userId, error: attErr?.message });
+      }
+
+      // ── STEP 4.6: PROACTIVE INTEGRATION HANDOFF (Phase 3C-D) ───────────────
+      // Gated handoff from Watchtower Timing to ProactiveGate
+      try {
+        await watchtowerProactiveIntegrationService.evaluateAndDispatchProactiveOpportunities(
+          userId,
+          { dryRun: options?.dryRun }
+        );
+      } catch (proErr: any) {
+        logger.warn('[WatchtowerHeartbeat] Proactive integration non-fatal error', { userId, error: proErr?.message });
       }
 
       // ── STEP 5: PROVENANCE PROTECTION CHECK ──────────────────────────────
