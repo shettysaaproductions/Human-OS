@@ -75,6 +75,27 @@ export interface TimingContext {
 }
 
 /**
+ * Structured reason code explaining the timing decision.
+ */
+export type TimingReasonCode =
+  | 'QUIET_HOURS'
+  | 'RECENT_OUTREACH'
+  | 'ACTIVE_CONVERSATION'
+  | 'TOPIC_MISMATCH'
+  | 'USER_DEFERRED'
+  | 'USER_STOPPED'
+  | 'ALREADY_HANDLED'
+  | 'ALREADY_TOLD'
+  | 'DEADLINE_IMMINENT'
+  | 'READY_NOW'
+  | 'MISSING_CONTEXT'
+  | 'EXPIRED'
+  | 'LOW_PRIORITY'
+  | 'INTERNAL_SIGNAL'
+  | 'COOLDOWN_ACTIVE'
+  | 'RELEVANT_CONVERSATION';
+
+/**
  * Governed Timing Decision Record.
  */
 export interface WatchtowerTimingDecision {
@@ -86,7 +107,7 @@ export interface WatchtowerTimingDecision {
   confidence: TimingConfidence;
   sourceClass: OutreachSourceClass;
   burdenCount24h: number;
-  reasonCode: string;
+  reasonCode: TimingReasonCode;
   rejectionReason?: string | null;
   deferUntil?: string | null;
   contextSnapshot: Record<string, any>;
