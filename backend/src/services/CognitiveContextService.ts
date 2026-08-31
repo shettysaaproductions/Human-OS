@@ -225,8 +225,18 @@ export class CognitiveContextService {
     });
 
     const wmPromise = qt.track('get_working_memory', 'working_memory', () =>
-      supabaseAdmin.from('working_memory').select('key, value, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }).limit(15)
-    ).catch(err => {
+      supabaseAdmin.from('working_memory').select('key, value, created_at, promotion_status, expires_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
+    ).then((res: any) => {
+      if (res && Array.isArray(res.data)) {
+        const now = new Date().toISOString();
+        res.data = res.data.filter((wm: any) =>
+          wm.promotion_status !== 'SUPERSEDED' &&
+          wm.promotion_status !== 'INVALIDATED' &&
+          (!wm.expires_at || wm.expires_at > now)
+        );
+      }
+      return res;
+    }).catch(err => {
       logger.warn('[CognitiveContext] Working memory fetch failed', { error: err.message });
       degradedSources.push('working_memory');
       return { data: [] };
@@ -469,6 +479,18 @@ export class CognitiveContextService {
 
     const workingMemory: { key: string; value: string }[] = [];
     for (const wm of rawWm) {
+      // Check if current turn has an active correction for this canonical key
+      const { canonical: wmCanonical } = canonicalizeKey(wm.key || '');
+      const activeCorrection = corrections.find(c => {
+        const { canonical: corrCanonical } = canonicalizeKey(c.key);
+        return corrCanonical === wmCanonical;
+      });
+
+      // If there is an active correction on this turn and the WM value does not match the new corrected value, skip it
+      if (activeCorrection && (wm.value || '').toLowerCase().trim() !== activeCorrection.newValue.toLowerCase().trim()) {
+        continue;
+      }
+
       workingMemory.push({ key: wm.key, value: wm.value });
       if (workingMemory.length >= maxWorkingMemories) break;
     }

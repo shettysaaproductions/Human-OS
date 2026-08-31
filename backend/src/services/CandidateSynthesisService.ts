@@ -389,13 +389,20 @@ export class CandidateSynthesisService {
         .limit(CANDIDATE_SYNTHESIS_LIMITS.MAX_EPISODIC_RECORDS_PER_USER)
     );
 
-    const workingMemoryRecords = (wmRows || []).map((w: any) => ({
-      id: w.id,
-      key: (w.key || '').substring(0, 100),
-      value: (w.value || '').substring(0, 200),
-      created_at: w.created_at,
-      promotion_status: w.promotion_status,
-    }));
+    const workingMemoryRecords = (wmRows || [])
+      .filter((w: any) =>
+        w.promotion_status !== 'PROMOTED' &&
+        w.promotion_status !== 'SUPERSEDED' &&
+        w.promotion_status !== 'INVALIDATED' &&
+        w.promotion_status !== 'REJECTED'
+      )
+      .map((w: any) => ({
+        id: w.id,
+        key: (w.key || '').substring(0, 100),
+        value: (w.value || '').substring(0, 200),
+        created_at: w.created_at,
+        promotion_status: w.promotion_status,
+      }));
 
     const episodicRecords = (epRows || []).map((e: any) => ({
       id: e.id,

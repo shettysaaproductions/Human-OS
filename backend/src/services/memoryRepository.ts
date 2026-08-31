@@ -417,6 +417,9 @@ export class MemoryRepository {
           incomingAuthority,
           supersededAt: supersededTimestamp,
         });
+
+        // Pre-Heartbeat Hardening: Invalidate stale working memory for this canonical key
+        await this.invalidateStaleWorkingMemory(userId, normalizedMemory.key, normalizedMemory.value);
       } else {
         // No conflicting CURRENT row found: clean fresh insert
         await executeInsert({
@@ -450,6 +453,11 @@ export class MemoryRepository {
           authority: incomingAuthority,
           lifecycleState: incomingLifecycleState
         });
+
+        // If authoritative or explicit correction, invalidate any conflicting working memory rows
+        if (authorityRank(incomingAuthority) >= authorityRank('deterministic') || normalizedMemory.correction_intent) {
+          await this.invalidateStaleWorkingMemory(userId, normalizedMemory.key, normalizedMemory.value);
+        }
       }
 
       // Phase 2A: Non-blocking Guardian mutation observation trigger
@@ -720,6 +728,106 @@ export class MemoryRepository {
     if (error || !mem) return null;
     return sourceDependencyService.resolveMemoryProvenance(userId, mem as Memory);
   }
+
+  /**
+   * Pre-Heartbeat Hardening: Stale Working-Memory Invalidation on Authoritative Correction.
+   * When an authoritative fact or correction is committed for canonical key K,
+   * any active working_memory row for the same user with matching canonical key K
+   * and differing value is marked promotion_status = 'SUPERSEDED'.
+   * 
+   * Invariants:
+   * 1. Deterministic canonical key matching via canonicalizeKey().
+   * 2. Preserves row in DB (0 physical DELETE).
+   * 3. Zero LLM calls.
+   * 4. Does not touch unrelated working memory rows.
+   * 5. Does not touch episodic memories.
+   * 6. Scoped strictly to the same userId (cross-user isolation).
+   */
+  async invalidateStaleWorkingMemory(
+    userId: string,
+    canonicalKey: string,
+    activeValue: string
+  ): Promise<number> {
+    if (!userId || !canonicalKey) return 0;
+
+    try {
+      const { canonical: targetCanonical } = canonicalizeKey(canonicalKey.trim());
+      const normActiveVal = (activeValue || '').toLowerCase().trim();
+
+      const { data: wmRows, error: fetchErr } = await qt.track(
+        'wm_fetch_for_invalidation',
+        'working_memory',
+        () =>
+          supabaseAdmin
+            .from('working_memory')
+            .select('id, key, value, promotion_status')
+            .eq('user_id', userId)
+      );
+
+      if (fetchErr || !wmRows || wmRows.length === 0) {
+        return 0;
+      }
+
+      const staleRowIds: string[] = [];
+
+      for (const row of wmRows as any[]) {
+        if (row.promotion_status === 'SUPERSEDED' || row.promotion_status === 'INVALIDATED') {
+          continue;
+        }
+
+        const { canonical: rowCanonical } = canonicalizeKey(row.key || '');
+        if (rowCanonical === targetCanonical) {
+          const rowVal = (row.value || '').toLowerCase().trim();
+          if (rowVal !== normActiveVal) {
+            staleRowIds.push(row.id);
+          }
+        }
+      }
+
+      if (staleRowIds.length > 0) {
+        const { error: updateErr } = await qt.track(
+          'wm_invalidate_stale',
+          'working_memory',
+          () =>
+            supabaseAdmin
+              .from('working_memory')
+              .update({
+                promotion_status: 'SUPERSEDED',
+              })
+              .in('id', staleRowIds)
+              .eq('user_id', userId)
+        );
+
+        if (updateErr) {
+          logger.warn('[MemoryRepository] Failed to invalidate stale working memory', {
+            userId,
+            canonicalKey: targetCanonical,
+            error: updateErr.message,
+          });
+          return 0;
+        }
+
+        logger.info('[MemoryRepository] Invalidated stale working memory records', {
+          userId,
+          canonicalKey: targetCanonical,
+          invalidatedCount: staleRowIds.length,
+          staleRowIds,
+        });
+
+        return staleRowIds.length;
+      }
+
+      return 0;
+    } catch (err: any) {
+      logger.warn('[MemoryRepository] Exception during stale working memory invalidation', {
+        userId,
+        canonicalKey,
+        error: err?.message,
+      });
+      return 0;
+    }
+  }
 }
 
 export const memoryRepository = new MemoryRepository();
+

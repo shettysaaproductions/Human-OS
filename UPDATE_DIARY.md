@@ -1,4 +1,32 @@
 
+## [2026-08-31] Pre-Heartbeat Hardening: Stale Working-Memory Correction Invalidation
+
+### Trigger
+Pre-heartbeat hardening following deep architectural red-team: when an explicit/authoritative memory correction occurs for canonical key K, stale working-memory candidates for the same user and semantic key must be immediately invalidated rather than lingering until normal rotation.
+
+### Changes Made
+1. **MemoryRepository Invalidation Hook (`backend/src/services/memoryRepository.ts`)**
+   - Implemented `invalidateStaleWorkingMemory(userId, canonicalKey, activeValue)`.
+   - Invoked on authoritative supersession, authoritative memory reinforcement, and authoritative fresh inserts.
+   - Deterministically matches working memory rows using `canonicalizeKey()`.
+   - Transitions matching conflicting working memory candidates to `promotion_status = 'SUPERSEDED'`.
+   - Invariants guaranteed: 0 physical DELETEs, 0 LLM calls, strictly isolated to `userId`, preserves unrelated working memory & episodic history.
+
+2. **CognitiveContextService Filter (`backend/src/services/CognitiveContextService.ts`)**
+   - In `get_working_memory` query, filters out `promotion_status === 'SUPERSEDED'` and `'INVALIDATED'` rows and orders by `created_at` descending.
+   - In the intra-turn context assembly loop, checks `corrections` on the active turn and immediately filters out any working memory row conflicting with the new value on the same turn.
+
+3. **CandidateSynthesisService Filter (`backend/src/services/CandidateSynthesisService.ts`)**
+   - Excludes working memory records with `promotion_status === 'SUPERSEDED'` or `'INVALIDATED'` from evidence packets during nightly candidate synthesis.
+
+### Verification
+- `npm run build`: exit 0 (0 errors).
+- `npx jest src/services/__tests__/WorkingMemoryInvalidationHardening.test.ts`: 8/8 unit tests passed (100%).
+- `npm test -- --coverage=false`: 38/38 test suites, 509/509 tests passed (100%).
+- `npx tsx scripts/prod_smoke_test_wm_invalidation.ts`: Ephemeral production smoke test verified with 100% pass (exact key superseded, alias key superseded, unrelated keys preserved, 0 physical DELETEs, ephemeral account 100% eradicated).
+
+---
+
 ## [2026-08-31] Phase 2F-E Account Lifecycle & User Data Integrity Hardening
 
 ### Trigger

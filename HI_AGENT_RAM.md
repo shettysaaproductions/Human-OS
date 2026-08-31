@@ -74,6 +74,12 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 31 Session — Pre-Heartbeat Hardening (Stale Working-Memory Invalidation):**
+  - **MemoryRepository Invalidation Hook (`services/memoryRepository.ts`):** `invalidateStaleWorkingMemory()` invalidates matching working memory candidates (`promotion_status = 'SUPERSEDED'`) when authoritative facts/corrections are committed for a canonical key. Zero physical DELETEs, 0 LLM calls, preserves unrelated working memory & episodic history.
+  - **CognitiveContextService Filter (`services/CognitiveContextService.ts`):** Defensive query filter excludes `SUPERSEDED` and `INVALIDATED` working memory rows; intra-turn loop filters out working memory items conflicting with active corrections on the current turn.
+  - **CandidateSynthesisService Filter (`services/CandidateSynthesisService.ts`):** Excludes superseded/invalidated working memory rows from evidence packets.
+  - **Verification & Tests:** 8/8 new unit tests in `WorkingMemoryInvalidationHardening.test.ts`. 38/38 test suites (509/509 tests, 100%) passing. Production ephemeral smoke test verified with 100% pass.
+
 - ✅ **Aug 31 Session — Phase 2F-E Account Lifecycle & User Data Integrity Hardening:**
   - **Canonical Account Lifecycle Service (`services/AccountLifecycleService.ts`):** Single authoritative service for complete, deterministic, irreversible account eradication ("Mark Dead"). 32-table inventory executed in strict topological dependency order (child and foreign key dependent tables first).
   - **Mark Dead Profiles Key Fix (`routes/auth.ts`):** Fixed bug where profile deletion was querying non-existent `user_id` on profiles table (PK is `id`).
