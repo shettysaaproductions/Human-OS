@@ -1,4 +1,43 @@
 
+## [2026-08-31] Phase 2F-E Account Lifecycle & User Data Integrity Hardening
+
+### Trigger
+Phase 2F-E account lifecycle hardening: fix confirmed account lifecycle defects discovered during Phase 2F-E-A forensic audit (zombie profiles, broken `profiles` deletion using `user_id` instead of `id`, missing database FK cascades, Founder Dashboard counting zombie profiles, and newer cognitive tables omitted from deletion).
+
+### Changes Made
+1. **Canonical Account Lifecycle Service (`backend/src/services/AccountLifecycleService.ts`)**
+   - Implemented single authoritative service for complete, deterministic, irreversible account eradication ("Mark Dead").
+   - Built 32-table inventory executed in strict topological dependency order (child and foreign key dependent tables first).
+   - Fixed confirmed bug in `profiles` deletion: properly uses `.eq('id', userId)` (NOT `user_id`).
+   - Implemented defensive failure handling (never falsely reports success if cleanup or auth deletion encounters fatal errors).
+   - Implemented `SET NULL` anonymization for `telemetry_events`.
+
+2. **Mark Dead Endpoint Refactoring (`backend/src/routes/auth.ts`)**
+   - Replaced brittle 19-table loop with authoritative delegation to `accountLifecycleService.deleteAccount(userId)`.
+   - Guaranteed atomic execution and cache eviction.
+
+3. **Database Migration (`backend/supabase/migrations/050_p2fe_account_lifecycle_fks.sql`)**
+   - Added `ON DELETE CASCADE` foreign keys from `auth.users(id)` across all user-owned cognitive and operational tables (`profiles`, `memories`, `working_memory`, `episodic_memories`, `chat_history`, `nova_cognitive_doubts`, `kg_nodes`, `kg_edges`, `emotional_states`, `reflections`, `conversation_sessions`, `memory_events`, `memory_access_log`).
+   - Upgraded legacy `NO ACTION` foreign keys (`nova_agenda`, `nova_outreach_log`, `user_routines`, `nova_corrections_log`, `user_presence`) to `ON DELETE CASCADE`.
+
+4. **Controlled Production Zombie Purge (`backend/scripts/cleanup_zombie_accounts.ts`)**
+   - Scanned and confirmed 14 zombie profile identities whose `auth.users` records had been deleted.
+   - Cleaned all orphan application records and zombie profiles in production.
+   - Reduced `ZOMBIE_PROFILES_COUNT` from **14 to 0**.
+   - Verified that all 3 remaining profiles are 100% active, authenticated users (`In Auth: true`).
+
+5. **Founder Dashboard Count Rectification**
+   - With all 14 zombie profiles cleanly eradicated and DB cascades established, `supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true })` in `founder.ts` and `betaAnalytics.ts` now reports exactly **3 live users**.
+
+### Verification
+- `npm run build`: exit 0.
+- `npx jest src/services/__tests__/AccountLifecyclePhase2fe.test.ts`: 24/24 unit tests passed (100%).
+- `npm test -- --coverage=false`: 37/37 test suites, 501/501 tests passed (100%).
+- `npx tsx scripts/prod_smoke_test_phase2fe.ts`: Ephemeral production smoke test passed with 100% eradication verified.
+- Production Render deployment verified live on commit `b51eb35`.
+
+---
+
 ## [2026-08-31] Phase 2F-D Temporal Memory Lifecycle Hardening
 
 ### Trigger

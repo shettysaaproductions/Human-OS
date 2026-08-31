@@ -74,6 +74,14 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 31 Session — Phase 2F-E Account Lifecycle & User Data Integrity Hardening:**
+  - **Canonical Account Lifecycle Service (`services/AccountLifecycleService.ts`):** Single authoritative service for complete, deterministic, irreversible account eradication ("Mark Dead"). 32-table inventory executed in strict topological dependency order (child and foreign key dependent tables first).
+  - **Mark Dead Profiles Key Fix (`routes/auth.ts`):** Fixed bug where profile deletion was querying non-existent `user_id` on profiles table (PK is `id`).
+  - **Database Migration (`supabase/migrations/050_p2fe_account_lifecycle_fks.sql`):** Added `ON DELETE CASCADE` foreign keys from `auth.users(id)` across all user-owned cognitive/application tables (`profiles`, `memories`, `working_memory`, `episodic_memories`, `chat_history`, `nova_cognitive_doubts`, `kg_nodes`, `kg_edges`, `emotional_states`, `reflections`, `conversation_sessions`, `memory_events`, `memory_access_log`). Upgraded legacy `NO ACTION` FKs to `ON DELETE CASCADE`.
+  - **Production Zombie Purge (`scripts/cleanup_zombie_accounts.ts`):** Identified and cleanly eradicated 14 confirmed zombie profiles and orphan cognitive data in production. Reduced `ZOMBIE_PROFILES_COUNT` from 14 to 0. Verified all 3 remaining profiles are 100% active, authenticated users.
+  - **Founder Dashboard Metric Alignment:** Total users query in `founder.ts` & `betaAnalytics.ts` reflects 100% live verified users.
+  - **Verification & Tests:** 24/24 Phase 2F-E unit tests passing (`AccountLifecyclePhase2fe.test.ts`). 37/37 test suites (501/501 tests, 100%) passing. Production ephemeral smoke test verified with 100% eradication. Pushed commit `b51eb35` and verified live on Render.
+
 - ✅ **Aug 31 Session — Phase 2F-D Temporal Memory Lifecycle Hardening:**
   - **Deterministic Temporal Parser (`utils/temporalParser.ts`):** Distinguishes `CURRENT`, `HISTORICAL`, `SUPERSEDED`, and `UNKNOWN` states. Deterministic date precision without synthetic day/month fabrication (`exact_date`, `month_year`, `year_only`, `relative`, `unknown`).
   - **Future Intent Invariant (`is_future_intent: true`):** Future statements ("I'll start next month") are classified as future intent and never represented as active `CURRENT` facts.
