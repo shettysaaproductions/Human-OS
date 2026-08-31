@@ -1,11 +1,12 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { ExtractedMemory, Memory, SourceAuthority } from '../types/memory';
+import { ExtractedMemory, Memory, SourceAuthority, SourceDependencyType, SourceProvenanceReport } from '../types/memory';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { deterministicGuardian } from './DeterministicGuardianService';
+import { sourceDependencyService } from './SourceDependencyService';
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, user_id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, updated_at, is_archived, memory_type, source_authority, protection_source, protected_at, compression_status, lifecycle_state, superseded_by, superseded_at, supersession_reason';
@@ -601,6 +602,37 @@ export class MemoryRepository {
       logger.error('[MemoryRepository] canonicalizeMemoryKey error', { userId, memoryId, error: err?.message });
       return false;
     }
+  }
+
+  /**
+   * Phase 2F-B Hard Delete Guard:
+   * Checks whether a source evidence record is safe to permanently delete,
+   * or if an active trusted compressed memory depends on it.
+   */
+  async canPermanentlyDeleteSource(
+    userId: string,
+    sourceType: SourceDependencyType,
+    sourceId: string
+  ): Promise<boolean> {
+    return sourceDependencyService.canPermanentlyDeleteSource(userId, sourceType, sourceId);
+  }
+
+  /**
+   * Phase 2F-B Provenance Audit:
+   * Resolves the provenance dependency tree for a specific semantic memory.
+   */
+  async getSourceProvenance(userId: string, memoryId: string): Promise<SourceProvenanceReport | null> {
+    const { data: mem, error } = await qt.track('mem_repo_get_provenance', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .select(MEMORY_COLUMNS)
+        .eq('id', memoryId)
+        .eq('user_id', userId)
+        .maybeSingle()
+    );
+
+    if (error || !mem) return null;
+    return sourceDependencyService.resolveMemoryProvenance(userId, mem as Memory);
   }
 }
 

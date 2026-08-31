@@ -26,6 +26,7 @@ import {
   RetentionPriority,
   WorkingMemory,
 } from '../types/memory';
+import { sourceDependencyService } from './SourceDependencyService';
 import crypto from 'crypto';
 
 export const RETENTION_LIMITS = {
@@ -43,6 +44,7 @@ export interface RetentionEvaluationContext {
   activeGoals: Array<{ key: string; value: string }>;
   activeReminders: Array<{ id: string; title: string; trigger_at?: string }>;
   existingProposals: Map<string, MemoryRetentionProposal>;
+  lockedSourceKeys: Set<string>;
 }
 
 export function generateRetentionFingerprint(
@@ -63,7 +65,7 @@ export class MemoryRetentionEngine {
   private processedFingerprints: Set<string> = new Set();
 
   /**
-   * Builds evaluation context containing active goals, life threads, and reminders.
+   * Builds evaluation context containing active goals, life threads, reminders, and active source dependency locks.
    */
   async buildEvaluationContext(userId: string): Promise<RetentionEvaluationContext> {
     // 1. Fetch active life threads
@@ -97,6 +99,15 @@ export class MemoryRetentionEngine {
         .limit(10)
     );
 
+    // 4. Fetch active provenance locks (Phase 2F-B)
+    const activeLocksMap = await sourceDependencyService.getActiveSourceLocksForUser(userId);
+    const lockedSourceKeys = new Set<string>();
+    for (const key of activeLocksMap.keys()) {
+      lockedSourceKeys.add(key);
+      const [, id] = key.split(':');
+      if (id) lockedSourceKeys.add(id);
+    }
+
     const userProposals = this.proposalCache.get(userId) || [];
     const proposalMap = new Map(userProposals.map(p => [p.target_id, p]));
 
@@ -106,6 +117,7 @@ export class MemoryRetentionEngine {
       activeGoals: Array.isArray(goalMems) ? goalMems : [],
       activeReminders: Array.isArray(reminders) ? reminders : [],
       existingProposals: proposalMap,
+      lockedSourceKeys,
     };
   }
 
@@ -255,6 +267,12 @@ export class MemoryRetentionEngine {
     const createdAtMs = wm.created_at ? new Date(wm.created_at).getTime() : now;
     const ageDays = (now - createdAtMs) / (1000 * 3600 * 24);
 
+    // 0. Provenance Lock Guard (Phase 2F-B)
+    const isSourceLocked = context.lockedSourceKeys?.has(`working_memory:${wm.id}`) || context.lockedSourceKeys?.has(wm.id) || false;
+    if (isSourceLocked) {
+      reasons.push('Provenance source protected from permanent deletion by active trusted memory');
+    }
+
     // 1. Expiration check
     if (wm.expires_at && new Date(wm.expires_at).getTime() < now) {
       retentionClass = 'EXPIRED';
@@ -311,6 +329,9 @@ export class MemoryRetentionEngine {
         ageDays: Math.round(ageDays),
         expires_at: wm.expires_at,
         promotion_status: wm.promotion_status,
+        is_source_locked: isSourceLocked,
+        locked_by_trusted_memory: isSourceLocked,
+        provenance_safeguard: isSourceLocked ? 'PURGE_PROTECTED' : 'NONE',
       },
       confidence,
       priority,
@@ -339,6 +360,12 @@ export class MemoryRetentionEngine {
     const createdAtMs = ep.created_at ? new Date(ep.created_at).getTime() : now;
     const ageDays = (now - createdAtMs) / (1000 * 3600 * 24);
     const summaryLower = (ep.summary || '').toLowerCase();
+
+    // 0. Provenance Lock Guard (Phase 2F-B)
+    const isSourceLocked = context.lockedSourceKeys?.has(`episodic_memory:${ep.id}`) || context.lockedSourceKeys?.has(ep.id) || false;
+    if (isSourceLocked) {
+      reasons.push('Provenance source protected from permanent deletion by active trusted memory');
+    }
 
     // 1. High Emotional Valence / Significance
     if (Math.abs(ep.emotional_valence || 0) >= 0.7 || summaryLower.includes('marriage') || summaryLower.includes('baby') || summaryLower.includes('hospital')) {
@@ -394,6 +421,9 @@ export class MemoryRetentionEngine {
         emotion: ep.emotion,
         valence: ep.emotional_valence,
         ageDays: Math.round(ageDays),
+        is_source_locked: isSourceLocked,
+        locked_by_trusted_memory: isSourceLocked,
+        provenance_safeguard: isSourceLocked ? 'PURGE_PROTECTED' : 'NONE',
       },
       confidence,
       priority,

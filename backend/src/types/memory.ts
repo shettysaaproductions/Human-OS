@@ -279,4 +279,41 @@ export interface MemoryRetentionProposal {
   evaluated_by: 'deterministic_rules' | 'gemini-flash-high';
 }
 
+// ============================================================================
+// PHASE 2F-B: SOURCE DEPENDENCY PROTECTION & PROVENANCE LOCKS
+// ============================================================================
+
+export type SourceDependencyType = 'episodic_memory' | 'working_memory' | 'turn';
+
+export type SourceLifecycleState = 'HOT' | 'ARCHIVED_BUT_RECOVERABLE' | 'PURGE_PROTECTED';
+
+export interface SourceDependencyLock {
+  userId: string;
+  trustedMemoryId: string;
+  trustedMemoryKey: string;
+  sourceType: SourceDependencyType;
+  sourceId: string;
+  isSourceActive: boolean;
+  isValid: boolean;
+  lockReason: string;
+}
+
+export interface SourceProvenanceReport {
+  memoryId: string;
+  userId: string;
+  key: string;
+  isTrusted: boolean;
+  lifecycleState: LifecycleState;
+  dependencyCount: number;
+  provenanceComplete: boolean;
+  provenanceIncompleteReason?: string;
+  resolvedDependencies: SourceDependencyLock[];
+  unresolvedDependencies: Array<{
+    type: string;
+    id: string;
+    reason: string;
+  }>;
+}
+
+
 
