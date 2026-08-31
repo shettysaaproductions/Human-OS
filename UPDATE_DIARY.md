@@ -1,4 +1,37 @@
 
+## [2026-08-31] Phase 3B: Watchtower Attention & Priority Engine
+
+### Trigger
+Implementation of Phase 3B: Watchtower Attention & Priority Engine on top of the Phase 3A heartbeat layer. Determines "What deserves Nova's attention now?" through structured priority scoring, importance vs. urgency separation, goal/deadline mapping, and non-intrusive decision caching without direct user interruption.
+
+### Changes Made
+1. **Database Schema (`backend/supabase/migrations/052_p3b_watchtower_attention.sql`)**
+   - Created `watchtower_attention_decisions` table with unique constraint `(user_id, fingerprint)`, foreign key cascade on `profiles(id)`, integer component scores (0–100), structured attention classes (`IGNORE`, `WATCH`, `ATTENTION`, `ACTIONABLE`, `URGENT`), and lifecycle statuses (`PENDING`, `WATCHING`, `READY`, `DEFERRED`, `ACTED`, `DISMISSED`, `EXPIRED`).
+
+2. **Types & Invariants (`backend/src/types/watchtowerAttention.ts`)**
+   - Defined `AttentionClass`, `AttentionStatus`, `AttentionTargetType`, `AttentionScoreComponents`, `WatchtowerAttentionDecision`, and user fairness constants (`MAX_ATTENTION_DECISIONS_PER_USER = 10`, `MAX_ACTIONABLE_PER_USER = 3`, `MAX_URGENT_PER_USER = 1`).
+
+3. **Core Attention Engine (`backend/src/services/WatchtowerAttentionEngine.ts`)**
+   - Implemented `evaluateUserAttention(userId, context)` and `getActionableAttention(userId)`.
+   - Multi-dimensional deterministic scoring across 9 components: `importance`, `urgency`, `goalRelevance`, `deadlineProximity`, `novelty`, `confidence`, `recency`, `alreadyHandledPenalty`, `interruptionCost`, and normalized `compositeScore`.
+   - Strict separation of importance and urgency (e.g. distant goals $\to$ `WATCH`, urgent interviews $\to$ `URGENT`, internal anomalies $\to$ system `ATTENTION`).
+   - High interruption cost deferral with automatic cooldown (`status = 'DEFERRED'`).
+   - Handled task suppression (`alreadyHandledPenalty >= 90` $\to$ `status = 'ACTED'`, `attentionClass = 'IGNORE'`).
+   - SHA-256 fingerprinting for duplicate suppression and changed-evidence reconsideration.
+   - Bounded decision capping per user (max 10 decisions, max 3 actionable, max 1 urgent).
+
+4. **Integration with Heartbeat & Account Lifecycle**
+   - Integrated attention evaluation into `WatchtowerHeartbeatService.ts` (Step 4.5).
+   - Added `watchtower_attention_decisions` to `USER_OWNED_TABLES` in `AccountLifecycleService.ts` for complete account eradication.
+
+### Verification
+- `npm run build`: Exit 0 (0 TypeScript errors).
+- `npx jest src/services/__tests__/WatchtowerAttentionPhase3b.test.ts`: 28/28 tests passed (100%), including all 30 invariant requirements and Adversarial Cases A–H.
+- `npm test -- --coverage=false`: 40/40 test suites, 557/557 tests passed (100%).
+- `npx tsx scripts/prod_smoke_test_watchtower_attention.ts`: Ephemeral production smoke test verified with 100% pass across all 6 scenarios and clean account eradication.
+
+---
+
 ## [2026-08-31] Phase 3A: Watchtower Heartbeat Foundation
 
 ### Trigger

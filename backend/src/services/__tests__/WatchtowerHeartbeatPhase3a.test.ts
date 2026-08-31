@@ -152,6 +152,10 @@ jest.mock('../../lib/supabase', () => ({
               updateBuilder._filters[c] = v;
               return updateBuilder;
             }),
+            in: jest.fn().mockImplementation((c: string, v: any[]) => {
+              updateBuilder._filters[`${c}_in`] = v;
+              return updateBuilder;
+            }),
             lte: jest.fn().mockImplementation((c: string, v: string) => {
               updateBuilder._filters[`${c}_lte`] = v;
               return updateBuilder;

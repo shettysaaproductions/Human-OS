@@ -23,6 +23,7 @@ import { cognitiveDoubtService } from './CognitiveDoubtService';
 import { canonicalStateReconciler } from './CanonicalStateReconciler';
 import { memoryRetentionEngine } from './MemoryRetentionEngine';
 import { sourceDependencyService } from './SourceDependencyService';
+import { watchtowerAttentionEngine } from './WatchtowerAttentionEngine';
 import { RepairType } from '../types/canonicalRepair';
 import {
   HeartbeatLeaseAcquireResult,
@@ -498,6 +499,14 @@ export class WatchtowerHeartbeatService {
         await memoryRetentionEngine.evaluateUserRetentionBatch(userId);
       } catch (retErr: any) {
         logger.debug('[WatchtowerHeartbeat] Retention evaluation non-fatal error', { userId, error: retErr?.message });
+      }
+
+      // ── STEP 4.5: ATTENTION & PRIORITY EVALUATION (Phase 3B) ───────────────
+      // Evaluates what deserves Nova's immediate/supervisory attention
+      try {
+        await watchtowerAttentionEngine.evaluateUserAttention(userId);
+      } catch (attErr: any) {
+        logger.warn('[WatchtowerHeartbeat] Attention evaluation non-fatal error', { userId, error: attErr?.message });
       }
 
       // ── STEP 5: PROVENANCE PROTECTION CHECK ──────────────────────────────
