@@ -74,6 +74,14 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 31 Session — Phase 2F-D Temporal Memory Lifecycle Hardening:**
+  - **Deterministic Temporal Parser (`utils/temporalParser.ts`):** Distinguishes `CURRENT`, `HISTORICAL`, `SUPERSEDED`, and `UNKNOWN` states. Deterministic date precision without synthetic day/month fabrication (`exact_date`, `month_year`, `year_only`, `relative`, `unknown`).
+  - **Future Intent Invariant (`is_future_intent: true`):** Future statements ("I'll start next month") are classified as future intent and never represented as active `CURRENT` facts.
+  - **Temporal Memory Persistence Gateway (`memoryRepository.ts`):** Persists `valid_from`, `valid_until`, `temporal_precision`, `temporal_metadata`. Historical memories coexist cleanly without superseding CURRENT facts. Incoming CURRENT facts supersede only conflicting active CURRENT facts while preserving historical milestones.
+  - **Temporal Retention Semantics (`MemoryRetentionEngine.ts`):** `lifecycle_state === 'HISTORICAL'` protected from age-based fading (`decision = 'KEEP'`). `SUPERSEDED` rows eligible for dry-run archival proposal.
+  - **Context Retrieval Separation (`CognitiveContextService.ts`):** Prioritizes active `CURRENT` truth in `durableFacts`, separates `HISTORICAL` facts into `historicalFacts`, and strictly excludes `SUPERSEDED`, `INVALIDATED`, and `PROPOSED` records.
+  - **Verification & Tests:** 22/22 Phase 2F-D unit tests + adversarial cases A–F passing. 36/36 test suites (477/477 tests, 100%) passing. Production smoke test verified with 100% baseline restoration.
+
 - ✅ **Aug 29 Session — Production Reliability Repair Pass v2 (5 Amendments):**
   - **P0 Conversation Isolation (`chat.ts`):** Single-owner check for `conversation_id`. If ID contains rows from another user, auto-assigns fresh UUID. Zero cross-user context leakage.
   - **P0 Deterministic Reminders (`TurnAnalyzer.ts` + `ReminderEngine.ts`):** Fixed regex capture group bug for `"kal shaam 4 baje"`. Captures `rawTime = "4"` and `periodWord = "shaam"`, parses to 16:00 IST / target date reliably.

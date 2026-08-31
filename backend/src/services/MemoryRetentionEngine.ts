@@ -147,6 +147,27 @@ export class MemoryRetentionEngine {
       priority = 'NOW';
       reasons.push(`Explicitly protected memory (source: ${memory.protection_source || 'system'})`);
     }
+    // 1b. Phase 2F-D Historical Facts Protection (Never faded purely due to chronological age)
+    else if (memory.lifecycle_state === 'HISTORICAL') {
+      retentionClass = 'DURABLE_FACT';
+      decision = 'KEEP';
+      priority = 'NOW';
+      reasons.push(`Historical memory preserved regardless of age (lifecycle: ${memory.lifecycle_state})`);
+    }
+    // 1c. Phase 2F-A/D Superseded Memory Evaluation (Eligible for archival dry-run proposal)
+    else if (memory.lifecycle_state === 'SUPERSEDED') {
+      retentionClass = 'LOW_VALUE_EVENT';
+      decision = 'ARCHIVE_CANDIDATE';
+      priority = 'BACKGROUND';
+      reasons.push('Superseded representation eligible for archival under retention rules');
+    }
+    // 1d. Unknown Temporal State (Conservative KEEP)
+    else if (memory.lifecycle_state === 'UNKNOWN') {
+      retentionClass = 'DURABLE_FACT';
+      decision = 'KEEP';
+      priority = 'NEXT';
+      reasons.push('Unknown temporal state handled conservatively as KEEP');
+    }
     // 2. Core Identity / Family High-Authority Facts
     else if (
       authority === 'explicit_user' ||

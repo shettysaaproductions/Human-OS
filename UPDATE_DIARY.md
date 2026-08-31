@@ -1,4 +1,33 @@
 
+## [2026-08-31] Phase 2F-D Temporal Memory Lifecycle Hardening
+
+### Trigger
+Phase 2F-D temporal memory lifecycle hardening: strengthen Human-OS temporal memory semantics so the system distinguishes CURRENT, HISTORICAL, SUPERSEDED, and UNKNOWN facts while preserving chronology and zero date fabrication.
+
+### Changes Made
+1. **Deterministic Temporal Extraction (`backend/src/utils/temporalParser.ts`)**
+   - Implemented `TemporalParser` for deterministic parsing of exact dates (`exact_date`), month + year (`month_year`), year only (`year_only`), and relative clauses (`relative`).
+   - Zero date fabrication invariant: "2023" -> `valid_from: '2023'` (strictly NO `-01-01`), "June 2025" -> `valid_from: '2025-06'` (strictly NO `-01`).
+   - Future Intent Invariant (`is_future_intent: true`): Statements about future intentions are blocked from active CURRENT state.
+
+2. **Temporal Memory Gateway (`backend/src/services/memoryRepository.ts`)**
+   - Canonical persistence consuming structured `TemporalMetadata`.
+   - Historical facts (`lifecycle_state: 'HISTORICAL'`) are preserved alongside active CURRENT facts without supersession collision.
+   - Incoming CURRENT facts supersede only conflicting active CURRENT facts while preserving historical milestones.
+   - Forward-compatible schema execution with automatic fallback for pending migrations.
+
+3. **Retention and Retrieval Hardening (`MemoryRetentionEngine.ts` & `CognitiveContextService.ts`)**
+   - Protected historical milestones from age-based decay (`decision = 'KEEP'`).
+   - Segregated `durableFacts` (active CURRENT) from `historicalFacts` in cognitive context assembly while excluding `SUPERSEDED`, `INVALIDATED`, and `PROPOSED` rows.
+
+### Verification
+- `npm run build`: exit 0.
+- `npx jest src/services/__tests__/TemporalLifecyclePhase2fd.test.ts`: 22/22 unit tests + Adversarial Cases A–F passed (100%).
+- `npm test -- --coverage=false`: 36/36 test suites, 477/477 tests passed (100%).
+- `npx tsx scripts/prod_smoke_test_phase2fd.ts`: 5/5 production smoke scenarios passed with 100% ephemeral baseline restoration.
+
+---
+
 ## [2026-08-30] Phase 2A Watchtower Read-Only Deterministic Guardian & Live Anomaly Classification
 
 ### Trigger

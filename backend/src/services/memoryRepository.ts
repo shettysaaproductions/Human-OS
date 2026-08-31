@@ -9,7 +9,7 @@ import { deterministicGuardian } from './DeterministicGuardianService';
 import { sourceDependencyService } from './SourceDependencyService';
 
 // Explicit column list — never use select('*') on memories
-const MEMORY_COLUMNS = 'id, user_id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, updated_at, is_archived, memory_type, source_authority, protection_source, protected_at, compression_status, lifecycle_state, superseded_by, superseded_at, supersession_reason';
+const MEMORY_COLUMNS = 'id, user_id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, updated_at, is_archived, memory_type, source_authority, protection_source, protected_at, compression_status, lifecycle_state, superseded_by, superseded_at, supersession_reason, valid_from, valid_until, temporal_precision, temporal_metadata';
 
 // ── Authority rank (higher = more authoritative) ──────────────────────────────
 const AUTHORITY_RANK: Record<SourceAuthority, number> = {
@@ -98,15 +98,37 @@ export class MemoryRepository {
       return;
     }
 
-    // ── Layer 1c: Proposed & Historical Classification ────────────────────────
+    // ── Layer 1c: Proposed, Historical & Future Intent Classification ────────
     const isProposed = normalizedMemory.compression_status === 'proposed';
-    const isHistorical = normalizedMemory.lifecycle_state === 'HISTORICAL' ||
-      isHistoricalFact(normalizedMemory.value, sourceMessage, (normalizedMemory as any).factClass, normalizedMemory.is_historical);
+    const isFutureIntent = normalizedMemory.is_future_intent === true || normalizedMemory.temporal_metadata?.is_future_intent === true;
+    const isHistorical = !isFutureIntent && (
+      normalizedMemory.lifecycle_state === 'HISTORICAL' ||
+      normalizedMemory.temporal_status === 'HISTORICAL' ||
+      isHistoricalFact(normalizedMemory.value, sourceMessage, (normalizedMemory as any).factClass, normalizedMemory.is_historical)
+    );
+    const isExplicitUnknown = !isHistorical && !isFutureIntent && (
+      normalizedMemory.lifecycle_state === ('UNKNOWN' as any) ||
+      normalizedMemory.temporal_status === 'UNKNOWN'
+    );
+
     const incomingLifecycleState: string = isProposed
       ? 'PROPOSED'
       : isHistorical
       ? 'HISTORICAL'
+      : isFutureIntent || isExplicitUnknown
+      ? 'UNKNOWN'
       : 'CURRENT';
+
+    const validFrom = normalizedMemory.valid_from ?? normalizedMemory.temporal_metadata?.valid_from ?? null;
+    const validUntil = normalizedMemory.valid_until ?? normalizedMemory.temporal_metadata?.valid_until ?? null;
+    const temporalPrecision = normalizedMemory.temporal_precision ?? normalizedMemory.temporal_metadata?.precision ?? 'unknown';
+    const temporalMetadata = normalizedMemory.temporal_metadata ?? (validFrom ? {
+      temporal_status: isHistorical ? 'HISTORICAL' : isFutureIntent ? 'UNKNOWN' : 'CURRENT',
+      valid_from: validFrom,
+      valid_until: validUntil,
+      precision: temporalPrecision,
+      is_future_intent: isFutureIntent,
+    } : {});
 
     try {
       // ── Layer 2: Query ALL active/unarchived rows for this canonical key ────
@@ -175,69 +197,135 @@ export class MemoryRepository {
         return;
       }
 
+      const executeInsert = async (payload: any, trackerName: string) => {
+        const { data, error } = await qt.track(trackerName, 'memories', () =>
+          supabaseAdmin.from('memories').insert(payload).select('id').single()
+        );
+        if (error) {
+          const errMsg = error.message || '';
+          if (
+            errMsg.includes('schema cache') ||
+            errMsg.includes('Could not find') ||
+            errMsg.includes('does not exist') ||
+            error.code === '42703' ||
+            error.code === 'PGRST204'
+          ) {
+            const fallbackPayload = { ...payload };
+            delete fallbackPayload.valid_from;
+            delete fallbackPayload.valid_until;
+            delete fallbackPayload.temporal_precision;
+            delete fallbackPayload.temporal_metadata;
+            const resFallback = await qt.track(`${trackerName}_fallback`, 'memories', () =>
+              supabaseAdmin.from('memories').insert(fallbackPayload).select('id').single()
+            );
+            if (resFallback.error) {
+              throw new Error(`Failed to insert memory (fallback): ${resFallback.error.message}`);
+            }
+            return resFallback;
+          }
+          throw new Error(`Failed to insert memory: ${error.message}`);
+        }
+        return { data, error: null };
+      };
+
       // If incoming memory is PROPOSED, insert it as PROPOSED without superseding any CURRENT rows
       if (isProposed) {
-        await qt.track('upsert_memory_insert_proposed', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .insert({
-              user_id: userId,
-              memory_type: normalizedMemory.type,
-              key: normalizedMemory.key,
-              value: normalizedMemory.value,
-              importance: normalizedMemory.importance,
-              confidence: normalizedMemory.confidence,
-              emotional_weight: normalizedMemory.emotional_weight ?? 0,
-              source_message: sourceMessage,
-              source_authority: incomingAuthority,
-              is_archived: false,
-              lifecycle_state: 'PROPOSED',
-              compression_status: 'proposed',
-              source_references: normalizedMemory.source_references,
-              last_accessed_at: new Date().toISOString(),
-            })
-        );
+        await executeInsert({
+          user_id: userId,
+          memory_type: normalizedMemory.type,
+          key: normalizedMemory.key,
+          value: normalizedMemory.value,
+          importance: normalizedMemory.importance,
+          confidence: normalizedMemory.confidence,
+          emotional_weight: normalizedMemory.emotional_weight ?? 0,
+          source_message: sourceMessage,
+          source_authority: incomingAuthority,
+          is_archived: false,
+          lifecycle_state: 'PROPOSED',
+          compression_status: 'proposed',
+          source_references: normalizedMemory.source_references,
+          valid_from: validFrom,
+          valid_until: validUntil,
+          temporal_precision: temporalPrecision,
+          temporal_metadata: temporalMetadata,
+          last_accessed_at: new Date().toISOString(),
+        }, 'upsert_memory_insert_proposed');
         return;
       }
 
       // If incoming memory is HISTORICAL, insert it as HISTORICAL (do NOT supersede CURRENT rows)
       if (isHistorical) {
-        await qt.track('upsert_memory_insert_historical', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .insert({
-              user_id: userId,
-              memory_type: normalizedMemory.type,
-              key: normalizedMemory.key,
-              value: normalizedMemory.value,
-              importance: normalizedMemory.importance,
-              confidence: normalizedMemory.confidence,
-              emotional_weight: normalizedMemory.emotional_weight ?? 0,
-              source_message: sourceMessage,
-              source_authority: incomingAuthority,
-              is_archived: false,
-              lifecycle_state: 'HISTORICAL',
-              last_accessed_at: new Date().toISOString(),
-              ...(normalizedMemory.is_protected ? {
-                protection_source: normalizedMemory.protection_source || 'system',
-                protected_at: new Date().toISOString()
-              } : {}),
-              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
-              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
-            })
-        );
+        await executeInsert({
+          user_id: userId,
+          memory_type: normalizedMemory.type,
+          key: normalizedMemory.key,
+          value: normalizedMemory.value,
+          importance: normalizedMemory.importance,
+          confidence: normalizedMemory.confidence,
+          emotional_weight: normalizedMemory.emotional_weight ?? 0,
+          source_message: sourceMessage,
+          source_authority: incomingAuthority,
+          is_archived: false,
+          lifecycle_state: 'HISTORICAL',
+          valid_from: validFrom,
+          valid_until: validUntil,
+          temporal_precision: temporalPrecision,
+          temporal_metadata: temporalMetadata,
+          last_accessed_at: new Date().toISOString(),
+          ...(normalizedMemory.is_protected ? {
+            protection_source: normalizedMemory.protection_source || 'system',
+            protected_at: new Date().toISOString()
+          } : {}),
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+          ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
+        }, 'upsert_memory_insert_historical');
         logger.info('[MemoryRepository] Historical memory preserved & inserted', {
           key: normalizedMemory.key,
           userId,
-          value: normalizedMemory.value
+          value: normalizedMemory.value,
+          validFrom,
+          temporalPrecision
+        });
+        return;
+      }
+
+      // If incoming memory is FUTURE INTENT or EXPLICIT UNKNOWN, insert without superseding CURRENT rows
+      if (isFutureIntent || isExplicitUnknown) {
+        await executeInsert({
+          user_id: userId,
+          memory_type: normalizedMemory.type,
+          key: normalizedMemory.key,
+          value: normalizedMemory.value,
+          importance: normalizedMemory.importance,
+          confidence: normalizedMemory.confidence,
+          emotional_weight: normalizedMemory.emotional_weight ?? 0,
+          source_message: sourceMessage,
+          source_authority: incomingAuthority,
+          is_archived: false,
+          lifecycle_state: 'UNKNOWN',
+          valid_from: validFrom,
+          valid_until: validUntil,
+          temporal_precision: temporalPrecision,
+          temporal_metadata: temporalMetadata,
+          last_accessed_at: new Date().toISOString(),
+          ...(normalizedMemory.is_protected ? {
+            protection_source: normalizedMemory.protection_source || 'system',
+            protected_at: new Date().toISOString()
+          } : {}),
+        }, 'upsert_memory_insert_future_or_unknown');
+        logger.info('[MemoryRepository] Future intent / unknown memory inserted without supersession', {
+          key: normalizedMemory.key,
+          userId,
+          value: normalizedMemory.value,
+          isFutureIntent
         });
         return;
       }
 
       // Find conflicting CURRENT row(s) to supersede
-      // (Exclude rows that are explicitly HISTORICAL)
+      // (Exclude rows that are explicitly HISTORICAL or UNKNOWN)
       const conflictingCurrentRow = currentActiveRows.find(
-        r => r.lifecycle_state !== 'HISTORICAL' && !isHistoricalFact(r.value)
+        r => r.lifecycle_state !== 'HISTORICAL' && r.lifecycle_state !== 'UNKNOWN' && !isHistoricalFact(r.value)
       );
 
       if (conflictingCurrentRow) {
@@ -277,35 +365,33 @@ export class MemoryRepository {
         }
 
         // 2. Insert NEW memory row as CURRENT
-        const { data: newRow, error: insertErr } = await qt.track('upsert_memory_insert_superseding', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .insert({
-              user_id: userId,
-              memory_type: normalizedMemory.type,
-              key: normalizedMemory.key,
-              value: normalizedMemory.value,
-              importance: Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance),
-              confidence: normalizedMemory.confidence,
-              emotional_weight: normalizedMemory.emotional_weight ?? conflictingCurrentRow.emotional_weight ?? 0,
-              source_message: sourceMessage,
-              source_authority: incomingAuthority,
-              is_archived: false,
-              lifecycle_state: 'CURRENT',
-              last_accessed_at: new Date().toISOString(),
-              ...(normalizedMemory.is_protected || conflictingCurrentRow.protection_source ? {
-                protection_source: normalizedMemory.protection_source || conflictingCurrentRow.protection_source || 'system',
-                protected_at: new Date().toISOString()
-              } : {}),
-              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
-              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
-            })
-            .select('id')
-            .single()
-        );
+        const { data: newRow } = await executeInsert({
+          user_id: userId,
+          memory_type: normalizedMemory.type,
+          key: normalizedMemory.key,
+          value: normalizedMemory.value,
+          importance: Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance),
+          confidence: normalizedMemory.confidence,
+          emotional_weight: normalizedMemory.emotional_weight ?? conflictingCurrentRow.emotional_weight ?? 0,
+          source_message: sourceMessage,
+          source_authority: incomingAuthority,
+          is_archived: false,
+          lifecycle_state: 'CURRENT',
+          valid_from: validFrom,
+          valid_until: validUntil,
+          temporal_precision: temporalPrecision,
+          temporal_metadata: temporalMetadata,
+          last_accessed_at: new Date().toISOString(),
+          ...(normalizedMemory.is_protected || conflictingCurrentRow.protection_source ? {
+            protection_source: normalizedMemory.protection_source || conflictingCurrentRow.protection_source || 'system',
+            protected_at: new Date().toISOString()
+          } : {}),
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+          ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
+        }, 'upsert_memory_insert_superseding');
 
-        if (insertErr || !newRow) {
-          throw new Error(`Failed to insert superseding memory: ${insertErr?.message}`);
+        if (!newRow?.id) {
+          throw new Error('Failed to insert superseding memory');
         }
 
         const newMemoryId = newRow.id;
@@ -333,30 +419,30 @@ export class MemoryRepository {
         });
       } else {
         // No conflicting CURRENT row found: clean fresh insert
-        await qt.track('upsert_memory_insert_fresh', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .insert({
-              user_id: userId,
-              memory_type: normalizedMemory.type,
-              key: normalizedMemory.key,
-              value: normalizedMemory.value,
-              importance: normalizedMemory.importance,
-              confidence: normalizedMemory.confidence,
-              emotional_weight: normalizedMemory.emotional_weight ?? 0,
-              source_message: sourceMessage,
-              source_authority: incomingAuthority,
-              is_archived: false,
-              lifecycle_state: incomingLifecycleState,
-              last_accessed_at: new Date().toISOString(),
-              ...(normalizedMemory.is_protected ? {
-                protection_source: normalizedMemory.protection_source || 'system',
-                protected_at: new Date().toISOString()
-              } : {}),
-              ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
-              ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
-            })
-        );
+        await executeInsert({
+          user_id: userId,
+          memory_type: normalizedMemory.type,
+          key: normalizedMemory.key,
+          value: normalizedMemory.value,
+          importance: normalizedMemory.importance,
+          confidence: normalizedMemory.confidence,
+          emotional_weight: normalizedMemory.emotional_weight ?? 0,
+          source_message: sourceMessage,
+          source_authority: incomingAuthority,
+          is_archived: false,
+          lifecycle_state: incomingLifecycleState,
+          valid_from: validFrom,
+          valid_until: validUntil,
+          temporal_precision: temporalPrecision,
+          temporal_metadata: temporalMetadata,
+          last_accessed_at: new Date().toISOString(),
+          ...(normalizedMemory.is_protected ? {
+            protection_source: normalizedMemory.protection_source || 'system',
+            protected_at: new Date().toISOString()
+          } : {}),
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
+          ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
+        }, 'upsert_memory_insert_fresh');
 
         logger.debug('[MemoryRepository] Fresh memory inserted', {
           key: normalizedMemory.key,

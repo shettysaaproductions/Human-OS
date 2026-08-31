@@ -18,7 +18,20 @@ export type SourceAuthority =
   | 'explicit_user'           // User directly stated / explicitly corrected
   | 'needs_review';           // Reconciliation script: evidence ambiguous
 
-export type LifecycleState = 'CURRENT' | 'HISTORICAL' | 'SUPERSEDED' | 'INVALIDATED' | 'PROPOSED';
+export type LifecycleState = 'CURRENT' | 'HISTORICAL' | 'SUPERSEDED' | 'INVALIDATED' | 'PROPOSED' | 'UNKNOWN';
+
+export type TemporalStatus = 'CURRENT' | 'HISTORICAL' | 'SUPERSEDED' | 'UNKNOWN';
+
+export type TemporalPrecision = 'exact_date' | 'month_year' | 'year_only' | 'relative' | 'unknown';
+
+export interface TemporalMetadata {
+  temporal_status?: TemporalStatus;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  precision?: TemporalPrecision;
+  raw_stated?: string;
+  is_future_intent?: boolean;
+}
 
 export interface Memory {
   id: string;
@@ -47,6 +60,11 @@ export interface Memory {
   superseded_by?: string | null;
   superseded_at?: Date | string | null;
   supersession_reason?: string | null;
+  /** Phase 2F-D Temporal Lifecycle Metadata */
+  valid_from?: string | null;
+  valid_until?: string | null;
+  temporal_precision?: TemporalPrecision;
+  temporal_metadata?: TemporalMetadata;
   created_at: Date;
   updated_at: Date;
 }
@@ -74,6 +92,13 @@ export interface ExtractedMemory {
   /** Phase 2F Lifecycle State */
   lifecycle_state?: LifecycleState;
   is_historical?: boolean;
+  /** Phase 2F-D Temporal Lifecycle Metadata */
+  temporal_status?: TemporalStatus;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  temporal_precision?: TemporalPrecision;
+  temporal_metadata?: TemporalMetadata;
+  is_future_intent?: boolean;
 }
 
 export interface WorkingMemory {

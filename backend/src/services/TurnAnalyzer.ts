@@ -1,5 +1,7 @@
 import { ChatMessageInput } from '../routes/chat';
 import crypto from 'crypto';
+import { TemporalParser } from '../utils/temporalParser';
+import { TemporalMetadata } from '../types/memory';
 
 export type SemanticUnitType = 'question' | 'fact' | 'emotion' | 'action' | 'correction' | 'casual';
 export type FactClassification = 'HIGH_CONFIDENCE_DURABLE_FACT' | 'PROTECTED_FACT' | 'TRANSIENT_FACT';
@@ -21,6 +23,7 @@ export interface SemanticUnit {
   relationship?: string;
   isProtected?: boolean;
   factClass?: FactClassification;
+  temporalMetadata?: TemporalMetadata;
 }
 
 /**
@@ -88,6 +91,7 @@ export interface ExtractedFact {
   text: string;
   isProtected: boolean;
   factClass: FactClassification;
+  temporalMetadata?: TemporalMetadata;
 }
 
 export interface TurnContext {
@@ -141,6 +145,9 @@ export class TurnAnalyzer {
             }
           }
 
+          const temporalResult = TemporalParser.extractTemporalMetadata(clause);
+          const temporalMetadata = TemporalParser.toMetadata(temporalResult);
+
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,
@@ -157,7 +164,8 @@ export class TurnAnalyzer {
             oldValue,
             relationship,
             isProtected: isExplicitRemember,
-            factClass: isExplicitRemember ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT'
+            factClass: isExplicitRemember ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT',
+            temporalMetadata,
           });
         }
         // 2. Check for extracted facts
@@ -197,7 +205,8 @@ export class TurnAnalyzer {
               oldValue,
               relationship,
               isProtected: fact.isProtected,
-              factClass: fact.factClass
+              factClass: fact.factClass,
+              temporalMetadata: fact.temporalMetadata,
             });
           }
         }
@@ -738,7 +747,7 @@ export class TurnAnalyzer {
       if (m) {
         facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       } else {
-        m = lower.match(/\b(?:kaam karta|karti hoon|work at|working at|job at|employed at)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b)/i);
+        m = lower.match(/\b(?:kaam karta|karti hoon|work at|working at|worked at|joined|employed at|job at|now work at|now working at)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b|\bin\s+\d{4}|\bin\s+[a-z]+|\bsince\b)/i);
         if (m) facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       }
     }
@@ -774,6 +783,15 @@ export class TurnAnalyzer {
           lower.match(/\b(?:actually|instead|correction:?)\s+([a-zA-Z]+)\b/i);
       if (m && !lower.includes('my name') && !lower.includes('mera naam')) {
         facts.push({ key: 'UNKNOWN_RELATION', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    const temporalResult = TemporalParser.extractTemporalMetadata(text);
+    const temporalMetadata = TemporalParser.toMetadata(temporalResult);
+
+    for (const f of facts) {
+      if (!f.temporalMetadata) {
+        f.temporalMetadata = temporalMetadata;
       }
     }
 

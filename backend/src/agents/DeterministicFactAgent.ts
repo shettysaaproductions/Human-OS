@@ -38,6 +38,7 @@ export class DeterministicFactAgent {
       const isProtected = fact.is_protected === true || fact.factClass === 'PROTECTED_FACT';
 
       try {
+        const tm = fact.temporalMetadata;
         await memoryRepository.upsertMemory(userId, {
           type: getMemoryTypeForKey(fact.key),
           key: fact.key,
@@ -52,6 +53,14 @@ export class DeterministicFactAgent {
           protection_source: isProtected ? 'user_explicit' : undefined,
           // Corrections from TurnAnalyzer carry correction_intent
           correction_intent: fact.factClass === 'PROTECTED_FACT' || fact.isCorrection === true || fact.is_correction === true,
+          // Phase 2F-D Temporal Metadata
+          valid_from: tm?.valid_from,
+          valid_until: tm?.valid_until,
+          temporal_precision: tm?.precision,
+          temporal_status: tm?.temporal_status,
+          temporal_metadata: tm,
+          is_future_intent: tm?.is_future_intent,
+          lifecycle_state: tm?.temporal_status === 'HISTORICAL' ? 'HISTORICAL' : tm?.is_future_intent ? 'UNKNOWN' : undefined,
         }, sourceMessage || 'Direct Fact Extraction');
 
 
