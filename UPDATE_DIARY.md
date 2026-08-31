@@ -1,5 +1,37 @@
 
-## [2026-08-31] Pre-Heartbeat Hardening: Stale Working-Memory Correction Invalidation
+## [2026-08-31] Phase 3A: Watchtower Heartbeat Foundation
+
+### Trigger
+Implementation of Phase 3A: Bounded Watchtower supervisory heartbeat layer. Coordinates observation and follow-up over deterministic guardians, semantic guardians, cognitive doubt, source dependency, canonical reconciler, retention evaluation, and account lifecycle.
+
+### Changes Made
+1. **Database Schema & Distributed Lease (`backend/supabase/migrations/051_p3a_watchtower_heartbeat.sql`)**
+   - Created `watchtower_heartbeat_runs` table with distributed lease locking (`id`, `status`, `lease_owner`, `lease_until`, telemetry columns) to guarantee exactly-once execution per 15-minute window (`watchtower:YYYY-MM-DD:HH:mm`) with crash recovery.
+   - Created `watchtower_cognitive_signals` table with unique constraint `(user_id, fingerprint)` for compact, expiring, structured supervisory signals.
+
+2. **Watchtower Heartbeat Service (`backend/src/services/WatchtowerHeartbeatService.ts`)**
+   - Implemented `acquireLease()` with atomic DB locking and expired lease recovery.
+   - Implemented `executeHeartbeat()` orchestrating:
+     - Step 1: Deterministic inspection via `DeterministicGuardianService` (0 LLM calls).
+     - Step 2: Safe repair candidate delegation via `CanonicalStateReconciler` (never direct core writes) and structured cognitive signal persistence.
+     - Step 3: Rate-limited semantic escalation via `SemanticGuardianService` on genuine ambiguity only $\to$ delegation to `CognitiveDoubtService`.
+     - Step 4: Dry-run retention inspection via `MemoryRetentionEngine` (0 physical deletes).
+     - Step 5: Expired signal cleanup via `expireStaleSignals()`.
+   - Guaranteed bounded execution (max 20 users per run, max 10 anomalies per user, 10-second timeout per user).
+
+3. **Account Lifecycle Integration (`backend/src/services/AccountLifecycleService.ts`)**
+   - Added `watchtower_cognitive_signals` to `USER_OWNED_TABLES` (section 3) to ensure 100% complete account eradication during "Mark Dead".
+
+4. **Background Pulse Registration (`backend/src/index.ts`)**
+   - Registered 15-minute background interval for Watchtower Heartbeat, staggered from NACE.
+
+### Verification
+- `npm run build`: Exit 0 (0 TypeScript errors).
+- `npx jest src/services/__tests__/WatchtowerHeartbeatPhase3a.test.ts`: 20/20 unit tests + Adversarial Cases A–H passed (100%).
+- `npm test -- --coverage=false`: 39/39 test suites, 529/529 unit tests passed (100%).
+- `npx tsx scripts/prod_smoke_test_watchtower_heartbeat.ts`: Ephemeral production smoke test verified with 100% pass across all 5 scenarios (clean state $\to$ 0 LLM calls, deterministic anomaly detection, cognitive signal persistence, lease lock concurrency safety, and 100% ephemeral account eradication).
+
+---
 
 ### Trigger
 Pre-heartbeat hardening following deep architectural red-team: when an explicit/authoritative memory correction occurs for canonical key K, stale working-memory candidates for the same user and semantic key must be immediately invalidated rather than lingering until normal rotation.

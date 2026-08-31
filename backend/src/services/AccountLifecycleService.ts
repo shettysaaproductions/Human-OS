@@ -58,7 +58,8 @@ export class AccountLifecycleService {
     { table: 'nova_guardian_anomalies', userColumn: 'user_id' },
     { table: 'nova_guardian_runs', userColumn: 'user_id' },
 
-    // 3. Cognitive Doubts & Concurrency Leases
+    // 3. Cognitive Doubts, Watchtower Signals & Concurrency Leases
+    { table: 'watchtower_cognitive_signals', userColumn: 'user_id' },
     { table: 'nova_cognitive_doubts', userColumn: 'user_id' },
     { table: 'candidate_synthesis_claims', userColumn: 'user_id' },
 

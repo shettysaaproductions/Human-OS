@@ -372,3 +372,4 @@ Rules:
 }
 
 export const semanticGuardian = new SemanticGuardianService();
+export const semanticGuardianService = semanticGuardian;

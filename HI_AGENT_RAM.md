@@ -74,6 +74,13 @@ INIT COMMAND:  Type "hi agent init" in any new project to auto-generate a RAM sn
 ---
 
 ## 🐛 Recent Fixes & Active Status
+- ✅ **Aug 31 Session — Phase 3A Watchtower Heartbeat Foundation:**
+  - **Bounded Supervisory Heartbeat (`services/WatchtowerHeartbeatService.ts`):** 15-minute supervisory pulse orchestrating deterministic inspection (`DeterministicGuardianService`), semantic escalation on genuine ambiguity (`SemanticGuardianService`), cognitive doubt creation (`CognitiveDoubtService`), repair order submission & execution (`CanonicalStateReconciler`), dry-run retention inspection (`MemoryRetentionEngine`), and account lifecycle integrity (`AccountLifecycleService`).
+  - **Distributed Lease Locking (`051_p3a_watchtower_heartbeat.sql`):** Database-backed atomic lease slots (`watchtower_heartbeat_runs` with `watchtower:YYYY-MM-DD:HH:mm`) ensuring exactly-once execution per 15-minute window with automated crash recovery.
+  - **Structured Cognitive Signals:** Persists deduplicated supervisory signals in `watchtower_cognitive_signals` with SHA-256 fingerprinting and bounded TTL expiry. Integrated into `AccountLifecycleService` for complete account eradication.
+  - **Deterministic-First & 0 Physical Deletion:** 0 unconditional LLM calls on clean states, 0 physical DELETEs across cognitive tables, safe repair delegation through canonical services.
+  - **Verification & Tests:** 20/20 Phase 3A unit tests + adversarial cases A–H passing (`WatchtowerHeartbeatPhase3a.test.ts`). 39/39 test suites (529/529 tests, 100%) passing. Production smoke test verified with 100% pass and complete ephemeral account eradication.
+
 - ✅ **Aug 31 Session — Pre-Heartbeat Hardening (Stale Working-Memory Invalidation):**
   - **MemoryRepository Invalidation Hook (`services/memoryRepository.ts`):** `invalidateStaleWorkingMemory()` invalidates matching working memory candidates (`promotion_status = 'SUPERSEDED'`) when authoritative facts/corrections are committed for a canonical key. Zero physical DELETEs, 0 LLM calls, preserves unrelated working memory & episodic history.
   - **CognitiveContextService Filter (`services/CognitiveContextService.ts`):** Defensive query filter excludes `SUPERSEDED` and `INVALIDATED` working memory rows; intra-turn loop filters out working memory items conflicting with active corrections on the current turn.

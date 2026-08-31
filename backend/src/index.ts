@@ -116,6 +116,28 @@ async function main(): Promise<void> {
     }, 15 * 60 * 1000); // NACE pulse every 15 minutes (Free tier hard limit)
     if (naceInterval.unref) naceInterval.unref();
 
+    // Watchtower Heartbeat: Supervisory Cognition Pulse (Runs every 15 minutes, staggered by 2m)
+    setTimeout(async () => {
+      try {
+        logger.info('[BOOT] Initial Watchtower Heartbeat running...');
+        const { watchtowerHeartbeatService } = await import('./services/WatchtowerHeartbeatService');
+        await watchtowerHeartbeatService.executeHeartbeat();
+      } catch (e) {
+        logger.warn('[BOOT] Initial Watchtower Heartbeat failed (non-critical)', { error: e });
+      }
+    }, 90 * 1000); // 90s after boot
+
+    const watchtowerInterval = setInterval(async () => {
+      try {
+        logger.info('Scheduler: Triggering Watchtower Heartbeat pulse...');
+        const { watchtowerHeartbeatService } = await import('./services/WatchtowerHeartbeatService');
+        await watchtowerHeartbeatService.executeHeartbeat();
+      } catch (err) {
+        logger.error('Error in Watchtower Heartbeat pulse', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }, 15 * 60 * 1000); // Watchtower heartbeat every 15 minutes
+    if (watchtowerInterval.unref) watchtowerInterval.unref();
+
     // Jarvis Protocol: Proactive Environment Monitoring (Runs every 3 hours)
     const weatherWatcherInterval = setInterval(async () => {
       try {

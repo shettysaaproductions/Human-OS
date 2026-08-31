@@ -608,10 +608,10 @@ export class DeterministicGuardianService {
 
     const { data: reminders } = await supabaseAdmin
       .from('reminders')
-      .select('id, user_id, title')
+      .select('id, user_id, text')
       .eq('user_id', userId);
 
-    const reminderTitles = new Set((reminders || []).map((r: any) => (r.title || '').toLowerCase().trim()));
+    const reminderTitles = new Set((reminders || []).map((r: any) => (r.text || '').toLowerCase().trim()));
 
     for (const act of actions) {
       const titleLower = (act.title || '').toLowerCase().trim();
@@ -998,7 +998,7 @@ export class DeterministicGuardianService {
     const { data: reminders, error } = await qt.track('guardian_w019_reminders', 'reminders', () =>
       supabaseAdmin
         .from('reminders')
-        .select('id, user_id, title, trigger_at, status')
+        .select('id, user_id, text, trigger_at, status')
         .eq('user_id', userId)
         .in('status', ['pending', 'active'])
         .lt('trigger_at', oneDayAgo)
@@ -1016,7 +1016,7 @@ export class DeterministicGuardianService {
         fingerprint,
         evidence: {
           reminder_id: r.id,
-          title: r.title,
+          text: r.text,
           trigger_at: r.trigger_at,
           status: r.status,
           discrepancy: 'Active reminder trigger_at is overdue by more than 24 hours without completion',
