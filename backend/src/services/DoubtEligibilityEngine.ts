@@ -1,17 +1,17 @@
 /**
- * DoubtEligibilityEngine.ts — Deterministic Clarification Eligibility Engine (Phase 2B)
+ * DoubtEligibilityEngine.ts — Deterministic Clarification Eligibility Engine (Phase 2F-C)
  *
  * Rules:
  * 1. Single-doubt-per-turn limit (Max 1 doubt injected per turn).
- * 2. User burden cap (Max 3 open doubts per user).
+ * 2. User burden cap (Max 3 open doubts considered).
  * 3. Topical relevance: Matches canonical entity keys / concepts against current turn.
  * 4. Conversational opportunity: Avoids distress, closed-ended turns, or topic disruption.
- * 5. Presentation cooldown & loop protection (presentation_count < 2).
+ * 5. Presentation cooldown & loop protection (presentation_count < 3, lifetime < 9).
  * 6. Zero LLM calls — 100% deterministic evaluation.
  */
 
 import { CognitiveDoubtRecord, DoubtEligibilityContext, DoubtEligibilityDecision } from '../types/cognitiveDoubt';
-import { cognitiveDoubtService } from './CognitiveDoubtService';
+import { cognitiveDoubtService, DOUBT_LIMITS } from './CognitiveDoubtService';
 import { logger } from '../lib/logger';
 
 export class DoubtEligibilityEngine {
@@ -57,8 +57,16 @@ export class DoubtEligibilityEngine {
       const messageLower = ctx.currentMessageText.toLowerCase();
 
       for (const doubt of sorted) {
-        // Presentation loop prevention
-        if (doubt.presentation_count >= 2 || doubt.status === 'waiting_for_user') {
+        // Presentation loop prevention (per-version and lifetime limits)
+        const lifetimeCount = Number(doubt.evidence?.lifetime_presentation_count ?? doubt.presentation_count ?? 0);
+        if (
+          doubt.presentation_count >= DOUBT_LIMITS.MAX_CLARIFICATION_ATTEMPTS ||
+          lifetimeCount >= DOUBT_LIMITS.MAX_LIFETIME_CLARIFICATION_ATTEMPTS ||
+          doubt.status === 'waiting_for_user' ||
+          doubt.status === 'human_review' ||
+          doubt.status === 'resolved' ||
+          doubt.status === 'dismissed'
+        ) {
           continue;
         }
 
@@ -123,6 +131,11 @@ export class DoubtEligibilityEngine {
 
   /**
    * Constructs the Supervisory Cognitive Signal for the Chat LLM.
+   * Prompts strictly declare:
+   * - WHAT IS UNCERTAIN
+   * - WHAT EVIDENCE SUPPORTS IT
+   * - WHAT IS MISSING
+   * - WHAT NOVA MUST NOT ASSUME
    */
   private buildSupervisoryDirective(doubt: CognitiveDoubtRecord): string {
     const evidence = doubt.evidence || {};
@@ -130,19 +143,18 @@ export class DoubtEligibilityEngine {
 
     if (doubt.category === 'identity_gap' && evidence.claimed_count) {
       const grounded = Object.keys(evidence.grounded_relations || {}).join(', ') || 'user only';
-      details = `The user previously mentioned having ${evidence.claimed_count} family members, but only ${evidence.grounded_count} (${grounded}) are identified in durable memory. Exactly ${evidence.missing_count} member is unknown.`;
+      details = `The user previously stated having ${evidence.claimed_count} family members, but only ${evidence.grounded_count} (${grounded}) are identified in durable memory. Exactly ${evidence.missing_count} member identity is ungrounded.`;
     } else {
       details = doubt.question;
     }
 
     return [
       `[SUPERVISORY COGNITIVE SIGNAL: EPISTEMIC UNCERTAINTY (${doubt.category.toUpperCase()})]`,
-      `Context: ${details}`,
-      `Strict Instructions:`,
-      `- THIS IS UNCERTAINTY, NOT FACT.`,
-      `- DO NOT ASSUME OR INVENT THE MISSING ENTITY/INFORMATION.`,
-      `- If current conversational flow naturally allows it, you may ask for clarification in a casual, warm, non-robotic way.`,
-      `- If the user is busy or the moment feels unnatural, DO NOT FORCE the question.`,
+      `WHAT IS UNCERTAIN: ${doubt.question}`,
+      `WHAT EVIDENCE SUPPORTS IT: ${details}`,
+      `WHAT IS MISSING: Unresolved epistemic gap (${doubt.category})`,
+      `WHAT NOVA MUST NOT ASSUME: DO NOT ASSUME OR INVENT THE MISSING ENTITY OR FACT. THIS IS UNCERTAINTY, NOT FACT.`,
+      `Guidelines: If current conversational flow naturally allows it, clarify casually and warmly without forcing the question.`,
     ].join('\n');
   }
 }

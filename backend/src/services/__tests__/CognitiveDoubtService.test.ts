@@ -351,8 +351,8 @@ describe('Phase 2B: Cognitive Doubt Subsystem', () => {
     expect(presented1?.status).toBe('presented');
   });
 
-  // ── 9. Repeated Presentation (>=2) Becomes waiting_for_user ───────────────
-  it('9. Repeated presentation (>=2) transitions status to waiting_for_user to prevent loop', async () => {
+  // ── 9. Repeated Presentation (>=3) Becomes waiting_for_user ───────────────
+  it('9. Repeated presentation (>=3) transitions status to waiting_for_user to prevent loop', async () => {
     const draft: DoubtCreationDraft = {
       userId: userIdA,
       category: 'identity_gap',
@@ -363,10 +363,11 @@ describe('Phase 2B: Cognitive Doubt Subsystem', () => {
     const doubt = await cognitiveDoubtService.createOrUpdateDoubt(draft);
 
     await cognitiveDoubtService.markPresented(doubt!.id);
-    const presented2 = await cognitiveDoubtService.markPresented(doubt!.id);
+    await cognitiveDoubtService.markPresented(doubt!.id);
+    const presented3 = await cognitiveDoubtService.markPresented(doubt!.id);
 
-    expect(presented2?.presentation_count).toBe(2);
-    expect(presented2?.status).toBe('waiting_for_user');
+    expect(presented3?.presentation_count).toBe(3);
+    expect(presented3?.status).toBe('waiting_for_user');
 
     // Subsequent eligibility check suppresses doubts in waiting_for_user
     const decision = await doubtEligibilityEngine.evaluateEligibility({

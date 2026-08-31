@@ -36,6 +36,8 @@ export interface CognitiveDoubtRecord {
   status: DoubtStatus;
   fingerprint: string;
   presentation_count: number;
+  presentation_count_for_evidence_version?: number;
+  lifetime_presentation_count?: number;
   last_presented_at: string | null;
   resolution_turn_id: string | null;
   created_at: string;
@@ -53,7 +55,10 @@ export interface DoubtCreationDraft {
   priority?: DoubtPriority;
   fingerprint?: string;
   targetEntityKeys?: string[];
+  unresolvedQuestionType?: string;
+  evidenceVersion?: string;
   expiresInDays?: number;
+  cooldownDays?: number;
 }
 
 export interface DoubtEligibilityContext {
@@ -76,6 +81,8 @@ export interface DoubtEligibilityDecision {
 
 export interface DoubtResolutionMatch {
   matched: boolean;
+  isResolved?: boolean;
+  isAmbiguous?: boolean;
   doubtId?: string;
   category?: DoubtCategory;
   resolutionTurnId?: string;
@@ -83,3 +90,4 @@ export interface DoubtResolutionMatch {
   resolvedEntityValue?: string;
   reason: string;
 }
+
