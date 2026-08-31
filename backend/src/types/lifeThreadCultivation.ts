@@ -160,3 +160,57 @@ export const LIFETHREAD_CULTIVATION_BOUNDS = {
   MAX_BLOCKERS_PER_THREAD: 10,
   MAX_MILESTONES_PER_THREAD: 20,
 } as const;
+
+/**
+ * Bounded evidence packet assembled for LLM synthesis.
+ * Excludes system-generated suggestions, reminders, and passive compliance
+ * from being presented as user commitment.
+ */
+export interface LifeThreadEvidencePacket {
+  threadId: string;
+  userId: string;
+  topic: string;
+  canonicalKey: string;
+  category: LifeThreadCategory;
+  cultivationStage: LifeThreadCultivationStage;
+  groundedGoalStatement?: string;
+  userEvidence: Array<{
+    id: string;
+    provenance: 'USER_EXPLICIT' | 'USER_ACTION' | 'USER_CONFIRMATION';
+    text: string;
+    createdAt: string;
+    turnId?: string;
+  }>;
+  existingBlockers: LifeThreadBlocker[];
+  milestones: LifeThreadMilestone[];
+  nextRelevantTime?: string | null;
+  lastRelevantAt?: string | null;
+}
+
+/**
+ * Strict LLM output schema for next useful step synthesis.
+ */
+export interface LifeThreadSynthesisOutput {
+  progress_summary: string | null;
+  blocker_summary: string | null;
+  next_step_proposal: {
+    title: string;
+    description: string;
+    duration_mins: number;
+    leverage_score: number;
+  } | null;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNCERTAIN';
+  evidence_ids: string[];
+  temporal_consistency: 'CURRENT' | 'HISTORICAL' | 'FUTURE_INTENT' | 'CONFLICTING';
+  uncertainty_reason?: string | null;
+}
+
+export interface LifeThreadSynthesisDecision {
+  threadId: string;
+  accepted: boolean;
+  rejectionReason?: string;
+  output?: LifeThreadSynthesisOutput;
+  nextUsefulStepProposal?: LifeThreadNextUsefulStep | null;
+  wasContradictory?: boolean;
+  synthesizedAt: string;
+}
