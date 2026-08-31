@@ -4,6 +4,7 @@ import { authenticateUser } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { config } from '../config';
 import { cache } from '../lib/cache';
+import { accountLifecycleService } from '../services/AccountLifecycleService';
 
 export const authRouter: import('express').Router = Router();
 
@@ -244,53 +245,16 @@ authRouter.delete('/mark-dead', authenticateUser, async (req: Request, res: Resp
 
     logger.info('[Mark Dead] Initiating nuclear data wipe for user', { userId });
 
-    // 1. Explicitly delete user data from all operational tables
-    // (We do this explicitly in case ON DELETE CASCADE is missing on some tables)
-    const tables = [
-      'nova_outreach_log',
-      'nova_agenda',
-      'user_routines',
-      'reminders',
-      'chat_history',
-      'short_term_memories',
-      'memories',
-      'working_memory',
-      'nova_thoughts',
-      'user_presence',
-      'kg_edges',
-      'kg_nodes',
-      'user_moments',
-      'reflections',
-      'emotional_states',
-      'nova_followups',
-      'profiles',
-      'episodic_memories',
-      'conversation_sessions'
-    ];
+    const result = await accountLifecycleService.deleteAccount(userId);
 
-    for (const table of tables) {
-      try {
-        await supabaseAdmin.from(table).delete().eq('user_id', userId);
-      } catch (e) {
-        logger.warn(`[Mark Dead] Failed to delete from ${table}`, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-
-    // 2. Delete the actual Auth user (this permanently revokes access and deletes the identity)
-    const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-    
-    if (authError) {
-      logger.error('[Mark Dead] Failed to delete auth user', { error: authError.message, userId });
-      res.status(500).json({ error: 'Failed to completely delete account identity' });
+    if (!result.success) {
+      logger.error('[Mark Dead] Account deletion had errors', { userId, errors: result.errors });
+      res.status(500).json({ error: 'Failed to completely delete account and data', details: result.errors });
       return;
     }
 
-    // 3. Clear cache
-    cache.invalidate(`profile:${userId}`);
-    cache.invalidate(`memories:${userId}`);
-
-    logger.info('[Mark Dead] User successfully eradicated', { userId });
-    res.status(200).json({ success: true, message: 'Account marked dead and all data wiped.' });
+    logger.info('[Mark Dead] User successfully eradicated', { userId, durationMs: result.durationMs });
+    res.status(200).json({ success: true, message: 'Account marked dead and all data wiped.', result });
   } catch (err) {
     logger.error('[Mark Dead] Catastrophic failure during deletion', { error: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ error: 'Internal server error' });
