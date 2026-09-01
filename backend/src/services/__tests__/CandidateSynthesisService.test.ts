@@ -70,6 +70,44 @@ describe('Phase 2E-C: CandidateSynthesisService', () => {
     expect(cognitiveRouter.complete).not.toHaveBeenCalled();
   });
 
+  // 1b. model output truncated -> explicit error mapping
+  test('1b. Truncated JSON returns explicit MODEL_OUTPUT_TRUNCATED error', async () => {
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'working_memory') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockResolvedValue({
+            data: [{ id: 'w1', key: 'fact', value: 'value', created_at: new Date().toISOString() }],
+            error: null,
+          }),
+        };
+      }
+      return {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue({ data: [], error: null }),
+      };
+    });
+
+    // Mock cognitiveRouter to return malformed truncated JSON
+    (cognitiveRouter.complete as jest.Mock).mockResolvedValue(`{
+      "candidates": [
+        {
+          "category": "FACT",
+          "key": "test",
+          "value": "incomplete",
+          "source_refs": [
+            { "type": "w`);
+
+    const result = await service.synthesizeCandidatesForUser(userId);
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toBe('MODEL_OUTPUT_TRUNCATED');
+    expect(result.candidatesGenerated.length).toBe(0);
+  });
+
   // 2-6. Category candidates (EVENT, FACT, PREFERENCE, GOAL, IDENTITY)
   test('2-6. Accurately synthesizes EVENT, FACT, PREFERENCE, GOAL, IDENTITY candidates', async () => {
     const wmId1 = 'wm-1';
@@ -550,8 +588,8 @@ describe('Phase 2E-C: CandidateSynthesisService', () => {
   // 16-17. User isolation and bounded batch
   test('16-17. Enforces strict user isolation and bounded batch sizes', async () => {
     const packet = await service.buildEvidencePacket(userId);
-    expect(CANDIDATE_SYNTHESIS_LIMITS.MAX_WORKING_MEMORY_RECORDS_PER_USER).toBe(20);
-    expect(CANDIDATE_SYNTHESIS_LIMITS.MAX_EPISODIC_RECORDS_PER_USER).toBe(20);
+    expect(CANDIDATE_SYNTHESIS_LIMITS.MAX_WORKING_MEMORY_RECORDS_PER_USER).toBe(15);
+    expect(CANDIDATE_SYNTHESIS_LIMITS.MAX_EPISODIC_RECORDS_PER_USER).toBe(10);
     expect(CANDIDATE_SYNTHESIS_LIMITS.MAX_CANDIDATES_PER_USER).toBe(10);
   });
 

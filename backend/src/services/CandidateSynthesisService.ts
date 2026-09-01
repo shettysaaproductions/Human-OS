@@ -37,11 +37,11 @@ import crypto from 'crypto';
 export const CANDIDATE_SYNTHESIS_LIMITS = {
   MAX_USERS_PER_RUN: 50,
   MAX_CANDIDATES_PER_USER: 10,
-  MAX_WORKING_MEMORY_RECORDS_PER_USER: 20,
-  MAX_EPISODIC_RECORDS_PER_USER: 20,
+  MAX_WORKING_MEMORY_RECORDS_PER_USER: 15,
+  MAX_EPISODIC_RECORDS_PER_USER: 10,
   MAX_MODEL_CALLS_PER_USER: 1,
   MAX_INPUT_TOKENS: 1500,
-  MAX_OUTPUT_TOKENS: 512,
+  MAX_OUTPUT_TOKENS: 4000,
   MAX_RETRIES: 2,
   LEASE_DURATION_MINUTES: 5,
   CANDIDATE_TTL_DAYS: 7,
@@ -525,8 +525,14 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
         return [];
       }
       return parsed.candidates;
-    } catch (parseErr) {
-      logger.warn('[CandidateSynthesis] JSON parse failed on model output', { rawResponse, error: parseErr });
+    } catch (parseErr: any) {
+      const trimmed = rawResponse.trim();
+      if ((trimmed.startsWith('{') && !trimmed.endsWith('}')) || (trimmed.startsWith('[') && !trimmed.endsWith(']'))) {
+        logger.error('[CandidateSynthesis] JSON parse failed on model output (likely truncated)', { rawResponseLength: rawResponse.length, error: parseErr });
+        throw new Error('MODEL_OUTPUT_TRUNCATED');
+      }
+      
+      logger.warn('[CandidateSynthesis] Malformed JSON response', { rawResponse, error: parseErr });
       return [];
     }
   }

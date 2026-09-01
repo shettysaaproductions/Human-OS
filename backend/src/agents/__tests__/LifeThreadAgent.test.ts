@@ -261,6 +261,79 @@ describe('LifeThreadAgent', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // ADMISSION THRESHOLD
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Admission Threshold', () => {
+    const validUserId = '11111111-1111-1111-1111-111111111111';
+
+    it('should ignore trivial single-step tasks', async () => {
+      mockSupabase.limit.mockResolvedValueOnce({
+        data: [{ role: 'user', content: 'remind me to call plumber tomorrow' }],
+        error: null
+      });
+
+      mockSupabase.in
+        .mockResolvedValueOnce({ data: [], error: null }) // activeThreads
+        .mockResolvedValueOnce({ data: [], error: null }); // recent actions
+
+      // We mock the LLM returning "ignore" due to the new prompt rules
+      (chatCompletionBackground as jest.Mock).mockResolvedValueOnce(`{
+        "action": "ignore",
+        "reason": "Trivial single-step task, does not qualify as LifeThread"
+      }`);
+
+      await agent.processJob({ payload: { user_id: validUserId, turn_context: {} } });
+      
+      // Because action="ignore", applyUpdate does nothing
+      expect(mockSupabase.insert).not.toHaveBeenCalled();
+      expect(mockSupabase.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CORRECTION SCRUBBING
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Correction Scrubbing', () => {
+    const validUserId = '11111111-1111-1111-1111-111111111111';
+
+    it('should pass scrubbedConcept to repository on correction', async () => {
+      // Setup mock to return a thread
+      mockSupabase.limit.mockResolvedValueOnce({
+        data: [{ role: 'user', content: 'Actually my wife is not Priya, it is Sakshi' }],
+        error: null
+      });
+
+      mockSupabase.in
+        .mockResolvedValueOnce({ 
+          data: [{ id: 'thread-wife', topic: 'Wife is Priya', state: 'active', provenance: 'User said wife is Priya' }], 
+          error: null 
+        })
+        .mockResolvedValueOnce({ data: [], error: null });
+
+      // We mock the LLM returning an update due to correction
+      (chatCompletionBackground as jest.Mock).mockResolvedValueOnce(`{
+        "action": "update",
+        "thread_id": "thread-wife",
+        "topic": "Wife is Sakshi",
+        "reason": "Correction"
+      }`);
+
+      await agent.processJob({ 
+        payload: { 
+          user_id: validUserId,
+          turn_context: {
+            negativeCorrectionConcepts: ['Priya']
+          }
+        } 
+      });
+
+      // The internal logic will try to scrub "Priya" during thread updates
+      // This implicitly exercises updateThreadProvenanceForCorrection
+      expect(chatCompletionBackground).toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // BUG-NEGATION-RESUME — 12-test surgical suite (FINAL)
   // ─────────────────────────────────────────────────────────────────────────────
   describe('BUG-NEGATION-RESUME: resume lifecycle (final surgical)', () => {

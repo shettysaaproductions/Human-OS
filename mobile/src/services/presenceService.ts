@@ -130,8 +130,10 @@ class PresenceService {
       const user = useAuthStore.getState().user;
       if (!user?.id) return; // Don't send if not logged in
 
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       await api.post('/presence', {
         userId: user.id,
+        timezone,
         ...data,
         timestamp: Date.now(),
       });

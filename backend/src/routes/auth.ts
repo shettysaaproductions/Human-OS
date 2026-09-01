@@ -13,7 +13,7 @@ export const authRouter: import('express').Router = Router();
  */
 authRouter.post('/signup', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const { email, password, timezone } = req.body;
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' });
       return;
@@ -39,6 +39,12 @@ authRouter.post('/signup', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    if (timezone && data.user?.id) {
+      supabaseAdmin.from('profiles').update({ timezone }).eq('id', data.user.id).then(({ error }) => {
+        if (error) logger.warn('Failed to save timezone on signup', { userId: data.user?.id, error: error.message });
+      });
+    }
+
     res.status(201).json({
       user: data.user,
       access_token: data.session?.access_token || null,
@@ -59,7 +65,7 @@ authRouter.post('/signup', async (req: Request, res: Response): Promise<void> =>
  */
 authRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const { email, password, timezone } = req.body;
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' });
       return;
@@ -85,6 +91,12 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
         error: isRateLimited ? 'Too many attempts. Please wait a moment.' : (error.message || 'Authentication failed')
       });
       return;
+    }
+
+    if (timezone && data.user?.id) {
+      supabaseAdmin.from('profiles').update({ timezone }).eq('id', data.user.id).then(({ error }) => {
+        if (error) logger.warn('Failed to save timezone on login', { userId: data.user?.id, error: error.message });
+      });
     }
 
     const { data: profile } = await supabaseAdmin

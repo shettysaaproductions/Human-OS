@@ -8,11 +8,18 @@ const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { userId, status, timestamp } = req.body;
+    const { userId, status, timestamp, timezone } = req.body;
     
     if (!userId || !status) {
       res.status(400).json({ error: 'Missing userId or status' });
       return;
+    }
+
+    if (timezone) {
+      // Opportunistically update timezone on presence heartbeat
+      supabaseAdmin.from('profiles').update({ timezone }).eq('id', userId).then(({ error }) => {
+        if (error) logger.warn('Failed to update timezone on presence', { userId, error: error.message });
+      });
     }
 
     const updateData: any = {

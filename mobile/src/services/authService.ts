@@ -2,12 +2,14 @@ import { api } from './api';
 
 export const authService = {
   signup: async (email: string, password: string) => {
-    const response = await api.post('/auth/signup', { email, password });
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const response = await api.post('/auth/signup', { email, password, timezone });
     return response.data; // { access_token, refresh_token, user }
   },
 
   login: async (email: string, password: string) => {
-    const response = await api.post('/auth/login', { email, password });
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const response = await api.post('/auth/login', { email, password, timezone });
     return response.data; // { access_token, refresh_token, user }
   },
 

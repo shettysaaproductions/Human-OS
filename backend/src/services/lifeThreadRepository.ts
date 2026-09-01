@@ -99,6 +99,7 @@ export interface ThreadMutationOpts {
   isExplicitResume?: boolean;
   contextText?: string;
   existingThread?: LifeThreadRow;
+  scrubbedConcept?: string;
 }
 
 
@@ -277,10 +278,18 @@ export class LifeThreadRepository {
       }
 
 
-      const updatedProvenance = (existingThread.provenance ?? '') + transitionNote;
+      let updatedProvenance = (existingThread.provenance ?? '') + transitionNote;
+      let finalTopic = displayTopic;
+
+      if (opts.scrubbedConcept) {
+        // Scrub the negated concept completely from active state while appending the historical note
+        const scrubRegex = new RegExp(opts.scrubbedConcept, 'gi');
+        finalTopic = finalTopic.replace(scrubRegex, '[SCRUBBED]');
+        updatedProvenance = updatedProvenance.replace(scrubRegex, '[SCRUBBED]');
+      }
 
       const updatePayload: any = {
-        topic: displayTopic,
+        topic: finalTopic,
         canonical_key: canonicalKey,
         state: targetState,
         priority: spec.priority || existingThread.priority,

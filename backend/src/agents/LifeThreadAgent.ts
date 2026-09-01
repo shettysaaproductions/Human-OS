@@ -232,7 +232,8 @@ export class LifeThreadAgent {
           {
             turnId,
             sourceAuthority: 'deterministic_turn_analysis',
-            provenanceNote: `[CONCEPT SUPERSEDED: "${matchedConcept}" — user correction]`
+            provenanceNote: `[CONCEPT SUPERSEDED: "${matchedConcept}" — user correction]`,
+            scrubbedConcept: matchedConcept
           }
         );
         logger.info(`LifeThreadAgent: Concept superseded in thread ${thread.id}`, { userId, matchedConcept });
@@ -277,6 +278,10 @@ AND you must decompose goals into explicitly trackable ACTIONS.
 
 A "Life Thread" tracks unresolved plans, goals, commitments, or waiting states.
 An "Action" is a concrete step required to advance or complete a Life Thread.
+
+CRITICAL RULE - ADMISSION THRESHOLD:
+DO NOT create LifeThreads for trivial, short-lived, or single-step tasks (e.g., "call plumber tomorrow", "remind me to buy milk"). ONLY create a LifeThread for complex, multi-day, or emotionally significant ongoing goals that require multiple steps to complete. For simple tasks or casual conversation, emit "ignore".
+
 ${softLimitNote}
 ${candidateNote}
 ${pausedNote}
@@ -291,11 +296,11 @@ Recent Conversation:
 ${JSON.stringify(recentChat, null, 2)}
 
 Based on the latest messages, decide the appropriate thread action:
-- "create": user stated a brand-new goal/plan that does NOT overlap with any existing thread.
+- "create": user stated a brand-new complex, multi-day goal/plan that does NOT overlap with any existing thread.
 - "update": user added information to an existing thread, OR user explicitly resumed a PAUSED (waiting) thread. When resuming, set state="active".
 - "complete": user indicated an existing thread is finished.
 - "abandon": user explicitly dropped this goal (NOT just corrected a concept within it).
-- "ignore": no meaningful thread activity.
+- "ignore": casual conversation, simple single-step tasks, or no meaningful thread activity.
 
 Respond ONLY with a JSON object in this exact schema:
 {
