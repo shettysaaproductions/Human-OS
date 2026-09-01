@@ -982,6 +982,18 @@ export function ChatScreen() {
               </View>
             </View>
             <View style={s.headerRight}>
+              <TouchableOpacity onPress={() => {
+                Alert.alert(
+                  "New Chat",
+                  "Start a fresh conversation? Your old messages are safely saved.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Start", onPress: () => useChatStore.getState().startNewConversation() }
+                  ]
+                );
+              }} style={s.headerBtn}>
+                <Text style={s.headerBtnText}>✨</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => navigation.navigate('Brain')} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>🧠</Text>
               </TouchableOpacity>

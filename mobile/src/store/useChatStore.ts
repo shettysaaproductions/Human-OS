@@ -56,6 +56,7 @@ interface ChatState {
   sendMessage: (content: string, imageBase64?: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
+  startNewConversation: () => Promise<void>;
   processQueue: () => Promise<void>;
   checkProactiveMessages: () => Promise<void>;
   set_isTyping: (v: boolean) => void;
@@ -827,6 +828,22 @@ export const useChatStore = create<ChatState>((set, get) => {
     
     clearMessages: () => {
       set({ messages: [], conversationId: null, pendingQueue: [], isTyping: false });
+    },
+
+    startNewConversation: async () => {
+      set({ 
+        messages: [], 
+        conversationId: null, 
+        pendingQueue: [], 
+        isTyping: false,
+        diagnostics: null,
+        oldestMessageId: null,
+        hasMoreMessages: false,
+      });
+      await clearAwaitingReply();
+      await SecureStore.deleteItemAsync(CONV_CACHE_KEY);
+      await SecureStore.setItemAsync(MSG_CACHE_KEY, JSON.stringify([]));
+      console.log('[NEW_CHAT] Conversation reset to null. Next message starts a new session.');
     },
 
     // ── Proactive message check: called when push arrives or app foregrounds ───

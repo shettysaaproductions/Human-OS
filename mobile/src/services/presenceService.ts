@@ -136,13 +136,17 @@ class PresenceService {
         const calendars = Localization.getCalendars();
         if (calendars && calendars.length > 0 && calendars[0].timeZone) {
           timezone = calendars[0].timeZone;
+          console.log('[PRESENCE] TIMEZONE_RESOLVED:', timezone);
         } else if (Localization.timezone) {
           timezone = Localization.timezone;
+          console.log('[PRESENCE] TIMEZONE_RESOLVED (fallback):', timezone);
+        } else {
+          console.log('[PRESENCE] TIMEZONE_UNAVAILABLE (no native tz)');
         }
       } catch (tzErr) {
         // Fail-safe: if native module throws or fails, send empty timezone.
         // Backend ContextualTimingEngine handles missing timezones securely.
-        console.warn('Failed to retrieve device timezone:', tzErr);
+        console.log('[PRESENCE] TIMEZONE_INVALID/UNAVAILABLE:', tzErr);
       }
 
       await api.post('/presence', {
