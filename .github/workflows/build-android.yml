@@ -33,14 +33,12 @@ jobs:
           java-version: '17'
 
       - name: Setup EAS CLI
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+        run: npm install -g eas-cli
 
       - name: Build APK locally on CI
         env:
           EAS_LOCAL_BUILD_SKIP_CLEANUP: 1
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas build --platform android --profile production --local --non-interactive
 
       - name: Upload APK artifact
