@@ -130,7 +130,21 @@ class PresenceService {
       const user = useAuthStore.getState().user;
       if (!user?.id) return; // Don't send if not logged in
 
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      let timezone = '';
+      try {
+        const Localization = require('expo-localization');
+        const calendars = Localization.getCalendars();
+        if (calendars && calendars.length > 0 && calendars[0].timeZone) {
+          timezone = calendars[0].timeZone;
+        } else if (Localization.timezone) {
+          timezone = Localization.timezone;
+        }
+      } catch (tzErr) {
+        // Fail-safe: if native module throws or fails, send empty timezone.
+        // Backend ContextualTimingEngine handles missing timezones securely.
+        console.warn('Failed to retrieve device timezone:', tzErr);
+      }
+
       await api.post('/presence', {
         userId: user.id,
         timezone,

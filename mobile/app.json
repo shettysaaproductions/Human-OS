@@ -86,7 +86,8 @@
           }
         }
       ],
-      "./plugins/withDisableLint.js"
+      "./plugins/withDisableLint.js",
+      "expo-localization"
     ],
     "extra": {
       "eas": {

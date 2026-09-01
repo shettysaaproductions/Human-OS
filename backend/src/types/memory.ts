@@ -202,7 +202,7 @@ export interface MemoryPromotionCandidate {
   importance_estimate: number;
   reason: string;
   created_at: string;
-  status: 'candidate' | 'rejected' | 'expired';
+  status: 'candidate' | 'rejected' | 'expired' | 'promoted';
   fingerprint?: string;
   expires_at?: string;
   proposed_memory_type?: MemoryType;

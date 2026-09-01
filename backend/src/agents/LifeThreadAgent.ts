@@ -169,6 +169,18 @@ export class LifeThreadAgent {
       throw new Error(`LifeThreadAgent[APPLICATION_EXCEPTION]: JSON parse failed — ${e?.message ?? String(e)} | raw: ${responseText?.slice(0, 200)}`);
     }
 
+    // 4.5. Deterministic Admission Gate (BUG-07 / P1-2)
+    if (result.action === 'create') {
+      const msgLower = (recentChat[recentChat.length - 1]?.content ?? '').toLowerCase();
+      const hasCommitment = /\b(plan|goal|start|going to|want to|decided|karna hai|karunga|karungi|socha hai|plan hai|target|aim|build|create|launch|shuru|seekhna|learn|prepare)\b/i.test(msgLower);
+      const hasTimeframe = /\b(this week|this month|this year|next week|next month|next year|in \d+ (days|weeks|months)|by (january|february|march|april|may|june|july|august|september|october|november|december))\b/i.test(msgLower);
+      
+      if (!hasCommitment && !hasTimeframe) {
+         logger.info(`LifeThreadAgent: Blocked creation of casual thread "${result.topic}" due to lack of deterministic commitment signals.`);
+         return;
+      }
+    }
+
     // 5. Apply the action deterministically via Repository
     await this.applyUpdate(user_id, result, threads, activeActions || [], message_id, turnId, recentChat);
   }

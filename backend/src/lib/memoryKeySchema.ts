@@ -109,6 +109,11 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     // other entities. It's listed here so it's normalized, but the value
     // validation layer will still reject non-name values.
   ],
+  // ── Work: preferences ───────────────────────────────────────────────────────
+  preferred_work_hours: [
+    'prefer_work_hours', 'prefer_morning_work', 'prefer_evening_work',
+    'work_hours_preference', 'working_hours_preference', 'preferred_working_hours'
+  ],
 };
 
 // ── Reverse lookup: alias → canonical key ─────────────────────────────────────

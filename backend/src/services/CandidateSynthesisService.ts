@@ -686,31 +686,72 @@ If no evidence warrants a promotion candidate, return {"candidates": []}.`;
   }
 
   /**
-   * Stores synthesized candidates in the candidate holding buffer.
+   * Stores synthesized candidates in the durable memories table via memoryRepository,
+   * ending their lifecycle as PROMOTED, and marking working_memory sources as PROMOTED.
    */
   async storeCandidates(userId: string, candidates: MemoryPromotionCandidate[]): Promise<void> {
     if (candidates.length === 0) return;
 
-    const existing = this.candidateStore.get(userId) || [];
-    const updated = [...existing, ...candidates].slice(-50); // Keep max 50 recent candidates per user
+    // We no longer just store them in RAM. We write them to the `memories` table
+    // via memoryRepository.upsertMemory to complete the promotion lifecycle.
+    const { memoryRepository } = await import('./memoryRepository');
+    const repo = memoryRepository;
 
-    this.candidateStore.set(userId, updated);
-    candidates.forEach(c => {
-      if (c.fingerprint) this.fingerprintStore.add(c.fingerprint);
-    });
+    for (const c of candidates) {
+      // Map Candidate to ExtractedMemory format
+      const mem: any = {
+        shouldPersist: true,
+        type: 'personal', // fallback, actual type is inferred or mapped, but we just use personal for synthesized
+        key: c.proposed_key,
+        value: c.proposed_value,
+        importance: c.importance_estimate || 70,
+        confidence: c.confidence || 0.8,
+        source_authority: 'subconscious_inference',
+        source_references: c.source_references,
+        compression_status: 'promoted',
+        lifecycle_state: 'CURRENT'
+      };
 
-    // Update metadata on source working_memory records (non-destructive status tag)
+      try {
+        await repo.upsertMemory(userId, mem, 'Synthesis Candidate Promotion');
+        c.status = 'promoted'; // Update terminal state in memory
+      } catch (err: any) {
+        logger.error('[CandidateSynthesis] Failed to promote candidate to durable memory', {
+          userId,
+          key: c.proposed_key,
+          error: err.message
+        });
+      }
+    }
+
+    // Update metadata on source working_memory records (terminal status PROMOTED)
     const wmIds = candidates
+      .filter(c => c.status === 'promoted')
       .flatMap(c => c.source_references)
       .filter(r => r.type === 'working_memory')
       .map(r => r.id);
 
     if (wmIds.length > 0) {
-      await qt.track('tag_wm_candidates', 'working_memory', () =>
+      await qt.track('tag_wm_promoted', 'working_memory', () =>
         supabaseAdmin
           .from('working_memory')
-          .update({ promotion_status: 'CANDIDATE_SYNTHESIZED' })
+          .update({ promotion_status: 'PROMOTED' })
           .in('id', wmIds)
+      );
+    }
+
+    const epIds = candidates
+      .filter(c => c.status === 'promoted')
+      .flatMap(c => c.source_references)
+      .filter(r => r.type === 'episodic_memory')
+      .map(r => r.id);
+
+    if (epIds.length > 0) {
+      await qt.track('tag_ep_promoted', 'episodic_memories', () =>
+        supabaseAdmin
+          .from('episodic_memories')
+          .update({ promotion_status: 'PROMOTED' })
+          .in('id', epIds)
       );
     }
   }

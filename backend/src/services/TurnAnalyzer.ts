@@ -522,7 +522,9 @@ export class TurnAnalyzer {
     const isNicknameIntent = /\b(nick\s*name|nickname|pyar\s+se|pyar\s+ka\s+naam)\b/i.test(lower);
     const isRealNameIntent = /\b(real\s+name|actual\s+name|formal\s+name|asli\s+naam)\b/i.test(lower);
 
-    if (!isFem && !isMasc && !isNeutral && !isGenericCorrection && !isNicknameIntent && !isRealNameIntent) {
+    // If it's a generic correction without ANY person pronoun or name intent, DO NOT guess a person relation.
+    // It could be correcting a work preference or something else.
+    if (!isFem && !isMasc && !isNeutral && !isNicknameIntent && !isRealNameIntent) {
       return null;
     }
 
@@ -784,6 +786,11 @@ export class TurnAnalyzer {
       if (m && !lower.includes('my name') && !lower.includes('mera naam')) {
         facts.push({ key: 'UNKNOWN_RELATION', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       }
+    }
+
+    // Fallback: If user explicitly asked to remember something but no pattern matched
+    if (facts.length === 0 && isExplicitRemember) {
+      facts.push({ key: 'UNKNOWN_FACT', value: text, text, isProtected: true, factClass: 'PROTECTED_FACT' });
     }
 
     const temporalResult = TemporalParser.extractTemporalMetadata(text);
