@@ -83,6 +83,10 @@ export interface TurnAnalysisResult {
    * An empty array means no question clauses were detected.
    */
   questionClauses?: string[];
+  /** P0-1: Explicit remember command detected ("remember this") */
+  hasExplicitRemember?: boolean;
+  /** P0-3: Specific target key of the correction, or null if ambiguous */
+  correctionTarget?: string | null;
 }
 
 export interface ExtractedFact {
@@ -293,13 +297,19 @@ export class TurnAnalyzer {
       .filter(u => u.type === 'question')
       .map(u => u.text);
 
+    const hasCorrections = units.some(u => u.type === 'correction');
+    const firstCorrectionWithKey = units.find(u => u.type === 'correction' && !!u.factKey);
+    const correctionTarget = hasCorrections ? (firstCorrectionWithKey ? firstCorrectionWithKey.factKey! : null) : null;
+
     return {
       units,
       hasQuestions: units.some(u => u.type === 'question'),
       hasFacts: units.some(u => u.type === 'fact' || (u.type === 'correction' && !!u.factKey)),
       hasEmotions: units.some(u => u.type === 'emotion'),
       hasActions: units.some(u => u.type === 'action'),
-      hasCorrections: units.some(u => u.type === 'correction'),
+      hasCorrections,
+      hasExplicitRemember: units.some(u => u.isProtected === true),
+      correctionTarget,
       // BUG-03: Deterministic reminder extraction across all clauses
       reminderIntent: this.extractReminderIntent(fullText),
       // BUG-06 legacy: string array for backward compat (factual only)
@@ -525,6 +535,17 @@ export class TurnAnalyzer {
     // If it's a generic correction without ANY person pronoun or name intent, DO NOT guess a person relation.
     // It could be correcting a work preference or something else.
     if (!isFem && !isMasc && !isNeutral && !isNicknameIntent && !isRealNameIntent) {
+      // 0. New: Attempt deterministic string matching against generic context.memories
+      if (isGenericCorrection && context?.memories) {
+        for (const mem of context.memories) {
+          if (!mem.key) continue;
+          // E.g., 'favourite_dessert' -> 'favourite dessert'
+          const humanReadableKey = mem.key.replace(/_/g, ' ').toLowerCase();
+          if (lower.includes(humanReadableKey)) {
+            return { factKey: mem.key, oldValue: mem.value, relationship: mem.key, isCorrection: true };
+          }
+        }
+      }
       return null;
     }
 

@@ -48,10 +48,14 @@ export function SettingsScreen() {
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(true);
   const [exporting, setExporting] = useState(false);
 
-  // Country / timezone selector
   const [country, setCountry] = useState('IN');
   const [countryModalVisible, setCountryModalVisible] = useState(false);
   const [savingCountry, setSavingCountry] = useState(false);
+
+  // Shoot Dead modal state
+  const [shootDeadVisible, setShootDeadVisible] = useState(false);
+  const [deleteInput, setDeleteInput] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Load saved country from profile on mount
   useEffect(() => {
@@ -96,25 +100,26 @@ export function SettingsScreen() {
   }, []);
 
   const handleMarkDead = useCallback(() => {
-    Alert.alert(
-      'MARK DEAD (NUCLEAR OPTION)',
-      'Are you absolutely sure? This will shoot Nova dead, delete your account, and erase every memory, chat, and emotion forever. There is no coming back.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Shoot (Delete Everything)', style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete('/auth/mark-dead');
-              await logout(); // Wipe local tokens and redirect to Auth
-            } catch (err) {
-              Alert.alert('Error', 'Failed to eradicate data.');
-            }
-          }
-        }
-      ]
-    );
-  }, [logout]);
+    setDeleteInput('');
+    setShootDeadVisible(true);
+  }, []);
+
+  const confirmShootDead = useCallback(async () => {
+    if (deleteInput !== 'DELETE') {
+      Alert.alert('Invalid', 'You must type exactly DELETE to confirm.');
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      await api.delete('/auth/mark-dead');
+      setShootDeadVisible(false);
+      await logout(); // Wipe local tokens and redirect to Auth
+    } catch (err) {
+      Alert.alert('Error', 'Failed to eradicate data.');
+      setIsDeleting(false);
+    }
+  }, [deleteInput, logout]);
 
   const handleSelectTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
@@ -197,6 +202,48 @@ export function SettingsScreen() {
               )}
             />
           </SafeAreaView>
+        </Modal>
+
+        {/* ── Shoot Dead Modal ──────────────────────────── */}
+        <Modal visible={shootDeadVisible} transparent={true} animationType="fade" onRequestClose={() => !isDeleting && setShootDeadVisible(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
+            <View style={{ backgroundColor: colors.card, padding: 24, borderRadius: 16, borderColor: '#EF4444', borderWidth: 2 }}>
+              <Text style={{ color: '#EF4444', fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>⚠️ Shoot Dead User</Text>
+              
+              <Text style={{ color: colors.textPrimary, fontSize: 16, marginBottom: 12, lineHeight: 22 }}>
+                This will permanently delete your account and ALL Nova data associated with it, including memories, conversations, LifeThreads, reminders, tasks, presence, cognitive state, and proactive history.
+              </Text>
+              
+              <Text style={{ color: colors.textSecondary, fontSize: 15, marginBottom: 20, fontWeight: '600' }}>
+                This cannot be undone.
+              </Text>
+              
+              <Text style={{ color: colors.textPrimary, fontSize: 14, marginBottom: 8 }}>
+                Type <Text style={{ fontWeight: 'bold', color: '#EF4444' }}>DELETE</Text> to confirm.
+              </Text>
+              
+              <TextInput
+                style={{ backgroundColor: colors.background, color: colors.textPrimary, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border, marginBottom: 24, fontSize: 16 }}
+                value={deleteInput}
+                onChangeText={setDeleteInput}
+                autoCapitalize="none"
+                editable={!isDeleting}
+              />
+              
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                <TouchableOpacity onPress={() => setShootDeadVisible(false)} disabled={isDeleting} style={{ paddingVertical: 12, paddingHorizontal: 16 }}>
+                  <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 16 }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={confirmShootDead} 
+                  disabled={isDeleting || deleteInput !== 'DELETE'}
+                  style={{ backgroundColor: deleteInput === 'DELETE' ? '#EF4444' : '#ef444460', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{isDeleting ? 'Deleting...' : 'Shoot Dead'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
         </Modal>
 
         {/* ── Theme ────────────────────────────────────── */}

@@ -108,17 +108,66 @@ export class AccountLifecycleService {
    */
   public async deleteAccount(userId: string): Promise<AccountDeletionResult> {
     const startTime = Date.now();
-    const errors: string[] = [];
-    const tablesCleaned: Record<string, number> = {};
     let authDeleted = false;
     let profileDeleted = false;
+    const tablesCleaned: Record<string, number> = {};
+    const errors: string[] = [];
 
     if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
       throw new Error('Cannot delete account: invalid or empty userId');
     }
 
     const cleanUserId = userId.trim();
-    logger.info('[AccountLifecycle] Initiating complete account eradication', { userId: cleanUserId });
+    logger.info(`[AccountLifecycle] Starting exhaustive erasure for user: ${cleanUserId}`);
+
+    // ── STEP 0: Create account_tombstone (Architectural Invariant) ───────────────────
+    try {
+      const { error: tombstoneErr } = await supabaseAdmin
+        .from('account_tombstones')
+        .upsert({ user_id: cleanUserId, deleted_at: new Date().toISOString() });
+      if (tombstoneErr) {
+        throw new Error(`Failed to create account tombstone: ${tombstoneErr.message}`);
+      }
+      logger.info(`[AccountLifecycle] Created tombstone for user: ${cleanUserId}. All concurrent background writes are now blocked.`);
+    } catch (e: any) {
+      logger.error(`[AccountLifecycle] Fatal Tombstone Error: ${e.message}`);
+      return {
+        success: false,
+        userId: cleanUserId,
+        authDeleted: false,
+        profileDeleted: false,
+        tablesCleaned,
+        errors: [`Tombstone creation failed: ${e.message}`],
+        durationMs: Date.now() - startTime
+      };
+    }
+
+    // ── STEP 0.5: Cancel pending jobs ────────────────────────────────────────────────
+    try {
+      // Find jobs containing the user id in the payload
+      const { data: pendingJobs } = await supabaseAdmin
+        .from('background_jobs')
+        .select('id, payload')
+        .eq('status', 'pending');
+        
+      if (pendingJobs && pendingJobs.length > 0) {
+        const jobsToCancel = pendingJobs.filter(j => 
+          j.payload?.userId === cleanUserId || j.payload?.user_id === cleanUserId
+        ).map(j => j.id);
+
+        if (jobsToCancel.length > 0) {
+          await supabaseAdmin
+            .from('background_jobs')
+            .update({ status: 'failed', error: 'ACCOUNT_TOMBSTONE_VIOLATION' })
+            .in('id', jobsToCancel);
+          logger.info(`[AccountLifecycle] Cancelled ${jobsToCancel.length} pending background jobs for user: ${cleanUserId}`);
+        }
+      }
+    } catch (e: any) {
+      logger.error(`[AccountLifecycle] Failed to cancel pending jobs: ${e.message}`);
+      // Proceed with deletion even if queue cancellation partially failed, 
+      // because the DB trigger will block them anyway if they run.
+    }
 
     // ── STEP 1: Disassociate Telemetry Events (SET NULL for anonymized retention) ──
     try {
@@ -128,6 +177,46 @@ export class AccountLifecycleService {
         .eq('user_id', cleanUserId);
     } catch (e: any) {
       logger.warn('[AccountLifecycle] Telemetry anonymization notice', { error: e.message });
+    }
+
+    // ── STEP 1.5: Delete Orphan Records (recovery_archive, audit_logs, tombstones) ──
+    try {
+      // Find all chat_history IDs for this user (both active and soft-deleted)
+      const { data: chats } = await supabaseAdmin
+        .from('chat_history')
+        .select('id')
+        .eq('user_id', cleanUserId);
+
+      if (chats && chats.length > 0) {
+        const chatIds = chats.map(c => c.id);
+        
+        // Wipe audit_logs and tombstones safely (using chunks if > 1000 items)
+        const chunkSize = 1000;
+        for (let i = 0; i < chatIds.length; i += chunkSize) {
+          const chunk = chatIds.slice(i, i + chunkSize);
+          await supabaseAdmin.from('audit_logs').delete().in('source_message_id', chunk);
+          await supabaseAdmin.from('tombstones').delete().in('id', chunk);
+        }
+      }
+
+      // Wipe recovery_archive which holds physical payloads
+      // (Using JSON operator to match user_id inside original_payload)
+      const { data: archived } = await supabaseAdmin
+        .from('recovery_archive')
+        .select('id');
+        
+      // Safely filter on the node side in case JSON operators have cast issues
+      // Or we can just try to run it via raw query if available, but doing it in memory is safe enough for admin scripts
+      if (archived && archived.length > 0) {
+        // We will just do a standard supabase JSON delete
+        await supabaseAdmin
+          .from('recovery_archive')
+          .delete()
+          .eq('original_payload->>user_id', cleanUserId);
+      }
+    } catch (e: any) {
+      logger.error(`[AccountLifecycle] Failed to wipe orphan records: ${e.message}`);
+      errors.push(`Orphan wipe failed: ${e.message}`);
     }
 
     // ── STEP 2: Delete All User-Scoped Application & Cognitive Tables ──────────────

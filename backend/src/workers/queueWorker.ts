@@ -27,6 +27,7 @@ async function processWithBackoff(job: any, processor: (job: any) => Promise<voi
       const isPermanent = err?.isPermanent === true ||
         err?.name === 'SchemaValidationError' ||
         err?.name === 'ZodError' ||
+        (err?.message && err.message.includes('ACCOUNT_TOMBSTONE_VIOLATION')) ||
         (err?.message && (err.message.includes('missing messageId') || err.message.includes('Schema validation failed')));
 
       if (isPermanent) {

@@ -1984,6 +1984,9 @@ HINGLISH RULES:
             message: primaryMessage,
             turnId,                           // P0-A
             questionClauses: brainContext.questionClauses,  // P0-B
+            hasExplicitRemember: turnAnalysis.hasExplicitRemember,
+            hasCorrections: turnAnalysis.hasCorrections,
+            correctionTarget: turnAnalysis.correctionTarget,
           };
           memoryQueue.add('extract_all_memories', payload).catch(err => {
             logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });

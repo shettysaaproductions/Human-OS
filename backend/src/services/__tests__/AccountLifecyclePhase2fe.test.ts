@@ -203,10 +203,12 @@ describe('Phase 2F-E: Account Lifecycle & Deletion Hardening', () => {
   it('15. Purging confirmed zombie only cleans data for that specific zombie ID', async () => {
     const deleteSpy = jest.fn().mockReturnValue({
       eq: jest.fn().mockResolvedValue({ count: 5, error: null }),
+      in: jest.fn().mockResolvedValue({ count: 5, error: null }),
     });
     (supabaseAdmin.from as jest.Mock).mockImplementation(() => ({
       delete: deleteSpy,
       update: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) }),
+      select: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ data: [], error: null }) }),
     }));
 
     const result = await accountLifecycleService.purgeConfirmedZombie('zombie-999');
@@ -232,8 +234,12 @@ describe('Phase 2F-E: Account Lifecycle & Deletion Hardening', () => {
   it('18. Deletion queries always specify userColumn = userId filter', async () => {
     const eqSpy = jest.fn().mockResolvedValue({ count: 1, error: null });
     (supabaseAdmin.from as jest.Mock).mockImplementation(() => ({
-      delete: jest.fn().mockReturnValue({ eq: eqSpy }),
+      delete: jest.fn().mockReturnValue({ 
+        eq: eqSpy,
+        in: jest.fn().mockResolvedValue({ count: 0, error: null })
+      }),
       update: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) }),
+      select: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ data: [], error: null }) }),
     }));
 
     await accountLifecycleService.deleteAccount('target-user-456');

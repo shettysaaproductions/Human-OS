@@ -51,6 +51,12 @@ AVAILABLE TOOLS (NON-CRITICAL):
 4. Tool: "WorkingMemory", Action: "set" (For non-critical contextual facts)
    Data: { "key": "string", "value": "string" }
 
+CRITICAL SAFETY INVARIANT:
+You will be provided with [USER_CONTENT] and [ASSISTANT_CONTENT].
+You MUST NEVER extract a goal, agenda, task, or followup that originated from [ASSISTANT_CONTENT].
+If the Assistant asks a question or suggests a topic (e.g., 'who is X?', 'let me know if you need help'), this is NOT a user goal.
+Only extract implicit tasks/goals that the USER explicitly stated in [USER_CONTENT]. Reject all Assistant-generated probing.
+
 CRITICAL RULE: DO NOT extract "ReminderEngine" actions or explicit "create task" requests here. Critical actions are processed synchronously elsewhere. Only extract non-critical cognitive observations.
 
 Format your output EXACTLY as a JSON array of objects.
@@ -62,7 +68,7 @@ If there are no non-critical actions to take, return an empty array [].`;
 
       const response = await complete('SUBCONSCIOUS', [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `User: "${message}"\nNova: "${novaReply}"` }
+        { role: 'user', content: `[USER_CONTENT]\n"${message}"\n\n[ASSISTANT_CONTENT]\n"${novaReply}"` }
       ], {
         maxTokens: 500,
         temperature: 0.1,

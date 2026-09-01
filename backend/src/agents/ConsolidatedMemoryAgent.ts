@@ -137,7 +137,7 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
   }
 
   protected async execute(job: Job): Promise<number> {
-    const { userId, messageId, message, questionClauses, turnId: _turnId } = job.payload;
+    const { userId, messageId, message, questionClauses, turnId: _turnId, hasExplicitRemember, hasCorrections, correctionTarget } = job.payload;
 
     // P0-B: Build the question-clause suppression instruction if we have clause data.
     // This is the PRIMARY fix for question text being stored as memory values.
@@ -154,12 +154,25 @@ If the entire user message is a question, return empty arrays for all memory typ
 `
       : '';
 
+    const isExplicitAuthority = hasExplicitRemember || (hasCorrections && !!correctionTarget);
+
     // Check cache first
     const cacheKey = `memory_extraction:${hashMessage(message)}`;
     const cached = cache.get<ConsolidatedExtraction>(cacheKey);
     if (cached) {
       logger.info(`[ConsolidatedMemoryAgent] Cache hit for message ${messageId}`, { userId });
-      return this.persistExtraction(userId, messageId, cached);
+      return this.persistExtraction(userId, messageId, cached, { isExplicitAuthority });
+    }
+
+    let safetyInstructions = '';
+    if (hasCorrections) {
+      if (correctionTarget) {
+        safetyInstructions += `\n- A CORRECTION was detected targeting the concept: '${correctionTarget}'. You MUST ONLY extract the updated value for this specific fact. DO NOT extract unrelated noise as new memories. Use the SAME CANONICAL KEY '${correctionTarget}'.`;
+      } else {
+        safetyInstructions += `\n- An AMBIGUOUS CORRECTION was detected. The target concept is unclear. To ensure safety, you MUST NOT extract ANY new memories or mutate existing ones from this message. Return empty extractions.`;
+      }
+    } else if (hasExplicitRemember) {
+      safetyInstructions += `\n- The user explicitly COMMANDED you to remember this. Prioritize the core fact they want remembered and assign high importance.`;
     }
 
     const response = await complete('MEMORY', [
@@ -225,7 +238,7 @@ Return ONLY a valid JSON object with these exact keys (omit empty arrays/objects
 CRITICAL:
 - If the user mentions ANY important time, date, schedule, or appointment worth remembering long-term, extract it as a 'semantic' memory with type "important_dates".
 - Only extract what is genuinely present. Use null/empty arrays for absent types.
-- Do NOT extract insignificant daily chatter.
+- Do NOT extract insignificant daily chatter.${safetyInstructions}
 
 CANONICAL KEY SCHEMA (MANDATORY — USE THESE EXACT KEYS):
 Do NOT invent aliases, plurals, or possessive variants. Use ONLY canonical keys:
@@ -268,13 +281,14 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
     cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
 
-    let totalCreated = this.persistExtraction(userId, messageId, parsed);
+    let totalCreated = await this.persistExtraction(userId, messageId, parsed, { isExplicitAuthority });
 
     return totalCreated;
   }
 
-  private async persistExtraction(userId: string, messageId: string, parsed: ConsolidatedExtraction): Promise<number> {
+  private async persistExtraction(userId: string, messageId: string, parsed: ConsolidatedExtraction, opts?: { isExplicitAuthority?: boolean }): Promise<number> {
     let totalCreated = 0;
+    const { memoryRepository } = await import('../services/memoryRepository');
 
     // ── Semantic memories ──
     const rawSemanticMemories = parsed.semantic_memories || [];
@@ -290,14 +304,29 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
           continue;
         }
         
-        // Phase 2E-B: Route subconscious semantic extractions to WorkingMemory as candidates
-        // instead of writing directly to durable semantic memory.
-        candidateInserts.push({
-          user_id: userId,
-          key: mem.key,
-          value: mem.value,
-          promotion_status: 'CANDIDATE'
-        });
+        if (opts?.isExplicitAuthority) {
+          // P0-1: Bypass candidate pool and directly insert into durable memory
+          await memoryRepository.upsertMemory(userId, {
+            key: mem.key,
+            value: mem.value,
+            type: (mem.type || 'semantic') as any,
+            shouldPersist: true,
+            source_authority: 'explicit_user',
+            importance: mem.importance || 100,
+            confidence: 1.0,
+            emotional_weight: mem.emotional_weight || 0,
+          }, 'explicit_user_command');
+          totalCreated++;
+        } else {
+          // Phase 2E-B: Route subconscious semantic extractions to WorkingMemory as candidates
+          // instead of writing directly to durable semantic memory.
+          candidateInserts.push({
+            user_id: userId,
+            key: mem.key,
+            value: mem.value,
+            promotion_status: 'CANDIDATE'
+          });
+        }
       }
     }
     
