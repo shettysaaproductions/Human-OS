@@ -170,6 +170,11 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
  */
 authRouter.post('/logout', authenticateUser, async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = (req as any).user?.id;
+    if (userId) {
+      await supabaseAdmin.from('profiles').update({ push_token: null }).eq('id', userId);
+    }
+
     const token = req.headers.authorization?.split(' ')[1];
     if (token) {
       // For a purely stateless JWT API, logout is primarily handled by the client dropping the token.
@@ -238,6 +243,28 @@ authRouter.post('/push-token', authenticateUser, async (req: Request, res: Respo
     res.status(200).json({ success: true });
   } catch (err) {
     logger.error('Failed to register push token', { error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /auth/clear-push-token
+ * Allows mobile to clear the push token even if the session just expired,
+ * using the push_token itself as proof of authority.
+ */
+authRouter.post('/clear-push-token', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { push_token } = req.body;
+    if (push_token) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ push_token: null })
+        .eq('push_token', push_token);
+      logger.info('Push token cleared via unauthenticated endpoint', { push_token: push_token.substring(0, 30) });
+    }
+    res.status(200).json({ success: true });
+  } catch (err) {
+    logger.error('Failed to clear push token', { error: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ error: 'Internal server error' });
   }
 });

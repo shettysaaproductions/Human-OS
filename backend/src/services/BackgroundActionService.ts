@@ -118,6 +118,11 @@ export class BackgroundActionService {
     }
 
     for (const action of actions) {
+      // P0-5 & P0-10: Strict provenance check. Reject anything the LLM tagged as 'assistant' source.
+      if (action.data?.source_role === 'assistant') {
+        logger.warn('[BackgroundAction] Rejected action originating from assistant content', { tool: action.tool, action: action.action });
+        continue;
+      }
       try {
         if (action.tool === 'ReminderEngine' && action.action === 'schedule') {
           const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;

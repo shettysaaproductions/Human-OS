@@ -19,22 +19,12 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
-import { sendPushNotification } from '../lib/pushNotifications';
+import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { proactiveGate } from './ProactiveGate';
-
-// Deduplication cache to prevent duplicate messages
-const dedupCache = new Map<string, { lastContent: string, lastSentAt: number }>();
-
-// Per-user cooldown for the "ignored message" follow-up (prevents hammering LLM every 10s)
-// Key: userId → timestamp of last ignored-follow-up LLM call
-const ignoredFollowupSent = new Map<string, number>();
-
-// Escalation level tracking: how many times Nova has tried to re-engage with no reply
-// Key: userId → count. Resets when user replies.
-const ignoreEscalationCount = new Map<string, number>();
 
 // NOTE: Global proactive cooldown is now enforced by ProactiveGate (DB-backed).
 // lastProactiveSentAt and GLOBAL_PROACTIVE_COOLDOWN_MS removed — they reset on server restart.
+
 
 // ── Sleep / unavailability signal classification ──────────────────────────────
 // Shared by queueFollowup's guard, chat.ts's immediate lock (recordUnavailability),
@@ -274,11 +264,6 @@ export class NovaFollowupService {
         .eq('user_id', userId)
         .eq('status', 'pending');
       
-      // Reset in-memory caches so next ignored-message cycle starts fresh
-      dedupCache.delete(userId);
-      ignoredFollowupSent.delete(userId);
-      ignoreEscalationCount.delete(userId);
-
       // Mark all unreplied outreaches as replied — resets DB-backed ignored count
       await proactiveGate.markReplied(userId, new Date().toISOString());
 
@@ -336,135 +321,118 @@ export class NovaFollowupService {
   }
 
   private async _fireFollowup(followup: any): Promise<void> {
-    // Sleep-lock respect: never fire a pre-queued follow-up while the user is
-    // suppressed (e.g. they said "good night"). Leave it pending so it fires after
-    // the suppression clears, or gets cancelled by the sleep-guard.
     try {
-      const { data: suppression } = await supabaseAdmin
-        .from('working_memory')
-        .select('value')
-        .eq('user_id', followup.user_id)
-        .eq('key', 'followup_suppressed_until')
+      // P0-3: Active Conversation Debounce
+      // Check if user sent a message in this conversation after the followup was created
+      const { data: recentUserMsg } = await supabaseAdmin
+        .from('chat_history')
+        .select('id, created_at')
+        .eq('conversation_id', followup.conversation_id)
+        .eq('role', 'user')
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
-      if (suppression?.value && new Date(suppression.value).getTime() > Date.now()) {
-        logger.info('[NovaFollowup] Deferred follow-up: user is suppressed (sleep/busy)', { id: followup.id, userId: followup.user_id });
-        return; // leave pending — fires after suppression clears
+
+      if (recentUserMsg) {
+        // If the user's message is newer than the followup's created_at, they already replied.
+        if (new Date(recentUserMsg.created_at) > new Date(followup.created_at)) {
+          logger.info('[NovaFollowup] Cancelled followup: user already replied to the conversation', { followupId: followup.id });
+          await supabaseAdmin.from('nova_followups').update({ status: 'cancelled' }).eq('id', followup.id);
+          return;
+        }
       }
-    } catch (err) {
-      logger.warn('[NovaFollowup] Suppression check failed during fire — proceeding', {
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
 
-    // Dedup check BEFORE claiming, so a duplicate doesn't consume the claim.
-    const normalizedNew = followup.message.toLowerCase().trim();
-    const cached = dedupCache.get(followup.user_id);
-
-    // Check if same message sent within last 3 minutes (was 10 — blocked all follow-ups too long)
-    if (cached &&
-        Date.now() - cached.lastSentAt < 3 * 60 * 1000 &&
-        (cached.lastContent === normalizedNew ||
-         (normalizedNew.length > 20 && cached.lastContent.includes(normalizedNew.substring(0, 20))) ||
-         (cached.lastContent.length > 20 && normalizedNew.includes(cached.lastContent.substring(0, 20))))) {
-      logger.warn('[NovaFollowup] Prevented firing duplicate followup', { id: followup.id, userId: followup.user_id });
-      return;
-    }
-
-    // Atomic claim — only one concurrent poll wins (prevents double-fire). `.select('id')`
-    // is REQUIRED: without it supabase-js returns { data: null } whether 0 or 1 rows matched,
-    // so a losing poll could not distinguish "I won" from "I lost" and would fire anyway.
-    const { data: locked, error: updateErr } = await supabaseAdmin
-      .from('nova_followups')
-      .update({ status: 'sent' })
-      .eq('id', followup.id)
-      .eq('status', 'pending') // optimistic lock
-      .select('id');
-
-    if (updateErr || !locked || locked.length === 0) {
-      logger.warn('[NovaFollowup] Could not lock followup for firing (may be racing)', { id: followup.id });
-      return;
-    }
-
-    try {
-      // Deliver FIRST — insert as Nova's message in chat history. If this fails the
-      // follow-up must be retried, not silently dropped (the old code marked it 'sent'
-      // before delivery, so any failure permanently lost the message).
-      const insertErr = await saveAssistantMessage(
-        followup.user_id,
-        followup.conversation_id,
-        followup.message,
-        'NovaFollowupService',
-        undefined,
-        { sourceType: 'followup' }   // P0-C: attribution
-      ).then(() => null).catch((e: any) => e);
-
-      if (insertErr) throw new Error(`chat_history insert failed: ${insertErr.message}`);
-
-      // Fetch push token and send notification
+      // Fetch timezone offset and profile data for ProactiveGate and Push
       const { data: profile } = await supabaseAdmin
         .from('profiles')
-        .select('push_token, preferred_name')
+        .select('timezone_offset, push_token')
         .eq('id', followup.user_id)
         .maybeSingle();
+      const tzOffset = profile?.timezone_offset ?? 0;
 
-      if (profile?.push_token) {
-        await sendPushNotification([{
-          to: profile.push_token,
-          title: 'Nova',
-          body: followup.message.length > 100
-            ? followup.message.substring(0, 97) + '...'
-            : followup.message,
-          sound: 'default',
-          channelId: 'nova_messages',
-          priority: 'high',
-          data: {
-            type: 'nova_followup',
-            conversationId: followup.conversation_id,
-            message: followup.message.length > 500 ? followup.message.substring(0, 497) + '...' : followup.message
-          },
-        }]);
+      // P0-1: Single Authoritative Proactive Pipeline
+      const gateDecision = await proactiveGate.acquire(followup.user_id, {
+        outreachType: 'proactive', 
+        logicalKey: `followup:fired:${followup.id}`,
+        logicalKeyWindowMinutes: 60, // duplicate suppression
+        skipQuietHoursCheck: false,  // P0-2: ALWAYS check quiet hours at FIRE time
+        skipMinGapCheck: false,      // P0-2: ALWAYS check burden at FIRE time
+        proposedMessage: followup.message,
+        timezoneOffsetMinutes: tzOffset,
+      });
 
-        logger.info('[NovaFollowup] Push notification sent', { userId: followup.user_id });
-      } else {
-        logger.warn('[NovaFollowup] No push token for user', { userId: followup.user_id });
+      if (!gateDecision.allowed) {
+        // P0-2: Blocked by timing, presence, or burden at fire time
+        logger.info('[NovaFollowup] Deferred/Blocked follow-up at fire time', { 
+          id: followup.id, 
+          blockedBy: gateDecision.blockedBy,
+          detail: gateDecision.detail
+        });
+        
+        // Cancel if blocked by duplicate logic, else leave pending to retry later
+        if (gateDecision.blockedBy === 'duplicate_logical_key' || gateDecision.blockedBy === 'duplicate_content') {
+           await supabaseAdmin.from('nova_followups').update({ status: 'cancelled' }).eq('id', followup.id);
+        }
+        return; 
+      }
+
+      // Atomic claim — only one concurrent poll wins.
+      const { data: locked, error: updateErr } = await supabaseAdmin
+        .from('nova_followups')
+        .update({ status: 'sent' })
+        .eq('id', followup.id)
+        .eq('status', 'pending') // optimistic lock
+        .select('id');
+
+      if (updateErr || !locked || locked.length === 0) {
+        logger.warn('[NovaFollowup] Could not lock followup for firing (may be racing)', { id: followup.id });
+        await proactiveGate.release(gateDecision.outreachId);
+        return;
+      }
+
+      try {
+        // Deliver FIRST — insert as Nova's message in chat history.
+        const insertErr = await saveAssistantMessage(
+          followup.user_id,
+          followup.conversation_id,
+          followup.message,
+          'NovaFollowupService',
+          undefined,
+          { sourceType: 'followup', outreachLogId: gateDecision.outreachId }   // P0-C: attribution
+        ).then(() => null).catch((e: any) => e);
+
+        if (insertErr) throw new Error(`chat_history insert failed: ${insertErr.message}`);
+
+        // Commit the gate reservation
+        await proactiveGate.commit(gateDecision.outreachId, followup.message);
+
+        // Fetch push token and send notification via unified method
+        if (profile?.push_token) {
+          // P0-1: Use the canonical sendNovaReplyNotification instead of manual FCM payload
+          await sendNovaReplyNotification(
+            profile.push_token,
+            followup.message,
+            followup.conversation_id
+          ).catch((e) => {
+             logger.warn('[NovaFollowup] Failed to send push notification (non-critical)', { error: e.message });
+          });
+        }
+      } catch (err) {
+        // Delivery failed — revert the claim so the next poll retries, and release gate
+        logger.error('[NovaFollowup] Delivery failed, reverting followup to pending for retry', {
+          id: followup.id,
+          error: err instanceof Error ? err.message : String(err)
+        });
+        await proactiveGate.release(gateDecision.outreachId);
+        await supabaseAdmin
+          .from('nova_followups')
+          .update({ status: 'pending' })
+          .eq('id', followup.id)
+          .eq('status', 'sent');
+        throw err;
       }
     } catch (err) {
-      // Delivery failed — revert the claim so the next poll retries, and clear the
-      // dedup cache so the retry isn't blocked by the recent-sent check.
-      logger.error('[NovaFollowup] Delivery failed, reverting followup to pending for retry', {
-        id: followup.id,
-        error: err instanceof Error ? err.message : String(err)
-      });
-      dedupCache.delete(followup.user_id);
-      await supabaseAdmin
-        .from('nova_followups')
-        .update({ status: 'pending' })
-        .eq('id', followup.id)
-        .eq('status', 'sent');
-      throw err;
-    }
-
-    // Delivery succeeded — now it's safe to remember the message for dedup.
-    dedupCache.set(followup.user_id, {
-      lastContent: normalizedNew,
-      lastSentAt: Date.now()
-    });
-
-    // Record global proactive cooldown via gate — every follow-up fired here is
-    // proactive (queued via queueFollowup), so it counts toward the gate cooldown.
-    // We don't call gate.acquire() for followups (they were already gate-checked at
-    // queueFollowup time), but we write to nova_outreach_log for cross-engine dedup.
-    try {
-      await supabaseAdmin.from('nova_outreach_log').insert({
-        user_id: followup.user_id,
-        message: followup.message,
-        outreach_type: 'proactive',
-        logical_key: `followup:fired:${followup.id}`,
-      });
-    } catch (logErr) {
-      logger.warn('[NovaFollowup] outreach_log record failed (non-critical)', {
-        followupId: followup.id, error: logErr instanceof Error ? logErr.message : String(logErr)
-      });
+       logger.error('[NovaFollowup] Unexpected error in _fireFollowup', { error: err instanceof Error ? err.message : String(err) });
     }
   }
   /**
@@ -756,13 +724,6 @@ export class NovaFollowupService {
           continue;
         }
 
-        // Per-user LLM cooldown: max 1 ignored-follow-up LLM call per 3 minutes (in-memory)
-        const lastSent = ignoredFollowupSent.get(userId) || 0;
-        if (Date.now() - lastSent < 3 * 60 * 1000) {
-          await proactiveGate.release(ignoredOutreachId);
-          continue;
-        }
-
         // Skip if user replied after Nova's message
         const { data: userReply } = await supabaseAdmin
           .from('chat_history')
@@ -772,7 +733,7 @@ export class NovaFollowupService {
           .gt('created_at', novaMsg.created_at)
           .limit(1);
         if (userReply && userReply.length > 0) {
-          ignoreEscalationCount.delete(userId);
+          await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
           await proactiveGate.release(ignoredOutreachId); // release — not spam, user replied
           continue;
         }
@@ -834,12 +795,13 @@ export class NovaFollowupService {
         // User is ONLINE — Nova must keep the conversation going!
         // Escalation: nudge 1 (warm), nudge 2 (different angle), nudge 3 → give space
         if (activelyInApp) {
-          const escalation = (ignoreEscalationCount.get(userId) || 0) + 1;
-          ignoreEscalationCount.set(userId, escalation);
+          const { data: escData } = await supabaseAdmin.from('working_memory').select('value').eq('user_id', userId).eq('key', 'ignore_escalation_count').maybeSingle();
+          const escalation = parseInt(escData?.value || '0', 10) + 1;
+          await supabaseAdmin.from('working_memory').upsert({ user_id: userId, key: 'ignore_escalation_count', value: String(escalation), expires_at: new Date(Date.now() + 2 * 3600e3).toISOString() }, { onConflict: 'user_id,key' });
 
           // Hard cap: after 3 online nudges with no reply, give space (don't harass)
           if (escalation > 3) {
-            ignoreEscalationCount.delete(userId);
+            await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
             await this._writeSuppression(userId, 1); // 1h cooldown, not 24h
             logger.info('[NovaFollowup] Online escalation cap — brief cooldown', { userId, escalation });
             continue;
@@ -858,8 +820,6 @@ export class NovaFollowupService {
 
           const prompt = escalationPrompts[escalation] || escalationPrompts[3];
           const fallback = escalationFallbacks[escalation] || escalationFallbacks[3];
-
-          ignoredFollowupSent.set(userId, Date.now());
 
           let msg = fallback;
           try {
@@ -903,7 +863,6 @@ export class NovaFollowupService {
         const backoffMinutes = Math.round(backoffHours * 60);
 
         let deferredMsg = 'Arre, kaisa chal raha? Bas check kar raha tha — kabhi free ho toh bata dena.';
-        ignoredFollowupSent.set(userId, Date.now());
         try {
           const { novaBrain } = await import('./NovaBrainService');
           const gen = await novaBrain.evaluateConsciousnessTier2(
@@ -1010,8 +969,5 @@ export class NovaFollowupService {
 export const novaFollowupService = new NovaFollowupService();
 
 export function _clearFollowupCachesForTest() {
-  dedupCache.clear();
-  ignoredFollowupSent.clear();
-  ignoreEscalationCount.clear();
-  // lastProactiveSentAt removed — cooldown now DB-backed via ProactiveGate
+  // Caches removed for P0 remediation
 }
