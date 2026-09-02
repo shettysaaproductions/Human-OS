@@ -116,6 +116,7 @@ export class TurnAnalyzer {
     let order = 0;
 
     for (const msg of messages) {
+      if ((msg as any).role && (msg as any).role !== 'user') continue;
       if (!msg.message) continue;
       const sourceMessageId = msg.client_message_id || crypto.randomUUID();
       const rawText = msg.message.trim();
@@ -132,7 +133,7 @@ export class TurnAnalyzer {
 
         // 1. Check for structured/explicit correction
         const structuredCorrection = this.extractStructuredCorrection(clause);
-        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
+        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:|wrong|incorrect)\b/i.test(lower);
 
         if (structuredCorrection || isCorrectionRegex) {
           let resolvedKey: string | undefined;
@@ -990,14 +991,18 @@ export class TurnAnalyzer {
   public static extractStructuredCorrection(text: string): { concept: string | null, value: string } | null {
     let lower = text.toLowerCase();
     
-    const markerRegex = /\b(actually|correction|nahi(?: yaar)?|galat(?: tha)?|not that|instead|wait no|ek correction hai|correct that)\b/ig;
+    const markerRegex = /\b(actually|correction|nahi(?: yaar)?|galat(?: tha)?|not that|instead|wait no|ek correction hai|correct that|no, that is wrong|wrong|incorrect)\b/ig;
     const hasMarker = markerRegex.test(lower);
     lower = lower.replace(markerRegex, '').replace(/^[:,\.\-\s—]+|[:,\.\-\s—]+$/g, '').trim();
 
-    const directValueMatch = lower.match(/^(?:make that|make it|change it to)\s+([a-z0-9\s]+)$/i) || 
+    const directValueMatch = lower.match(/^(?:make that|make it|change it to|make it as)\s+([a-z0-9\s]+)$/i) || 
                              (hasMarker && lower.split(/\s+/).length <= 2 ? [null, lower] : null);
     if (directValueMatch && directValueMatch[1]) {
       return { concept: null, value: directValueMatch[1].trim() };
+    }
+
+    if (!hasMarker && !directValueMatch) {
+      return null; // Not a structured correction without a marker
     }
 
     let match = lower.match(/^(?:my|mera|meri|merko)?\s*(.+?)\s+(?:is|hai|toh)\s+(.+?)(?:\s+hai|\s+is|\.|$)/i);

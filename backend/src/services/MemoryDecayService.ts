@@ -12,7 +12,7 @@ export class MemoryDecayService {
     // Fetch all active memories
     const { data: memories, error } = await supabaseAdmin
       .from('memories')
-      .select('id, importance, frequency, emotional_weight, last_accessed_at, is_archived')
+      .select('id, user_id, importance, frequency, emotional_weight, last_accessed_at, is_archived')
       .eq('is_archived', false);
 
     if (error || !memories) {
@@ -41,7 +41,8 @@ export class MemoryDecayService {
 
       if (finalScore < 10) {
         // Archive
-        await supabaseAdmin.from('memories').update({ is_archived: true }).eq('id', mem.id);
+        const { memoryRepository } = await import('./memoryRepository');
+        await memoryRepository.archiveMemory(mem.user_id, mem.id, 'Memory decay below threshold');
         archivedCount++;
       }
     }

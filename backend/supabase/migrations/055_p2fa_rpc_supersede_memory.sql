@@ -31,8 +31,13 @@ DECLARE
   v_new_message_ts TIMESTAMPTZ;
   v_new_id UUID;
 BEGIN
-  -- 1. Lock the current active memory for this user and key
-  SELECT id, source_message_id
+  -- Handle concurrent inserts with a retry loop
+  FOR i IN 1..3 LOOP
+    -- 1. Lock the current active memory for this user and key
+    v_old_id := NULL;
+    v_old_source_id := NULL;
+    
+    SELECT id, source_message_id
   INTO v_old_id, v_old_source_id
   FROM memories
   WHERE user_id = p_user_id
@@ -76,28 +81,36 @@ BEGIN
     WHERE id = v_old_id;
   END IF;
 
-  -- 4. Insert new memory
-  INSERT INTO memories (
-    user_id, key, value, memory_type, is_archived,
-    importance, confidence, emotional_weight, source_message, source_message_id, source_authority,
-    lifecycle_state, is_protected, protection_source, protected_at,
-    source_references, compression_status,
-    valid_from, valid_until, temporal_precision, temporal_metadata
-  ) VALUES (
-    p_user_id, p_key, p_new_value, p_memory_type, false,
-    p_importance, p_confidence, p_emotional_weight, p_source_message, p_source_message_id, p_source_authority,
-    'CURRENT', p_is_protected, p_protection_source, CASE WHEN p_is_protected THEN NOW() ELSE NULL END,
-    p_source_references, p_compression_status,
-    p_valid_from, p_valid_until, p_temporal_precision, p_temporal_metadata
-  ) RETURNING id INTO v_new_id;
+    BEGIN
+      INSERT INTO memories (
+        user_id, key, value, memory_type, is_archived,
+        importance, confidence, emotional_weight, source_message, source_message_id, source_authority,
+        lifecycle_state, is_protected, protection_source, protected_at,
+        source_references, compression_status,
+        valid_from, valid_until, temporal_precision, temporal_metadata
+      ) VALUES (
+        p_user_id, p_key, p_new_value, p_memory_type, false,
+        p_importance, p_confidence, p_emotional_weight, p_source_message, p_source_message_id, p_source_authority,
+        'CURRENT', p_is_protected, p_protection_source, CASE WHEN p_is_protected THEN NOW() ELSE NULL END,
+        p_source_references, p_compression_status,
+        p_valid_from, p_valid_until, p_temporal_precision, p_temporal_metadata
+      ) RETURNING id INTO v_new_id;
+    EXCEPTION WHEN unique_violation THEN
+      -- Concurrent insert beat us to it. Loop and retry (which will now find the row in step 1).
+      CONTINUE;
+    END;
 
-  -- 5. Link old memory to new memory
-  IF v_old_id IS NOT NULL THEN
-    UPDATE memories
-    SET superseded_by = v_new_id
-    WHERE id = v_old_id;
-  END IF;
+    -- 5. Link old memory to new memory
+    IF v_old_id IS NOT NULL THEN
+      UPDATE memories
+      SET superseded_by = v_new_id
+      WHERE id = v_old_id;
+    END IF;
 
-  RETURN jsonb_build_object('success', true, 'new_id', v_new_id, 'superseded_id', v_old_id);
+    RETURN jsonb_build_object('success', true, 'new_id', v_new_id, 'superseded_id', v_old_id);
+  END LOOP;
+  
+  -- If we exhausted retries:
+  RETURN jsonb_build_object('success', false, 'reason', 'CONCURRENT_RACE');
 END;
 $$ LANGUAGE plpgsql;

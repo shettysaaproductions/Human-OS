@@ -160,54 +160,27 @@ describe('Memory Persistence & Concurrency Integration', () => {
     // Tests for specific constraints
     
     it('ambiguous correction -> zero mutation', async () => {
-      const { turnAnalyzer } = await import('../services/TurnAnalyzer');
+      const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
       const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
       
+      const messageId = randomUUID();
+      const messageText = 'No, that is wrong. Make that yellow.';
+      
+      // End-to-End: Use actual TurnAnalyzer
+      const analysisRes = TurnAnalyzer.analyze([{ role: 'user', message: messageText }] as any);
+      expect(analysisRes.hasCorrections).toBe(true);
+      expect(analysisRes.correctionTarget).toBeFalsy(); // Cannot extract target from just 'yellow'
+
       const payload = {
         userId: TEST_USER,
-        messageId: randomUUID(),
-        message: 'No, that is wrong.',
-        questionClauses: [],
+        messageId,
+        message: messageText,
+        questionClauses: analysisRes.questionClauses,
         turnId: randomUUID(),
-        hasExplicitRemember: false,
-        hasCorrections: true,
-        correctionTarget: null, // Ambiguous
-        correctionValue: null,
-      };
-
-      await supabaseAdmin.from('chat_history').insert([
-        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
-      ]);
-
-      // Execute Agent
-      const job = { payload } as any;
-      const count = await consolidatedMemoryAgent['execute'](job);
-      
-      // Should result in NO semantic memories
-      const { data: rows } = await supabaseAdmin.from('memories')
-        .select('*')
-        .eq('user_id', TEST_USER)
-        .eq('source_message_id', payload.messageId);
-        
-      // Count might be > 0 if it extracted episodic/emotional, but semantic memories should be 0.
-      const semanticRows = rows?.filter(r => ['fact', 'family', 'health', 'preferences'].includes(r.memory_type)) || [];
-      expect(semanticRows.length).toBe(0);
-    });
-
-    it('deterministic USER value beats hallucinated LLM value', async () => {
-      const { turnAnalyzer } = await import('../services/TurnAnalyzer');
-      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
-      
-      const payload = {
-        userId: TEST_USER,
-        messageId: randomUUID(),
-        message: 'My brother name is actually Amit',
-        questionClauses: [],
-        turnId: randomUUID(),
-        hasExplicitRemember: false,
-        hasCorrections: true,
-        correctionTarget: 'brother_name',
-        correctionValue: 'Amit',
+        hasExplicitRemember: analysisRes.hasExplicitRemember,
+        hasCorrections: analysisRes.hasCorrections,
+        correctionTarget: analysisRes.correctionTarget || null,
+        correctionValue: analysisRes.correctionValue || null,
       };
 
       await supabaseAdmin.from('chat_history').insert([
@@ -220,11 +193,114 @@ describe('Memory Persistence & Concurrency Integration', () => {
       const { data: rows } = await supabaseAdmin.from('memories')
         .select('*')
         .eq('user_id', TEST_USER)
-        .eq('key', 'brother_name')
+        .eq('source_message_id', payload.messageId);
+        
+      const semanticRows = rows?.filter(r => ['fact', 'family', 'health', 'preferences'].includes(r.memory_type)) || [];
+      expect(semanticRows.length).toBe(0);
+    });
+
+    it('deterministic USER value beats hallucinated LLM value (e2e)', async () => {
+      const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
+      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+      
+      const messageId = randomUUID();
+      const messageText = "My brother's name is actually Amit";
+      
+      // End-to-End: Use actual TurnAnalyzer
+      const analysisRes = TurnAnalyzer.analyze([{ role: 'user', message: messageText }]);
+      expect(analysisRes.hasCorrections).toBe(true);
+      expect(analysisRes.correctionTarget).toBe("brother's_name");
+      expect(analysisRes.correctionValue).toBe('amit');
+
+      const payload = {
+        userId: TEST_USER,
+        messageId,
+        message: messageText,
+        questionClauses: analysisRes.questionClauses,
+        turnId: randomUUID(),
+        hasExplicitRemember: analysisRes.hasExplicitRemember,
+        hasCorrections: analysisRes.hasCorrections,
+        correctionTarget: analysisRes.correctionTarget || null,
+        correctionValue: analysisRes.correctionValue || null,
+      };
+
+      await supabaseAdmin.from('chat_history').insert([
+        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
+      ]);
+
+      const job = { payload } as any;
+      await consolidatedMemoryAgent['execute'](job);
+      
+      const { data: rows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .eq('key', "brother's_name")
         .eq('is_archived', false);
         
       expect(rows?.length).toBe(1);
-      expect(rows![0].value).toBe('Amit');
+      expect(rows![0].value).toBe('amit');
+    });
+
+    it('correction persistence does not depend on LLM availability', async () => {
+      const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
+      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+      const nvidia = await import('../lib/nvidia');
+      
+      // Mock LLM to simulate complete failure/timeout
+      const completeSpy = jest.spyOn(nvidia, 'complete').mockRejectedValue(new Error('NVIDIA API Timeout or 503 Overloaded'));
+
+      const messageId = randomUUID();
+      const messageText = "Actually my favourite colour is blue";
+      
+      const analysisRes = TurnAnalyzer.analyze([{ role: 'user', message: messageText }]);
+      expect(analysisRes.hasCorrections).toBe(true);
+      expect(analysisRes.correctionTarget).toBe('favourite_color'); // TurnAnalyzer output
+      expect(analysisRes.correctionValue).toBe('blue');
+
+      const payload = {
+        userId: TEST_USER,
+        messageId,
+        message: messageText,
+        questionClauses: analysisRes.questionClauses,
+        turnId: randomUUID(),
+        hasExplicitRemember: analysisRes.hasExplicitRemember,
+        hasCorrections: analysisRes.hasCorrections,
+        correctionTarget: analysisRes.correctionTarget || null,
+        correctionValue: analysisRes.correctionValue || null,
+      };
+
+      await supabaseAdmin.from('chat_history').insert([
+        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
+      ]);
+
+      const job = { payload } as any;
+      // Should NOT throw despite LLM failure, because correction bypasses LLM
+      await consolidatedMemoryAgent['execute'](job);
+      
+      const { data: rows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .in('key', ['favorite_color', 'favourite_color'])
+        .eq('is_archived', false);
+        
+      expect(rows?.length).toBe(1);
+      expect(rows![0].value).toBe('blue');
+      expect(completeSpy).not.toHaveBeenCalled(); // MUST NOT HAVE BEEN CALLED
+      
+      completeSpy.mockRestore();
+    });
+
+    it('adversarial: assistant value cannot become correctionValue', async () => {
+      const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
+      
+      const msgs = [
+        { role: 'assistant' as const, message: 'I remember your favorite color is green.' },
+        { role: 'user' as const, message: 'That is incorrect.' } // No new value provided by user
+      ];
+      
+      const analysisRes = TurnAnalyzer.analyze(msgs);
+      expect(analysisRes.correctionTarget).toBeFalsy();
+      expect(analysisRes.correctionValue).toBeFalsy(); 
     });
 
     it('favorite/favourite and color/colour collapse to one canonical key', async () => {
@@ -250,11 +326,10 @@ describe('Memory Persistence & Concurrency Integration', () => {
         .select('*')
         .eq('user_id', TEST_USER)
         .eq('is_archived', false)
-        .in('key', ['favorite_color', 'favourite_color', 'favorite_colour', 'favourite_colour']);
+        .eq('key', 'favourite_color');
         
       expect(activeRows?.length).toBe(1);
-      // Depending on the canonicalizer's schema, it should be the canonical target. Let's assume 'favorite_color' wins.
-      // At the very least there's only 1 active row.
+      expect(activeRows![0].key).toBe('favourite_color');
       expect(activeRows![0].value).toBe('blue');
     });
     

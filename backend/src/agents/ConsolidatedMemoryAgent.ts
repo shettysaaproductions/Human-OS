@@ -172,14 +172,31 @@ If the entire user message is a question, return empty arrays for all memory typ
       }
     }
 
-    let safetyInstructions = '';
+    // P0-2: ENFORCE DETERMINISTIC CORRECTION ARCHITECTURE - BYPASS LLM
     if (hasCorrections) {
-      if (correctionTarget) {
-        safetyInstructions += `\n- A CORRECTION was detected targeting the concept: '${correctionTarget}'. You MUST ONLY extract the updated value for this specific fact. DO NOT extract unrelated noise as new memories. Use the SAME CANONICAL KEY '${correctionTarget}'.`;
+      const parsedCorrection: ConsolidatedExtraction = {};
+      if (!correctionTarget || !job.payload.correctionValue || job.payload.correctionValue.trim() === '') {
+        // Ambiguous correction or missing value -> zero semantic mutation
+        parsedCorrection.semantic_memories = [];
       } else {
-        safetyInstructions += `\n- An AMBIGUOUS CORRECTION was detected. The target concept is unclear. To ensure safety, you MUST NOT extract ANY new memories or mutate existing ones from this message. Return empty extractions.`;
+        // Unambiguous correction -> exactly ONE canonical target deterministically generated
+        parsedCorrection.semantic_memories = [{
+          shouldPersist: true,
+          type: 'fact',
+          key: correctionTarget,
+          value: job.payload.correctionValue,
+          importance: 100,
+          confidence: 1.0,
+          emotional_weight: 0,
+          correction_intent: true
+        }];
       }
-    } else if (hasExplicitRemember) {
+      logger.info(`[ConsolidatedMemoryAgent] Correction deterministic bypass activated for message ${messageId}`);
+      return this.persistExtraction(userId, messageId, message, parsedCorrection, { isExplicitAuthority });
+    }
+
+    let safetyInstructions = '';
+    if (hasExplicitRemember) {
       safetyInstructions += `\n- The user explicitly COMMANDED you to remember this. Prioritize the core fact they want remembered and assign high importance.`;
     }
 
@@ -285,31 +302,9 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 
     const parsed = JSON.parse(response) as ConsolidatedExtraction;
     
-    // ENFORCE DETERMINISTIC CORRECTION ARCHITECTURE (BLOCKER 3 / P0-1)
-    if (hasCorrections) {
-      if (!correctionTarget || !job.payload.correctionValue || job.payload.correctionValue.trim() === '') {
-        // Ambiguous correction or missing value -> zero semantic mutation
-        parsed.semantic_memories = [];
-      } else {
-        // Unambiguous correction -> exactly ONE canonical target deterministically generated
-        parsed.semantic_memories = [{
-          shouldPersist: true,
-          type: 'fact',
-          key: correctionTarget,
-          value: job.payload.correctionValue,
-          importance: 100,
-          confidence: 1.0,
-          emotional_weight: 0,
-          correction_intent: true
-        }];
-      }
-    }
-
-    // Cache the extraction result (1 hour TTL) - BYPASS FOR CORRECTIONS (P0-2)
-    if (!hasCorrections) {
-      const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
-      cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
-    }
+    // Cache the extraction result (1 hour TTL)
+    const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
+    cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
 
     let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority });
 

@@ -70,6 +70,21 @@ export class MemoryRepository {
    * 6. AUTHORITY HIERARCHY: Lower authority cannot supersede higher authority without explicit correction intent.
    */
   async upsertMemory(userId: string, memory: ExtractedMemory, sourceMessage: string): Promise<void> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this._upsertMemoryImpl(userId, memory, sourceMessage);
+        return;
+      } catch (err: any) {
+        if (err.message === 'CONCURRENT_INSERT_RETRY' && attempt < 3) {
+          logger.warn(`[MemoryRepository] Retrying upsert due to concurrent insert`, { key: memory.key, attempt });
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  private async _upsertMemoryImpl(userId: string, memory: ExtractedMemory, sourceMessage: string): Promise<void> {
     if (!memory.shouldPersist) return;
 
     // ── Layer 0: Canonical key normalization ──────────────────────────────────
@@ -204,8 +219,8 @@ export class MemoryRepository {
         if (error) {
           const errMsg = error.message || '';
           if (error.code === '23505' || errMsg.includes('unique constraint')) {
-            logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index. Safely aborting to prevent duplicate.`, { payloadKey: payload.key, error: errMsg });
-            return { data: null, error: null };
+            logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index. Retrying...`, { payloadKey: payload.key, error: errMsg });
+            throw new Error('CONCURRENT_INSERT_RETRY');
           }
           if (
             errMsg.includes('schema cache') ||
@@ -224,7 +239,7 @@ export class MemoryRepository {
             );
             if (resFallback.error && (resFallback.error.code === '23505' || resFallback.error.message.includes('unique constraint'))) {
                logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index (fallback).`, { payloadKey: payload.key });
-               return { data: null, error: null };
+               throw new Error('CONCURRENT_INSERT_RETRY');
             }
             if (resFallback.error) {
               throw new Error(`Failed to insert memory (fallback): ${resFallback.error.message}`);
