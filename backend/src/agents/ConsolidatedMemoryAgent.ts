@@ -161,7 +161,7 @@ If the entire user message is a question, return empty arrays for all memory typ
     const cached = cache.get<ConsolidatedExtraction>(cacheKey);
     if (cached) {
       logger.info(`[ConsolidatedMemoryAgent] Cache hit for message ${messageId}`, { userId });
-      return this.persistExtraction(userId, messageId, cached, { isExplicitAuthority });
+      return this.persistExtraction(userId, messageId, message, cached, { isExplicitAuthority });
     }
 
     let safetyInstructions = '';
@@ -281,12 +281,12 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
     cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
 
-    let totalCreated = await this.persistExtraction(userId, messageId, parsed, { isExplicitAuthority });
+    let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority });
 
     return totalCreated;
   }
 
-  private async persistExtraction(userId: string, messageId: string, parsed: ConsolidatedExtraction, opts?: { isExplicitAuthority?: boolean }): Promise<number> {
+  private async persistExtraction(userId: string, messageId: string, messageText: string, parsed: ConsolidatedExtraction, opts?: { isExplicitAuthority?: boolean }): Promise<number> {
     let totalCreated = 0;
     const { memoryRepository } = await import('../services/memoryRepository');
 
@@ -315,7 +315,9 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
             importance: mem.importance || 100,
             confidence: 1.0,
             emotional_weight: mem.emotional_weight || 0,
-          }, 'explicit_user_command');
+            source_message_id: messageId,
+            source_references: [{ type: 'turn', id: messageId }]
+          }, messageText);
           totalCreated++;
         } else {
           // Phase 2E-B: Route subconscious semantic extractions to WorkingMemory as candidates

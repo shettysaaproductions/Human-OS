@@ -127,25 +127,37 @@ export class TurnAnalyzer {
         const extractedFacts = this.extractFacts(clause);
         const isExplicitRemember = /\b(remember this|don't forget|do not forget|yaad rakhna|bhoolna mat|hamesha yaad rakh)\b/i.test(lower);
 
-        // 1. Check for explicit correction
-        const isCorrection = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
+        // 1. Check for structured/explicit correction
+        const structuredCorrection = this.extractStructuredCorrection(clause);
+        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:)\b/i.test(lower);
 
-        if (isCorrection) {
-          // For corrections: prefer specific relation facts, but ignore UNKNOWN_RELATION facts
-          // since their 'value' may contain pronouns (e.g. 'uska') captured by the fallback pattern.
-          const specificFact = extractedFacts.find(f => f.key !== 'UNKNOWN_RELATION');
-          let resolvedKey: string | undefined = specificFact?.key;
-          let resolvedVal: string | undefined = specificFact?.value || this.extractNameFromCorrection(lower);
+        if (structuredCorrection || isCorrectionRegex) {
+          let resolvedKey: string | undefined;
+          let resolvedVal: string | undefined;
           let oldValue: string | undefined;
           let relationship: string | undefined;
 
-          // If no specific relation key was extracted or it is UNKNOWN_RELATION, attempt antecedent resolution
-          if (!resolvedKey || resolvedKey === 'UNKNOWN_RELATION') {
-            const antecedent = this.resolveAntecedent(clause, units, context);
-            if (antecedent) {
-              resolvedKey = antecedent.factKey;
-              oldValue = antecedent.oldValue;
-              relationship = antecedent.relationship;
+          if (structuredCorrection && structuredCorrection.concept) {
+            // Self-contained correction found!
+            resolvedKey = this.mapConceptToCanonicalKey(structuredCorrection.concept, context);
+            resolvedVal = structuredCorrection.value;
+            relationship = resolvedKey;
+          } else {
+            // Ambiguous correction (e.g. "Make that blue") OR fallback regex matched.
+            const specificFact = extractedFacts.find(f => f.key !== 'UNKNOWN_RELATION');
+            resolvedKey = specificFact?.key;
+            resolvedVal = structuredCorrection ? structuredCorrection.value : (specificFact?.value || this.extractNameFromCorrection(lower));
+            
+            if (!resolvedKey || resolvedKey === 'UNKNOWN_RELATION') {
+              const antecedent = this.resolveAntecedent(clause, units, context);
+              if (antecedent) {
+                resolvedKey = antecedent.factKey;
+                oldValue = antecedent.oldValue;
+                relationship = antecedent.relationship;
+              } else if (structuredCorrection && !structuredCorrection.concept) {
+                // Completely ambiguous with no context -> NO-OP
+                resolvedKey = undefined;
+              }
             }
           }
 
@@ -532,21 +544,13 @@ export class TurnAnalyzer {
     const isNicknameIntent = /\b(nick\s*name|nickname|pyar\s+se|pyar\s+ka\s+naam)\b/i.test(lower);
     const isRealNameIntent = /\b(real\s+name|actual\s+name|formal\s+name|asli\s+naam)\b/i.test(lower);
 
-    // If it's a generic correction without ANY person pronoun or name intent, DO NOT guess a person relation.
-    // It could be correcting a work preference or something else.
-    if (!isFem && !isMasc && !isNeutral && !isNicknameIntent && !isRealNameIntent) {
-      // 0. New: Attempt deterministic string matching against generic context.memories
-      if (isGenericCorrection && context?.memories) {
-        for (const mem of context.memories) {
-          if (!mem.key) continue;
-          // E.g., 'favourite_dessert' -> 'favourite dessert'
-          const humanReadableKey = mem.key.replace(/_/g, ' ').toLowerCase();
-          if (lower.includes(humanReadableKey)) {
-            return { factKey: mem.key, oldValue: mem.value, relationship: mem.key, isCorrection: true };
-          }
-        }
+    // 1. Search backwards in current turn's already processed units for Generic Concepts
+    for (let i = unitsSoFar.length - 1; i >= 0; i--) {
+      const u = unitsSoFar[i];
+      // If we already resolved a concept in the same turn (e.g. from a previous clause)
+      if (u.factKey && !ALL_PERSON_RELATIONS.includes(u.factKey)) {
+        return { factKey: u.factKey, oldValue: u.oldValue, relationship: u.relationship || u.factKey, isCorrection: true };
       }
-      return null;
     }
 
     const mapKeyForIntent = (baseKey: string, baseVal?: string, rel?: string) => {
@@ -575,29 +579,22 @@ export class TurnAnalyzer {
       };
     };
 
-    // 1. Search backwards in current turn's already processed units
-    for (let i = unitsSoFar.length - 1; i >= 0; i--) {
-      const u = unitsSoFar[i];
-      if (u.factKey && ALL_PERSON_RELATIONS.includes(u.factKey)) {
-        if (isFem && FEMININE_RELATIONS.includes(u.factKey)) {
-          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
-        }
-        if (isMasc && MASCULINE_RELATIONS.includes(u.factKey)) {
-          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
-        }
-        if ((isNeutral || (!isFem && !isMasc) || isGenericCorrection || isNicknameIntent || isRealNameIntent) && ALL_PERSON_RELATIONS.includes(u.factKey)) {
-          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
-        }
-      }
-    }
-
     // 2. Search backwards in context.recentMessages (immediate conversation context ONLY)
     if (context?.recentMessages && Array.isArray(context.recentMessages)) {
       for (let i = context.recentMessages.length - 1; i >= 0; i--) {
         const msg = context.recentMessages[i];
+        const role = typeof msg === 'string' ? 'user' : (msg.role || 'user');
+        if (role !== 'user') continue; // USER ONLY evidence
+        
         const text = typeof msg === 'string' ? msg : (msg.content || '');
         if (!text) continue;
         
+        const structured = this.extractStructuredCorrection(text);
+        if (structured && structured.concept) {
+          const mappedKey = this.mapConceptToCanonicalKey(structured.concept, context);
+          return { factKey: mappedKey, oldValue: structured.value, relationship: mappedKey, isCorrection: true };
+        }
+
         const facts = this.extractFacts(text);
         for (const f of facts) {
           if (f.key && ALL_PERSON_RELATIONS.includes(f.key)) {
@@ -614,8 +611,39 @@ export class TurnAnalyzer {
         }
       }
     }
+    
+    // If it's a generic correction without ANY person pronoun or name intent, DO NOT guess a person relation.
+    // It could be correcting a work preference or something else.
+    if (!isFem && !isMasc && !isNeutral && !isNicknameIntent && !isRealNameIntent) {
+      // Attempt deterministic string matching against generic context.memories
+      if ((isGenericCorrection || /\b(make that|make it|change it to|ek correction hai)\b/i.test(lower)) && context?.memories) {
+        for (const mem of context.memories) {
+          if (!mem.key) continue;
+          if (this.normalizeForMatch(lower).includes(this.normalizeForMatch(mem.key))) {
+            return { factKey: mem.key, oldValue: mem.value, relationship: mem.key, isCorrection: true };
+          }
+        }
+      }
+      return null;
+    }
 
-    // 3. Check context.memories ONLY for explicit nickname / real-name clarifications
+    // 3. Search backwards in current turn's already processed units for Person Relations
+    for (let i = unitsSoFar.length - 1; i >= 0; i--) {
+      const u = unitsSoFar[i];
+      if (u.factKey && ALL_PERSON_RELATIONS.includes(u.factKey)) {
+        if (isFem && FEMININE_RELATIONS.includes(u.factKey)) {
+          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
+        }
+        if (isMasc && MASCULINE_RELATIONS.includes(u.factKey)) {
+          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
+        }
+        if ((isNeutral || (!isFem && !isMasc) || isGenericCorrection || isNicknameIntent || isRealNameIntent) && ALL_PERSON_RELATIONS.includes(u.factKey)) {
+          return mapKeyForIntent(u.factKey, u.factValue, u.relationship);
+        }
+      }
+    }
+
+    // 4. Check context.memories ONLY for explicit nickname / real-name clarifications
     if ((isNicknameIntent || isRealNameIntent) && context?.memories && Array.isArray(context.memories)) {
       for (const m of context.memories) {
         if (m.key && ALL_PERSON_RELATIONS.includes(m.key)) {
@@ -936,6 +964,60 @@ export class TurnAnalyzer {
     }
 
     return uncovered;
+  }
+
+  public static extractStructuredCorrection(text: string): { concept: string | null, value: string } | null {
+    let lower = text.toLowerCase();
+    
+    const markerRegex = /\b(actually|correction|nahi(?: yaar)?|galat(?: tha)?|not that|instead|wait no|ek correction hai|correct that)\b/ig;
+    const hasMarker = markerRegex.test(lower);
+    lower = lower.replace(markerRegex, '').replace(/^[:,\.\-\s—]+|[:,\.\-\s—]+$/g, '').trim();
+
+    const directValueMatch = lower.match(/^(?:make that|make it|change it to)\s+([a-z0-9\s]+)$/i) || 
+                             (hasMarker && lower.split(/\s+/).length <= 2 ? [null, lower] : null);
+    if (directValueMatch && directValueMatch[1]) {
+      return { concept: null, value: directValueMatch[1].trim() };
+    }
+
+    let match = lower.match(/^(?:my|mera|meri|merko)?\s*(.+?)\s+(?:is|hai|toh)\s+(.+?)(?:\s+hai|\s+is|\.|$)/i);
+    if (match) {
+      return { concept: match[1].trim(), value: match[2].trim() };
+    }
+    
+    match = lower.match(/^([a-z0-9\s]+?)\s+(?:is|hai)\s+(?:my|mera|meri)?\s*(.+?)(?:,|\s+not\s+.*|\.|$)/i);
+    if (match) {
+      return { concept: match[2].trim(), value: match[1].trim() };
+    }
+    
+    match = lower.match(/^(?:my|mera|meri)?\s*(.+?)\s+([a-z0-9]+)(?:\s+hai|\s+is|\.|$)/i);
+    if (match) {
+      return { concept: match[1].trim(), value: match[2].trim() };
+    }
+    
+    return null;
+  }
+
+  public static normalizeForMatch(str: string): string {
+    return str.toLowerCase()
+      .replace(/_/g, '')
+      .replace(/\s+/g, '')
+      .replace(/colour/g, 'color')
+      .replace(/favourite/g, 'favorite');
+  }
+
+  public static mapConceptToCanonicalKey(concept: string, context?: TurnContext): string {
+    let normalizedConcept = this.normalizeForMatch(concept);
+    
+    if (context?.memories) {
+      for (const mem of context.memories) {
+        if (!mem.key) continue;
+        if (this.normalizeForMatch(mem.key) === normalizedConcept || normalizedConcept.includes(this.normalizeForMatch(mem.key))) {
+          return mem.key;
+        }
+      }
+    }
+    
+    return concept.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   }
 }
 

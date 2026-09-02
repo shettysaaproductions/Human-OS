@@ -26,7 +26,7 @@ function getMemoryTypeForKey(key: string): MemoryType {
 
 export class DeterministicFactAgent {
   async processJob(job: any): Promise<void> {
-    const { userId, facts, sourceMessage } = job.payload;
+    const { userId, facts, sourceMessage, messageId } = job.payload;
 
     if (!userId || !facts || !Array.isArray(facts)) {
       throw new Error('Invalid payload for extract_deterministic_fact');
@@ -61,6 +61,8 @@ export class DeterministicFactAgent {
           temporal_metadata: tm,
           is_future_intent: tm?.is_future_intent,
           lifecycle_state: tm?.temporal_status === 'HISTORICAL' ? 'HISTORICAL' : tm?.is_future_intent ? 'UNKNOWN' : undefined,
+          source_message_id: messageId,
+          source_references: messageId ? [{ type: 'turn', id: messageId }] : undefined,
         }, sourceMessage || 'Direct Fact Extraction');
 
 

@@ -1200,6 +1200,7 @@ chatRouter.post(
           await memoryQueue.add('extract_deterministic_fact', {
             userId,
             turnId,                     // P0-A: canonical turn identity
+            messageId: userMessageId,   // Provenance fix
             facts: payloadFacts,
             sourceMessage: effectiveMessage
           });

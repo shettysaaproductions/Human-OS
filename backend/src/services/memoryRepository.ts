@@ -243,7 +243,7 @@ export class MemoryRepository {
           is_archived: false,
           lifecycle_state: 'PROPOSED',
           compression_status: 'proposed',
-          source_references: normalizedMemory.source_references,
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
           valid_from: validFrom,
           valid_until: validUntil,
           temporal_precision: temporalPrecision,
@@ -312,6 +312,7 @@ export class MemoryRepository {
             protection_source: normalizedMemory.protection_source || 'system',
             protected_at: new Date().toISOString()
           } : {}),
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
         }, 'upsert_memory_insert_future_or_unknown');
         logger.info('[MemoryRepository] Future intent / unknown memory inserted without supersession', {
           key: normalizedMemory.key,
