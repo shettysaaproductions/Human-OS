@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
+import { memoryRepository } from '../services/memoryRepository';
 import { logger } from '../lib/logger';
 
 export const memoryManagementRouter = Router();
@@ -105,22 +106,40 @@ memoryManagementRouter.patch('/:id', async (req: Request, res: Response, next: N
       return;
     }
 
-    const updates: any = { updated_at: new Date().toISOString() };
-    if (value) updates.value = value;
-    if (key) updates.key = key;
-
-    const { data, error } = await supabaseAdmin
+    // Fetch the full current row so the edit can be routed through the
+    // authoritative state-transition mechanism (MemoryRepository) instead of a
+    // raw in-place mutation that would bypass lifecycle/provenance handling.
+    const { data: existing, error: fetchErr } = await supabaseAdmin
       .from('memories')
-      .update(updates)
+      .select('*')
       .eq('id', id)
       .eq('user_id', userId)
-      .select('id, key, value')
       .maybeSingle();
 
-    if (error) throw error;
-    if (!data) { res.status(404).json({ error: 'Memory not found' }); return; }
+    if (fetchErr) throw fetchErr;
+    if (!existing) { res.status(404).json({ error: 'Memory not found' }); return; }
 
-    res.status(200).json({ success: true, data });
+    // Authoritative transition: archive the existing row (preserve history,
+    // never physically delete) and commit the edited value as a fresh CURRENT
+    // row through the repository. This never creates two CURRENT rows for a key.
+    const archived = await memoryRepository.archiveMemory(userId, id, 'User edit via memory management');
+    if (!archived) { res.status(500).json({ error: 'Failed to archive original memory during edit' }); return; }
+
+    await memoryRepository.upsertMemory(userId, {
+      type: existing.memory_type || 'semantic',
+      key: key || existing.key,
+      value: value || existing.value,
+      importance: existing.importance,
+      confidence: existing.confidence,
+      emotional_weight: existing.emotional_weight || 0,
+      source_authority: 'explicit_user',
+      shouldPersist: true
+    } as any, 'User edit via memory management');
+
+    res.status(200).json({
+      success: true,
+      data: { id: undefined, key: key || existing.key, value: value || existing.value }
+    });
   } catch (err) {
     logger.error('Failed to edit memory', { error: err instanceof Error ? err.message : String(err) });
     next(err);

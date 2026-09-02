@@ -27,3 +27,13 @@ audit_*.txt
 *_dump.txt
 *_dump.json
 forensics_*.json
+
+# Scratch / ad-hoc debug scripts
+scratch/
+scratch_*.js
+scratch_*.ts
+scratch_*.json
+scratch-test*.js
+scratch-test*.ts
+scratch_test*.js
+scratch_test*.ts

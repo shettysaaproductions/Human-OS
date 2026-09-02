@@ -77,7 +77,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── Family: brother ─────────────────────────────────────────────────────────
   brother_name: [
-    'brothers_name', 'bhai_name',
+    'brothers_name', 'bhai_name', 'brothers_name', // apostrophe-stripped version
     // NOTE: bare 'brother' and 'bhai' are NOT added here —
     // they are separately blocked as vocative values in the agent filter.
     // But if LLM emits key='brother' or key='bhai' with a proper-name value,
@@ -148,17 +148,22 @@ export const CANONICAL_KEYS: ReadonlySet<string> = new Set(Object.keys(CANONICAL
  *  2. If the key is a known alias, the canonical key is returned.
  *  3. If the key is unknown (no alias), it is returned as-is after basic
  *     validation — allowing genuinely new concept keys to pass through.
+ *  4. Apostrophes are stripped before processing.
  *
  * This function is DETERMINISTIC and has no side effects.
  */
 export function canonicalizeKey(rawKey: string): { canonical: string; wasAliased: boolean } {
-  const lower = rawKey.toLowerCase().trim();
+  // P0-2: Strip apostrophes and quotes BEFORE any processing
+  // "brother's_name" -> "brothers_name" -> canonicalize -> "brother_name"
+  const noApostrophes = rawKey.replace(/['']/g, '');
+
+  const lower = noApostrophes.toLowerCase().trim();
   const canonical = ALIAS_TO_CANONICAL.get(lower);
 
   if (canonical) {
     return {
       canonical,
-      wasAliased: canonical !== lower,
+      wasAliased: canonical !== rawKey.toLowerCase().trim(),
     };
   }
 

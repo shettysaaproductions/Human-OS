@@ -133,7 +133,10 @@ export class TurnAnalyzer {
 
         // 1. Check for structured/explicit correction
         const structuredCorrection = this.extractStructuredCorrection(clause);
-        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:|wrong|incorrect)\b/i.test(lower);
+        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:|wrong|incorrect|no, that is wrong)\b/i.test(lower);
+        // Deterministic canonical favourite statement (e.g. "My favourite colour is blue").
+        // Routed through the correction path so it is persisted deterministically without the LLM.
+        const canonicalFavourite = this.extractCanonicalFavourite(clause);
 
         if (structuredCorrection || isCorrectionRegex) {
           let resolvedKey: string | undefined;
@@ -181,6 +184,12 @@ export class TurnAnalyzer {
             }
           }
 
+          // Canonical person-name corrections are capitalized deterministically
+          // (e.g. "actually Amit" -> "Amit"). Colour/preference values stay as written.
+          if (resolvedKey && resolvedVal && ALL_PERSON_RELATIONS.includes(resolvedKey)) {
+            resolvedVal = this.cleanValue(resolvedVal);
+          }
+
           const temporalResult = TemporalParser.extractTemporalMetadata(clause);
           const temporalMetadata = TemporalParser.toMetadata(temporalResult);
 
@@ -203,6 +212,32 @@ export class TurnAnalyzer {
             factClass: isExplicitRemember ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT',
             temporalMetadata,
           });
+        }
+        // 1b. Deterministic canonical favourite statement (no correction marker)
+        else if (canonicalFavourite) {
+          const finalRes = MemorySemanticResolver.resolveProposedKey(canonicalFavourite.key);
+          const finalKey = (finalRes.action === 'PERSIST' && finalRes.canonicalKey)
+            ? finalRes.canonicalKey
+            : null;
+          if (finalKey) {
+            units.push({
+              unitId: crypto.randomUUID(),
+              sourceMessageId,
+              order,
+              type: 'correction',
+              text: clause,
+              importance: 8,
+              responseRequired: true,
+              acknowledgementPreferred: true,
+              memoryCandidate: true,
+              actionCandidate: false,
+              factKey: finalKey,
+              factValue: canonicalFavourite.value,
+              isProtected: false,
+              factClass: 'HIGH_CONFIDENCE_DURABLE_FACT',
+              temporalMetadata: TemporalParser.toMetadata(TemporalParser.extractTemporalMetadata(clause)),
+            });
+          }
         }
         // 2. Check for extracted facts
         else if (extractedFacts.length > 0) {
@@ -1020,6 +1055,27 @@ export class TurnAnalyzer {
       return { concept: match[1].trim(), value: match[2].trim() };
     }
     
+    return null;
+  }
+
+  /**
+   * Deterministically detect canonical favourite statements (e.g. "My favourite
+   * colour is blue"). Returns the canonical key (before authoritative resolution)
+   * and the as-written value, or null if no canonical favourite was stated.
+   * Explicit correction-marked turns are intentionally excluded so they route
+   * through the structured-correction branch instead.
+   */
+  public static extractCanonicalFavourite(text: string): { key: string; value: string } | null {
+    const lower = text.toLowerCase();
+    const hasMarker = /\b(actually|correction|instead|wait no|wrong|incorrect|no, that is wrong|nahi|galat)\b/i.test(lower);
+    if (hasMarker) return null;
+
+    const m = lower.match(/\b(?:my\s+)?(?:favourite|favorite)\s+(?:colour|color)\s+is\s+([a-z0-9][a-z0-9\s-]*)(?:[.,;!]|$)/i);
+    if (m) {
+      const value = m[1].trim().replace(/[.,;!]+$/, '');
+      if (!value) return null;
+      return { key: 'favourite_color', value };
+    }
     return null;
   }
 

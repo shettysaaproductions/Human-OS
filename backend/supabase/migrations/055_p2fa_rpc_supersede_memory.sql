@@ -2,6 +2,16 @@
 -- HUMAN OS — MIGRATION 055: Atomic Supersession RPC
 --
 -- PURPOSE: Ensure memory corrections are race-safe and ordered by provenance.
+--
+-- SAFETY INVARIANTS:
+-- 1. Incoming source_message_id MUST resolve to chat_history with role='user'
+-- 2. Source must belong to the same user
+-- 3. Required provenance fields must exist (created_at)
+-- 4. Missing/invalid provenance -> ZERO mutation
+-- 5. Older authoritative event -> STALE_WRITE with ZERO mutation
+-- 6. Equal timestamps -> deterministic ordering by ID comparison
+-- 7. Never resurrect an older event
+-- 8. Concurrent writers must never leave two CURRENT rows
 -- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION atomic_supersede_memory(
@@ -28,58 +38,108 @@ DECLARE
   v_old_id UUID;
   v_old_source_id TEXT;
   v_old_message_ts TIMESTAMPTZ;
+  v_old_message_id UUID;
+  v_old_source_role TEXT;
+  v_old_source_user_id UUID;
   v_new_message_ts TIMESTAMPTZ;
   v_new_id UUID;
+  v_new_source_role TEXT;
+  v_new_source_user_id UUID;
 BEGIN
+  -- ── PROVENANCE VALIDATION: Incoming source_message_id ─────────────────────
+  -- P0-1: Validate that incoming source_message_id resolves to a valid user message
+
+  IF p_source_message_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'MISSING_PROVENANCE', 'detail', 'source_message_id is null');
+  END IF;
+
+  -- Fetch the chat_history row for the incoming source
+  BEGIN
+    SELECT created_at, role, user_id INTO v_new_message_ts, v_new_source_role, v_new_source_user_id
+    FROM chat_history
+    WHERE id = p_source_message_id;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'MISSING_PROVENANCE', 'detail', 'invalid source_message_id format');
+  END;
+
+  -- Validate source exists
+  IF v_new_message_ts IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'MISSING_PROVENANCE', 'detail', 'source_message_id not found in chat_history');
+  END IF;
+
+  -- Validate source belongs to the same user
+  IF v_new_source_user_id IS NULL OR v_new_source_user_id != p_user_id THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'MISSING_PROVENANCE', 'detail', 'source_message_id belongs to different user');
+  END IF;
+
+  -- Validate source is a user message (not assistant)
+  IF v_new_source_role IS NULL OR v_new_source_role != 'user' THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'MISSING_PROVENANCE', 'detail', 'source_message_id is not a user message');
+  END IF;
+
   -- Handle concurrent inserts with a retry loop
   FOR i IN 1..3 LOOP
     -- 1. Lock the current active memory for this user and key
     v_old_id := NULL;
     v_old_source_id := NULL;
-    
+    v_old_message_ts := NULL;
+    v_old_message_id := NULL;
+
     SELECT id, source_message_id
-  INTO v_old_id, v_old_source_id
-  FROM memories
-  WHERE user_id = p_user_id
-    AND key = p_key
-    AND is_archived = false
-    AND (lifecycle_state = 'CURRENT' OR lifecycle_state IS NULL)
-  FOR UPDATE;
+      INTO v_old_id, v_old_source_id
+    FROM memories
+    WHERE user_id = p_user_id
+      AND key = p_key
+      AND is_archived = false
+      AND (lifecycle_state = 'CURRENT' OR lifecycle_state IS NULL)
+    FOR UPDATE;
 
-  -- 2. Verify provenance ordering if a current memory exists
-  IF v_old_id IS NOT NULL THEN
-    -- Get timestamps
-    BEGIN
-      SELECT created_at INTO v_old_message_ts
-      FROM chat_history
-      WHERE id = v_old_source_id::UUID;
-    EXCEPTION WHEN invalid_text_representation THEN
-      v_old_message_ts := NULL;
-    END;
+    -- 2. Verify provenance ordering if a current memory exists
+    IF v_old_id IS NOT NULL THEN
+      -- Get the OLD memory's source message provenance
+      BEGIN
+        SELECT ch.created_at, ch.id, ch.role, ch.user_id
+          INTO v_old_message_ts, v_old_message_id, v_old_source_role, v_old_source_user_id
+        FROM chat_history ch
+        WHERE ch.id = v_old_source_id::UUID;
+      EXCEPTION WHEN invalid_text_representation THEN
+        v_old_message_ts := NULL;
+        v_old_message_id := NULL;
+        v_old_source_role := NULL;
+        v_old_source_user_id := NULL;
+      END;
 
-    BEGIN
-      SELECT created_at INTO v_new_message_ts
-      FROM chat_history
-      WHERE id = p_source_message_id::UUID;
-    EXCEPTION WHEN invalid_text_representation THEN
-      v_new_message_ts := NULL;
-    END;
+      -- PROVENANCE FAIL-CLOSED: The existing CURRENT row MUST have resolvable,
+      -- same-user, USER-role source with authoritative ordering information.
+      -- Never silently continue because timestamps are NULL.
+      IF v_old_message_ts IS NULL OR v_old_message_id IS NULL
+         OR v_old_source_role IS NULL OR v_old_source_role != 'user'
+         OR v_old_source_user_id IS NULL OR v_old_source_user_id != p_user_id THEN
+        RETURN jsonb_build_object('success', false, 'reason', 'MISSING_PROVENANCE', 'current_id', v_old_id, 'detail', 'existing CURRENT memory provenance cannot be authoritatively resolved');
+      END IF;
 
-    -- If the incoming message is OLDER than the current memory's source, ABORT.
-    IF v_old_message_ts IS NOT NULL AND v_new_message_ts IS NOT NULL AND v_new_message_ts < v_old_message_ts THEN
-      -- Stale write detected. Return null to indicate no mutation.
-      RETURN jsonb_build_object('success', false, 'reason', 'STALE_WRITE', 'current_id', v_old_id);
+      -- Stale write check: incoming is OLDER than current
+      IF v_new_message_ts < v_old_message_ts THEN
+        RETURN jsonb_build_object('success', false, 'reason', 'STALE_WRITE', 'current_id', v_old_id, 'detail', 'incoming message is older than current memory source');
+      END IF;
+
+      -- Equal timestamps: deterministic ordering by source_message_id comparison (lexicographic)
+      IF v_new_message_ts = v_old_message_ts THEN
+        IF p_source_message_id::TEXT < v_old_message_id::TEXT THEN
+          -- Incoming has "lower" ID, treat as older -> stale
+          RETURN jsonb_build_object('success', false, 'reason', 'STALE_WRITE', 'current_id', v_old_id, 'detail', 'equal timestamps, incoming ID is older');
+        END IF;
+      END IF;
+
+      -- 3. Supersede old memory
+      UPDATE memories
+      SET is_archived = true,
+          lifecycle_state = 'SUPERSEDED',
+          superseded_at = NOW(),
+          supersession_reason = 'Authoritative correction: superseded by ' || p_source_authority || ' fact',
+          updated_at = NOW()
+      WHERE id = v_old_id;
     END IF;
-
-    -- 3. Supersede old memory
-    UPDATE memories
-    SET is_archived = true,
-        lifecycle_state = 'SUPERSEDED',
-        superseded_at = NOW(),
-        supersession_reason = 'Authoritative correction: superseded by ' || p_source_authority || ' fact',
-        updated_at = NOW()
-    WHERE id = v_old_id;
-  END IF;
 
     BEGIN
       INSERT INTO memories (
@@ -109,8 +169,88 @@ BEGIN
 
     RETURN jsonb_build_object('success', true, 'new_id', v_new_id, 'superseded_id', v_old_id);
   END LOOP;
-  
+
   -- If we exhausted retries:
   RETURN jsonb_build_object('success', false, 'reason', 'CONCURRENT_RACE');
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- HELPER RPC: atomic_archive_memory
+--
+-- PURPOSE: Safely archive a memory without physical deletion.
+-- Used by reconciliation script and CanonicalStateReconciler.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION atomic_archive_memory(
+  p_user_id UUID,
+  p_memory_id UUID,
+  p_reason TEXT
+) RETURNS JSONB AS $$
+DECLARE
+  v_memory_user_id UUID;
+BEGIN
+  -- Verify memory belongs to user
+  SELECT user_id INTO v_memory_user_id
+  FROM memories
+  WHERE id = p_memory_id;
+
+  IF v_memory_user_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'NOT_FOUND');
+  END IF;
+
+  IF v_memory_user_id != p_user_id THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'USER_MISMATCH');
+  END IF;
+
+  -- Perform archive
+  UPDATE memories
+  SET is_archived = true,
+      lifecycle_state = COALESCE(lifecycle_state, 'SUPERSEDED'),
+      supersession_reason = p_reason,
+      updated_at = NOW()
+  WHERE id = p_memory_id;
+
+  RETURN jsonb_build_object('success', true);
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- HELPER RPC: atomic_quarantine_memory
+--
+-- PURPOSE: Quarantine a malformed/invalid memory.
+-- Used by reconciliation script for command-key quarantine.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION atomic_quarantine_memory(
+  p_user_id UUID,
+  p_memory_id UUID,
+  p_reason TEXT
+) RETURNS JSONB AS $$
+DECLARE
+  v_memory_user_id UUID;
+BEGIN
+  -- Verify memory belongs to user
+  SELECT user_id INTO v_memory_user_id
+  FROM memories
+  WHERE id = p_memory_id;
+
+  IF v_memory_user_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'NOT_FOUND');
+  END IF;
+
+  IF v_memory_user_id != p_user_id THEN
+    RETURN jsonb_build_object('success', false, 'reason', 'USER_MISMATCH');
+  END IF;
+
+  -- Perform quarantine (archive + invalidate)
+  UPDATE memories
+  SET is_archived = true,
+      lifecycle_state = 'INVALIDATED',
+      supersession_reason = p_reason,
+      updated_at = NOW()
+  WHERE id = p_memory_id;
+
+  RETURN jsonb_build_object('success', true);
 END;
 $$ LANGUAGE plpgsql;
