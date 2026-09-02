@@ -594,11 +594,19 @@ describe('Memory Persistence & Concurrency Integration', () => {
       }),
     ]);
 
-    // Both RPCs must succeed (one creates, one archives)
+    // At least one must succeed; with deterministic batch the second may be NOT_FOUND if first already archived both
     for (const r of results) {
       expect(r.error).toBeNull();
-      expect(r.data?.success).toBe(true);
+      expect(r.data).toBeDefined();
+      if (r.data?.success === true) {
+        expect(['created_canonical', 'archived_alias', 'replaced_canonical'].includes(r.data.action)).toBeTruthy();
+      } else {
+        expect(r.data?.reason).toBe('NOT_FOUND');
+      }
     }
+    // Ensure at least one created the canonical
+    const anySuccess = results.some(r => r.data?.success === true);
+    expect(anySuccess).toBe(true);
 
     // Exactly one CURRENT canonical
     const { data: canonicalRows, error: canonErr } = await supabaseAdmin
@@ -757,6 +765,274 @@ describe('Memory Persistence & Concurrency Integration', () => {
       .eq('lifecycle_state', 'CURRENT');
     expect(activeRows2?.length).toBe(1);
     expect(activeRows2![0].value).toBe('coffee'); // same deterministic rule
+  });
+
+  it('10f. concurrent aliases with DIFFERENT values -> newest provenance wins regardless of lock order', async () => {
+    // Deterministic winner: Amit (00:00:02) must win over Rahul (00:00:01) even if Rahul acquires lock first
+    const srcRahul = randomUUID();
+    const srcAmit = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([
+      { id: srcRahul, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mera mom ka naam Rahul hai', created_at: '2026-01-01T00:00:01Z' },
+      { id: srcAmit, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mera mom ka naam Amit hai', created_at: '2026-01-01T00:00:02Z' },
+    ]);
+    const aliasRahul = randomUUID();
+    const aliasAmit = randomUUID();
+    await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasRahul,
+        user_id: TEST_USER,
+        key: 'moms_name',
+        value: 'Rahul',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcRahul,
+        source_message: 'Mera mom ka naam Rahul hai',
+      },
+      {
+        id: aliasAmit,
+        user_id: TEST_USER,
+        key: 'mom_name',
+        value: 'Amit',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcAmit,
+        source_message: 'Mera mom ka naam Amit hai',
+      },
+    ]);
+
+    // Launch Rahul then Amit
+    const res1 = await Promise.all([
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasRahul,
+        p_canonical_key: 'mother_name',
+        p_reason: 'test: deterministic winner',
+      }),
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasAmit,
+        p_canonical_key: 'mother_name',
+        p_reason: 'test: deterministic winner',
+      }),
+    ]);
+    // At least one should succeed; batch archives both so second may be NOT_FOUND
+    for (const r of res1) {
+      expect(r.error).toBeNull();
+      expect(r.data).toBeDefined();
+      if (r.data?.success === true) {
+        expect(['created_canonical', 'archived_alias', 'replaced_canonical'].includes(r.data.action)).toBeTruthy();
+      } else {
+        expect(r.data?.reason).toBe('NOT_FOUND');
+      }
+    }
+    expect(res1.some(r => r.data?.success === true)).toBe(true);
+    const { data: canonAmit } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'mother_name').eq('is_archived', false).eq('lifecycle_state', 'CURRENT');
+    expect(canonAmit?.length).toBe(1);
+    expect(canonAmit![0].value).toBe('Amit');
+    // Both aliases superseded to surviving canonical
+    const { data: aliasRowsA } = await supabaseAdmin.from('memories').select('*').in('id', [aliasRahul, aliasAmit]);
+    for (const row of aliasRowsA!) {
+      expect(row.is_archived).toBe(true);
+      expect(row.lifecycle_state).toBe('SUPERSEDED');
+      expect(row.superseded_by).toBe(canonAmit![0].id);
+    }
+
+    // Clean up for reversed order test on fresh key sister_name
+    const srcRahul2 = randomUUID();
+    const srcAmit2 = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([
+      { id: srcRahul2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Meri behen ka naam Rahul2 hai', created_at: '2026-01-01T00:00:01Z' },
+      { id: srcAmit2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Meri behen ka naam Amit2 hai', created_at: '2026-01-01T00:00:02Z' },
+    ]);
+    const aliasRahul2 = randomUUID();
+    const aliasAmit2 = randomUUID();
+    await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasRahul2,
+        user_id: TEST_USER,
+        key: 'behen_name',
+        value: 'Rahul2',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcRahul2,
+        source_message: 'Meri behen ka naam Rahul2 hai',
+      },
+      {
+        id: aliasAmit2,
+        user_id: TEST_USER,
+        key: 'sister',
+        value: 'Amit2',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcAmit2,
+        source_message: 'Meri behen ka naam Amit2 hai',
+      },
+    ]);
+    // Reverse launch: Amit first, Rahul second -> Amit must still win
+    const res2 = await Promise.all([
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasAmit2,
+        p_canonical_key: 'sister_name',
+        p_reason: 'test: deterministic winner reversed',
+      }),
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasRahul2,
+        p_canonical_key: 'sister_name',
+        p_reason: 'test: deterministic winner reversed',
+      }),
+    ]);
+    for (const r of res2) {
+      expect(r.error).toBeNull();
+      // Second may return NOT_FOUND if first already archived both, but our new batch archives both at once so second finds alias already archived
+      // Accept either success or NOT_FOUND as long as final state is correct
+      if (r.data) expect(['archived_alias', 'created_canonical', 'replaced_canonical'].includes(r.data.action) || r.data.reason === 'NOT_FOUND').toBeTruthy();
+    }
+    const { data: canonAmit2 } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'sister_name').eq('is_archived', false).eq('lifecycle_state', 'CURRENT');
+    expect(canonAmit2?.length).toBe(1);
+    expect(canonAmit2![0].value).toBe('Amit2');
+    const { data: aliasRowsB } = await supabaseAdmin.from('memories').select('*').in('id', [aliasRahul2, aliasAmit2]);
+    for (const row of aliasRowsB!) {
+      expect(row.is_archived).toBe(true);
+      expect(row.superseded_by).toBe(canonAmit2![0].id);
+    }
+  });
+
+  it('10g. equal-timestamp different values -> deterministic source_message_id wins', async () => {
+    const ts = '2026-01-01T00:00:00Z';
+    // Amit has lexicographically larger source_message_id than Rahul
+    const srcRahul = '00000000-0000-0000-0000-000000001111';
+    const srcAmit = '00000000-0000-0000-0000-000000002222';
+    await supabaseAdmin.from('chat_history').insert([
+      { id: srcRahul, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mera bhai ka naam Rahul equal', created_at: ts },
+      { id: srcAmit, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mera bhai ka naam Amit equal', created_at: ts },
+    ]);
+    // Also ensure no leftover brother_name canonical from earlier tests interferes - use distinct key father_name for equal test
+    const aliasRahul = randomUUID();
+    const aliasAmit = randomUUID();
+    await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasRahul,
+        user_id: TEST_USER,
+        key: 'bhai_name',
+        value: 'Rahul',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcRahul,
+        source_message: 'Mera bhai ka naam Rahul equal',
+      },
+      {
+        id: aliasAmit,
+        user_id: TEST_USER,
+        key: 'brother',
+        value: 'Amit',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcAmit,
+        source_message: 'Mera bhai ka naam Amit equal',
+      },
+    ]);
+    // Launch Rahul then Amit (Amit has larger ID, should win)
+    await Promise.all([
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasRahul,
+        p_canonical_key: 'brother_name',
+        p_reason: 'test: equal ts deterministic',
+      }),
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasAmit,
+        p_canonical_key: 'brother_name',
+        p_reason: 'test: equal ts deterministic',
+      }),
+    ]);
+    const { data: canon } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'brother_name').eq('is_archived', false).eq('lifecycle_state', 'CURRENT');
+    expect(canon?.length).toBe(1);
+    expect(canon![0].value).toBe('Amit');
+
+    // Reverse launch order -> same winner
+    // Use new aliases for father_name to avoid polluting same canonical
+    const srcRahul2 = '00000000-0000-0000-0000-000000003333';
+    const srcAmit2 = '00000000-0000-0000-0000-000000004444';
+    await supabaseAdmin.from('chat_history').insert([
+      { id: srcRahul2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mere papa ka naam Rahul equal2', created_at: ts },
+      { id: srcAmit2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mere papa ka naam Amit equal2', created_at: ts },
+    ]);
+    const aliasRahul2 = randomUUID();
+    const aliasAmit2 = randomUUID();
+    await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasRahul2,
+        user_id: TEST_USER,
+        key: 'papa_name',
+        value: 'Rahul',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcRahul2,
+        source_message: 'Mere papa ka naam Rahul equal2',
+      },
+      {
+        id: aliasAmit2,
+        user_id: TEST_USER,
+        key: 'father',
+        value: 'Amit',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+        source_message_id: srcAmit2,
+        source_message: 'Mere papa ka naam Amit equal2',
+      },
+    ]);
+    await Promise.all([
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasAmit2,
+        p_canonical_key: 'father_name',
+        p_reason: 'test: equal ts reversed',
+      }),
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasRahul2,
+        p_canonical_key: 'father_name',
+        p_reason: 'test: equal ts reversed',
+      }),
+    ]);
+    const { data: canon2 } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'father_name').eq('is_archived', false).eq('lifecycle_state', 'CURRENT');
+    expect(canon2?.length).toBe(1);
+    expect(canon2![0].value).toBe('Amit');
   });
 
   it('11. stale old event cannot resurrect', async () => {
@@ -1100,5 +1376,54 @@ describe('Memory Persistence & Concurrency Integration', () => {
     expect(blueRow?.lifecycle_state).toBe('CURRENT');
     // superseded_by is on the OLD (superseded) row, pointing to the NEW row
     expect(redRow?.superseded_by).toBe(blueRow?.id);
+  });
+
+  // ── P0-USER ROLE BOUNDARY: deterministic USER-only extraction ───────────────
+  it('RB1: TurnAnalyzer includes role=user, excludes assistant/system/unknown/role-less', async () => {
+    const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
+    const userMsg = { role: 'user' as const, message: 'My favourite colour is blue' };
+    const assistantMsg = { role: 'assistant' as const, message: 'My favourite colour is blue' };
+    const systemMsg = { role: 'system' as const, message: 'My favourite colour is blue' };
+    const unknownMsg = { role: 'unknown' as any, message: 'My favourite colour is blue' };
+    const roleLessMsg = { message: 'My favourite colour is blue' } as any;
+
+    const userRes = TurnAnalyzer.analyze([userMsg]);
+    expect(userRes.hasCorrections).toBe(true);
+    expect(userRes.correctionTarget).toBe('favourite_color');
+    expect(userRes.negatedGoals).toBeDefined();
+
+    const assistantRes = TurnAnalyzer.analyze([assistantMsg]);
+    expect(assistantRes.units.length).toBe(0);
+    expect(assistantRes.hasCorrections).toBe(false);
+    expect(assistantRes.negatedGoals?.length).toBe(0);
+    expect(assistantRes.correctionTarget).toBeFalsy();
+
+    const systemRes = TurnAnalyzer.analyze([systemMsg]);
+    expect(systemRes.units.length).toBe(0);
+    expect(systemRes.hasCorrections).toBe(false);
+
+    const unknownRes = TurnAnalyzer.analyze([unknownMsg]);
+    expect(unknownRes.units.length).toBe(0);
+    expect(unknownRes.hasCorrections).toBe(false);
+
+    const roleLessRes = TurnAnalyzer.analyze([roleLessMsg]);
+    // Strict: role-less is NOT user, so excluded (ingress must normalize)
+    expect(roleLessRes.units.length).toBe(0);
+    expect(roleLessRes.hasCorrections).toBe(false);
+  });
+
+  it('RB2: mixed role batch only processes user messages for negatedGoals', async () => {
+    const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
+    const msgs = [
+      { role: 'assistant' as const, message: 'fashion ka shop nahi hai' },
+      { role: 'user' as const, message: 'My favourite colour is blue' },
+    ];
+    const res = TurnAnalyzer.analyze(msgs);
+    // Only user message contributes to correction and negatedGoals
+    expect(res.hasCorrections).toBe(true);
+    expect(res.correctionTarget).toBe('favourite_color');
+    // Assistant's negated phrase must not appear
+    const concepts = (res.negatedGoals || []).map(g => g.concept);
+    expect(concepts.some(c => c.includes('fashion'))).toBe(false);
   });
 });

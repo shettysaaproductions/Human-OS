@@ -116,7 +116,8 @@ export class TurnAnalyzer {
     let order = 0;
 
     for (const msg of messages) {
-      if ((msg as any).role && (msg as any).role !== 'user') continue;
+      // Strict USER-only: requires explicit role='user' (ingress normalized)
+      if ((msg as any).role !== 'user') continue;
       if (!msg.message) continue;
       const sourceMessageId = msg.client_message_id || crypto.randomUUID();
       const rawText = msg.message.trim();
@@ -351,9 +352,10 @@ export class TurnAnalyzer {
     }
 
     // P0-1: Deterministic state-affecting analysis MUST use USER messages only.
-    // Assistant text must never contribute to negatedGoals / correction-derived state.
+    // Assistant/system/unknown roles never contribute. Ingress boundary normalizes
+    // production role-less input to role='user' so strict filter preserves compatibility.
     const userFullText = messages
-      .filter(m => !(m as any).role || (m as any).role === 'user')
+      .filter(m => (m as any).role === 'user')
       .map(m => m.message || '')
       .join(' ');
     const negatedGoals = this.extractNegatedGoals(userFullText);

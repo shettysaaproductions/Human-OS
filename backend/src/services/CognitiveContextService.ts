@@ -430,7 +430,7 @@ export class CognitiveContextService {
     if (effectiveMessage) {
       const normalizedInputs = options.messages && options.messages.length > 0
         ? options.messages
-        : [{ message: effectiveMessage }];
+        : [{ message: effectiveMessage, role: 'user' as const }];
 
       turnAnalysis = TurnAnalyzer.analyze(normalizedInputs, {
         recentMessages,

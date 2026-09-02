@@ -164,6 +164,7 @@ const ChatMessageSchema = z.object({
   reply_to_id: z.string().optional(),
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
+  role: z.enum(['user', 'assistant', 'system']).optional(),
 });
 
 export interface ChatMessageInput {
@@ -172,6 +173,7 @@ export interface ChatMessageInput {
   reply_to_id?: string;
   reply_to_content?: string;
   image_base64?: string;
+  role?: 'user' | 'assistant' | 'system';
 }
 
 const ChatSchema = z.object({
@@ -538,6 +540,19 @@ chatRouter.post(
         if (msg.client_message_id && !UUID_REGEX.test(msg.client_message_id)) {
           logger.warn('[Chat] Stripping malformed legacy client_message_id', { client_message_id: msg.client_message_id, userId });
           msg.client_message_id = undefined;
+        }
+      }
+
+      // ── Ingress role normalization: deterministic boundary
+      // Production clients send role-less user messages; normalize once here so
+      // downstream analyzers (TurnAnalyzer) can enforce strict role='user' without
+      // silently assuming missing role = user everywhere.
+      for (const msg of normalizedMessages) {
+        if (!msg.role) {
+          (msg as any).role = 'user';
+        } else if (!['user', 'assistant', 'system'].includes(msg.role)) {
+          logger.warn('[Chat] Stripping unknown role at ingress', { role: msg.role, userId });
+          (msg as any).role = 'user';
         }
       }
 
@@ -915,7 +930,7 @@ chatRouter.post(
       // Runs alongside the existing fetches; never blocks the critical path.
       const cogCtxPromise = cognitiveContextService.assembleContext(userId, {
         message: effectiveMessage,
-        messages: normalizedMessages.map(m => ({ message: m.message, reply_to_content: m.reply_to_content })),
+        messages: normalizedMessages.map(m => ({ message: m.message, reply_to_content: m.reply_to_content, role: (m as any).role })),
         conversationId: activeConversationId,
         isProactive: is_proactive,
         skipMemory,
