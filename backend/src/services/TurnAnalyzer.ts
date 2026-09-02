@@ -140,7 +140,8 @@ export class TurnAnalyzer {
 
           if (structuredCorrection && structuredCorrection.concept) {
             // Self-contained correction found!
-            const resolution = MemorySemanticResolver.resolveProposedKey(structuredCorrection.concept);
+            const sanitizedStructuredConcept = structuredCorrection.concept.trim().replace(/\s+/g, '_');
+            const resolution = MemorySemanticResolver.resolveProposedKey(sanitizedStructuredConcept);
             if (resolution.action === 'PERSIST' && resolution.canonicalKey) {
               resolvedKey = resolution.canonicalKey;
             } else {
@@ -1022,6 +1023,12 @@ export class TurnAnalyzer {
   }
 
   public static mapConceptToCanonicalKey(concept: string, context?: TurnContext): string {
+    const sanitizedConcept = concept.trim().replace(/\s+/g, '_');
+    const resolution = MemorySemanticResolver.resolveProposedKey(sanitizedConcept);
+    if (resolution.action === 'PERSIST' && resolution.canonicalKey) {
+      return resolution.canonicalKey;
+    }
+
     let normalizedConcept = this.normalizeForMatch(concept);
     
     if (context?.memories) {

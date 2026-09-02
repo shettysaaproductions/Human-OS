@@ -281,6 +281,26 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     });
 
     const parsed = JSON.parse(response) as ConsolidatedExtraction;
+    
+    // ENFORCE DETERMINISTIC CORRECTION ARCHITECTURE (BLOCKER 3)
+    if (hasCorrections) {
+      if (!correctionTarget) {
+        // Ambiguous correction -> zero semantic mutation
+        parsed.semantic_memories = [];
+      } else {
+        // Unambiguous correction -> exactly one canonical target
+        parsed.semantic_memories = (parsed.semantic_memories || []).filter(
+          mem => mem.key === correctionTarget
+        );
+        // Force the value to be grounded in the user's turn
+        if (job.payload.correctionValue) {
+          for (const mem of parsed.semantic_memories) {
+            mem.value = job.payload.correctionValue;
+            mem.correction_intent = true;
+          }
+        }
+      }
+    }
 
     // Cache the extraction result (1 hour TTL)
     const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
@@ -298,8 +318,8 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     // ── Semantic memories ──
     const rawSemanticMemories = parsed.semantic_memories || [];
     // Apply pre-DB filters (BUG-01 generic value + BUG-02 vocative guard)
-    // source_message_id is used as the source text for vocative check
-    const semanticMemories = filterSemanticMemories(rawSemanticMemories, messageId);
+    // messageText is used as the source text for vocative check
+    const semanticMemories = filterSemanticMemories(rawSemanticMemories, messageText);
     
     const candidateInserts: any[] = [];
     for (const mem of semanticMemories) {

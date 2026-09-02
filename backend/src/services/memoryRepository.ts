@@ -247,6 +247,7 @@ export class MemoryRepository {
           confidence: normalizedMemory.confidence,
           emotional_weight: normalizedMemory.emotional_weight ?? 0,
           source_message: sourceMessage,
+          source_message_id: (normalizedMemory as any).source_message_id || null,
           source_authority: incomingAuthority,
           is_archived: false,
           lifecycle_state: 'PROPOSED',
@@ -272,6 +273,7 @@ export class MemoryRepository {
           confidence: normalizedMemory.confidence,
           emotional_weight: normalizedMemory.emotional_weight ?? 0,
           source_message: sourceMessage,
+          source_message_id: (normalizedMemory as any).source_message_id || null,
           source_authority: incomingAuthority,
           is_archived: false,
           lifecycle_state: 'HISTORICAL',
@@ -308,6 +310,7 @@ export class MemoryRepository {
           confidence: normalizedMemory.confidence,
           emotional_weight: normalizedMemory.emotional_weight ?? 0,
           source_message: sourceMessage,
+          source_message_id: (normalizedMemory as any).source_message_id || null,
           source_authority: incomingAuthority,
           is_archived: false,
           lifecycle_state: 'UNKNOWN',
@@ -353,79 +356,52 @@ export class MemoryRepository {
         }
 
         // Authoritative Supersession Execution:
-        // 1. Mark conflicting old row as SUPERSEDED first (frees the unique partial index slot)
-        const supersededTimestamp = new Date().toISOString();
-        const { error: supersedeErr } = await qt.track('upsert_memory_mark_superseded', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .update({
-              is_archived: true,
-              lifecycle_state: 'SUPERSEDED',
-              superseded_at: supersededTimestamp,
-              supersession_reason: `Authoritative correction: superseded by ${incomingAuthority} fact`,
-              updated_at: supersededTimestamp,
-            })
-            .eq('id', conflictingCurrentRow.id)
-            .eq('user_id', userId)
+        // Use the atomic RPC to lock, check provenance, mark superseded, and insert new.
+        const rpcPayload = {
+          p_user_id: userId,
+          p_key: normalizedMemory.key,
+          p_new_value: normalizedMemory.value,
+          p_memory_type: normalizedMemory.type,
+          p_importance: Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance ?? 50),
+          p_confidence: normalizedMemory.confidence ?? 0.8,
+          p_emotional_weight: normalizedMemory.emotional_weight ?? conflictingCurrentRow.emotional_weight ?? 0,
+          p_source_message: sourceMessage,
+          p_source_message_id: (normalizedMemory as any).source_message_id || null,
+          p_source_authority: incomingAuthority,
+          p_is_protected: normalizedMemory.is_protected || !!conflictingCurrentRow.protection_source,
+          p_protection_source: normalizedMemory.protection_source || conflictingCurrentRow.protection_source || 'system',
+          p_source_references: normalizedMemory.source_references || null,
+          p_compression_status: normalizedMemory.compression_status || null,
+          p_valid_from: validFrom,
+          p_valid_until: validUntil,
+          p_temporal_precision: temporalPrecision,
+          p_temporal_metadata: temporalMetadata
+        };
+
+        const { data: rpcResult, error: rpcError } = await qt.track('upsert_memory_atomic_supersede', 'memories', () =>
+          supabaseAdmin.rpc('atomic_supersede_memory', rpcPayload)
         );
 
-        if (supersedeErr) {
-          throw new Error(`Failed to archive superseded memory: ${supersedeErr.message}`);
+        if (rpcError) {
+          throw new Error(`Failed to execute atomic supersession: ${rpcError.message}`);
         }
 
-        // 2. Insert NEW memory row as CURRENT
-        const { data: newRow } = await executeInsert({
-          user_id: userId,
-          memory_type: normalizedMemory.type,
-          key: normalizedMemory.key,
-          value: normalizedMemory.value,
-          importance: Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance),
-          confidence: normalizedMemory.confidence,
-          emotional_weight: normalizedMemory.emotional_weight ?? conflictingCurrentRow.emotional_weight ?? 0,
-          source_message: sourceMessage,
-          source_authority: incomingAuthority,
-          is_archived: false,
-          lifecycle_state: 'CURRENT',
-          valid_from: validFrom,
-          valid_until: validUntil,
-          temporal_precision: temporalPrecision,
-          temporal_metadata: temporalMetadata,
-          last_accessed_at: new Date().toISOString(),
-          ...(normalizedMemory.is_protected || conflictingCurrentRow.protection_source ? {
-            protection_source: normalizedMemory.protection_source || conflictingCurrentRow.protection_source || 'system',
-            protected_at: new Date().toISOString()
-          } : {}),
-          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
-          ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
-        }, 'upsert_memory_insert_superseding');
-
-        if (!newRow?.id) {
-          logger.warn('[MemoryRepository] Failed to insert superseding memory (likely race condition blocked by unique index), aborting supersession back-link.');
-          return;
+        if (rpcResult && rpcResult.success === false) {
+          if (rpcResult.reason === 'STALE_WRITE') {
+            logger.warn(`[MemoryRepository] Blocked stale write. Incoming message is older than current memory's source.`, { userId, key: normalizedMemory.key });
+            return;
+          }
+          throw new Error(`Atomic supersession failed: ${rpcResult.reason}`);
         }
 
-        const newMemoryId = newRow.id;
-
-        // 3. Back-link superseded_by on the old row
-        await qt.track('upsert_memory_link_superseded', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .update({
-              superseded_by: newMemoryId,
-            })
-            .eq('id', conflictingCurrentRow.id)
-            .eq('user_id', userId)
-        );
-
-        logger.info('[MemoryRepository] Conflicting CURRENT memory SUPERSEDED cleanly', {
+        logger.info('[MemoryRepository] Conflicting CURRENT memory SUPERSEDED atomically', {
           userId,
           key: normalizedMemory.key,
-          oldMemoryId: conflictingCurrentRow.id,
+          oldMemoryId: rpcResult?.superseded_id,
           oldValue: conflictingCurrentRow.value,
-          newMemoryId,
+          newMemoryId: rpcResult?.new_id,
           newValue: normalizedMemory.value,
-          incomingAuthority,
-          supersededAt: supersededTimestamp,
+          incomingAuthority
         });
 
         // Pre-Heartbeat Hardening: Invalidate stale working memory for this canonical key
@@ -441,6 +417,7 @@ export class MemoryRepository {
           confidence: normalizedMemory.confidence,
           emotional_weight: normalizedMemory.emotional_weight ?? 0,
           source_message: sourceMessage,
+          source_message_id: (normalizedMemory as any).source_message_id || null,
           source_authority: incomingAuthority,
           is_archived: false,
           lifecycle_state: incomingLifecycleState,

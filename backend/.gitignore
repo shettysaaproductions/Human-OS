@@ -20,3 +20,10 @@ Thumbs.db
 
 # Render build cache
 .render-build-cache/
+
+# Forensic and Audit Dumps
+forensic_*.json
+audit_*.txt
+*_dump.txt
+*_dump.json
+forensics_*.json

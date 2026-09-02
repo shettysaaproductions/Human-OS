@@ -1988,6 +1988,7 @@ HINGLISH RULES:
             hasExplicitRemember: turnAnalysis.hasExplicitRemember,
             hasCorrections: turnAnalysis.hasCorrections,
             correctionTarget: turnAnalysis.correctionTarget,
+            correctionValue: turnAnalysis.units.find((u: any) => u.type === 'correction')?.factValue,
           };
           memoryQueue.add('extract_all_memories', payload).catch(err => {
             logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });
