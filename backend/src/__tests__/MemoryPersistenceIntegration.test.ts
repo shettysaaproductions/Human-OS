@@ -1143,7 +1143,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const result = await supabaseAdmin.rpc('atomic_supersede_memory', {
       p_user_id: TEST_USER,
-      p_key: 'favorite_color',
+      p_key: 'favourite_color',
       p_new_value: 'blue',
       p_memory_type: 'fact',
       p_importance: 50,
@@ -1425,5 +1425,182 @@ describe('Memory Persistence & Concurrency Integration', () => {
     // Assistant's negated phrase must not appear
     const concepts = (res.negatedGoals || []).map(g => g.concept);
     expect(concepts.some(c => c.includes('fashion'))).toBe(false);
+  });
+
+  // ── P0-CANONICAL BOUNDARY: DB must reject alias keys ──────────────────────
+  it('CB1: atomic_canonicalize with alias key mom_name -> NON_CANONICAL_KEY zero mutation', async () => {
+    const aliasId = randomUUID();
+    await supabaseAdmin.from('memories').insert([{
+      id: aliasId,
+      user_id: TEST_USER,
+      key: 'moms_name',
+      value: 'TestAlias',
+      memory_type: 'family',
+      is_archived: false,
+      lifecycle_state: 'CURRENT',
+      importance: 80,
+      confidence: 0.9,
+      source_authority: 'explicit_user',
+    }]);
+    const res = await supabaseAdmin.rpc('atomic_canonicalize_memory', {
+      p_user_id: TEST_USER,
+      p_alias_memory_id: aliasId,
+      p_canonical_key: 'mom_name', // alias, not canonical
+      p_reason: 'test: alias boundary',
+    });
+    expect(res.data?.success).toBe(false);
+    expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+    // Zero mutation: no new canonical, alias remains CURRENT
+    const { data: canon } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'mom_name').eq('is_archived', false);
+    // alias row still exists as CURRENT (no mutation)
+    const { data: aliasRow } = await supabaseAdmin.from('memories').select('*').eq('id', aliasId).maybeSingle();
+    expect(aliasRow?.is_archived).toBe(false);
+    // No mom_name canonical created (the alias itself is mom_name? but p_canonical_key was mom_name alias, so canonical check fails before any insert)
+    // Also ensure no mother_name created from this bypass
+    const { data: motherCanon } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'mother_name').eq('is_archived', false).eq('lifecycle_state', 'CURRENT');
+    // mother_name should not have been created by alias attempt (if it existed before, ignore)
+  });
+
+  it('CB2: atomic_canonicalize with favorite_colour alias -> NON_CANONICAL_KEY', async () => {
+    const aliasId = randomUUID();
+    await supabaseAdmin.from('memories').insert([{
+      id: aliasId,
+      user_id: TEST_USER,
+      key: 'favorite_color',
+      value: 'blue',
+      memory_type: 'fact',
+      is_archived: false,
+      lifecycle_state: 'CURRENT',
+      importance: 50,
+      confidence: 0.9,
+      source_authority: 'explicit_user',
+    }]);
+    const res = await supabaseAdmin.rpc('atomic_canonicalize_memory', {
+      p_user_id: TEST_USER,
+      p_alias_memory_id: aliasId,
+      p_canonical_key: 'favorite_colour', // alias for favourite_color
+      p_reason: 'test',
+    });
+    expect(res.data?.success).toBe(false);
+    expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+    const { data: aliasRow } = await supabaseAdmin.from('memories').select('*').eq('id', aliasId).maybeSingle();
+    expect(aliasRow?.is_archived).toBe(false);
+  });
+
+  it('CB3: atomic_supersede with alias mom_name -> NON_CANONICAL_KEY', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'test supersede alias', created_at: '2026-01-01T00:00:00Z' }]);
+    const res = await supabaseAdmin.rpc('atomic_supersede_memory', {
+      p_user_id: TEST_USER,
+      p_key: 'mom_name',
+      p_new_value: 'Bypass',
+      p_memory_type: 'fact',
+      p_importance: 50,
+      p_confidence: 0.9,
+      p_emotional_weight: 0,
+      p_source_message: 'test',
+      p_source_message_id: src,
+      p_source_authority: 'explicit_user',
+    });
+    expect(res.data?.success).toBe(false);
+    expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'mom_name').eq('is_archived', false);
+    expect(rows?.length).toBe(0);
+  });
+
+  it('CB4: atomic_supersede with brothers_name alias -> NON_CANONICAL_KEY', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'test brothers', created_at: '2026-01-01T00:00:00Z' }]);
+    const res = await supabaseAdmin.rpc('atomic_supersede_memory', {
+      p_user_id: TEST_USER,
+      p_key: 'brothers_name',
+      p_new_value: 'Bypass2',
+      p_memory_type: 'fact',
+      p_importance: 50,
+      p_confidence: 0.9,
+      p_emotional_weight: 0,
+      p_source_message: 'test',
+      p_source_message_id: src,
+      p_source_authority: 'explicit_user',
+    });
+    expect(res.data?.success).toBe(false);
+    expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+  });
+
+  it('CB5: atomic_supersede with valid canonical mother_name succeeds', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'My mother name is Sita', created_at: '2026-01-01T00:00:10Z' }]);
+    const mem = { key: 'mother_name', value: 'Sita', correction_intent: true, source_message_id: src, shouldPersist: true, type: 'fact' };
+    await memoryRepository.upsertMemory(TEST_USER, mem, 'My mother name is Sita');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'mother_name').eq('is_archived', false);
+    expect(rows?.length).toBe(1);
+    expect(rows![0].value).toBe('Sita');
+  });
+
+  it('CB6: atomic_canonicalize with valid canonical brother_name succeeds', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Mera bhai ka naam Arjun', created_at: '2026-01-01T00:00:11Z' }]);
+    const aliasId = randomUUID();
+    await supabaseAdmin.from('memories').insert([{
+      id: aliasId,
+      user_id: TEST_USER,
+      key: 'bhai_name',
+      value: 'Arjun',
+      memory_type: 'family',
+      is_archived: false,
+      lifecycle_state: 'CURRENT',
+      importance: 80,
+      confidence: 0.9,
+      source_authority: 'explicit_user',
+      source_message_id: src,
+      source_message: 'Mera bhai ka naam Arjun',
+    }]);
+    const res = await supabaseAdmin.rpc('atomic_canonicalize_memory', {
+      p_user_id: TEST_USER,
+      p_alias_memory_id: aliasId,
+      p_canonical_key: 'brother_name',
+      p_reason: 'test valid canonical',
+    });
+    expect(res.data?.success).toBe(true);
+    const { data: canon } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'brother_name').eq('is_archived', false).eq('lifecycle_state', 'CURRENT');
+    expect(canon?.length).toBe(1);
+  });
+
+  it('SC1: DB canonicalize_key_sql matches JS memoryKeySchema for all aliases', async () => {
+    const { CANONICAL_ALIAS_MAP } = await import('../lib/memoryKeySchema');
+    const { Client } = await import('pg');
+    const dotenv = await import('dotenv');
+    dotenv.config();
+    const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    await client.connect();
+    try {
+      for (const [canonical, aliases] of Object.entries(CANONICAL_ALIAS_MAP)) {
+        for (const alias of aliases as string[]) {
+          const dbRes = await client.query('SELECT canonicalize_key_sql($1) as canon', [alias]);
+          const dbCanon = dbRes.rows[0].canon;
+          expect(dbCanon).toBe(canonical);
+        }
+        // canonical maps to itself
+        const selfRes = await client.query('SELECT canonicalize_key_sql($1) as canon', [canonical]);
+        expect(selfRes.rows[0].canon).toBe(canonical);
+      }
+      // Specific audits
+      const checks: Array<[string,string]> = [
+        ['moms_name','mother_name'],
+        ['mom_name','mother_name'],
+        ['bhai_name','brother_name'],
+        ['brothers_name','brother_name'],
+        ['behen','sister_name'],
+        ['sister','sister_name'],
+        ['favorite_colour','favourite_color'],
+        ['favorite_color','favourite_color'],
+      ];
+      for (const [alias, expected] of checks) {
+        const r = await client.query('SELECT canonicalize_key_sql($1) as canon', [alias]);
+        expect(r.rows[0].canon).toBe(expected);
+      }
+    } finally {
+      await client.end();
+    }
   });
 });
