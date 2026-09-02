@@ -24,7 +24,9 @@ export type AnomalyCode =
   | 'W-019' // Expired active reminder
   | 'W-020' // Impossible event order
   | 'W-021' // Causal source mismatch
-  | 'W-022'; // Durable state / output agreement failure
+  | 'W-022' // Durable state / output agreement failure
+  | 'W-023' // Multiple current values for canonical concept
+  | 'W-024'; // Malformed command key
 
 export type AnomalySeverity = 'low' | 'medium' | 'high' | 'critical';
 

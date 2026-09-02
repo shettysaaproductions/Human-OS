@@ -114,6 +114,16 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'prefer_work_hours', 'prefer_morning_work', 'prefer_evening_work',
     'work_hours_preference', 'working_hours_preference', 'preferred_working_hours'
   ],
+  // ── User: Favourites / Preferences ──────────────────────────────────────────
+  favourite_color: [
+    'favorite_color', 'favorite_colour', 'fav_color', 'favourite_colour'
+  ],
+  favourite_beverage: [
+    'favorite_beverage', 'favorite_drink', 'favourite_drink'
+  ],
+  favourite_street_food: [
+    'favorite_street_food', 'favourite_food'
+  ],
 };
 
 // ── Reverse lookup: alias → canonical key ─────────────────────────────────────
@@ -177,6 +187,13 @@ export function sameCanonicalConcept(keyA: string, keyB: string): boolean {
   const a = ALIAS_TO_CANONICAL.get(keyA.toLowerCase().trim()) ?? keyA.toLowerCase().trim();
   const b = ALIAS_TO_CANONICAL.get(keyB.toLowerCase().trim()) ?? keyB.toLowerCase().trim();
   return a === b;
+}
+
+/**
+ * Return whether a canonical key is explicitly defined in our map.
+ */
+export function isKnownCanonicalKey(canonicalKey: string): boolean {
+  return CANONICAL_KEYS.has(canonicalKey);
 }
 
 /**

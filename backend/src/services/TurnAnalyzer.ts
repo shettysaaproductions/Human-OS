@@ -2,6 +2,7 @@ import { ChatMessageInput } from '../routes/chat';
 import crypto from 'crypto';
 import { TemporalParser } from '../utils/temporalParser';
 import { TemporalMetadata } from '../types/memory';
+import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 
 export type SemanticUnitType = 'question' | 'fact' | 'emotion' | 'action' | 'correction' | 'casual';
 export type FactClassification = 'HIGH_CONFIDENCE_DURABLE_FACT' | 'PROTECTED_FACT' | 'TRANSIENT_FACT';
@@ -139,7 +140,12 @@ export class TurnAnalyzer {
 
           if (structuredCorrection && structuredCorrection.concept) {
             // Self-contained correction found!
-            resolvedKey = this.mapConceptToCanonicalKey(structuredCorrection.concept, context);
+            const resolution = MemorySemanticResolver.resolveProposedKey(structuredCorrection.concept);
+            if (resolution.action === 'PERSIST' && resolution.canonicalKey) {
+              resolvedKey = resolution.canonicalKey;
+            } else {
+              resolvedKey = this.mapConceptToCanonicalKey(structuredCorrection.concept, context);
+            }
             resolvedVal = structuredCorrection.value;
             relationship = resolvedKey;
           } else {
@@ -158,6 +164,16 @@ export class TurnAnalyzer {
                 // Completely ambiguous with no context -> NO-OP
                 resolvedKey = undefined;
               }
+            }
+          }
+
+          // Force ambiguous correction targets through the semantic resolver if we have a key
+          if (resolvedKey) {
+            const finalRes = MemorySemanticResolver.resolveProposedKey(resolvedKey);
+            if (finalRes.action === 'QUARANTINE') {
+               resolvedKey = undefined;
+            } else if (finalRes.action === 'PERSIST' && finalRes.canonicalKey) {
+               resolvedKey = finalRes.canonicalKey;
             }
           }
 

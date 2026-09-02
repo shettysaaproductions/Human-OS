@@ -5,7 +5,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { cache, CACHE_NS } from '../lib/cache';
 import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
-import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 import { isGarbageMemoryValue, filterGarbageWorkingMemories } from '../lib/memoryFilters';
 
 // ── Hinglish vocative words that are NOT kinship facts ──────────────────────────
@@ -55,10 +55,15 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
       }
 
       // Agent-level key normalization (defense-in-depth before memoryRepository)
-      const { canonical, wasAliased } = canonicalizeKey(key);
-      if (wasAliased || key !== (mem.key ?? '')) {
-        logger.info('[ConsolidatedMemoryAgent] Key normalized at agent level', { original: mem.key, canonical });
-        return { ...mem, key: canonical };
+      const resolution = MemorySemanticResolver.resolveProposedKey(key);
+      if (resolution.action === 'QUARANTINE' || resolution.action === 'NO_OP') {
+        logger.warn('[ConsolidatedMemoryAgent] Key quarantined at agent level', { original: mem.key, reason: resolution.reason });
+        return { ...mem, shouldPersist: false };
+      }
+      
+      if (resolution.canonicalKey !== (mem.key ?? '')) {
+        logger.info('[ConsolidatedMemoryAgent] Key normalized at agent level', { original: mem.key, canonical: resolution.canonicalKey });
+        return { ...mem, key: resolution.canonicalKey };
       }
       return mem;
     })

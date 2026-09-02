@@ -199,10 +199,14 @@ export class MemoryRepository {
 
       const executeInsert = async (payload: any, trackerName: string) => {
         const { data, error } = await qt.track(trackerName, 'memories', () =>
-          supabaseAdmin.from('memories').insert(payload).select('id').single()
+          supabaseAdmin.from('memories').insert(payload).select('id').maybeSingle()
         );
         if (error) {
           const errMsg = error.message || '';
+          if (error.code === '23505' || errMsg.includes('unique constraint')) {
+            logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index. Safely aborting to prevent duplicate.`, { payloadKey: payload.key, error: errMsg });
+            return { data: null, error: null };
+          }
           if (
             errMsg.includes('schema cache') ||
             errMsg.includes('Could not find') ||
@@ -216,14 +220,18 @@ export class MemoryRepository {
             delete fallbackPayload.temporal_precision;
             delete fallbackPayload.temporal_metadata;
             const resFallback = await qt.track(`${trackerName}_fallback`, 'memories', () =>
-              supabaseAdmin.from('memories').insert(fallbackPayload).select('id').single()
+              supabaseAdmin.from('memories').insert(fallbackPayload).select('id').maybeSingle()
             );
+            if (resFallback.error && (resFallback.error.code === '23505' || resFallback.error.message.includes('unique constraint'))) {
+               logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index (fallback).`, { payloadKey: payload.key });
+               return { data: null, error: null };
+            }
             if (resFallback.error) {
               throw new Error(`Failed to insert memory (fallback): ${resFallback.error.message}`);
             }
             return resFallback;
           }
-          throw new Error(`Failed to insert memory: ${error.message}`);
+          throw new Error(`Failed to insert memory: ${error.message} (Code: ${error.code})`);
         }
         return { data, error: null };
       };
@@ -392,7 +400,8 @@ export class MemoryRepository {
         }, 'upsert_memory_insert_superseding');
 
         if (!newRow?.id) {
-          throw new Error('Failed to insert superseding memory');
+          logger.warn('[MemoryRepository] Failed to insert superseding memory (likely race condition blocked by unique index), aborting supersession back-link.');
+          return;
         }
 
         const newMemoryId = newRow.id;

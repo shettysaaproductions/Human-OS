@@ -15,6 +15,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { generateAnomalyFingerprint } from '../lib/guardianFingerprint';
 import {
@@ -38,12 +39,12 @@ export class DeterministicGuardianService {
   ): Promise<GuardianRunResult> {
     return this.executeGuardianRun(userId, 'post_turn', { turnId, sourceMessageId }, async (uId) => {
       const anomalies: GuardianAnomalyDraft[] = [];
-      const [
-        w001, w002, w003, w004, w008, w014, w016, w017, w020, w021
-      ] = await Promise.all([
+      const [w001, w002, w003, w023, w024, w004, w008, w014, w016, w017, w020, w021] = await Promise.all([
         this.detectW001_MemoryQuestionMetaText(uId),
         this.detectW002_MemoryAuthorityInversion(uId),
         this.detectW003_AliasCanonicalKeyCollision(uId),
+        this.detectW023_MultipleCurrentValues(uId),
+        this.detectW024_MalformedCommandKey(uId),
         this.detectW004_DuplicateLifeThreads(uId),
         this.detectW008_AutonomousChatWithoutOutreach(uId),
         this.detectW014_MissingTurnAttribution(uId),
@@ -53,7 +54,7 @@ export class DeterministicGuardianService {
         this.detectW021_CausalSourceMismatch(uId),
       ]);
 
-      anomalies.push(...w001, ...w002, ...w003, ...w004, ...w008, ...w014, ...w016, ...w017, ...w020, ...w021);
+      anomalies.push(...w001, ...w002, ...w003, ...w023, ...w024, ...w004, ...w008, ...w014, ...w016, ...w017, ...w020, ...w021);
       return anomalies;
     });
   }
@@ -81,12 +82,14 @@ export class DeterministicGuardianService {
         ]);
         anomalies.push(...w004, ...w005, ...w007, ...w021);
       } else {
-        const [w001, w002, w003] = await Promise.all([
+        const [w001, w002, w003, w023, w024] = await Promise.all([
           this.detectW001_MemoryQuestionMetaText(uId),
           this.detectW002_MemoryAuthorityInversion(uId),
           this.detectW003_AliasCanonicalKeyCollision(uId),
+          this.detectW023_MultipleCurrentValues(uId),
+          this.detectW024_MalformedCommandKey(uId),
         ]);
-        anomalies.push(...w001, ...w002, ...w003);
+        anomalies.push(...w001, ...w002, ...w003, ...w023, ...w024);
       }
       return anomalies;
     });
@@ -188,6 +191,8 @@ export class DeterministicGuardianService {
       this.detectW020_ImpossibleEventOrder(userId),
       this.detectW021_CausalSourceMismatch(userId),
       this.detectW022_DurableStateOutputAgreementFailure(userId),
+      this.detectW023_MultipleCurrentValues(userId),
+      this.detectW024_MalformedCommandKey(userId),
     ]);
     return results.flat();
   }
@@ -323,6 +328,89 @@ export class DeterministicGuardianService {
       }
     }
 
+    return drafts;
+  }
+
+  /**
+   * W-023: MULTIPLE CURRENT VALUES
+   * Detects if multiple rows claim to be the 'CURRENT' state for the same canonical concept.
+   */
+  async detectW023_MultipleCurrentValues(userId: string): Promise<GuardianAnomalyDraft[]> {
+    const drafts: GuardianAnomalyDraft[] = [];
+    const { data: memories, error } = await qt.track('guardian_w023_memories', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .select('id, key, value, lifecycle_state')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+    );
+
+    if (error || !memories) return drafts;
+
+    const currentRows = memories.filter(m => !m.lifecycle_state || m.lifecycle_state === 'CURRENT');
+    const grouped = new Map<string, typeof memories>();
+
+    for (const mem of currentRows) {
+      const canonical = MemorySemanticResolver.resolveProposedKey(mem.key).canonicalKey || mem.key;
+      if (!grouped.has(canonical)) grouped.set(canonical, []);
+      grouped.get(canonical)!.push(mem);
+    }
+
+    for (const [canonical, list] of grouped.entries()) {
+      if (list.length > 1) {
+        const fingerprint = generateAnomalyFingerprint(userId, 'W-023', list[0].id, canonical);
+        drafts.push({
+          anomalyCode: 'W-023',
+          severity: 'high',
+          targetEntityId: list[0].id,
+          fingerprint,
+          evidence: {
+            canonical_key: canonical,
+            memory_ids: list.map(m => m.id),
+            keys: list.map(m => m.key),
+            values: list.map(m => m.value),
+            discrepancy: 'Multiple CURRENT memory rows exist for the same canonical concept'
+          }
+        });
+      }
+    }
+    return drafts;
+  }
+
+  /**
+   * W-024: MALFORMED COMMAND KEY
+   * Detects legacy keys derived from command prefixes (e.g. remember_this_favourite)
+   */
+  async detectW024_MalformedCommandKey(userId: string): Promise<GuardianAnomalyDraft[]> {
+    const drafts: GuardianAnomalyDraft[] = [];
+    const { data: memories, error } = await qt.track('guardian_w024_memories', 'memories', () =>
+      supabaseAdmin
+        .from('memories')
+        .select('id, key, value')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+    );
+
+    if (error || !memories) return drafts;
+
+    for (const mem of memories) {
+      const res = MemorySemanticResolver.resolveProposedKey(mem.key);
+      if (res.action === 'QUARANTINE') {
+        const fingerprint = generateAnomalyFingerprint(userId, 'W-024', mem.id, mem.key);
+        drafts.push({
+          anomalyCode: 'W-024',
+          severity: 'medium',
+          targetEntityId: mem.id,
+          fingerprint,
+          evidence: {
+            memory_id: mem.id,
+            key: mem.key,
+            value: mem.value,
+            discrepancy: `Malformed command-derived key detected: ${res.reason}`
+          }
+        });
+      }
+    }
     return drafts;
   }
 

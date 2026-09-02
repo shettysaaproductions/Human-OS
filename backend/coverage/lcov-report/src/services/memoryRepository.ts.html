@@ -25,14 +25,14 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/247</span>
+                <span class='fraction'>0/254</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/210</span>
+                <span class='fraction'>0/221</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/232</span>
+                <span class='fraction'>0/239</span>
             </div>
         
             
@@ -896,7 +896,17 @@
 <a name='L831'></a><a href='#L831'>831</a>
 <a name='L832'></a><a href='#L832'>832</a>
 <a name='L833'></a><a href='#L833'>833</a>
-<a name='L834'></a><a href='#L834'>834</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L834'></a><a href='#L834'>834</a>
+<a name='L835'></a><a href='#L835'>835</a>
+<a name='L836'></a><a href='#L836'>836</a>
+<a name='L837'></a><a href='#L837'>837</a>
+<a name='L838'></a><a href='#L838'>838</a>
+<a name='L839'></a><a href='#L839'>839</a>
+<a name='L840'></a><a href='#L840'>840</a>
+<a name='L841'></a><a href='#L841'>841</a>
+<a name='L842'></a><a href='#L842'>842</a>
+<a name='L843'></a><a href='#L843'>843</a>
+<a name='L844'></a><a href='#L844'>844</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1102,19 +1112,27 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1211,6 +1229,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1288,6 +1307,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1930,10 +1950,14 @@ function <span class="fstat-no" title="function not covered" >isHistoricalFact(<
 &nbsp;
       const executeInsert = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >async </span>(payload: any, trackerName: string) =&gt; {</span>
         const { data, error } = <span class="cstat-no" title="statement not covered" >await qt.track(trackerName, 'memories', <span class="fstat-no" title="function not covered" >() =</span>&gt;</span>
-<span class="cstat-no" title="statement not covered" >          supabaseAdmin.from('memories').insert(payload).select('id').single()</span>
+<span class="cstat-no" title="statement not covered" >          supabaseAdmin.from('memories').insert(payload).select('id').maybeSingle()</span>
         );
 <span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (error) {</span>
           const errMsg = <span class="cstat-no" title="statement not covered" >error.message || '';</span>
+<span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (error.code === '23505' || errMsg.includes('unique constraint')) {</span>
+<span class="cstat-no" title="statement not covered" >            logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index. Safely aborting to prevent duplicate.`, { payloadKey: payload.key, error: errMsg });</span>
+<span class="cstat-no" title="statement not covered" >            return { data: null, error: null };</span>
+          }
 <span class="cstat-no" title="statement not covered" >          <span class="missing-if-branch" title="if path not taken" >I</span>if (</span>
             errMsg.includes('schema cache') ||
             errMsg.includes('Could not find') ||
@@ -1947,14 +1971,18 @@ function <span class="fstat-no" title="function not covered" >isHistoricalFact(<
 <span class="cstat-no" title="statement not covered" >            delete fallbackPayload.temporal_precision;</span>
 <span class="cstat-no" title="statement not covered" >            delete fallbackPayload.temporal_metadata;</span>
             const resFallback = <span class="cstat-no" title="statement not covered" >await qt.track(`${trackerName}_fallback`, 'memories', <span class="fstat-no" title="function not covered" >() =</span>&gt;</span>
-<span class="cstat-no" title="statement not covered" >              supabaseAdmin.from('memories').insert(fallbackPayload).select('id').single()</span>
+<span class="cstat-no" title="statement not covered" >              supabaseAdmin.from('memories').insert(fallbackPayload).select('id').maybeSingle()</span>
             );
+<span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (resFallback.error &amp;&amp; (resFallback.error.code === '23505' || resFallback.error.message.includes('unique constraint'))) {</span>
+<span class="cstat-no" title="statement not covered" >               logger.warn(`[MemoryRepository] Concurrent CURRENT row insertion blocked by DB unique index (fallback).`, { payloadKey: payload.key });</span>
+<span class="cstat-no" title="statement not covered" >               return { data: null, error: null };</span>
+            }
 <span class="cstat-no" title="statement not covered" >            <span class="missing-if-branch" title="if path not taken" >I</span>if (resFallback.error) {</span>
 <span class="cstat-no" title="statement not covered" >              throw new Error(`Failed to insert memory (fallback): ${resFallback.error.message}`);</span>
             }
 <span class="cstat-no" title="statement not covered" >            return resFallback;</span>
           }
-<span class="cstat-no" title="statement not covered" >          throw new Error(`Failed to insert memory: ${error.message}`);</span>
+<span class="cstat-no" title="statement not covered" >          throw new Error(`Failed to insert memory: ${error.message} (Code: ${error.code})`);</span>
         }
 <span class="cstat-no" title="statement not covered" >        return { data, error: null };</span>
       };
@@ -1974,7 +2002,7 @@ function <span class="fstat-no" title="function not covered" >isHistoricalFact(<
           is_archived: false,
           lifecycle_state: 'PROPOSED',
           compression_status: 'proposed',
-          source_references: normalizedMemory.source_references,
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
           valid_from: validFrom,
           valid_until: validUntil,
           temporal_precision: temporalPrecision,
@@ -2043,6 +2071,7 @@ function <span class="fstat-no" title="function not covered" >isHistoricalFact(<
             protection_source: normalizedMemory.protection_source || 'system',
             protected_at: new Date().toISOString()
           } : {}),
+          ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
         }, 'upsert_memory_insert_future_or_unknown');
 <span class="cstat-no" title="statement not covered" >        logger.info('[MemoryRepository] Future intent / unknown memory inserted without supersession', {</span>
           key: normalizedMemory.key,
@@ -2122,7 +2151,8 @@ function <span class="fstat-no" title="function not covered" >isHistoricalFact(<
         }, 'upsert_memory_insert_superseding');
 &nbsp;
 <span class="cstat-no" title="statement not covered" >        <span class="missing-if-branch" title="if path not taken" >I</span>if (!newRow?.id) {</span>
-<span class="cstat-no" title="statement not covered" >          throw new Error('Failed to insert superseding memory');</span>
+<span class="cstat-no" title="statement not covered" >          logger.warn('[MemoryRepository] Failed to insert superseding memory (likely race condition blocked by unique index), aborting supersession back-link.');</span>
+<span class="cstat-no" title="statement not covered" >          return;</span>
         }
 &nbsp;
         const newMemoryId = <span class="cstat-no" title="statement not covered" >newRow.id;</span>
@@ -2569,7 +2599,7 @@ export const <span class="cstat-no" title="statement not covered" >memoryReposit
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-09-01T13:17:12.499Z
+                at 2026-09-02T06:53:15.356Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
