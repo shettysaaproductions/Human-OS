@@ -355,36 +355,45 @@ export class MemoryRepository {
         r => r.lifecycle_state !== 'HISTORICAL' && r.lifecycle_state !== 'UNKNOWN' && !isHistoricalFact(r.value)
       );
 
-      if (conflictingCurrentRow) {
-        // Authority hierarchy check:
-        const existingRank = authorityRank(conflictingCurrentRow.source_authority);
-        const incomingRank = authorityRank(incomingAuthority);
+      const isCorrection = normalizedMemory.correction_intent === true;
 
-        if (existingRank > incomingRank && !normalizedMemory.correction_intent) {
-          logger.info('[MemoryRepository] BLOCKED lower-authority overwrite', {
-            userId,
-            key: normalizedMemory.key,
-            existingAuthority: conflictingCurrentRow.source_authority,
-            incomingAuthority,
-          });
-          return;
+      // For corrections, ALWAYS route through the atomic RPC to enforce provenance gating.
+      // The RPC handles both cases: existing CURRENT (supersede) and no CURRENT (fresh insert).
+      // This ensures: missing/nonexistent/cross-user/assistant provenance -> MISSING_PROVENANCE + zero mutation.
+      if (isCorrection || conflictingCurrentRow) {
+        // Authority hierarchy check (only applies when superseding existing CURRENT):
+        if (conflictingCurrentRow) {
+          const existingRank = authorityRank(conflictingCurrentRow.source_authority);
+          const incomingRank = authorityRank(incomingAuthority);
+
+          if (existingRank > incomingRank && !isCorrection) {
+            logger.info('[MemoryRepository] BLOCKED lower-authority overwrite', {
+              userId,
+              key: normalizedMemory.key,
+              existingAuthority: conflictingCurrentRow.source_authority,
+              incomingAuthority,
+            });
+            return;
+          }
         }
 
-        // Authoritative Supersession Execution:
-        // Use the atomic RPC to lock, check provenance, mark superseded, and insert new.
+        // Authoritative atomic execution via RPC.
+        // Validates provenance, enforces ordering, supersedes if needed, inserts new CURRENT.
         const rpcPayload = {
           p_user_id: userId,
           p_key: normalizedMemory.key,
           p_new_value: normalizedMemory.value,
           p_memory_type: normalizedMemory.type,
-          p_importance: Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance ?? 50),
+          p_importance: conflictingCurrentRow
+            ? Math.max(conflictingCurrentRow.importance || 50, normalizedMemory.importance ?? 50)
+            : (normalizedMemory.importance ?? 50),
           p_confidence: normalizedMemory.confidence ?? 0.8,
-          p_emotional_weight: normalizedMemory.emotional_weight ?? conflictingCurrentRow.emotional_weight ?? 0,
+          p_emotional_weight: normalizedMemory.emotional_weight ?? (conflictingCurrentRow?.emotional_weight ?? 0),
           p_source_message: sourceMessage,
           p_source_message_id: (normalizedMemory as any).source_message_id || null,
           p_source_authority: incomingAuthority,
-          p_is_protected: normalizedMemory.is_protected || !!conflictingCurrentRow.protection_source,
-          p_protection_source: normalizedMemory.protection_source || conflictingCurrentRow.protection_source || 'system',
+          p_is_protected: normalizedMemory.is_protected || !!conflictingCurrentRow?.protection_source,
+          p_protection_source: normalizedMemory.protection_source || conflictingCurrentRow?.protection_source || 'system',
           p_source_references: normalizedMemory.source_references || null,
           p_compression_status: normalizedMemory.compression_status || null,
           p_valid_from: validFrom,
@@ -406,23 +415,37 @@ export class MemoryRepository {
             logger.warn(`[MemoryRepository] Blocked stale write. Incoming message is older than current memory's source.`, { userId, key: normalizedMemory.key });
             return;
           }
+          if (rpcResult.reason === 'MISSING_PROVENANCE') {
+            logger.warn(`[MemoryRepository] Blocked correction with invalid provenance`, { userId, key: normalizedMemory.key, detail: rpcResult.detail });
+            return;
+          }
           throw new Error(`Atomic supersession failed: ${rpcResult.reason}`);
         }
 
-        logger.info('[MemoryRepository] Conflicting CURRENT memory SUPERSEDED atomically', {
-          userId,
-          key: normalizedMemory.key,
-          oldMemoryId: rpcResult?.superseded_id,
-          oldValue: conflictingCurrentRow.value,
-          newMemoryId: rpcResult?.new_id,
-          newValue: normalizedMemory.value,
-          incomingAuthority
-        });
+        if (conflictingCurrentRow) {
+          logger.info('[MemoryRepository] Conflicting CURRENT memory SUPERSEDED atomically', {
+            userId,
+            key: normalizedMemory.key,
+            oldMemoryId: rpcResult?.superseded_id,
+            oldValue: conflictingCurrentRow.value,
+            newMemoryId: rpcResult?.new_id,
+            newValue: normalizedMemory.value,
+            incomingAuthority
+          });
+        } else {
+          logger.info('[MemoryRepository] Correction inserted atomically with provenance validation', {
+            userId,
+            key: normalizedMemory.key,
+            newMemoryId: rpcResult?.new_id,
+            newValue: normalizedMemory.value,
+            incomingAuthority
+          });
+        }
 
         // Pre-Heartbeat Hardening: Invalidate stale working memory for this canonical key
         await this.invalidateStaleWorkingMemory(userId, normalizedMemory.key, normalizedMemory.value);
       } else {
-        // No conflicting CURRENT row found: clean fresh insert
+        // No conflicting CURRENT row found and not a correction: clean fresh insert
         await executeInsert({
           user_id: userId,
           memory_type: normalizedMemory.type,

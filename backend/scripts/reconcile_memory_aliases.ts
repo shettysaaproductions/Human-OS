@@ -2,7 +2,6 @@ import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import path from 'path';
 import { MemorySemanticResolver } from '../src/lib/MemorySemanticResolver';
-import { memoryRepository } from '../src/services/memoryRepository';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
@@ -80,62 +79,24 @@ async function runReconciliation() {
       fixCount++;
 
       if (isApply) {
-        // P0-3: Use authoritative state-transition path via MemoryRepository.
-        // Never perform raw "UPDATE old CURRENT -> INSERT new CURRENT" as separate
-        // application-level operations. The repository routes through the atomic
-        // lifecycle (upsert) and the old alias is archived via the safe RPC,
-        // preserving history, never creating two CURRENT rows, and staying
-        // concurrent-safe (the unique index + repository retry handle races).
+        // P0-4: Use single atomic canonicalization RPC.
+        // This replaces the multi-step check -> upsert -> archive pattern with
+        // one transaction that locks the alias, checks/creates canonical CURRENT,
+        // and archives the alias -- guaranteeing exactly one CURRENT canonical
+        // representation, preserving history, zero physical deletes.
+        const { data: rpcResult, error: rpcErr } = await supabase.rpc('atomic_canonicalize_memory', {
+          p_user_id: userId,
+          p_alias_memory_id: mem.id,
+          p_canonical_key: res.canonicalKey,
+          p_reason: 'Reconciliation script: Canonical alias migration'
+        });
 
-        // First, check if a CURRENT row with the canonical key already exists
-        const { data: existingCanonical } = await supabase
-          .from('memories')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('key', res.canonicalKey)
-          .eq('is_archived', false)
-          .maybeSingle();
-
-        if (existingCanonical) {
-          // Canonical key already exists - archive the alias row only
-          console.log(`  [INFO] Canonical key '${res.canonicalKey}' already exists (ID: ${existingCanonical.id}). Archiving alias.`);
-
-          const { error: archiveErr } = await supabase.rpc('atomic_archive_memory', {
-            p_user_id: userId,
-            p_memory_id: mem.id,
-            p_reason: 'Reconciliation script: Duplicate alias of canonical key'
-          });
-          if (archiveErr) {
-            console.error(`  [!] Failed to archive alias via RPC: ${archiveErr.message}`);
-          }
+        if (rpcErr) {
+          console.error(`  [!] Atomic canonicalization failed: ${rpcErr.message}`);
+        } else if (rpcResult && rpcResult.success) {
+          console.log(`  [OK] ${rpcResult.action === 'created_canonical' ? 'Created canonical' : 'Archived alias'}. Canonical ID: ${rpcResult.canonical_id}`);
         } else {
-          // No canonical CURRENT exists - commit the canonical row through the
-          // authoritative MemoryRepository (fresh authoritative insert, no raw
-          // replacement), then safely archive the old alias row.
-          try {
-            await memoryRepository.upsertMemory(userId, {
-              type: (mem.memory_type || 'semantic') as any,
-              key: res.canonicalKey,
-              value: mem.value,
-              importance: mem.importance || 50,
-              confidence: mem.confidence || 0.8,
-              emotional_weight: mem.emotional_weight || 0,
-              source_authority: mem.source_authority || 'needs_review',
-              shouldPersist: true
-            } as any, mem.source_message || 'Reconciliation canonicalization');
-            console.log(`  [OK] Canonical row committed via MemoryRepository.`);
-
-            const { error: archiveErr } = await supabase.rpc('atomic_archive_memory', {
-              p_user_id: userId,
-              p_memory_id: mem.id,
-              p_reason: 'Reconciliation script: Canonical alias migration'
-            });
-            if (archiveErr) {
-              console.error(`  [!] Failed to archive old alias via RPC: ${archiveErr.message}`);
-            }
-          } catch (err: any) {
-            console.error(`  [!] Failed canonical migration through MemoryRepository: ${err?.message}`);
-          }
+          console.error(`  [!] RPC returned failure: ${JSON.stringify(rpcResult)}`);
         }
       }
     }
