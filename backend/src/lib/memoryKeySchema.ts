@@ -55,11 +55,9 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: son ─────────────────────────────────────────────────────────────
   son_name: [
     'sons_name', 'son', 'beta', 'beta_name', 'bete_ka_naam', 'son_real_name',
-    'child_name',  // only when context indicates male child
   ],
   son_nickname: [
     'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam',
-    'child_nickname', 'child_nick_name',
   ],
   // ── Family: daughter ────────────────────────────────────────────────────────
   daughter_name: [
@@ -77,11 +75,9 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── Family: brother ─────────────────────────────────────────────────────────
   brother_name: [
-    'brothers_name', 'bhai_name', 'brothers_name', // apostrophe-stripped version
-    // NOTE: bare 'brother' and 'bhai' are NOT added here —
-    // they are separately blocked as vocative values in the agent filter.
-    // But if LLM emits key='brother' or key='bhai' with a proper-name value,
-    // we canonicalize the key but still validate the value separately.
+    'brothers_name', 'bhai_name',
+    // Bare 'brother' / 'bhai' ARE canonicalized to brother_name for key
+    // normalization, but the value layer still blocks generic vocatives.
     'brother', 'bhai', 'brother_real_name',
   ],
   brother_nickname: [

@@ -543,6 +543,222 @@ describe('Memory Persistence & Concurrency Integration', () => {
     // Both runs: the correction with lexicographically largest source_message_id (green) wins
   });
 
+  it('10d. concurrent alias reconciliation -> exactly one CURRENT canonical (serialized by user_id, canonical_key)', async () => {
+    // Two different aliases that map to the same canonical key (mother_name)
+    // must serialize by (user_id, canonical_key) and leave exactly one CURRENT.
+    const aliasId1 = randomUUID();
+    const aliasId2 = randomUUID();
+
+    // Insert two alias rows directly (bypass repository canonicalization)
+    const { error: insertErr } = await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasId1,
+        user_id: TEST_USER,
+        key: 'moms_name',
+        value: 'Sita',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+      },
+      {
+        id: aliasId2,
+        user_id: TEST_USER,
+        key: 'mom_name',
+        value: 'Sita',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+      },
+    ]);
+    if (insertErr) throw new Error(`Alias insert error: ${insertErr.message}`);
+
+    // Fire concurrent canonicalizations via RPC — both target mother_name
+    const results = await Promise.all([
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasId1,
+        p_canonical_key: 'mother_name',
+        p_reason: 'test: alias reconciliation',
+      }),
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasId2,
+        p_canonical_key: 'mother_name',
+        p_reason: 'test: alias reconciliation',
+      }),
+    ]);
+
+    // Both RPCs must succeed (one creates, one archives)
+    for (const r of results) {
+      expect(r.error).toBeNull();
+      expect(r.data?.success).toBe(true);
+    }
+
+    // Exactly one CURRENT canonical
+    const { data: canonicalRows, error: canonErr } = await supabaseAdmin
+      .from('memories')
+      .select('*')
+      .eq('user_id', TEST_USER)
+      .eq('key', 'mother_name')
+      .eq('is_archived', false)
+      .eq('lifecycle_state', 'CURRENT');
+    if (canonErr) throw new Error(`DB error: ${canonErr.message}`);
+    expect(canonicalRows?.length).toBe(1);
+    expect(canonicalRows![0].value).toBe('Sita');
+
+    // Both alias rows must now be archived with superseded_by linkage
+    const { data: aliasRows } = await supabaseAdmin
+      .from('memories')
+      .select('*')
+      .in('id', [aliasId1, aliasId2]);
+    expect(aliasRows?.length).toBe(2);
+    for (const row of aliasRows!) {
+      expect(row.is_archived).toBe(true);
+      expect(row.lifecycle_state).toBe('SUPERSEDED');
+      expect(row.superseded_by).toBe(canonicalRows![0].id);
+    }
+
+    // Reverse launch order must also yield exactly one CURRENT
+    const aliasId3 = randomUUID();
+    const aliasId4 = randomUUID();
+    await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasId3,
+        user_id: TEST_USER,
+        key: 'mothers_name',
+        value: 'Lakshmi',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+      },
+      {
+        id: aliasId4,
+        user_id: TEST_USER,
+        key: 'maa_name',
+        value: 'Lakshmi',
+        memory_type: 'family',
+        is_archived: false,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+      },
+    ]);
+
+    const resultsRev = await Promise.all([
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasId4,
+        p_canonical_key: 'mother_name',
+        p_reason: 'test: alias reconciliation reversed',
+      }),
+      supabaseAdmin.rpc('atomic_canonicalize_memory', {
+        p_user_id: TEST_USER,
+        p_alias_memory_id: aliasId3,
+        p_canonical_key: 'mother_name',
+        p_reason: 'test: alias reconciliation reversed',
+      }),
+    ]);
+
+    // After reversed-order concurrent canonicalization, still exactly one CURRENT
+    // The second batch should detect canonical already exists and just archive alias.
+    // Since mother_name already has a CURRENT from previous batch ('Sita'), these
+    // new aliases should be archived against the existing canonical, not create a second.
+    const { data: canonicalRows2 } = await supabaseAdmin
+      .from('memories')
+      .select('*')
+      .eq('user_id', TEST_USER)
+      .eq('key', 'mother_name')
+      .eq('is_archived', false)
+      .eq('lifecycle_state', 'CURRENT');
+    expect(canonicalRows2?.length).toBe(1);
+    // Original canonical value preserved (Sita), not overwritten by Lakshmi aliases
+    expect(canonicalRows2![0].value).toBe('Sita');
+
+    const { data: aliasRows2 } = await supabaseAdmin
+      .from('memories')
+      .select('*')
+      .in('id', [aliasId3, aliasId4]);
+    for (const row of aliasRows2!) {
+      expect(row.is_archived).toBe(true);
+      expect(row.superseded_by).toBe(canonicalRows2![0].id);
+    }
+  });
+
+  it('10e. equal timestamps reversed launch -> same deterministic winner', async () => {
+    const ts = '2026-01-01T00:00:00Z';
+    const sourceBlue = '00000000-0000-0000-0000-000000000010';
+    const sourceGreen = '00000000-0000-0000-0000-000000000020';
+    await supabaseAdmin.from('chat_history').insert([
+      { id: sourceBlue, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like pasta eq2', created_at: ts },
+      { id: sourceGreen, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like sushi eq2', created_at: ts }
+    ]);
+
+    const initialMem = { key: 'food_eq_rev', value: 'pizza', correction_intent: false, source_message_id: '00000000-0000-0000-0000-000000000009', shouldPersist: true, type: 'fact' };
+    // Seed initial CURRENT via separate history row
+    await supabaseAdmin.from('chat_history').insert([
+      { id: '00000000-0000-0000-0000-000000000009', user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'I like pizza eq_rev', created_at: '2025-12-31T00:00:00Z' }
+    ]);
+    await memoryRepository.upsertMemory(TEST_USER, initialMem, 'I like pizza eq_rev');
+
+    const memBlue = { key: 'food_eq_rev', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
+    const memGreen = { key: 'food_eq_rev', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
+
+    // Launch GREEN then BLUE (reversed) — lexicographically larger ID (green) must still win
+    await Promise.all([
+      memoryRepository.upsertMemory(TEST_USER, memGreen, 'Actually I like sushi eq2'),
+      memoryRepository.upsertMemory(TEST_USER, memBlue, 'Actually I like pasta eq2')
+    ]);
+
+    const { data: activeRows } = await supabaseAdmin.from('memories')
+      .select('*')
+      .eq('user_id', TEST_USER)
+      .eq('key', 'food_eq_rev')
+      .eq('is_archived', false)
+      .eq('lifecycle_state', 'CURRENT');
+    expect(activeRows?.length).toBe(1);
+    expect(activeRows![0].value).toBe('sushi'); // green has larger source_message_id -> wins
+
+    // Second independent key with same timestamps but BLUE then GREEN launch -> same winner
+    const sourceBlue2 = '00000000-0000-0000-0000-000000000030';
+    const sourceGreen2 = '00000000-0000-0000-0000-000000000040';
+    await supabaseAdmin.from('chat_history').insert([
+      { id: sourceBlue2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like tea', created_at: ts },
+      { id: sourceGreen2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like coffee', created_at: ts }
+    ]);
+    await supabaseAdmin.from('chat_history').insert([
+      { id: '00000000-0000-0000-0000-000000000029', user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'I like water', created_at: '2025-12-31T00:00:00Z' }
+    ]);
+    const initialMem2 = { key: 'drink_eq_rev', value: 'water', correction_intent: false, source_message_id: '00000000-0000-0000-0000-000000000029', shouldPersist: true, type: 'fact' };
+    await memoryRepository.upsertMemory(TEST_USER, initialMem2, 'I like water');
+
+    const memBlue2 = { key: 'drink_eq_rev', value: 'tea', correction_intent: true, source_message_id: sourceBlue2, shouldPersist: true, type: 'fact' };
+    const memGreen2 = { key: 'drink_eq_rev', value: 'coffee', correction_intent: true, source_message_id: sourceGreen2, shouldPersist: true, type: 'fact' };
+
+    await Promise.all([
+      memoryRepository.upsertMemory(TEST_USER, memBlue2, 'Actually I like tea'),
+      memoryRepository.upsertMemory(TEST_USER, memGreen2, 'Actually I like coffee')
+    ]);
+
+    const { data: activeRows2 } = await supabaseAdmin.from('memories')
+      .select('*')
+      .eq('user_id', TEST_USER)
+      .eq('key', 'drink_eq_rev')
+      .eq('is_archived', false)
+      .eq('lifecycle_state', 'CURRENT');
+    expect(activeRows2?.length).toBe(1);
+    expect(activeRows2![0].value).toBe('coffee'); // same deterministic rule
+  });
+
   it('11. stale old event cannot resurrect', async () => {
     const sourceOldId = randomUUID();
     const sourceNewId = randomUUID();

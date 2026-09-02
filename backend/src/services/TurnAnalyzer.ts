@@ -350,8 +350,13 @@ export class TurnAnalyzer {
       }
     }
 
-    const fullText = messages.map(m => m.message || '').join(' ');
-    const negatedGoals = this.extractNegatedGoals(fullText);
+    // P0-1: Deterministic state-affecting analysis MUST use USER messages only.
+    // Assistant text must never contribute to negatedGoals / correction-derived state.
+    const userFullText = messages
+      .filter(m => !(m as any).role || (m as any).role === 'user')
+      .map(m => m.message || '')
+      .join(' ');
+    const negatedGoals = this.extractNegatedGoals(userFullText);
 
     // BUG-06 legacy / BUG-NEGATION-RESUME: Only propagate FACTUAL CORRECTIONS (isCurrent = false)
     // Temporal pauses (isCurrent = true) must NOT be mixed into negativeCorrectionConcepts,
@@ -379,8 +384,8 @@ export class TurnAnalyzer {
       hasExplicitRemember: units.some(u => u.isProtected === true),
       correctionTarget,
       correctionValue,
-      // BUG-03: Deterministic reminder extraction across all clauses
-      reminderIntent: this.extractReminderIntent(fullText),
+      // BUG-03: Deterministic reminder extraction across all clauses (USER only)
+      reminderIntent: this.extractReminderIntent(userFullText),
       // BUG-06 legacy: string array for backward compat (factual only)
       negativeCorrectionConcepts: factualCorrections,
       // Amendment 3: structured negated goals with targetFactKey + isCurrent (both pauses and drops)

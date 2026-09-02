@@ -103,7 +103,7 @@ export class MemoryRepository {
     // ── Layer 1: Generic entity value blocklist ───────────────────────────────
     if (isGenericEntityValue(normalizedMemory.key, normalizedMemory.value, incomingAuthority)) {
       logger.info('[MemoryRepository] BLOCKED generic entity value', {
-        userId, key: normalizedMemory.key, value: normalizedMemory.value, authority: incomingAuthority
+        userId, canonicalKey: normalizedMemory.key, reason: 'GENERIC_ENTITY_VALUE', authority: incomingAuthority
       });
       return;
     }
@@ -305,10 +305,10 @@ export class MemoryRepository {
           ...(normalizedMemory.compression_status ? { compression_status: normalizedMemory.compression_status } : {}),
         }, 'upsert_memory_insert_historical');
         logger.info('[MemoryRepository] Historical memory preserved & inserted', {
-          key: normalizedMemory.key,
+          canonicalKey: normalizedMemory.key,
           userId,
-          value: normalizedMemory.value,
-          validFrom,
+          lifecycleState: 'HISTORICAL',
+          hasValidFrom: !!validFrom,
           temporalPrecision
         });
         return;
@@ -341,9 +341,9 @@ export class MemoryRepository {
           ...(normalizedMemory.source_references ? { source_references: normalizedMemory.source_references } : {}),
         }, 'upsert_memory_insert_future_or_unknown');
         logger.info('[MemoryRepository] Future intent / unknown memory inserted without supersession', {
-          key: normalizedMemory.key,
+          canonicalKey: normalizedMemory.key,
           userId,
-          value: normalizedMemory.value,
+          lifecycleState: 'UNKNOWN',
           isFutureIntent
         });
         return;
@@ -425,19 +425,20 @@ export class MemoryRepository {
         if (conflictingCurrentRow) {
           logger.info('[MemoryRepository] Conflicting CURRENT memory SUPERSEDED atomically', {
             userId,
-            key: normalizedMemory.key,
+            canonicalKey: normalizedMemory.key,
             oldMemoryId: rpcResult?.superseded_id,
-            oldValue: conflictingCurrentRow.value,
             newMemoryId: rpcResult?.new_id,
-            newValue: normalizedMemory.value,
+            reason: 'SUPERSEDED_VIA_PROVENANCE',
+            outcome: 'exactly_one_CURRENT',
             incomingAuthority
           });
         } else {
           logger.info('[MemoryRepository] Correction inserted atomically with provenance validation', {
             userId,
-            key: normalizedMemory.key,
+            canonicalKey: normalizedMemory.key,
             newMemoryId: rpcResult?.new_id,
-            newValue: normalizedMemory.value,
+            reason: 'CORRECTION_ATOMIC_INSERT',
+            outcome: 'exactly_one_CURRENT',
             incomingAuthority
           });
         }
@@ -492,7 +493,7 @@ export class MemoryRepository {
         });
       });
     } catch (err) {
-      logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), memory });
+      logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), canonicalKey: memory.key, reason: 'UPSERT_FAILED' });
       throw err;
     }
   }
