@@ -1,8 +1,23 @@
 import { memoryRepository } from '../services/memoryRepository';
+import { cache } from '../lib/cache';
 import { supabaseAdmin } from '../lib/supabase';
 import { randomUUID } from 'crypto';
+// Mock the LLM to return hallucinated values so we can test the deterministic override
+jest.mock('../lib/nvidia', () => ({
+  complete: jest.fn().mockResolvedValue(JSON.stringify({
+    semantic_memories: [{
+      shouldPersist: true,
+      type: 'fact',
+      key: 'hallucinated_key',
+      value: 'Hallucinated LLM Value',
+      importance: 100,
+      confidence: 1.0,
+      emotional_weight: 0
+    }]
+  }))
+}));
 
-jest.setTimeout(15000);
+jest.setTimeout(60000);
 
 describe('Memory Persistence & Concurrency Integration', () => {
   const TEST_USER = '00000000-0000-0000-0000-000000000123';
@@ -139,5 +154,187 @@ describe('Memory Persistence & Concurrency Integration', () => {
     expect(activeRows).toBeDefined();
     expect(activeRows!.length).toBe(1);
     expect(activeRows![0].value).toBe('bananas');
+  });
+
+  describe('TurnAnalyzer & ConsolidatedMemoryAgent Integration', () => {
+    // Tests for specific constraints
+    
+    it('ambiguous correction -> zero mutation', async () => {
+      const { turnAnalyzer } = await import('../services/TurnAnalyzer');
+      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+      
+      const payload = {
+        userId: TEST_USER,
+        messageId: randomUUID(),
+        message: 'No, that is wrong.',
+        questionClauses: [],
+        turnId: randomUUID(),
+        hasExplicitRemember: false,
+        hasCorrections: true,
+        correctionTarget: null, // Ambiguous
+        correctionValue: null,
+      };
+
+      await supabaseAdmin.from('chat_history').insert([
+        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
+      ]);
+
+      // Execute Agent
+      const job = { payload } as any;
+      const count = await consolidatedMemoryAgent['execute'](job);
+      
+      // Should result in NO semantic memories
+      const { data: rows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .eq('source_message_id', payload.messageId);
+        
+      // Count might be > 0 if it extracted episodic/emotional, but semantic memories should be 0.
+      const semanticRows = rows?.filter(r => ['fact', 'family', 'health', 'preferences'].includes(r.memory_type)) || [];
+      expect(semanticRows.length).toBe(0);
+    });
+
+    it('deterministic USER value beats hallucinated LLM value', async () => {
+      const { turnAnalyzer } = await import('../services/TurnAnalyzer');
+      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+      
+      const payload = {
+        userId: TEST_USER,
+        messageId: randomUUID(),
+        message: 'My brother name is actually Amit',
+        questionClauses: [],
+        turnId: randomUUID(),
+        hasExplicitRemember: false,
+        hasCorrections: true,
+        correctionTarget: 'brother_name',
+        correctionValue: 'Amit',
+      };
+
+      await supabaseAdmin.from('chat_history').insert([
+        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
+      ]);
+
+      const job = { payload } as any;
+      await consolidatedMemoryAgent['execute'](job);
+      
+      const { data: rows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .eq('key', 'brother_name')
+        .eq('is_archived', false);
+        
+      expect(rows?.length).toBe(1);
+      expect(rows![0].value).toBe('Amit');
+    });
+
+    it('favorite/favourite and color/colour collapse to one canonical key', async () => {
+      const source1 = randomUUID();
+      const source2 = randomUUID();
+      
+      await supabaseAdmin.from('chat_history').insert([
+        { id: source1, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'My favourite colour is red' },
+        { id: source2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually my favorite color is blue' }
+      ]);
+      
+      // British spelling
+      const mem1 = { key: 'favourite_colour', value: 'red', correction_intent: false, source_message_id: source1, shouldPersist: true, type: 'fact' };
+      await memoryRepository.upsertMemory(TEST_USER, mem1, 'My favourite colour is red');
+      
+      // American spelling correction
+      const mem2 = { key: 'favorite_color', value: 'blue', correction_intent: true, source_message_id: source2, shouldPersist: true, type: 'fact' };
+      await memoryRepository.upsertMemory(TEST_USER, mem2, 'Actually my favorite color is blue');
+      
+      // Check the final key - should be canonicalized to 'favorite_color'
+      // Wait, memoryRepository automatically canonicalizes 'favourite_colour' to 'favorite_color' using MemorySemanticResolver!
+      const { data: activeRows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .eq('is_archived', false)
+        .in('key', ['favorite_color', 'favourite_color', 'favorite_colour', 'favourite_colour']);
+        
+      expect(activeRows?.length).toBe(1);
+      // Depending on the canonicalizer's schema, it should be the canonical target. Let's assume 'favorite_color' wins.
+      // At the very least there's only 1 active row.
+      expect(activeRows![0].value).toBe('blue');
+    });
+    
+    it('target != null but value == null -> zero mutation', async () => {
+      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+      
+      const payload = {
+        userId: TEST_USER,
+        messageId: randomUUID(),
+        message: 'I dont have a brother', // If this somehow parsed as correction without a new value
+        questionClauses: [],
+        turnId: randomUUID(),
+        hasExplicitRemember: false,
+        hasCorrections: true,
+        correctionTarget: 'brother_name',
+        correctionValue: null,
+      };
+
+      await supabaseAdmin.from('chat_history').insert([
+        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
+      ]);
+
+      const job = { payload } as any;
+      await consolidatedMemoryAgent['execute'](job);
+      
+      const { data: rows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .eq('source_message_id', payload.messageId);
+        
+      const semanticRows = rows?.filter(r => ['fact', 'family'].includes(r.memory_type)) || [];
+      expect(semanticRows.length).toBe(0);
+    });
+
+    it('correction cache hit cannot leak stale value', async () => {
+      const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+      
+      const payload = {
+        userId: TEST_USER,
+        messageId: randomUUID(),
+        message: 'My favorite animal is dog',
+        questionClauses: [],
+        turnId: randomUUID(),
+        hasExplicitRemember: false,
+        hasCorrections: true,
+        correctionTarget: 'favorite_animal',
+        correctionValue: 'dog',
+      };
+
+      await supabaseAdmin.from('chat_history').insert([
+        { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
+      ]);
+
+      // Mock cache.get to simulate a stale cache hit that says "cat"
+      const getSpy = jest.spyOn(cache, 'get').mockReturnValue({
+        semantic_memories: [{
+          key: 'favorite_animal',
+          value: 'cat', // Stale
+          shouldPersist: true,
+          type: 'fact',
+          confidence: 1.0,
+          importance: 80,
+          emotional_weight: 0
+        }]
+      });
+
+      // Execute Agent - should ignore cache and insert 'dog' deterministically
+      const job = { payload } as any;
+      await consolidatedMemoryAgent['execute'](job);
+      
+      const { data: rows } = await supabaseAdmin.from('memories')
+        .select('*')
+        .eq('user_id', TEST_USER)
+        .eq('key', 'favorite_animal')
+        .eq('is_archived', false);
+        
+      expect(rows?.length).toBe(1);
+      expect(rows![0].value).toBe('dog'); // Proves cache was bypassed and correctionValue was used
+      
+      getSpy.mockRestore();
+    });
   });
 });

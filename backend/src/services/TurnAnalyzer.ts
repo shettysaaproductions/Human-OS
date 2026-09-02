@@ -88,6 +88,8 @@ export interface TurnAnalysisResult {
   hasExplicitRemember?: boolean;
   /** P0-3: Specific target key of the correction, or null if ambiguous */
   correctionTarget?: string | null;
+  /** P0-1: Deterministic value for the correction extracted from the user turn */
+  correctionValue?: string | null;
 }
 
 export interface ExtractedFact {
@@ -329,6 +331,7 @@ export class TurnAnalyzer {
     const hasCorrections = units.some(u => u.type === 'correction');
     const firstCorrectionWithKey = units.find(u => u.type === 'correction' && !!u.factKey);
     const correctionTarget = hasCorrections ? (firstCorrectionWithKey ? firstCorrectionWithKey.factKey! : null) : null;
+    const correctionValue = hasCorrections && firstCorrectionWithKey && firstCorrectionWithKey.factValue ? firstCorrectionWithKey.factValue : null;
 
     return {
       units,
@@ -339,6 +342,7 @@ export class TurnAnalyzer {
       hasCorrections,
       hasExplicitRemember: units.some(u => u.isProtected === true),
       correctionTarget,
+      correctionValue,
       // BUG-03: Deterministic reminder extraction across all clauses
       reminderIntent: this.extractReminderIntent(fullText),
       // BUG-06 legacy: string array for backward compat (factual only)

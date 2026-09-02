@@ -13,7 +13,7 @@ import { isGarbageMemoryValue, filterGarbageWorkingMemories } from '../lib/memor
 const HINGLISH_VOCATIVES = new Set(['bhai','yaar','bro','boss','dude','arre','oye','man','buddy','re']);
 
 // Kinship-statement patterns — must be present for brother/bhai_name to be extracted
-const KINSHIP_PATTERNS = /\b(mera|mere|hamara|hamare|meri|apna|us(?:ka|ki)|uska|ek|ek\s+bhai|bhai\s+ka\s+naam|brother\s+ka\s+naam|brother\s+hai|bhai\s+hai)\b/i;
+const KINSHIP_PATTERNS = /\b(my|mera|mere|hamara|hamare|meri|apna|us(?:ka|ki)|uska|ek|ek\s+bhai|bhai\s+ka\s+naam|brother\s+ka\s+naam|brother\s+hai|bhai\s+hai)\b/i;
 
 // ── Generic entity blocklist (pre-DB filter — layer 1 defense-in-depth) ─────────
 // memoryRepository also enforces this as layer 2. Both layers exist for safety.
@@ -161,12 +161,15 @@ If the entire user message is a question, return empty arrays for all memory typ
 
     const isExplicitAuthority = hasExplicitRemember || (hasCorrections && !!correctionTarget);
 
-    // Check cache first
-    const cacheKey = `memory_extraction:${hashMessage(message)}`;
-    const cached = cache.get<ConsolidatedExtraction>(cacheKey);
-    if (cached) {
-      logger.info(`[ConsolidatedMemoryAgent] Cache hit for message ${messageId}`, { userId });
-      return this.persistExtraction(userId, messageId, message, cached, { isExplicitAuthority });
+    // Check cache first (UNLESS IT'S A CORRECTION)
+    // Correction turns bypass the semantic extraction cache entirely (P0-2)
+    if (!hasCorrections) {
+      const cacheKey = `memory_extraction:${hashMessage(message)}`;
+      const cached = cache.get<ConsolidatedExtraction>(cacheKey);
+      if (cached) {
+        logger.info(`[ConsolidatedMemoryAgent] Cache hit for message ${messageId}`, { userId });
+        return this.persistExtraction(userId, messageId, message, cached, { isExplicitAuthority });
+      }
     }
 
     let safetyInstructions = '';
@@ -282,29 +285,31 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 
     const parsed = JSON.parse(response) as ConsolidatedExtraction;
     
-    // ENFORCE DETERMINISTIC CORRECTION ARCHITECTURE (BLOCKER 3)
+    // ENFORCE DETERMINISTIC CORRECTION ARCHITECTURE (BLOCKER 3 / P0-1)
     if (hasCorrections) {
-      if (!correctionTarget) {
-        // Ambiguous correction -> zero semantic mutation
+      if (!correctionTarget || !job.payload.correctionValue || job.payload.correctionValue.trim() === '') {
+        // Ambiguous correction or missing value -> zero semantic mutation
         parsed.semantic_memories = [];
       } else {
-        // Unambiguous correction -> exactly one canonical target
-        parsed.semantic_memories = (parsed.semantic_memories || []).filter(
-          mem => mem.key === correctionTarget
-        );
-        // Force the value to be grounded in the user's turn
-        if (job.payload.correctionValue) {
-          for (const mem of parsed.semantic_memories) {
-            mem.value = job.payload.correctionValue;
-            mem.correction_intent = true;
-          }
-        }
+        // Unambiguous correction -> exactly ONE canonical target deterministically generated
+        parsed.semantic_memories = [{
+          shouldPersist: true,
+          type: 'fact',
+          key: correctionTarget,
+          value: job.payload.correctionValue,
+          importance: 100,
+          confidence: 1.0,
+          emotional_weight: 0,
+          correction_intent: true
+        }];
       }
     }
 
-    // Cache the extraction result (1 hour TTL)
-    const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
-    cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
+    // Cache the extraction result (1 hour TTL) - BYPASS FOR CORRECTIONS (P0-2)
+    if (!hasCorrections) {
+      const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
+      cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
+    }
 
     let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority });
 

@@ -659,26 +659,42 @@ export class MemoryRepository {
     newCanonicalKey: string
   ): Promise<boolean> {
     try {
-      const { data, error } = await qt.track('mem_repo_canonicalize_key', 'memories', () =>
-        supabaseAdmin
-          .from('memories')
-          .update({
-            key: newCanonicalKey,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', memoryId)
-          .eq('user_id', userId)
-          .eq('key', oldKey)
-          .select('id')
-      );
+      // 1. Fetch the exact state of the old alias memory
+      const { data: oldMem, error: fetchErr } = await supabaseAdmin
+        .from('memories')
+        .select('*')
+        .eq('id', memoryId)
+        .eq('user_id', userId)
+        .eq('key', oldKey)
+        .single();
 
-      if (error) {
-        logger.error('[MemoryRepository] Failed to canonicalize memory key', { userId, memoryId, oldKey, newCanonicalKey, error: error.message });
+      if (fetchErr || !oldMem) {
+        logger.error('[MemoryRepository] Failed to fetch alias memory for canonicalization', { userId, memoryId, oldKey, error: fetchErr?.message });
         return false;
       }
 
-      logger.info('[MemoryRepository] Memory key canonicalized via canonical repository', { userId, memoryId, oldKey, newCanonicalKey });
-      return (data || []).length > 0;
+      // 2. Perform a race-safe atomic insertion of the new canonical key
+      // This routes through upsertMemory, which uses atomic_supersede_memory
+      await this.upsertMemory(userId, {
+        type: oldMem.memory_type,
+        key: newCanonicalKey,
+        value: oldMem.value,
+        importance: oldMem.importance,
+        confidence: oldMem.confidence,
+        emotional_weight: oldMem.emotional_weight,
+        source_references: oldMem.source_references,
+        is_protected: !!oldMem.protection_source,
+        protection_source: oldMem.protection_source,
+        compression_status: oldMem.compression_status,
+        source_authority: oldMem.source_authority,
+        shouldPersist: true
+      } as any, oldMem.source_message);
+
+      // 3. Safely archive the old alias row now that the canonical one is atomically inserted
+      await this.archiveMemory(userId, memoryId, 'Canonicalized to schema key: ' + newCanonicalKey);
+
+      logger.info('[MemoryRepository] Memory alias safely canonicalized via atomic RPC path', { userId, memoryId, oldKey, newCanonicalKey });
+      return true;
     } catch (err: any) {
       logger.error('[MemoryRepository] canonicalizeMemoryKey error', { userId, memoryId, error: err?.message });
       return false;
