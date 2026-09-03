@@ -1,7 +1,55 @@
-.claude/settings.local.json
-node_modules/
+# ── Credentials & secrets — NEVER commit ──
+# API keys / tokens
+token.txt
+*.token
+*.pem
+*.key
+
+# Environment files
 .env
-*.log
+.env.*
+!.env.example
+
+# Claude local settings (may contain secrets)
+.claude/settings.local.json
+**/.claude/settings.local.json
+
+# ── Scratch & forensic dumps — never commit ──
+scratch/
+scratch_*.js
+scratch_*.ts
+scratch_*.json
+scratch-test*.js
+scratch-test*.ts
+backend/scratch/
+backend/scratch_*.js
+backend/scratch_fetch_chats.js
+backend/token.txt
+backend/recent_chat*.txt
+backend/recent_chat*.json
+*_dump.txt
+*_dump.json
+*dump*.txt
+*dump*.json
+forensic_*.json
+forensics_*.json
+forensic_*.txt
+audit_*.txt
+audit_*.json
+audit_dump.*
+chat_dump.*
+forensic_data.json
+forensic_dump*.json
+
+# ── Coverage & build artifacts ──
 coverage/
 backend/coverage/
+backend/dist/
+mobile/dist/
+mobile/.expo/
+
+# ── Dependencies & logs ──
+node_modules/
+*.log
+npm-debug.log*
 

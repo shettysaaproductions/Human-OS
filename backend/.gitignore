@@ -21,12 +21,30 @@ Thumbs.db
 # Render build cache
 .render-build-cache/
 
+# Credentials — NEVER commit
+token.txt
+*.token
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+scratch_fetch_chats.js
+recent_chat*.txt
+recent_chat*.json
+
 # Forensic and Audit Dumps
 forensic_*.json
 audit_*.txt
 *_dump.txt
 *_dump.json
 forensics_*.json
+forensic_*.txt
+audit_*.json
+forensic_data.json
+forensic_dump*.json
+audit_dump.*
+chat_dump.*
 
 # Scratch / ad-hoc debug scripts
 scratch/
@@ -37,3 +55,4 @@ scratch-test*.js
 scratch-test*.ts
 scratch_test*.js
 scratch_test*.ts
+scratch-fetch*.js
