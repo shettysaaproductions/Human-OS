@@ -108,8 +108,8 @@ async function persistAssistantMessage(userId: string, conversationId: string, c
         source,
         error: err instanceof Error ? err.message : String(err),
         errorStack: err instanceof Error ? err.stack : undefined,
-        // Include content preview for debugging
-        contentPreview: content.substring(0, 100),
+        // Include content length for debugging (no content text)
+        contentLength: content.length,
       });
 
       // TODO: Add alerting integration here (PagerDuty, Slack webhook, Sentry, etc.)
@@ -1282,7 +1282,7 @@ chatRouter.post(
               negated_concept: neg.concept,
               target_fact_key: neg.targetFactKey,
               is_current: neg.isCurrent,   // true → waiting, false → abandoned
-              reason: `User said: "${effectiveMessage.substring(0, 100)}"`,
+              reason: `User said: (message length ${effectiveMessage.length})`,
             });
             logger.info('[Chat][Amendment3] suppress_life_thread queued', { userId, concept: neg.concept, isCurrent: neg.isCurrent });
           } catch (suppErr: any) {

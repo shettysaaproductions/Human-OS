@@ -80,7 +80,7 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
 
       // ── BUG-01: Generic entity blocklist ───────────────────────────────────
       if (key.endsWith('_name') && GENERIC_ENTITY_VALUES_AGENT.has(value.toLowerCase())) {
-        logger.info('[ConsolidatedMemoryAgent] BLOCKED generic entity value (pre-DB filter)', { key, value });
+        logger.info('[ConsolidatedMemoryAgent] BLOCKED generic entity value (pre-DB filter)', { key, reason: 'GENERIC_ENTITY_VALUE' });
         return false;
       }
 
@@ -92,7 +92,7 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
         const hasKinshipPattern = KINSHIP_PATTERNS.test(lowerSrc);
         const hasVocativeOnly = HINGLISH_VOCATIVES.has(value.toLowerCase()) && !hasKinshipPattern;
         if (hasVocativeOnly) {
-          logger.info('[ConsolidatedMemoryAgent] BLOCKED vocative as kinship fact', { key, value, sourceMessage: sourceMessage.substring(0, 80) });
+          logger.info('[ConsolidatedMemoryAgent] BLOCKED vocative as kinship fact', { key, reason: 'VOCATIVE_KINSHIP_MISMATCH' });
           return false;
         }
         if (!hasKinshipPattern) {
