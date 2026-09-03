@@ -260,13 +260,13 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const payload = {
       userId: TEST_USER,
       messageId: randomUUID(),
-      message: 'My favorite animal is dog',
+      message: 'My favourite color is blue',
       questionClauses: [],
       turnId: randomUUID(),
       hasExplicitRemember: false,
       hasCorrections: true,
-      correctionTarget: 'favorite_animal',
-      correctionValue: 'dog',
+      correctionTarget: 'favourite_color',
+      correctionValue: 'blue',
     };
 
     await supabaseAdmin.from('chat_history').insert([
@@ -275,8 +275,8 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const getSpy = jest.spyOn(cache, 'get').mockReturnValue({
       semantic_memories: [{
-        key: 'favorite_animal',
-        value: 'cat',
+        key: 'favourite_color',
+        value: 'red',
         shouldPersist: true,
         type: 'fact',
         confidence: 1.0,
@@ -291,12 +291,12 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_animal')
+      .eq('key', 'favourite_color')
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
     expect(rows?.length).toBe(1);
-    expect(rows![0].value).toBe('dog');
+    expect(rows![0].value).toBe('blue');
 
     getSpy.mockRestore();
   });
@@ -1759,5 +1759,55 @@ describe('Memory Persistence & Concurrency Integration', () => {
       p_source_authority: 'explicit_user',
     });
     expect(res.data?.success).toBe(true);
+  });
+
+  // ── Repository bypass closure: unknown keys via upsertMemory ─────────────
+  it('RPB1: repository CURRENT fresh unknown my_random_memory_key -> zero mutation', async () => {
+    const mem = { key: 'my_random_memory_key', value: 'evil', type: 'fact' as const, shouldPersist: true, importance: 50, confidence: 0.9 } as any;
+    await memoryRepository.upsertMemory(TEST_USER, mem, 'test current unknown');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'my_random_memory_key').eq('is_archived', false);
+    expect(rows?.length).toBe(0);
+  });
+
+  it('RPB2: repository PROPOSED unknown -> zero mutation', async () => {
+    const mem = { key: 'my_random_memory_key', value: 'evil', type: 'fact' as const, shouldPersist: true, compression_status: 'proposed' } as any;
+    await memoryRepository.upsertMemory(TEST_USER, mem, 'test proposed unknown');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'my_random_memory_key').eq('is_archived', false);
+    expect(rows?.length).toBe(0);
+  });
+
+  it('RPB3: repository HISTORICAL unknown -> zero mutation', async () => {
+    const mem = { key: 'my_random_memory_key', value: 'Worked at Company A in 2020', type: 'fact' as const, shouldPersist: true, lifecycle_state: 'HISTORICAL' } as any;
+    await memoryRepository.upsertMemory(TEST_USER, mem, 'Worked at Company A in 2020');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'my_random_memory_key').eq('is_archived', false);
+    expect(rows?.length).toBe(0);
+  });
+
+  it('RPB4: repository UNKNOWN/FUTURE unknown -> zero mutation', async () => {
+    const mem = { key: 'my_random_memory_key', value: 'will do', type: 'fact' as const, shouldPersist: true, lifecycle_state: 'UNKNOWN' as any, is_future_intent: true } as any;
+    await memoryRepository.upsertMemory(TEST_USER, mem, 'test future unknown');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'my_random_memory_key').eq('is_archived', false);
+    expect(rows?.length).toBe(0);
+  });
+
+  it('RPB5: repository known aliases canonicalize to stored canonical', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'alias canonicalize test', created_at: '2026-01-02T00:00:00Z' }]);
+    const cases: Array<[string, string]> = [
+      ['mom_name', 'mother_name'],
+      ['favorite_colour', 'favourite_color'],
+      ['brothers_name', 'brother_name'],
+    ];
+    for (const [alias, canonical] of cases) {
+      const mem = { key: alias, value: 'TestVal', type: 'fact' as const, shouldPersist: true, source_message_id: src } as any;
+      await memoryRepository.upsertMemory(TEST_USER, mem, `test alias ${alias}`);
+      const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', canonical).eq('is_archived', false);
+      expect(rows && rows.length >= 1).toBe(true);
+      // alias key must not exist as CURRENT
+      const { data: aliasRows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', alias).eq('is_archived', false);
+      expect(aliasRows?.length).toBe(0);
+      // cleanup for next iteration
+      await supabaseAdmin.from('memories').delete().eq('user_id', TEST_USER).eq('key', canonical);
+    }
   });
 });

@@ -3,7 +3,7 @@ import { ExtractedMemory, Memory, SourceAuthority, SourceDependencyType, SourceP
 import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
-import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { canonicalizeKey, isKnownCanonicalKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { deterministicGuardian } from './DeterministicGuardianService';
 import { sourceDependencyService } from './SourceDependencyService';
@@ -97,6 +97,15 @@ export class MemoryRepository {
     const normalizedMemory: ExtractedMemory = wasAliased
       ? { ...memory, key: canonicalKey }
       : memory;
+
+    // ── Layer 0b: Explicit canonical membership (authoritative schema) ────────
+    // Every semantic memory key must be a member of the approved canonical set.
+    // Known aliases are already normalized above; unknown arbitrary keys remain
+    // non-canonical and must fail closed with zero mutation.
+    if (!isKnownCanonicalKey(normalizedMemory.key)) {
+      logger.warn('[MemoryRepository] Blocked non-canonical key', { userId, key: normalizedMemory.key, reason: 'NON_CANONICAL_KEY' });
+      return;
+    }
 
     const incomingAuthority = normalizedMemory.source_authority ?? 'subconscious_inference';
 
