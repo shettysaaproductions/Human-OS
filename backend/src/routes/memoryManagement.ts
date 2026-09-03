@@ -333,12 +333,16 @@ memoryManagementRouter.patch('/:id/archive', async (req: Request, res: Response,
       return;
     }
 
-    // Unarchive — safe repository path with duplicate CURRENT and historical guards
+    // Unarchive — safe repository path with lifecycle and duplicate guards
     const result = await memoryRepository.unarchiveMemory(userId, id);
     if (!result.success) {
       if (result.reason === 'NOT_FOUND') { res.status(404).json({ error: 'Memory not found' }); return; }
       if (result.reason === 'DUPLICATE_CURRENT') { res.status(409).json({ error: 'Cannot unarchive: duplicate CURRENT would be created - another active memory exists for this key' }); return; }
+      if (result.reason === 'SUPERSEDED') { res.status(400).json({ error: 'Cannot unarchive a superseded memory' }); return; }
       if (result.reason === 'HISTORICAL') { res.status(400).json({ error: 'Cannot unarchive historical memory as CURRENT' }); return; }
+      if (result.reason === 'INVALIDATED') { res.status(400).json({ error: 'Cannot unarchive an invalidated memory' }); return; }
+      if (result.reason === 'PROPOSED') { res.status(400).json({ error: 'Cannot unarchive a proposed memory' }); return; }
+      if (result.reason === 'UNKNOWN') { res.status(400).json({ error: 'Cannot unarchive memory with unknown lifecycle' }); return; }
       res.status(400).json({ error: 'Failed to unarchive memory' });
       return;
     }

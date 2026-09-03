@@ -716,10 +716,11 @@ export class MemoryRepository {
    * Phase 2F: Safe Unarchive — restores an archived memory without creating duplicate CURRENT.
    * Invariants:
    *  - Ownership is validated (userId must match)
-   *  - Cannot create two CURRENT rows for same canonical key
-   *  - Cannot resurrect a HISTORICAL row as CURRENT (would violate lifecycle semantics)
+   *  - Only legitimately archived CURRENT memories are user-unarchivable
+   *  - Never resurrect SUPERSEDED, HISTORICAL, INVALIDATED, PROPOSED, UNKNOWN
+   *  - Cannot create two CURRENT rows for same canonical key (pre-check + DB constraint race guard)
    *  - Preserves lifecycle_state, only flips is_archived
-   * Returns true if unarchived, false if not found or blocked (duplicate/historical)
+   * Returns {success, reason} — reason is stable code like SUPERSEDED/HISTORICAL/DUPLICATE_CURRENT
    */
   async unarchiveMemory(userId: string, memoryId: string): Promise<{ success: boolean; reason?: string }> {
     try {
@@ -747,10 +748,32 @@ export class MemoryRepository {
         return { success: true };
       }
 
-      // Block resurrection of HISTORICAL as CURRENT
-      if (target.lifecycle_state === 'HISTORICAL') {
+      // Only legitimately archived CURRENT memories are user-unarchivable.
+      // Never resurrect non-CURRENT lifecycle states.
+      const ls = target.lifecycle_state as string | null | undefined;
+      if (ls === 'SUPERSEDED') {
+        logger.warn('[MemoryRepository] Blocked unarchive of superseded row', { userId, memoryId, key: target.key });
+        return { success: false, reason: 'SUPERSEDED' };
+      }
+      if (ls === 'HISTORICAL') {
         logger.warn('[MemoryRepository] Blocked unarchive of historical row as CURRENT', { userId, memoryId, key: target.key });
         return { success: false, reason: 'HISTORICAL' };
+      }
+      if (ls === 'INVALIDATED') {
+        logger.warn('[MemoryRepository] Blocked unarchive of invalidated row', { userId, memoryId, key: target.key });
+        return { success: false, reason: 'INVALIDATED' };
+      }
+      if (ls === 'PROPOSED') {
+        logger.warn('[MemoryRepository] Blocked unarchive of proposed row', { userId, memoryId, key: target.key });
+        return { success: false, reason: 'PROPOSED' };
+      }
+      if (ls === 'UNKNOWN') {
+        logger.warn('[MemoryRepository] Blocked unarchive of unknown lifecycle row', { userId, memoryId, key: target.key });
+        return { success: false, reason: 'UNKNOWN' };
+      }
+      if (ls !== 'CURRENT' && ls != null) {
+        logger.warn('[MemoryRepository] Blocked unarchive of non-CURRENT lifecycle row', { userId, memoryId, key: target.key, lifecycle_state: ls });
+        return { success: false, reason: ls };
       }
 
       // Check for duplicate CURRENT on same canonical key
@@ -778,7 +801,10 @@ export class MemoryRepository {
         return { success: false, reason: 'DUPLICATE_CURRENT' };
       }
 
-      // Safe to unarchive
+      // Safe to unarchive — final update with race-safe handling.
+      // Two concurrent unarchives for same canonical key could both pass the
+      // pre-check; the DB unique constraint will reject the loser, which we
+      // map to a safe DUPLICATE_CURRENT failure rather than success.
       const { data, error } = await qt.track('mem_repo_unarchive', 'memories', () =>
         supabaseAdmin
           .from('memories')
@@ -789,6 +815,11 @@ export class MemoryRepository {
       );
 
       if (error) {
+        const msg = error.message || '';
+        if ((error as any).code === '23505' || msg.includes('unique constraint') || msg.includes('idx_memories_user_current_key')) {
+          logger.warn('[MemoryRepository] Blocked concurrent unarchive duplicate CURRENT (DB constraint)', { userId, memoryId, canonical });
+          return { success: false, reason: 'DUPLICATE_CURRENT' };
+        }
         logger.error('[MemoryRepository] Failed to unarchive memory', { userId, memoryId, error: error.message });
         return { success: false, reason: 'UPDATE_ERROR' };
       }

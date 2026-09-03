@@ -545,6 +545,104 @@ describe('Memory Management Router — Trust Layer', () => {
       // forgetMemoryCompletely is the hard delete — ensure not called
       expect(mockMemoryRepository.forgetMemoryCompletely).not.toHaveBeenCalled();
     });
+
+    it('blocks unarchive of superseded row as CURRENT (400)', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'SUPERSEDED' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/superseded/i) }));
+      expect(mockSupabaseAdmin.from).not.toHaveBeenCalled();
+    });
+
+    it('blocks unarchive of invalidated row as CURRENT (400)', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'INVALIDATED' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/invalidated/i) }));
+    });
+
+    it('blocks unarchive of proposed row (400)', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'PROPOSED' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/proposed/i) }));
+    });
+
+    it('blocks unarchive of unknown lifecycle row (400)', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'UNKNOWN' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/unknown/i) }));
+    });
+
+    it('concurrent unarchive race — loser returns safe failure with no duplicate CURRENT', async () => {
+      const layer = findRoute('/:id/archive');
+
+      // First concurrent request succeeds
+      mockMemoryRepository.unarchiveMemory = jest.fn()
+        .mockResolvedValueOnce({ success: true })
+        .mockResolvedValueOnce({ success: false, reason: 'DUPLICATE_CURRENT' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      // First caller wins
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+
+      // Reset mocks for second caller (same canonical key, concurrent)
+      jest.clearAllMocks();
+      mockRes.status = jest.fn().mockReturnThis();
+      mockRes.json = jest.fn().mockReturnThis();
+      mockReq.params = { id: 'other-mem-id' };
+      mockReq.body = { archived: false };
+
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+      expect(mockRes.status).toHaveBeenCalledWith(409);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/duplicate/i) }));
+      // Ensure no hard delete and no duplicate CURRENT creation
+      expect(mockMemoryRepository.forgetMemoryCompletely).not.toHaveBeenCalled();
+    });
+
+    it('valid archived CURRENT can still unarchive when no conflicting CURRENT exists', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: true });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        data: { id: memoryId, is_archived: false },
+      }));
+    });
   });
 });
 
