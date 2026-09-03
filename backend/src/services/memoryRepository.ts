@@ -419,6 +419,10 @@ export class MemoryRepository {
             logger.warn(`[MemoryRepository] Blocked correction with invalid provenance`, { userId, key: normalizedMemory.key, detail: rpcResult.detail });
             return;
           }
+          if (rpcResult.reason === 'NON_CANONICAL_KEY') {
+            logger.warn(`[MemoryRepository] Blocked non-canonical key`, { userId, key: normalizedMemory.key, detail: rpcResult.detail });
+            return;
+          }
           throw new Error(`Atomic supersession failed: ${rpcResult.reason}`);
         }
 

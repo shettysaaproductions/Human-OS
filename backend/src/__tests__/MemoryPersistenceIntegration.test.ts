@@ -384,11 +384,11 @@ describe('Memory Persistence & Concurrency Integration', () => {
     ]);
     if (histErr) throw new Error(`Chat history insert error: ${histErr.message}`);
 
-    const initialMem = { key: 'favorite_food', value: 'pizza', correction_intent: false, source_message_id: sourceRed, shouldPersist: true, type: 'fact' };
+    const initialMem = { key: 'company_name', value: 'pizza', correction_intent: false, source_message_id: sourceRed, shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, initialMem, 'I like pizza');
 
-    const memBlue = { key: 'favorite_food', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
-    const memGreen = { key: 'favorite_food', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
+    const memBlue = { key: 'company_name', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
+    const memGreen = { key: 'company_name', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
 
     // Fire concurrently - green has later timestamp (00:00:03) so it should ultimately win
     // Race: whichever acquires lock first supersedes red; the other then supersedes that
@@ -400,7 +400,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_food')
+      .eq('key', 'company_name')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
 
@@ -413,7 +413,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: allRows } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_food')
+      .eq('key', 'company_name')
       .order('created_at', { ascending: true });
 
     const redRow = allRows!.find(r => r.value === 'pizza');
@@ -442,11 +442,11 @@ describe('Memory Persistence & Concurrency Integration', () => {
       { id: sourceGreen, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like sushi', created_at: '2026-01-01T00:00:03Z' }
     ]);
 
-    const initialMem = { key: 'favorite_food_rev', value: 'pizza', correction_intent: false, source_message_id: sourceRed, shouldPersist: true, type: 'fact' };
+    const initialMem = { key: 'birth_date', value: 'pizza', correction_intent: false, source_message_id: sourceRed, shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, initialMem, 'I like pizza');
 
-    const memBlue = { key: 'favorite_food_rev', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
-    const memGreen = { key: 'favorite_food_rev', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
+    const memBlue = { key: 'birth_date', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
+    const memGreen = { key: 'birth_date', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
 
     // Fire concurrently but REVERSED order - green still has later timestamp
     await Promise.all([
@@ -457,7 +457,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_food_rev')
+      .eq('key', 'birth_date')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
 
@@ -480,11 +480,11 @@ describe('Memory Persistence & Concurrency Integration', () => {
       { id: sourceGreen, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like sushi', created_at: ts }
     ]);
 
-    const initialMem = { key: 'favorite_food_eq', value: 'pizza', correction_intent: false, source_message_id: sourceRed, shouldPersist: true, type: 'fact' };
+    const initialMem = { key: 'marriage_date', value: 'pizza', correction_intent: false, source_message_id: sourceRed, shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, initialMem, 'I like pizza');
 
-    const memBlue = { key: 'favorite_food_eq', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
-    const memGreen = { key: 'favorite_food_eq', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
+    const memBlue = { key: 'marriage_date', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
+    const memGreen = { key: 'marriage_date', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
 
     // Fire concurrently - equal timestamps, deterministic ordering by source_message_id
     // sourceGreen > sourceBlue > sourceRed lexicographically, so green wins
@@ -496,7 +496,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_food_eq')
+      .eq('key', 'marriage_date')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
 
@@ -515,11 +515,11 @@ describe('Memory Persistence & Concurrency Integration', () => {
       { id: sourceGreen2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like quesadillas', created_at: ts }
     ]);
 
-    const initialMem2 = { key: 'favorite_food_eq2', value: 'tacos', correction_intent: false, source_message_id: sourceRed2, shouldPersist: true, type: 'fact' };
+    const initialMem2 = { key: 'preferred_name', value: 'tacos', correction_intent: false, source_message_id: sourceRed2, shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, initialMem2, 'I like tacos');
 
-    const memBlue2 = { key: 'favorite_food_eq2', value: 'burritos', correction_intent: true, source_message_id: sourceBlue2, shouldPersist: true, type: 'fact' };
-    const memGreen2 = { key: 'favorite_food_eq2', value: 'quesadillas', correction_intent: true, source_message_id: sourceGreen2, shouldPersist: true, type: 'fact' };
+    const memBlue2 = { key: 'preferred_name', value: 'burritos', correction_intent: true, source_message_id: sourceBlue2, shouldPersist: true, type: 'fact' };
+    const memGreen2 = { key: 'preferred_name', value: 'quesadillas', correction_intent: true, source_message_id: sourceGreen2, shouldPersist: true, type: 'fact' };
 
     // Reversed launch order
     await Promise.all([
@@ -530,7 +530,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows2, error: error2 } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_food_eq2')
+      .eq('key', 'preferred_name')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
 
@@ -711,15 +711,15 @@ describe('Memory Persistence & Concurrency Integration', () => {
       { id: sourceGreen, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'Actually I like sushi eq2', created_at: ts }
     ]);
 
-    const initialMem = { key: 'food_eq_rev', value: 'pizza', correction_intent: false, source_message_id: '00000000-0000-0000-0000-000000000009', shouldPersist: true, type: 'fact' };
+    const initialMem = { key: 'preferred_work_hours', value: 'pizza', correction_intent: false, source_message_id: '00000000-0000-0000-0000-000000000009', shouldPersist: true, type: 'fact' };
     // Seed initial CURRENT via separate history row
     await supabaseAdmin.from('chat_history').insert([
       { id: '00000000-0000-0000-0000-000000000009', user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'I like pizza eq_rev', created_at: '2025-12-31T00:00:00Z' }
     ]);
     await memoryRepository.upsertMemory(TEST_USER, initialMem, 'I like pizza eq_rev');
 
-    const memBlue = { key: 'food_eq_rev', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
-    const memGreen = { key: 'food_eq_rev', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
+    const memBlue = { key: 'preferred_work_hours', value: 'pasta', correction_intent: true, source_message_id: sourceBlue, shouldPersist: true, type: 'fact' };
+    const memGreen = { key: 'preferred_work_hours', value: 'sushi', correction_intent: true, source_message_id: sourceGreen, shouldPersist: true, type: 'fact' };
 
     // Launch GREEN then BLUE (reversed) — lexicographically larger ID (green) must still win
     await Promise.all([
@@ -730,7 +730,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'food_eq_rev')
+      .eq('key', 'preferred_work_hours')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
     expect(activeRows?.length).toBe(1);
@@ -746,11 +746,11 @@ describe('Memory Persistence & Concurrency Integration', () => {
     await supabaseAdmin.from('chat_history').insert([
       { id: '00000000-0000-0000-0000-000000000029', user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'I like water', created_at: '2025-12-31T00:00:00Z' }
     ]);
-    const initialMem2 = { key: 'drink_eq_rev', value: 'water', correction_intent: false, source_message_id: '00000000-0000-0000-0000-000000000029', shouldPersist: true, type: 'fact' };
+    const initialMem2 = { key: 'favourite_beverage', value: 'water', correction_intent: false, source_message_id: '00000000-0000-0000-0000-000000000029', shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, initialMem2, 'I like water');
 
-    const memBlue2 = { key: 'drink_eq_rev', value: 'tea', correction_intent: true, source_message_id: sourceBlue2, shouldPersist: true, type: 'fact' };
-    const memGreen2 = { key: 'drink_eq_rev', value: 'coffee', correction_intent: true, source_message_id: sourceGreen2, shouldPersist: true, type: 'fact' };
+    const memBlue2 = { key: 'favourite_beverage', value: 'tea', correction_intent: true, source_message_id: sourceBlue2, shouldPersist: true, type: 'fact' };
+    const memGreen2 = { key: 'favourite_beverage', value: 'coffee', correction_intent: true, source_message_id: sourceGreen2, shouldPersist: true, type: 'fact' };
 
     await Promise.all([
       memoryRepository.upsertMemory(TEST_USER, memBlue2, 'Actually I like tea'),
@@ -760,7 +760,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows2 } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'drink_eq_rev')
+      .eq('key', 'favourite_beverage')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
     expect(activeRows2?.length).toBe(1);
@@ -1045,16 +1045,16 @@ describe('Memory Persistence & Concurrency Integration', () => {
     ]);
     if (histErr) throw new Error(`Chat history insert error: ${histErr.message}`);
 
-    const memNew = { key: 'favorite_fruit', value: 'bananas', correction_intent: true, source_message_id: sourceNewId, shouldPersist: true, type: 'fact' };
+    const memNew = { key: 'favourite_street_food', value: 'bananas', correction_intent: true, source_message_id: sourceNewId, shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, memNew, 'Actually I like bananas');
 
-    const memOld = { key: 'favorite_fruit', value: 'apples', correction_intent: true, source_message_id: sourceOldId, shouldPersist: true, type: 'fact' };
+    const memOld = { key: 'favourite_street_food', value: 'apples', correction_intent: true, source_message_id: sourceOldId, shouldPersist: true, type: 'fact' };
     await memoryRepository.upsertMemory(TEST_USER, memOld, 'Actually I like apples');
 
     const { data: activeRows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_fruit')
+      .eq('key', 'favourite_street_food')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
 
@@ -1073,8 +1073,8 @@ describe('Memory Persistence & Concurrency Integration', () => {
       { id: source2, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'My favorite sport is soccer' }
     ]);
 
-    const mem1 = { key: 'favorite_sport', value: 'tennis', correction_intent: false, source_message_id: source1, shouldPersist: true, type: 'fact' };
-    const mem2 = { key: 'favorite_sport', value: 'soccer', correction_intent: false, source_message_id: source2, shouldPersist: true, type: 'fact' };
+    const mem1 = { key: 'preferred_work_hours', value: 'tennis', correction_intent: false, source_message_id: source1, shouldPersist: true, type: 'fact' };
+    const mem2 = { key: 'preferred_work_hours', value: 'soccer', correction_intent: false, source_message_id: source2, shouldPersist: true, type: 'fact' };
 
     await Promise.all([
       memoryRepository.upsertMemory(TEST_USER, mem1, 'My favorite sport is tennis'),
@@ -1084,7 +1084,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: activeRows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'favorite_sport')
+      .eq('key', 'preferred_work_hours')
       .eq('is_archived', false)
       .eq('lifecycle_state', 'CURRENT');
 
@@ -1096,7 +1096,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
   it('13. missing source_message_id -> MISSING_PROVENANCE + zero mutation', async () => {
     const result = await supabaseAdmin.rpc('atomic_supersede_memory', {
       p_user_id: TEST_USER,
-      p_key: 'test_key',
+      p_key: 'mother_name',
       p_new_value: 'test_value',
       p_memory_type: 'fact',
       p_importance: 50,
@@ -1116,7 +1116,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const fakeSourceId = randomUUID();
     const result = await supabaseAdmin.rpc('atomic_supersede_memory', {
       p_user_id: TEST_USER,
-      p_key: 'test_key',
+      p_key: 'father_name',
       p_new_value: 'test_value',
       p_memory_type: 'fact',
       p_importance: 50,
@@ -1222,7 +1222,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
   it('P0-2.1: correction with null source_message_id and no CURRENT -> zero mutation', async () => {
     const mem = {
-      key: 'test_correction_null_provenance',
+      key: 'mother_name',
       value: 'should_not_persist',
       correction_intent: true,
       source_message_id: null,
@@ -1234,7 +1234,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'test_correction_null_provenance')
+      .eq('key', 'mother_name')
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
@@ -1244,7 +1244,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
   it('P0-2.2: correction with nonexistent source_message_id and no CURRENT -> zero mutation', async () => {
     const fakeSourceId = randomUUID();
     const mem = {
-      key: 'test_correction_nonexistent_provenance',
+      key: 'father_name',
       value: 'should_not_persist',
       correction_intent: true,
       source_message_id: fakeSourceId,
@@ -1256,7 +1256,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'test_correction_nonexistent_provenance')
+      .eq('key', 'father_name')
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
@@ -1271,7 +1271,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     ]);
 
     const mem = {
-      key: 'test_correction_cross_user_provenance',
+      key: 'sister_name',
       value: 'should_not_persist',
       correction_intent: true,
       source_message_id: sourceId,
@@ -1283,7 +1283,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'test_correction_cross_user_provenance')
+      .eq('key', 'sister_name')
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
@@ -1297,7 +1297,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     ]);
 
     const mem = {
-      key: 'test_correction_assistant_provenance',
+      key: 'brother_name',
       value: 'should_not_persist',
       correction_intent: true,
       source_message_id: assistantSourceId,
@@ -1309,7 +1309,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'test_correction_assistant_provenance')
+      .eq('key', 'brother_name')
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
@@ -1602,5 +1602,162 @@ describe('Memory Persistence & Concurrency Integration', () => {
     } finally {
       await client.end();
     }
+  });
+
+  it('SC2: DB is_canonical_key_sql membership matches JS canonical set', async () => {
+    const { CANONICAL_KEYS } = await import('../lib/memoryKeySchema');
+    const { CANONICAL_ALIAS_MAP } = await import('../lib/memoryKeySchema');
+    const { Client } = await import('pg');
+    const dotenv = await import('dotenv');
+    dotenv.config();
+    const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    await client.connect();
+    try {
+      // Every JS canonical must be accepted
+      for (const canon of CANONICAL_KEYS) {
+        const r = await client.query('SELECT is_canonical_key_sql($1) as ok', [canon]);
+        expect(r.rows[0].ok).toBe(true);
+      }
+      // Every alias must be rejected as non-canonical
+      for (const aliases of Object.values(CANONICAL_ALIAS_MAP) as string[][]) {
+        for (const alias of aliases) {
+          const r = await client.query('SELECT is_canonical_key_sql($1) as ok', [alias]);
+          expect(r.rows[0].ok).toBe(false);
+        }
+      }
+      // Unknown keys rejected
+      const unknowns = ['my_random_memory_key', 'foo', 'bar_baz', 'unknown_key_123'];
+      for (const unk of unknowns) {
+        const r = await client.query('SELECT is_canonical_key_sql($1) as ok', [unk]);
+        expect(r.rows[0].ok).toBe(false);
+      }
+      // Uppercase arbitrary must be rejected
+      const rUpper = await client.query('SELECT is_canonical_key_sql($1) as ok', ['MY_RANDOM_MEMORY_KEY']);
+      expect(rUpper.rows[0].ok).toBe(false);
+      // Whitespace variant
+      const rSpace = await client.query('SELECT is_canonical_key_sql($1) as ok', [' mother_name ']);
+      // Our SQL trims, so this becomes mother_name and would be true - but spec says whitespace arbitrary must fail;
+      // verify arbitrary whitespace fails
+      const rSpaceArb = await client.query('SELECT is_canonical_key_sql($1) as ok', [' my_random_memory_key ']);
+      expect(rSpaceArb.rows[0].ok).toBe(false);
+      // Empty/null
+      const rEmpty = await client.query('SELECT is_canonical_key_sql($1) as ok', ['']);
+      expect(rEmpty.rows[0].ok).toBe(false);
+      const rNull = await client.query('SELECT is_canonical_key_sql(NULL) as ok');
+      expect(rNull.rows[0].ok).toBe(false);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('CB7: atomic_supersede with unknown lowercase my_random_memory_key -> NON_CANONICAL_KEY', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'test unknown', created_at: '2026-01-01T00:00:20Z' }]);
+    const res = await supabaseAdmin.rpc('atomic_supersede_memory', {
+      p_user_id: TEST_USER,
+      p_key: 'my_random_memory_key',
+      p_new_value: 'evil',
+      p_memory_type: 'fact',
+      p_importance: 50,
+      p_confidence: 0.9,
+      p_emotional_weight: 0,
+      p_source_message: 'test',
+      p_source_message_id: src,
+      p_source_authority: 'explicit_user',
+    });
+    expect(res.data?.success).toBe(false);
+    expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+    const { data: rows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'my_random_memory_key').eq('is_archived', false);
+    expect(rows?.length).toBe(0);
+  });
+
+  it('CB8: atomic_canonicalize with unknown my_random_memory_key -> NON_CANONICAL_KEY', async () => {
+    const aliasId = randomUUID();
+    await supabaseAdmin.from('memories').insert([{
+      id: aliasId,
+      user_id: TEST_USER,
+      key: 'moms_name',
+      value: 'X',
+      memory_type: 'family',
+      is_archived: false,
+      lifecycle_state: 'CURRENT',
+      importance: 80,
+      confidence: 0.9,
+      source_authority: 'explicit_user',
+    }]);
+    const res = await supabaseAdmin.rpc('atomic_canonicalize_memory', {
+      p_user_id: TEST_USER,
+      p_alias_memory_id: aliasId,
+      p_canonical_key: 'my_random_memory_key',
+      p_reason: 'test unknown',
+    });
+    expect(res.data?.success).toBe(false);
+    expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+    const { data: aliasRow } = await supabaseAdmin.from('memories').select('*').eq('id', aliasId).maybeSingle();
+    expect(aliasRow?.is_archived).toBe(false);
+    const { data: canonRows } = await supabaseAdmin.from('memories').select('*').eq('user_id', TEST_USER).eq('key', 'my_random_memory_key').eq('is_archived', false);
+    expect(canonRows?.length).toBe(0);
+  });
+
+  it('CB9: unknown variants uppercase/whitespace/punctuation/empty all rejected', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'test variant', created_at: '2026-01-01T00:00:21Z' }]);
+    const variants = ['MY_RANDOM_MEMORY_KEY', ' my_random_memory_key ', 'my_random_memory_key!', '', '   '];
+    for (const key of variants) {
+      const res = await supabaseAdmin.rpc('atomic_supersede_memory', {
+        p_user_id: TEST_USER,
+        p_key: key,
+        p_new_value: 'evil',
+        p_memory_type: 'fact',
+        p_importance: 50,
+        p_confidence: 0.9,
+        p_emotional_weight: 0,
+        p_source_message: 'test',
+        p_source_message_id: src,
+        p_source_authority: 'explicit_user',
+      });
+      expect(res.data?.success).toBe(false);
+      expect(res.data?.reason).toBe('NON_CANONICAL_KEY');
+    }
+    // null key via direct SQL (p_key null) - handled via canonical check (coalesce to '')
+    const aliasId = randomUUID();
+    await supabaseAdmin.from('memories').insert([{
+      id: aliasId,
+      user_id: TEST_USER,
+      key: 'mom_name',
+      value: 'Y',
+      memory_type: 'family',
+      is_archived: false,
+      lifecycle_state: 'CURRENT',
+      importance: 80,
+      confidence: 0.9,
+      source_authority: 'explicit_user',
+    }]);
+    const resNull = await supabaseAdmin.rpc('atomic_canonicalize_memory', {
+      p_user_id: TEST_USER,
+      p_alias_memory_id: aliasId,
+      p_canonical_key: '',
+      p_reason: 'test empty',
+    });
+    expect(resNull.data?.success).toBe(false);
+    expect(resNull.data?.reason).toBe('NON_CANONICAL_KEY');
+  });
+
+  it('CB10: valid canonical favourite_color still succeeds via supersede', async () => {
+    const src = randomUUID();
+    await supabaseAdmin.from('chat_history').insert([{ id: src, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: 'My favourite color is green', created_at: '2026-01-01T00:00:30Z' }]);
+    const res = await supabaseAdmin.rpc('atomic_supersede_memory', {
+      p_user_id: TEST_USER,
+      p_key: 'favourite_color',
+      p_new_value: 'green',
+      p_memory_type: 'fact',
+      p_importance: 80,
+      p_confidence: 0.9,
+      p_emotional_weight: 0,
+      p_source_message: 'My favourite color is green',
+      p_source_message_id: src,
+      p_source_authority: 'explicit_user',
+    });
+    expect(res.data?.success).toBe(true);
   });
 });
