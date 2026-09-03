@@ -531,16 +531,28 @@ export class MemoryRepository {
   /**
    * Default forget semantics: Archive and redact from active retrieval,
    * but keep the row for potential system audits or compaction reconciliation.
+   * Returns true if a row was archived, false if not found.
    */
-  async forgetMemory(userId: string, memoryId: string): Promise<void> {
-    await qt.track('forget_memory', 'memories', () =>
+  async forgetMemory(userId: string, memoryId: string): Promise<boolean> {
+    const { data, error } = await qt.track('forget_memory', 'memories', () =>
       supabaseAdmin
         .from('memories')
-        .update({ is_archived: true })
+        .update({ is_archived: true, updated_at: new Date().toISOString() })
         .eq('id', memoryId)
         .eq('user_id', userId)
+        .select('id')
     );
-    logger.info('Memory forgotten (archived)', { memoryId, userId });
+
+    if (error) {
+      logger.error('[MemoryRepository] Failed to forget memory', { userId, memoryId, error: error.message });
+      return false;
+    }
+
+    const forgotten = (data || []).length > 0;
+    if (forgotten) {
+      logger.info('[MemoryRepository] Memory forgotten (archived)', { memoryId, userId });
+    }
+    return forgotten;
   }
 
   /**
