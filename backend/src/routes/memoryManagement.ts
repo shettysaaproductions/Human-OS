@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { memoryRepository } from '../services/memoryRepository';
 import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { memoryPolicyService } from '../services/MemoryPolicyService';
 
 export const memoryManagementRouter = Router();
 
@@ -291,6 +292,64 @@ memoryManagementRouter.get('/browser', async (req: Request, res: Response, next:
   }
 });
 
+// GET /memories/settings — get MEMORY_ENABLED privacy setting (also /privacy alias)
+memoryManagementRouter.get('/settings', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const enabled = await memoryPolicyService.isMemoryEnabled(userId);
+    res.status(200).json({ success: true, data: { memory_enabled: enabled } });
+  } catch (err) {
+    logger.error('Failed to get memory privacy setting', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+memoryManagementRouter.get('/privacy', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const enabled = await memoryPolicyService.isMemoryEnabled(userId);
+    res.status(200).json({ success: true, data: { memory_enabled: enabled } });
+  } catch (err) {
+    logger.error('Failed to get memory privacy setting', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
+// PATCH /memories/settings — set MEMORY_ENABLED privacy setting (also /privacy alias)
+memoryManagementRouter.patch('/settings', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const { memory_enabled } = req.body;
+    if (typeof memory_enabled !== 'boolean') {
+      res.status(400).json({ error: 'memory_enabled must be boolean' });
+      return;
+    }
+    await memoryPolicyService.setMemoryEnabled(userId, memory_enabled);
+    res.status(200).json({ success: true, data: { memory_enabled } });
+  } catch (err) {
+    logger.error('Failed to set memory privacy setting', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+memoryManagementRouter.patch('/privacy', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const { memory_enabled } = req.body;
+    if (typeof memory_enabled !== 'boolean') {
+      res.status(400).json({ error: 'memory_enabled must be boolean' });
+      return;
+    }
+    await memoryPolicyService.setMemoryEnabled(userId, memory_enabled);
+    res.status(200).json({ success: true, data: { memory_enabled } });
+  } catch (err) {
+    logger.error('Failed to set memory privacy setting', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
 // DELETE /memories/:id — forget a memory (archive, not hard delete)
 memoryManagementRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -337,6 +396,7 @@ memoryManagementRouter.patch('/:id/archive', async (req: Request, res: Response,
     const result = await memoryRepository.unarchiveMemory(userId, id);
     if (!result.success) {
       if (result.reason === 'NOT_FOUND') { res.status(404).json({ error: 'Memory not found' }); return; }
+      if (result.reason === 'MEMORY_PAUSED') { res.status(403).json({ error: 'Memory is paused — unarchiving requires memory to be enabled' }); return; }
       if (result.reason === 'DUPLICATE_CURRENT') { res.status(409).json({ error: 'Cannot unarchive: duplicate CURRENT would be created - another active memory exists for this key' }); return; }
       if (result.reason === 'SUPERSEDED') { res.status(400).json({ error: 'Cannot unarchive a superseded memory' }); return; }
       if (result.reason === 'HISTORICAL') { res.status(400).json({ error: 'Cannot unarchive historical memory as CURRENT' }); return; }
@@ -380,6 +440,12 @@ memoryManagementRouter.patch('/:id', async (req: Request, res: Response, next: N
 
     if (fetchErr) throw fetchErr;
     if (!existing) { res.status(404).json({ error: 'Memory not found' }); return; }
+
+    // Privacy gate: editing creates new CURRENT, blocked when MEMORY_ENABLED is false
+    if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
+      res.status(403).json({ error: 'Memory is paused — editing requires memory to be enabled. Enable memory in Settings to edit memories.' });
+      return;
+    }
 
     // Authoritative transition: commit the edited value as a fresh CURRENT
     // via the repository's atomic supersession path. This preserves history,

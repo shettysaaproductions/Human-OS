@@ -49,6 +49,15 @@ export function MemoryBrowserScreen() {
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
+
+  const fetchMemoryPolicy = useCallback(async () => {
+    try {
+      const res = await api.get('/memories/settings');
+      const enabled = res.data?.data?.memory_enabled;
+      if (typeof enabled === 'boolean') setMemoryEnabled(enabled);
+    } catch {}
+  }, []);
 
   const fetchMemories = useCallback(async () => {
     try {
@@ -68,7 +77,7 @@ export function MemoryBrowserScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchMemories(); }, [fetchMemories]);
+  useEffect(() => { fetchMemories(); fetchMemoryPolicy(); }, [fetchMemories, fetchMemoryPolicy]);
 
   const handleForget = useCallback(async (memory: MemoryItem) => {
     Alert.alert(
@@ -95,9 +104,13 @@ export function MemoryBrowserScreen() {
   }, []);
 
   const handleEdit = useCallback((memory: MemoryItem) => {
+    if (!memoryEnabled) {
+      Alert.alert('Memory Paused', 'Editing requires memory to be enabled. Enable memory in Settings to edit memories.');
+      return;
+    }
     setEditingId(memory.id);
     setEditValue(memory.value);
-  }, []);
+  }, [memoryEnabled]);
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null);
@@ -112,8 +125,13 @@ export function MemoryBrowserScreen() {
       // Server-authoritative: refetch browser state instead of optimistic local patch.
       // Uses server as source of truth; works even if server normalized value or rotated id.
       await fetchMemories();
-    } catch (err) {
-      Alert.alert('Error', 'Failed to save edit');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || '';
+      if (msg.toLowerCase().includes('memory is paused') || msg.toLowerCase().includes('memory is paused')) {
+        Alert.alert('Memory Paused', 'Editing requires memory to be enabled. Enable memory in Settings.');
+      } else {
+        Alert.alert('Error', 'Failed to save edit');
+      }
     }
   }, [editValue, fetchMemories]);
 
@@ -140,6 +158,11 @@ export function MemoryBrowserScreen() {
         <Text style={styles.title}>Nova's Memory</Text>
         <Text style={styles.subtitle}>{totalMemories} memories</Text>
       </View>
+      {!memoryEnabled && (
+        <View style={styles.pausedBanner}>
+          <Text style={styles.pausedText}>Memory is paused — Nova won't save or use persistent memories while this is off. Editing is disabled.</Text>
+        </View>
+      )}
 
       <FlatList
         data={CATEGORY_ORDER}
@@ -185,6 +208,7 @@ export function MemoryBrowserScreen() {
                       setEditValue={setEditValue}
                       onSaveEdit={handleSaveEdit}
                       onCancelEdit={handleCancelEdit}
+                      memoryEnabled={memoryEnabled}
                     />
                   ))}
                 </View>
@@ -214,6 +238,7 @@ function MemoryCard({
   setEditValue,
   onSaveEdit,
   onCancelEdit,
+  memoryEnabled,
 }: {
   memory: MemoryItem;
   categoryColor: string;
@@ -224,6 +249,7 @@ function MemoryCard({
   setEditValue: (v: string) => void;
   onSaveEdit: (id: string) => void;
   onCancelEdit: () => void;
+  memoryEnabled: boolean;
 }) {
   const isEditing = editingId === memory.id;
 
@@ -265,14 +291,21 @@ function MemoryCard({
 
       <View style={styles.actions}>
         {!isEditing && (
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: categoryColor }]} onPress={() => onEdit(memory)}>
-            <Text style={[styles.actionText, { color: categoryColor }]}>✏️ Edit</Text>
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderColor: memoryEnabled ? categoryColor : '#333' }, !memoryEnabled && { opacity: 0.5 }]}
+            onPress={() => onEdit(memory)}
+            disabled={!memoryEnabled}
+          >
+            <Text style={[styles.actionText, { color: memoryEnabled ? categoryColor : '#666' }]}>✏️ Edit</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity style={styles.actionBtn} onPress={() => onForget(memory)}>
           <Text style={styles.forgetText}>🗑 Forget</Text>
         </TouchableOpacity>
       </View>
+      {!memoryEnabled && !isEditing && (
+        <Text style={styles.pausedNote}>Editing requires memory to be enabled</Text>
+      )}
 
       <Text style={styles.updatedText}>Updated {formatRelativeTime(memory.updatedAt)}</Text>
     </View>
@@ -346,6 +379,9 @@ const styles = StyleSheet.create({
   actionText: { color: '#aaa', fontSize: 13 },
   forgetText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
   updatedText: { fontSize: 11, color: '#444' },
+  pausedBanner: { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)', borderRadius: 8, padding: 12, marginHorizontal: 16, marginBottom: 12 },
+  pausedText: { fontSize: 13, color: '#F59E0B', lineHeight: 18 },
+  pausedNote: { fontSize: 11, color: '#F59E0B', marginTop: 6, fontStyle: 'italic' },
   emptyContainer: { alignItems: 'center', paddingTop: 60 },
   emptyText: { fontSize: 18, fontWeight: '600', color: '#555', marginBottom: 4 },
   emptySub: { fontSize: 14, color: '#333' },

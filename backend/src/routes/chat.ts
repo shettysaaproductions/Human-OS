@@ -25,6 +25,7 @@ import { TurnAnalyzer } from '../services/TurnAnalyzer';
 import { cognitiveContextService } from '../services/CognitiveContextService';
 import { cognitiveDoubtService } from '../services/CognitiveDoubtService';
 import { doubtEligibilityEngine } from '../services/DoubtEligibilityEngine';
+import { memoryPolicyService } from '../services/MemoryPolicyService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -919,7 +920,9 @@ chatRouter.post(
       const wmCacheKey = `working_memory:${userId}`;
       const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string; timezone_offset?: number }>(profileCacheKey);
       const cachedWm = cache.get<{ key: string; value: string }[]>(wmCacheKey);
-      const skipMemory = process.env.DISABLE_MEMORY === 'true';
+      const skipMemoryEnv = process.env.DISABLE_MEMORY === 'true';
+      const memoryEnabledForChat = await memoryPolicyService.isMemoryEnabled(userId).catch(() => true);
+      const skipMemory = skipMemoryEnv || !memoryEnabledForChat;
       const today = new Date().toISOString().split('T')[0];
 
       const dbStartTime = Date.now();
@@ -1185,13 +1188,14 @@ chatRouter.post(
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // Dispatch durable fact persistence immediately for deterministic facts & corrections
+      // Privacy gate: when MEMORY_ENABLED is false, do not queue deterministic fact persistence
       const explicitFacts = turnAnalysis.units.filter(u => 
         (u.type === 'fact' || u.type === 'correction') && 
         u.factKey && 
         !u.factKey.startsWith('UNKNOWN_') && 
         u.factValue
       );
-      if (explicitFacts.length > 0) {
+      if (explicitFacts.length > 0 && memoryEnabledForChat) {
         const factMap = new Map<string, { value: string, is_protected?: boolean, is_correction?: boolean, factClass?: string }>();
         for (const f of explicitFacts) {
           if (f.factKey && !f.factKey.startsWith('UNKNOWN_') && f.factValue) {
@@ -1986,10 +1990,10 @@ HINGLISH RULES:
       degradedMode.appendMessage(userId, 'user', primaryMessage);
       degradedMode.appendMessage(userId, 'assistant', reply);
 
-      // 9. Background extraction — skipped when DISABLE_MEMORY=true
+      // 9. Background extraction — skipped when DISABLE_MEMORY=true or MEMORY_ENABLED=false
       // OPTIMIZED: All 7 memory types are extracted in ONE LLM call via ConsolidatedMemoryAgent.
       // This reduces per-message LLM load from ~7 calls to ~2 (1 main + 1 consolidated extraction).
-      if (process.env.DISABLE_MEMORY !== 'true') {
+      if (process.env.DISABLE_MEMORY !== 'true' && memoryEnabledForChat) {
         const isFiller = primaryMessage.length < 10 && !shouldExtractShortTermMemory(primaryMessage);
 
         if (!isFiller) {

@@ -7,6 +7,7 @@ import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
 import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 import { isGarbageMemoryValue, filterGarbageWorkingMemories } from '../lib/memoryFilters';
+import { memoryPolicyService } from '../services/MemoryPolicyService';
 
 // ── Hinglish vocative words that are NOT kinship facts ──────────────────────────
 // "Bhai, sun" = addressing the listener. "Mera bhai Amit hai" = kinship fact.
@@ -143,6 +144,13 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
 
   protected async execute(job: Job): Promise<number> {
     const { userId, messageId, message, questionClauses, turnId: _turnId, hasExplicitRemember, hasCorrections, correctionTarget } = job.payload;
+
+    // Privacy gate: when MEMORY_ENABLED is false, no persistent memory may be created
+    // Check again at worker time for queued-job race safety
+    if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
+      logger.info('[ConsolidatedMemoryAgent] Memory paused — skipping persistence', { userId, messageId });
+      return 0;
+    }
 
     // P0-B: Build the question-clause suppression instruction if we have clause data.
     // This is the PRIMARY fix for question text being stored as memory values.
@@ -312,6 +320,11 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
   }
 
   private async persistExtraction(userId: string, messageId: string, messageText: string, parsed: ConsolidatedExtraction, opts?: { isExplicitAuthority?: boolean }): Promise<number> {
+    // Privacy gate at persistence boundary — ensures queued jobs cannot bypass
+    if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
+      logger.info('[ConsolidatedMemoryAgent] Memory paused — skipping persistExtraction', { userId, messageId });
+      return 0;
+    }
     let totalCreated = 0;
     const { memoryRepository } = await import('../services/memoryRepository');
 

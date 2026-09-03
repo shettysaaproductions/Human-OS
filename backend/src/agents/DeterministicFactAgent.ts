@@ -1,6 +1,7 @@
 import { memoryRepository } from '../services/memoryRepository';
 import { MemoryType } from '../types/memory';
 import { logger } from '../lib/logger';
+import { memoryPolicyService } from '../services/MemoryPolicyService';
 
 function getMemoryTypeForKey(key: string): MemoryType {
   if ([
@@ -30,6 +31,12 @@ export class DeterministicFactAgent {
 
     if (!userId || !facts || !Array.isArray(facts)) {
       throw new Error('Invalid payload for extract_deterministic_fact');
+    }
+
+    // Privacy gate: queued job must re-check at execution time (race safety)
+    if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
+      logger.info('[DeterministicFactAgent] Memory paused — skipping fact persistence', { userId, messageId });
+      return;
     }
 
     for (const fact of facts) {

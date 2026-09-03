@@ -25,6 +25,7 @@ import { qt } from '../lib/queryTracker';
 import { extractKeywords, stopWords } from '../utils/nlp';
 import { TurnAnalyzer, TurnAnalysisResult } from './TurnAnalyzer';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { memoryPolicyService } from './MemoryPolicyService';
 
 export interface ContextItemProvenance {
   source: 'current_turn' | 'chat_history' | 'working_memory' | 'short_term_memory' | 'episodic_memory' | 'long_term_memory' | 'life_thread' | 'nova_action' | 'reminder' | 'user_profile' | 'presence';
@@ -207,6 +208,12 @@ export class CognitiveContextService {
 
     const effectiveMessage = options.message || (options.messages && options.messages.length > 0 ? options.messages[options.messages.length - 1].message : '');
 
+    // Privacy gate: when MEMORY_ENABLED is false, no persistent memory enrichment
+    const memoryEnabled = await memoryPolicyService.isMemoryEnabled(userId).catch(() => true);
+    if (!memoryEnabled) {
+      logger.info('[CognitiveContext] Memory paused — skipping persistent memory enrichment', { userId });
+    }
+
     // ── Parallel Safe Queries ───────────────────────────────────────────────
     const profilePromise = qt.track('get_user_profile', 'profiles', () =>
       supabaseAdmin.from('profiles').select('id, preferred_name, companion_personality, grammatical_gender, country, timezone_offset, current_visual_context').eq('id', userId).maybeSingle()
@@ -224,49 +231,53 @@ export class CognitiveContextService {
       return { data: [] };
     });
 
-    const wmPromise = qt.track('get_working_memory', 'working_memory', () =>
-      supabaseAdmin.from('working_memory').select('key, value, created_at, promotion_status, expires_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
-    ).then((res: any) => {
-      if (res && Array.isArray(res.data)) {
-        const now = new Date().toISOString();
-        res.data = res.data.filter((wm: any) =>
-          wm.promotion_status !== 'SUPERSEDED' &&
-          wm.promotion_status !== 'INVALIDATED' &&
-          (!wm.expires_at || wm.expires_at > now)
-        );
-      }
-      return res;
-    }).catch(err => {
-      logger.warn('[CognitiveContext] Working memory fetch failed', { error: err.message });
-      degradedSources.push('working_memory');
-      return { data: [] };
-    });
+    const wmPromise = memoryEnabled
+      ? qt.track('get_working_memory', 'working_memory', () =>
+          supabaseAdmin.from('working_memory').select('key, value, created_at, promotion_status, expires_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
+        ).then((res: any) => {
+          if (res && Array.isArray(res.data)) {
+            const now = new Date().toISOString();
+            res.data = res.data.filter((wm: any) =>
+              wm.promotion_status !== 'SUPERSEDED' &&
+              wm.promotion_status !== 'INVALIDATED' &&
+              (!wm.expires_at || wm.expires_at > now)
+            );
+          }
+          return res;
+        }).catch(err => {
+          logger.warn('[CognitiveContext] Working memory fetch failed', { error: err.message });
+          degradedSources.push('working_memory');
+          return { data: [] };
+        })
+      : Promise.resolve({ data: [] } as any);
 
-    const memoriesPromise = qt.track('get_all_memories', 'memories', () =>
-      supabaseAdmin
-        .from('memories')
-        .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status, lifecycle_state, superseded_by')
-        .eq('user_id', userId)
-        .eq('is_archived', false)
-        .order('importance', { ascending: false })
-        .limit(50)
-    ).then((res: any) => {
-      // Defensive in-memory trust boundary & supersession filter
-      if (res && Array.isArray(res.data)) {
-        res.data = res.data.filter((m: any) =>
-          !m.is_archived &&
-          m.lifecycle_state !== 'SUPERSEDED' &&
-          m.lifecycle_state !== 'INVALIDATED' &&
-          !m.superseded_by &&
-          (m.compression_status === null || m.compression_status === undefined || m.compression_status === 'trusted')
-        );
-      }
-      return res;
-    }).catch(err => {
-      logger.warn('[CognitiveContext] Memories fetch failed', { error: err.message });
-      degradedSources.push('memories');
-      return { data: [] };
-    });
+    const memoriesPromise = memoryEnabled
+      ? qt.track('get_all_memories', 'memories', () =>
+          supabaseAdmin
+            .from('memories')
+            .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status, lifecycle_state, superseded_by')
+            .eq('user_id', userId)
+            .eq('is_archived', false)
+            .order('importance', { ascending: false })
+            .limit(50)
+        ).then((res: any) => {
+          // Defensive in-memory trust boundary & supersession filter
+          if (res && Array.isArray(res.data)) {
+            res.data = res.data.filter((m: any) =>
+              !m.is_archived &&
+              m.lifecycle_state !== 'SUPERSEDED' &&
+              m.lifecycle_state !== 'INVALIDATED' &&
+              !m.superseded_by &&
+              (m.compression_status === null || m.compression_status === undefined || m.compression_status === 'trusted')
+            );
+          }
+          return res;
+        }).catch(err => {
+          logger.warn('[CognitiveContext] Memories fetch failed', { error: err.message });
+          degradedSources.push('memories');
+          return { data: [] };
+        })
+      : Promise.resolve({ data: [] } as any);
 
     const stmPromise = qt.track('get_stm', 'short_term_memories', () =>
       supabaseAdmin.from('short_term_memories').select('id, memory, emotion, importance, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10)

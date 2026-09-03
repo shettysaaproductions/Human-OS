@@ -57,6 +57,11 @@ export function SettingsScreen() {
   const [deleteInput, setDeleteInput] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Memory privacy control
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [memoryLoading, setMemoryLoading] = useState(true);
+  const [memorySaving, setMemorySaving] = useState(false);
+
   // Load saved country from profile on mount
   useEffect(() => {
     api.get('/onboarding/status').then(res => {
@@ -81,6 +86,30 @@ export function SettingsScreen() {
   }, [country]);
 
   const selectedCountry = COUNTRIES.find(c => c.code === country) || COUNTRIES[0];
+
+  // Memory privacy control — fetch server-authoritative setting
+  useEffect(() => {
+    api.get('/memories/settings').then(res => {
+      const enabled = res.data?.data?.memory_enabled;
+      if (typeof enabled === 'boolean') setMemoryEnabled(enabled);
+    }).catch(() => {}).finally(() => setMemoryLoading(false));
+  }, []);
+
+  const handleToggleMemory = useCallback(async (value: boolean) => {
+    const prev = memoryEnabled;
+    setMemoryEnabled(value);
+    setMemorySaving(true);
+    try {
+      const res = await api.patch('/memories/settings', { memory_enabled: value });
+      const confirmed = res.data?.data?.memory_enabled;
+      if (typeof confirmed === 'boolean') setMemoryEnabled(confirmed);
+    } catch {
+      setMemoryEnabled(prev);
+      Alert.alert('Error', 'Could not save memory setting. Please try again.');
+    } finally {
+      setMemorySaving(false);
+    }
+  }, [memoryEnabled]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -172,6 +201,36 @@ export function SettingsScreen() {
               Nova uses this to know your current time, day of the week, and what counts as a weekend for you.
             </Text>
           </View>
+        </View>
+
+        {/* ── Memory Privacy ───────────────────────────── */}
+        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🧠 MEMORY</Text>
+        <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={st.row}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Memory</Text>
+              <Text style={[st.rowSub, { color: colors.textSecondary }]}>
+                {memoryLoading ? 'Loading...' : memoryEnabled ? 'On' : 'Off'}
+              </Text>
+            </View>
+            <Switch
+              value={memoryEnabled}
+              onValueChange={handleToggleMemory}
+              disabled={memoryLoading || memorySaving}
+              trackColor={{ true: '#8B5CF6', false: colors.border }}
+              thumbColor={memoryEnabled ? '#fff' : '#666'}
+            />
+          </View>
+          <View style={[st.divider, { backgroundColor: colors.divider }]} />
+          <View style={st.row}>
+            <Text style={[st.rowSub, { color: colors.textSecondary, flex: 1 }]}>
+              Nova won't save or use persistent memories while this is off.
+            </Text>
+          </View>
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Memories' })}>
+            <Text style={[st.rowLabel, { color: '#06B6D4' }]}>Manage Nova's memories</Text>
+            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
+          </TouchableOpacity>
         </View>
 
         {/* ── Country Picker Modal ──────────────────────── */}

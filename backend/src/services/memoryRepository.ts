@@ -7,6 +7,7 @@ import { canonicalizeKey, isKnownCanonicalKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { deterministicGuardian } from './DeterministicGuardianService';
 import { sourceDependencyService } from './SourceDependencyService';
+import { memoryPolicyService } from './MemoryPolicyService';
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, user_id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, updated_at, is_archived, memory_type, source_authority, protection_source, protected_at, compression_status, lifecycle_state, superseded_by, superseded_at, supersession_reason, valid_from, valid_until, temporal_precision, temporal_metadata';
@@ -86,6 +87,13 @@ export class MemoryRepository {
 
   private async _upsertMemoryImpl(userId: string, memory: ExtractedMemory, sourceMessage: string): Promise<void> {
     if (!memory.shouldPersist) return;
+
+    // Privacy gate: when MEMORY_ENABLED is false, no new persistent semantic memory may be created.
+    // This is the final defense — callers should also check early, but this ensures queued workers cannot bypass.
+    if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
+      logger.info('[MemoryRepository] Blocked memory write — memory paused', { userId, key: memory.key, reason: 'MEMORY_PAUSED' });
+      return;
+    }
 
     // ── Layer 0: Canonical key normalization ──────────────────────────────────
     const { canonical: canonicalKey, wasAliased } = canonicalizeKey(memory.key);
@@ -746,6 +754,12 @@ export class MemoryRepository {
       if (!target.is_archived) {
         // Already active — idempotent success
         return { success: true };
+      }
+
+      // Privacy gate: when MEMORY_ENABLED is false, do not restore archived memory to active
+      if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
+        logger.info('[MemoryRepository] Blocked unarchive — memory paused', { userId, memoryId, reason: 'MEMORY_PAUSED' });
+        return { success: false, reason: 'MEMORY_PAUSED' };
       }
 
       // Only legitimately archived CURRENT memories are user-unarchivable.
