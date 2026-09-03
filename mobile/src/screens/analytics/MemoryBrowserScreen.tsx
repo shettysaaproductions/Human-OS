@@ -99,23 +99,23 @@ export function MemoryBrowserScreen() {
     setEditValue(memory.value);
   }, []);
 
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditValue('');
+  }, []);
+
   const handleSaveEdit = useCallback(async (id: string) => {
     try {
       await api.patch(`/memories/${id}`, { value: editValue });
-      setCategories(prev => {
-        const newCategories = { ...prev };
-        for (const cat of Object.keys(newCategories)) {
-          newCategories[cat] = newCategories[cat].map(m =>
-            m.id === id ? { ...m, value: editValue, updatedAt: new Date().toISOString() } : m
-          );
-        }
-        return newCategories;
-      });
       setEditingId(null);
+      setEditValue('');
+      // Server-authoritative: refetch browser state instead of optimistic local patch.
+      // Uses server as source of truth; works even if server normalized value or rotated id.
+      await fetchMemories();
     } catch (err) {
       Alert.alert('Error', 'Failed to save edit');
     }
-  }, [editValue]);
+  }, [editValue, fetchMemories]);
 
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
@@ -184,6 +184,7 @@ export function MemoryBrowserScreen() {
                       editValue={editValue}
                       setEditValue={setEditValue}
                       onSaveEdit={handleSaveEdit}
+                      onCancelEdit={handleCancelEdit}
                     />
                   ))}
                 </View>
@@ -212,6 +213,7 @@ function MemoryCard({
   editValue,
   setEditValue,
   onSaveEdit,
+  onCancelEdit,
 }: {
   memory: MemoryItem;
   categoryColor: string;
@@ -221,6 +223,7 @@ function MemoryCard({
   editValue: string;
   setEditValue: (v: string) => void;
   onSaveEdit: (id: string) => void;
+  onCancelEdit: () => void;
 }) {
   const isEditing = editingId === memory.id;
 
@@ -251,7 +254,7 @@ function MemoryCard({
             <TouchableOpacity style={styles.saveBtn} onPress={() => onSaveEdit(memory.id)}>
               <Text style={styles.saveBtnText}>Save</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => onEdit({ ...memory, value: '' })}> 
+            <TouchableOpacity style={styles.cancelBtn} onPress={onCancelEdit}>
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
           </View>

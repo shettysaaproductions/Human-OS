@@ -80,6 +80,9 @@ memoryManagementRouter.get('/', async (req: Request, res: Response, next: NextFu
 
     // Fetch all active memories (or archived if requested) to canonicalize in-memory
     // We fetch a larger set to allow proper canonical deduplication, then paginate
+    // Product invariant: max distinct CURRENT keys per user is bounded by CANONICAL_KEYS
+    // (~22 keys; exactly one CURRENT per canonical key) so 500 is intentional product
+    // limit with large headroom. We still expose truncation explicitly.
     const fetchLimit = 500;
     let query = supabaseAdmin
       .from('memories')
@@ -100,6 +103,10 @@ memoryManagementRouter.get('/', async (req: Request, res: Response, next: NextFu
 
     const { data: allMemories, error } = await query;
     if (error) throw error;
+
+    // Bounded safe improvement: detect if raw fetch hit the 500 cap.
+    // If truncated, unique set and pagination may be incomplete — do not falsely claim completeness.
+    const isTruncated = (allMemories?.length ?? 0) >= fetchLimit;
 
     // Canonicalize and deduplicate: keep highest-authority CURRENT per canonical key
     const canonicalMap = new Map<string, any>();
@@ -165,6 +172,8 @@ memoryManagementRouter.get('/', async (req: Request, res: Response, next: NextFu
       success: true,
       data: displayMemories,
       total: uniqueMemories.length,
+      totalIsComplete: !isTruncated,
+      truncated: isTruncated,
       limit: Number(limit),
       offset: Number(offset),
     });
@@ -196,13 +205,16 @@ memoryManagementRouter.get('/browser', async (req: Request, res: Response, next:
     const { archived = 'false' } = req.query;
 
     // Fetch all non-archived memories for canonicalization
+    // Product invariant: distinct CURRENT canonical keys is bounded (~22). 500 is intentional
+    // product limit with large headroom; still explicitly signal truncation if hit.
+    const browserFetchLimit = 500;
     const { data: allMemories, error } = await supabaseAdmin
       .from('memories')
       .select('id, key, value, memory_type, importance, confidence, frequency, is_archived, created_at, updated_at, source_authority, lifecycle_state')
       .eq('user_id', userId)
       .eq('is_archived', archived === 'true')
       .order('importance', { ascending: false })
-      .limit(500);
+      .limit(browserFetchLimit);
 
     if (error) throw error;
 
@@ -230,6 +242,7 @@ memoryManagementRouter.get('/browser', async (req: Request, res: Response, next:
       }
     }
 
+    const isTruncated = (allMemories?.length ?? 0) >= browserFetchLimit;
     const uniqueMemories = Array.from(canonicalMap.values());
 
     // Group by category
@@ -265,7 +278,13 @@ memoryManagementRouter.get('/browser', async (req: Request, res: Response, next:
       });
     }
 
-    res.status(200).json({ success: true, data: categories });
+    res.status(200).json({
+      success: true,
+      data: categories,
+      totalUnique: uniqueMemories.length,
+      totalIsComplete: !isTruncated,
+      truncated: isTruncated,
+    });
   } catch (err) {
     logger.error('Failed to fetch memory browser data', { error: err instanceof Error ? err.message : String(err) });
     next(err);
@@ -372,9 +391,28 @@ memoryManagementRouter.patch('/:id', async (req: Request, res: Response, next: N
       shouldPersist: true
     } as any, 'User edit via memory management');
 
+    // Server-authoritative: fetch the newly created CURRENT row so the client
+    // does not have to assume the id. Value is the explicitly requested newValue
+    // (preserves history and guarantees exactly one CURRENT per canonical key).
+    // We return newValue as the authoritative value; the id comes from the fresh row.
+    const { data: authoritative } = await supabaseAdmin
+      .from('memories')
+      .select('id, updated_at')
+      .eq('user_id', userId)
+      .eq('key', canonicalKey)
+      .eq('is_archived', false)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     res.status(200).json({
       success: true,
-      data: { id: undefined, key: canonicalKey, value: newValue }
+      data: {
+        id: authoritative?.id,
+        key: canonicalKey,
+        value: newValue,
+        updatedAt: authoritative?.updated_at,
+      }
     });
   } catch (err) {
     logger.error('Failed to edit memory', { error: err instanceof Error ? err.message : String(err) });
