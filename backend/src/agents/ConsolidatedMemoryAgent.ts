@@ -74,7 +74,7 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
 
       // Block unscoped generic real_name / nickname without relationship context
       if ((key === 'real_name' || key === 'nickname' || key === 'nick_name') && !detectedRelation) {
-        logger.info('[ConsolidatedMemoryAgent] BLOCKED unscoped generic name/nickname key', { key, value });
+        logger.info('[ConsolidatedMemoryAgent] BLOCKED unscoped generic name/nickname key', { key, reason: 'UNSCOPED_GENERIC_KEY' });
         return false;
       }
 
@@ -96,7 +96,7 @@ function filterSemanticMemories(memories: any[], sourceMessage: string): any[] {
           return false;
         }
         if (!hasKinshipPattern) {
-          logger.info('[ConsolidatedMemoryAgent] BLOCKED brother_name without kinship evidence', { key, value });
+          logger.info('[ConsolidatedMemoryAgent] BLOCKED brother_name without kinship evidence', { key, reason: 'BROTHER_KINSHIP_MISSING' });
           return false;
         }
       }
