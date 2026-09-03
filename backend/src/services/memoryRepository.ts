@@ -713,6 +713,98 @@ export class MemoryRepository {
   }
 
   /**
+   * Phase 2F: Safe Unarchive — restores an archived memory without creating duplicate CURRENT.
+   * Invariants:
+   *  - Ownership is validated (userId must match)
+   *  - Cannot create two CURRENT rows for same canonical key
+   *  - Cannot resurrect a HISTORICAL row as CURRENT (would violate lifecycle semantics)
+   *  - Preserves lifecycle_state, only flips is_archived
+   * Returns true if unarchived, false if not found or blocked (duplicate/historical)
+   */
+  async unarchiveMemory(userId: string, memoryId: string): Promise<{ success: boolean; reason?: string }> {
+    try {
+      // Fetch target with ownership check
+      const { data: target, error: fetchErr } = await qt.track('mem_repo_unarchive_fetch', 'memories', () =>
+        supabaseAdmin
+          .from('memories')
+          .select('id, key, value, lifecycle_state, is_archived, user_id')
+          .eq('id', memoryId)
+          .eq('user_id', userId)
+          .maybeSingle()
+      );
+
+      if (fetchErr) {
+        logger.error('[MemoryRepository] Failed to fetch memory for unarchive', { userId, memoryId, error: fetchErr.message });
+        return { success: false, reason: 'FETCH_ERROR' };
+      }
+
+      if (!target) {
+        return { success: false, reason: 'NOT_FOUND' };
+      }
+
+      if (!target.is_archived) {
+        // Already active — idempotent success
+        return { success: true };
+      }
+
+      // Block resurrection of HISTORICAL as CURRENT
+      if (target.lifecycle_state === 'HISTORICAL') {
+        logger.warn('[MemoryRepository] Blocked unarchive of historical row as CURRENT', { userId, memoryId, key: target.key });
+        return { success: false, reason: 'HISTORICAL' };
+      }
+
+      // Check for duplicate CURRENT on same canonical key
+      const { canonical } = canonicalizeKey(target.key || '');
+      const { data: activeRows, error: activeErr } = await qt.track('mem_repo_unarchive_check', 'memories', () =>
+        supabaseAdmin
+          .from('memories')
+          .select('id, lifecycle_state, is_archived')
+          .eq('user_id', userId)
+          .eq('key', canonical)
+          .eq('is_archived', false)
+      );
+
+      if (activeErr) {
+        logger.error('[MemoryRepository] Failed to check duplicate CURRENT for unarchive', { userId, memoryId, error: activeErr.message });
+        return { success: false, reason: 'CHECK_ERROR' };
+      }
+
+      const hasDuplicateCurrent = (activeRows || []).some(
+        (r: any) => r.id !== memoryId && r.lifecycle_state !== 'SUPERSEDED' && r.lifecycle_state !== 'INVALIDATED' && r.lifecycle_state !== 'HISTORICAL'
+      );
+
+      if (hasDuplicateCurrent) {
+        logger.warn('[MemoryRepository] Blocked unarchive that would create duplicate CURRENT', { userId, memoryId, canonical });
+        return { success: false, reason: 'DUPLICATE_CURRENT' };
+      }
+
+      // Safe to unarchive
+      const { data, error } = await qt.track('mem_repo_unarchive', 'memories', () =>
+        supabaseAdmin
+          .from('memories')
+          .update({ is_archived: false, updated_at: new Date().toISOString() })
+          .eq('id', memoryId)
+          .eq('user_id', userId)
+          .select('id')
+      );
+
+      if (error) {
+        logger.error('[MemoryRepository] Failed to unarchive memory', { userId, memoryId, error: error.message });
+        return { success: false, reason: 'UPDATE_ERROR' };
+      }
+
+      const ok = (data || []).length > 0;
+      if (ok) {
+        logger.info('[MemoryRepository] Memory unarchived via canonical repository', { userId, memoryId, canonical });
+      }
+      return { success: ok, reason: ok ? undefined : 'NOT_FOUND' };
+    } catch (err: any) {
+      logger.error('[MemoryRepository] unarchiveMemory error', { userId, memoryId, error: err?.message });
+      return { success: false, reason: 'EXCEPTION' };
+    }
+  }
+
+  /**
    * Phase 2C Safe Deterministic Repair Operation: Key Canonicalization
    * Normalizes an aliased key to its canonical schema equivalent.
    */

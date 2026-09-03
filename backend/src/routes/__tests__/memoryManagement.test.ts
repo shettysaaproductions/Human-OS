@@ -81,6 +81,9 @@ describe('Memory Management Router — Trust Layer', () => {
     mockMemoryRepository.archiveMemory.mockResolvedValue(true);
     mockMemoryRepository.upsertMemory.mockResolvedValue(undefined);
     mockMemoryRepository.forgetMemory.mockResolvedValue(true);
+    // Mock additional repository methods used by archive/unarchive
+    (mockMemoryRepository as any).unarchiveMemory = jest.fn().mockResolvedValue({ success: true });
+    (mockMemoryRepository as any).forgetMemoryCompletely = jest.fn().mockResolvedValue(undefined);
   });
 
   function createMemoryRow(overrides: any = {}) {
@@ -283,10 +286,14 @@ describe('Memory Management Router — Trust Layer', () => {
   });
 
   describe('PATCH /memories/:id — user edit flow', () => {
-    it('archives old row and creates new CURRENT via MemoryRepository', async () => {
+    it('creates new CURRENT via MemoryRepository without separate raw archive (atomic)', async () => {
       const existing = createMemoryRow({ key: 'mother_name', value: 'Jane Doe' });
       const selectChain = createChainMock({ data: existing, error: null });
-      mockSupabaseAdmin.from.mockReturnValue(selectChain);
+      // First call: fetch existing for ownership; second call: authoritative id fetch after upsert
+      const authFetchChain = createChainMock({ data: { id: 'new-mem-id', updated_at: '2025-01-21T10:00:00Z' }, error: null });
+      mockSupabaseAdmin.from
+        .mockReturnValueOnce(selectChain)
+        .mockReturnValueOnce(authFetchChain);
 
       mockReq.params = { id: memoryId };
       mockReq.body = { value: 'Jane Smith' };
@@ -294,11 +301,8 @@ describe('Memory Management Router — Trust Layer', () => {
       const layer = findRoute('/:id', 'patch');
       await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
 
-      expect(mockMemoryRepository.archiveMemory).toHaveBeenCalledWith(
-        userId,
-        memoryId,
-        'User edit via memory management'
-      );
+      // Edit is now atomic via upsert only — no separate archiveMemory gap
+      expect(mockMemoryRepository.archiveMemory).not.toHaveBeenCalled();
       expect(mockMemoryRepository.upsertMemory).toHaveBeenCalledWith(
         userId,
         expect.objectContaining({
@@ -315,10 +319,31 @@ describe('Memory Management Router — Trust Layer', () => {
       }));
     });
 
-    it('derives canonical key from stored record (ignores client-supplied key)', async () => {
+    it('failed upsert does not return success and preserves exactly one CURRENT', async () => {
       const existing = createMemoryRow({ key: 'mother_name', value: 'Jane Doe' });
       const selectChain = createChainMock({ data: existing, error: null });
       mockSupabaseAdmin.from.mockReturnValue(selectChain);
+      mockMemoryRepository.upsertMemory.mockRejectedValueOnce(new Error('DB failure'));
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { value: 'Jane Smith' };
+
+      const layer = findRoute('/:id', 'patch');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).not.toHaveBeenCalledWith(200);
+      expect(mockNext).toHaveBeenCalled();
+      const nextErr = mockNext.mock.calls[0][0];
+      expect(nextErr.message).toMatch(/DB failure/);
+    });
+
+    it('derives canonical key from stored record (ignores client-supplied key)', async () => {
+      const existing = createMemoryRow({ key: 'mother_name', value: 'Jane Doe' });
+      const selectChain = createChainMock({ data: existing, error: null });
+      const authFetchChain = createChainMock({ data: { id: 'new-mem-id', updated_at: '2025-01-21T10:00:00Z' }, error: null });
+      mockSupabaseAdmin.from
+        .mockReturnValueOnce(selectChain)
+        .mockReturnValueOnce(authFetchChain);
 
       mockReq.params = { id: memoryId };
       mockReq.body = { value: 'Jane Smith', key: 'father_name' };
@@ -407,10 +432,9 @@ describe('Memory Management Router — Trust Layer', () => {
     });
   });
 
-  describe('PATCH /memories/:id/archive — explicit archive/unarchive', () => {
-    it('archives memory and returns updated state', async () => {
-      const updateChain = createChainMock({ data: { id: memoryId, is_archived: true }, error: null });
-      mockSupabaseAdmin.from.mockReturnValue(updateChain);
+  describe('PATCH /memories/:id/archive — explicit archive/unarchive via MemoryRepository', () => {
+    it('archives memory via MemoryRepository and does not call direct memories.update', async () => {
+      mockMemoryRepository.archiveMemory.mockResolvedValueOnce(true);
 
       mockReq.params = { id: memoryId };
       mockReq.body = { archived: true };
@@ -418,6 +442,8 @@ describe('Memory Management Router — Trust Layer', () => {
       const layer = findRoute('/:id/archive');
       await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
 
+      expect(mockMemoryRepository.archiveMemory).toHaveBeenCalledWith(userId, memoryId, 'User archive via memory management');
+      expect(mockSupabaseAdmin.from).not.toHaveBeenCalledWith('memories');
       expect(mockRes.status).toHaveBeenCalledWith(200);
       expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
         success: true,
@@ -425,9 +451,8 @@ describe('Memory Management Router — Trust Layer', () => {
       }));
     });
 
-    it('unarchives when archived=false', async () => {
-      const updateChain = createChainMock({ data: { id: memoryId, is_archived: false }, error: null });
-      mockSupabaseAdmin.from.mockReturnValue(updateChain);
+    it('unarchives when archived=false via safe repository path', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: true });
 
       mockReq.params = { id: memoryId };
       mockReq.body = { archived: false };
@@ -435,6 +460,7 @@ describe('Memory Management Router — Trust Layer', () => {
       const layer = findRoute('/:id/archive');
       await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
 
+      expect(mockMemoryRepository.unarchiveMemory).toHaveBeenCalledWith(userId, memoryId);
       expect(mockRes.status).toHaveBeenCalledWith(200);
       expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
         success: true,
@@ -442,9 +468,8 @@ describe('Memory Management Router — Trust Layer', () => {
       }));
     });
 
-    it('validates ownership', async () => {
-      const updateChain = createChainMock({ data: null, error: null });
-      mockSupabaseAdmin.from.mockReturnValue(updateChain);
+    it('validates ownership for archive (cross-user) with zero mutation', async () => {
+      mockMemoryRepository.archiveMemory.mockResolvedValueOnce(false);
 
       mockReq.params = { id: memoryId };
       mockReq.body = { archived: true };
@@ -452,7 +477,47 @@ describe('Memory Management Router — Trust Layer', () => {
       const layer = findRoute('/:id/archive');
       await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
 
+      expect(mockMemoryRepository.archiveMemory).toHaveBeenCalledWith(userId, memoryId, expect.any(String));
       expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockSupabaseAdmin.from).not.toHaveBeenCalled();
+    });
+
+    it('validates ownership for unarchive (cross-user) with zero mutation', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'NOT_FOUND' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+    });
+
+    it('blocks unarchive that would create duplicate CURRENT (409)', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'DUPLICATE_CURRENT' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(409);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/duplicate/i) }));
+    });
+
+    it('blocks unarchive of historical row as CURRENT (400)', async () => {
+      mockMemoryRepository.unarchiveMemory = jest.fn().mockResolvedValueOnce({ success: false, reason: 'HISTORICAL' });
+
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: false };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/historical/i) }));
     });
 
     it('requires authentication', async () => {
@@ -464,6 +529,21 @@ describe('Memory Management Router — Trust Layer', () => {
       await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
 
       expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockMemoryRepository.archiveMemory).not.toHaveBeenCalled();
+    });
+
+    it('does not perform hard delete for archive/unarchive', async () => {
+      mockMemoryRepository.archiveMemory.mockResolvedValueOnce(true);
+      mockReq.params = { id: memoryId };
+      mockReq.body = { archived: true };
+
+      const layer = findRoute('/:id/archive');
+      await layer.route.stack[0].handle(mockReq, mockRes, mockNext);
+
+      // Verify no delete was triggered via supabase or repository hard delete
+      expect(mockSupabaseAdmin.from).not.toHaveBeenCalledWith('memories');
+      // forgetMemoryCompletely is the hard delete — ensure not called
+      expect(mockMemoryRepository.forgetMemoryCompletely).not.toHaveBeenCalled();
     });
   });
 });

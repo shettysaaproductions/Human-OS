@@ -316,7 +316,7 @@ memoryManagementRouter.delete('/:id', async (req: Request, res: Response, next: 
   }
 });
 
-// PATCH /memories/:id/archive — archive a memory
+// PATCH /memories/:id/archive — archive/unarchive a memory via authoritative repository
 memoryManagementRouter.patch('/:id/archive', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -324,19 +324,26 @@ memoryManagementRouter.patch('/:id/archive', async (req: Request, res: Response,
 
     const { id } = req.params;
     const { archived = true } = req.body;
+    const shouldArchive = archived === true || archived === 'true';
 
-    const { data, error } = await supabaseAdmin
-      .from('memories')
-      .update({ is_archived: archived, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select('id, is_archived')
-      .maybeSingle();
+    if (shouldArchive) {
+      const ok = await memoryRepository.archiveMemory(userId, id, 'User archive via memory management');
+      if (!ok) { res.status(404).json({ error: 'Memory not found' }); return; }
+      res.status(200).json({ success: true, data: { id, is_archived: true } });
+      return;
+    }
 
-    if (error) throw error;
-    if (!data) { res.status(404).json({ error: 'Memory not found' }); return; }
+    // Unarchive — safe repository path with duplicate CURRENT and historical guards
+    const result = await memoryRepository.unarchiveMemory(userId, id);
+    if (!result.success) {
+      if (result.reason === 'NOT_FOUND') { res.status(404).json({ error: 'Memory not found' }); return; }
+      if (result.reason === 'DUPLICATE_CURRENT') { res.status(409).json({ error: 'Cannot unarchive: duplicate CURRENT would be created - another active memory exists for this key' }); return; }
+      if (result.reason === 'HISTORICAL') { res.status(400).json({ error: 'Cannot unarchive historical memory as CURRENT' }); return; }
+      res.status(400).json({ error: 'Failed to unarchive memory' });
+      return;
+    }
 
-    res.status(200).json({ success: true, data });
+    res.status(200).json({ success: true, data: { id, is_archived: false } });
   } catch (err) {
     logger.error('Failed to archive memory', { error: err instanceof Error ? err.message : String(err) });
     next(err);
@@ -370,15 +377,14 @@ memoryManagementRouter.patch('/:id', async (req: Request, res: Response, next: N
     if (fetchErr) throw fetchErr;
     if (!existing) { res.status(404).json({ error: 'Memory not found' }); return; }
 
-    // Authoritative transition: archive the existing row (preserve history,
-    // never physically delete) and commit the edited value as a fresh CURRENT
-    // row through the repository. This never creates two CURRENT rows for a key.
+    // Authoritative transition: commit the edited value as a fresh CURRENT
+    // via the repository's atomic supersession path. This preserves history,
+    // never physically deletes, and guarantees exactly one CURRENT per key.
+    // Atomicity: upsert handles supersession in a single RPC — no separate
+    // archive step that could leave the user without a CURRENT if upsert fails.
     // CRITICAL: Always derive canonical key from stored record — NEVER trust client-supplied key
     const canonicalKey = existing.key;
     const newValue = value ?? existing.value;
-
-    const archived = await memoryRepository.archiveMemory(userId, id, 'User edit via memory management');
-    if (!archived) { res.status(500).json({ error: 'Failed to archive original memory during edit' }); return; }
 
     await memoryRepository.upsertMemory(userId, {
       type: existing.memory_type || 'semantic',
