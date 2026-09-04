@@ -1,69 +1,55 @@
 # CURRENT TASK
 
 ## Task ID
-CONT-SESSION-CONTINUITY
+CONT-SETTINGS-CRASH-MEMORY-NAVIGATION
 
 ## Objective
-Establish a durable session-continuity system inside the Human-OS
-repository so that a fresh AI session (new account / token-quota switch /
-expired session) can read the repository and continue exactly where the
-previous session stopped, without the old conversation.
+Fix the persistent Android app crash when navigating from Settings toward the
+memory-management / "Mark Dead (Shoot)" area, and ensure the existing memory
+system keeps saving/editing the canonical memories — NOT a parallel memory
+system.
 
 ## Scope
-- Create the `.agent/` continuity store: README.md, CURRENT_TASK.md,
-  CURRENT_HANDOFF.md, DECISIONS.md, FINDINGS.md.
-- Add a read-only continuity-state validator script.
-- Extend (not replace) `SESSION_BOOT.md` so every AI session is instructed
-  to boot through the continuity system.
-- Define and document the boot/resume protocol (CONTINUE HUMAN-OS), manual
-  checkpoint protocol (HANDOFF SESSION NOW / CHECKPOINT SESSION), and
-  emergency handoff (EMERGENCY HANDOFF).
-- Establish the `agent-checkpoint/<task-name>` WIP branch strategy.
-- Create a durable Git checkpoint of the continuity infrastructure.
+- Settings -> Brain navigation targets must point at routes that actually exist.
+- MemoryManagementScreen must consume the backend's canonical memory
+  representation (canonicalKey, label, memoryType, isArchived, createdAt,
+  updatedAt) and edit existing memories via PATCH /memories/:id.
+- Preserve the existing canonical memory lifecycle (archive/forget, atomic
+  supersession, exactly one CURRENT) untouched.
+- Validate the Shoot Dead confirmation modal does not crash and only calls
+  DELETE /auth/mark-dead after exact "DELETE" confirmation.
 
 ## Non-Goals
-- NOT fixing the authentication bug.
-- NOT fixing reminders, language, rate limits, Nova behavior.
-- NOT deploying, OTA, merging, or pushing `main`.
-- NOT altering runtime code under `backend/` or `mobile/`.
-- NOT duplicating or replacing existing project memory documents.
-- NOT building a competing boot system (SESSION_BOOT.md remains the boot
-  document).
+- NOT redesigning the memory architecture.
+- NOT creating a second memory store or replacing canonical memories.
+- NOT hard-deleting memories where the lifecycle uses archive/forget.
+- NOT touching auth, OTA, rate-limit, chat, or backend architecture.
+- NOT blindly rewriting large files.
+- NOT merging into `main` or pushing `main`.
 
 ## Acceptance Criteria
-1. `SESSION_BOOT.md` points to the continuity system.
-2. `.agent/CURRENT_HANDOFF.md` contains every required section.
-3. A checkpoint contains enough Git metadata (branch, base commit,
-   checkpoint commit, files, working-tree state).
-4. Resume detects matching state.
-5. Resume detects stale state.
-6. Sensitive values are rejected/omitted (none present).
-7. WIP checkpointing does not target `main`.
-8. `## NEXT ACTION` is explicit and concrete.
-9. Existing Human-OS source is untouched except continuity infrastructure.
-10. `git diff --check` is clean; validation commands report actual exit
-    codes.
+1. Static validation passes (mobile type-check; relevant backend tests).
+2. Every Settings navigation target resolves to a real route in the current
+   navigators.
+3. Memory manager loads canonical fields, searches safely, edits an existing
+   memory via PATCH /memories/:id, preserves canonical key + history, and does
+   not create duplicates.
+4. Shoot Dead modal opens, can be cancelled, requires exactly "DELETE", then
+   calls /auth/mark-dead and logs out.
+5. Handoff updated; clean checkpoint commit on the fix branch with SHA
+   reported; branch marked READY_FOR_REVIEW only if evidence supports it.
 
 ## Constraints
-- Preserve Human-OS invariants: memory authority/supersession rules, auth
-  non-fabrication, privacy (no tokens/PII in handoff).
-- `main` must not be pushed. Render auto-deploys backend on push to `main`.
-- Helper scripts must be safe and non-destructive.
-- ASCII-only content; no secrets; no unnecessary PII.
+- Work only on branch `fix/settings-crash-memory-navigation`. Never `main`.
+- Preserve all memory invariants listed in SESSION_BOOT.md / FINDINGS.md.
+- No secrets or unnecessary PII in continuity files.
+- Real-device crash behavior is NOT reproducible in this sandbox (no Android
+  SDK/emulator). Distinguish code-level verification from device evidence.
 
 ## Relevant Subsystem
-Repository meta / documentation / engineering-continuity infrastructure.
-No runtime engine is touched. Runtime context this task respects:
-7-engine Nova backend (`backend/`), Expo mobile app (`mobile/`), Supabase
-storage, Render deploy, EAS OTA (`production` channel).
+Expo mobile app under `mobile/` (SettingsScreen, BrainNavigator,
+MemoryManagementScreen) and the memory API under `backend/`
+(memoryManagement.ts, memoryRepository.ts). Backend is read-only for this task.
 
 ## Status (of THIS task)
-COMPLETE once continuity infrastructure is committed on an
-`agent-checkpoint/` branch and this handoff is validated.
-
-## Queued Next Task (NOT STARTED)
-Authentication bug. Explicitly out of scope for this task. To be opened by a
-future session via a fresh task cycle: rewrite CURRENT_TASK.md and
-CURRENT_HANDOFF.md (status NOT_STARTED), then begin root-cause investigation
-in `backend/src`. Reference material: `docs/AI_HANDOFF.md`, `KNOWN_ISSUES.md`,
-and the existing auth code under `backend/`.
+FIXES COMMITTED; VALIDATION IN PROGRESS/COMPLETE; see CURRENT_HANDOFF.md.

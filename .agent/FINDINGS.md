@@ -64,3 +64,44 @@ core-state mutations in the read-only guardian.
 The `.gitignore` blocks `.env*`, token/scratch/dump files, and dist. A scan
 of `.agent/` finds no API keys, tokens, passwords, or PII. Any future writer
 of `.agent/*` must preserve this invariant.
+
+### F-008: Settings memory-navigation crash root cause (2026-09-04)
+`SettingsScreen` navigated to `navigate('Brain', { screen: 'Memories' })` from
+BOTH memory-management rows. `BrainNavigator` is a bottom-tab navigator whose
+screens are Memory, Emotions, Graph, Goals, Timeline, Browser, Manage, Founder,
+Beta — there is NO `Memories` screen. Navigating to a non-existent nested
+screen is the crash trigger. Fixed by pointing both rows at the existing
+`Manage` tab (MemoryManagementScreen). No other route references to
+`'Memories'` remain in `mobile/src`.
+
+### F-009: Backend memory API is already canonical; only the client was stale
+`backend/src/routes/memoryManagement.ts` already returns canonical display
+fields (`canonicalKey`, `label`, `category`, `value`, `memoryType`,
+`importance`, `confidence`, `isArchived`, `createdAt`, `updatedAt`) and
+already provides the full lifecycle: DELETE /memories/:id = forget (archive,
+not hard delete), PATCH /memories/:id/archive = safe archive/unarchive with
+lifecycle/duplicate guards, and PATCH /memories/:id = edit routed through
+`memoryRepository.upsertMemory` with atomic supersession, canonical key always
+derived from the stored row (client-supplied keys ignored), source authority
+`explicit_user`. 35/35 route tests pass. Backend was NOT modified.
+
+### F-010: PATCH /memories/:id supersedes the edited row with a new CURRENT id
+An edit that changes a value creates a fresh CURRENT row (old row archived as
+history), so the PATCH response returns the authoritative new `id`. The mobile
+manager must adopt that `id` after save so subsequent in-session Archive/Delete
+actions target the live CURRENT row, not the superseded one. Same-value edits
+hit the idempotent reinforcement path and return the same row id.
+
+### F-011: No Android/runtime crash evidence exists in this sandbox
+No Android SDK, adb, emulator, or Java is installed; `CRASH_LOGS.md` is empty;
+no Logcat/Metro stack trace is available. The crash is verified only at the
+code level (invalid route target). Real-device behavior after the fix is NOT
+device-verified in this environment.
+
+### F-012: This workspace ships clean on a shallow clone
+The environment starts from a single-commit clone of `origin/main`
+(`6494bfb`). The fix branch exists on the remote and must be fetched
+(`git fetch origin fix/settings-crash-memory-navigation`) before resuming.
+Mobile deps install via `yarn install --frozen-lockfile`; backend via
+`npm ci`. Backend jest for route tests needs dummy Supabase env placeholders
+because `config` validates at import time (mocks still intercept DB access).

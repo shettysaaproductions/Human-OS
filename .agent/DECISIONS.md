@@ -99,3 +99,30 @@ Format:
   doc change.
 - **Consequence:** Validation is fast and meaningful. When a task touches
   runtime code, that task's cycle runs the runtime suites instead.
+
+### D-009: Keep the canonical backend memory system; fix only the client
+- **Decision:** For the Settings navigation crash, change the client to point
+  at existing navigator routes and to consume the backend's canonical memory
+  fields. Do not add a new memory store, a second manager, or new backend
+  endpoints.
+- **Reason:** The backend already implements the canonical memory lifecycle
+  (canonical-key authority, atomic supersession, exactly one CURRENT,
+  archive/forget, history preservation) with 35 passing route tests. The crash
+  and the stale fields were client-only defects.
+- **Alternatives considered:** rewriting memory management as a new UI+store;
+  adding a mobile-side cache/duplicate layer; changing backend field names
+  back to snake_case.
+- **Consequence:** Minimal, surgical client diff. Memory invariants are
+  preserved and the existing system continues to be the single source of
+  truth.
+
+### D-010: Adopt the authoritative CURRENT id returned by PATCH /memories/:id
+- **Decision:** After a successful memory edit, update the in-memory row to
+  the `id` returned by the backend instead of keeping the superseded row id.
+- **Reason:** PATCH /memories/:id performs atomic supersession and returns the
+  fresh CURRENT row id. Keeping the old id means a later Archive/Delete in the
+  same session would act on a superseded/historical row.
+- **Alternatives considered:** refetching the whole list after each edit
+  (extra round trip); keeping the stale id (buggy).
+- **Consequence:** Follow-up lifecycle actions in the same session target the
+  live CURRENT row; no duplicates are introduced.

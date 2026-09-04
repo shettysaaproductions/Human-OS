@@ -91,8 +91,10 @@ export function MemoryManagementScreen() {
     try {
       const res = await api.patch(`/memories/${id}`, { value: nextValue });
       const updated = res.data?.data;
+      const authoritativeId = typeof updated?.id === 'string' && updated.id ? updated.id : id;
       setMemories(prev => prev.map(m => m.id === id ? {
         ...m,
+        id: authoritativeId,
         value: typeof updated?.value === 'string' ? updated.value : nextValue,
         updatedAt: typeof updated?.updatedAt === 'string' ? updated.updatedAt : m.updatedAt,
       } : m));
