@@ -61,7 +61,7 @@ No runtime tests. Maintenance validation is limited to repository/configuration 
 - No production runtime tests run because runtime code was not changed.
 
 ## Known Failures
-- Local MonkeyCode task stopped with Payment Required after quota exhaustion, so its local workspace could not finish its own final verification. The required cleanup has been completed and committed directly on this checkpoint branch.
+- Local MonkeyCode task stopped with Payment Required after quota exhaustion, so its local workspace could not finish its own final verification. The required cleanup was completed through GitHub on this checkpoint branch.
 
 ## Unresolved Questions
 - Whether/when this cleanup branch should be merged into `main` remains an explicit production decision.
@@ -82,7 +82,7 @@ No runtime tests. Maintenance validation is limited to repository/configuration 
 - Do not begin the authentication fix on this branch; use a new `agent-checkpoint/auth-bug` branch after the cleanup is reviewed.
 
 ## NEXT ACTION
-1. Independently verify this cleanup branch against `main` and confirm only intended agent-framework files changed.
+1. Independently compare `agent-checkpoint/retire-hi-agent` with `main` and confirm only intended agent-framework/continuity files changed.
 2. If verification passes, this branch is the candidate source for merging the continuity + Hi-Agent retirement changes into `main` after explicit approval.
 3. Then create `agent-checkpoint/auth-bug` from the approved baseline and resume the authentication blocker with fresh MonkeyCode quota.
 
@@ -92,7 +92,7 @@ YES
 ## Checkpoint Information
 CHECKPOINT_BRANCH=agent-checkpoint/retire-hi-agent
 BASE_COMMIT=6494bfb77c9edaeeb6393eb788906063c82b7f23
-CHECKPOINT_COMMIT=latest-on-branch
+CHECKPOINT_COMMIT=431daada34d36113a4e7f64ad00d2b30f0de3b78
 RELEVANT_FILES=.agents/AGENTS.md,.agent/CURRENT_HANDOFF.md,.agent/CURRENT_TASK.md,.agent/DECISIONS.md,.agent/FINDINGS.md,.agent/scripts/check_continuity.sh,SESSION_BOOT.md
 WORKING_TREE_STATE=clean after committed changes
 CHECKPOINT_PUSHED=yes
