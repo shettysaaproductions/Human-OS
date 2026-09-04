@@ -1,161 +1,100 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-04 (session end checkpoint)
+2026-09-04 — Hi-Agent retirement checkpoint
 
 ## Session / Agent
-Agent: MonkeyCode coding agent (model: monkeycode-basic / Qwen3.5-Plus).
-Task session: CONT-SESSION-CONTINUITY (session continuity system build).
+Agent: ChatGPT-assisted repository maintenance after MonkeyCode Basic quota exhaustion.
+Task: Retire obsolete Hi-Agent coding workflow without changing Human-OS runtime behavior.
 
 ## Current Task
-CONT-SESSION-CONTINUITY: Establish the durable session-continuity system
-inside this repository (.agent/ store, SESSION_BOOT.md integration,
-checkpoint protocol, read-only validator). This task is now COMPLETE.
+RETIRE-HI-AGENT: remove obsolete Hi-Agent RAM/command framework and establish one active coding-agent workflow.
 
 ## Objective
-A fresh AI session (new account, token-quota switch, expired context) must
-be able to open this repository and continue exactly where the previous
-session stopped WITHOUT the old conversation. Durable engineering state only;
-never a transcript.
+MonkeyCode is the single active coding agent. Durable continuity lives in `.agent/` and `SESSION_BOOT.md`. The old Hi-Agent persona, RAM cache, command mode-lock, planner/execute routing, and stale resume cache must not control future coding sessions.
 
 ## Status
-COMPLETE
+CHECKPOINTED
 
 ## Repository State
-- Remote: https://github.com/shettysaaproductions/Human-OS (origin, main).
-- Base branch `main` at base commit `6494bfb77c9edaeeb6393eb788906063c82b7f23`
-  ("fix: wire language, rate limits, and tester-facing auth UX").
-- Clone is SHALLOW (single commit present); full history is not available
-  locally. Do not assume older commits can be diffed.
-- Continuity work lives on branch `agent-checkpoint/session-continuity`
-  (see Checkpoint Information). `main` is untouched and was never pushed.
-- `git status` is clean on the checkpoint branch after the checkpoint commit.
-- Existing source tree (backend/, mobile/, root docs) unchanged except for
-  SESSION_BOOT.md (extended) and the added `.agent/` directory.
+- Base production branch: `main` at `6494bfb77c9edaeeb6393eb788906063c82b7f23`.
+- `main` must remain untouched for this maintenance task.
+- Active cleanup branch: `agent-checkpoint/retire-hi-agent`.
+- Previous continuity branch: `agent-checkpoint/session-continuity`.
+- Production runtime code is not part of this task.
 
 ## Confirmed Findings
-- No pre-existing session-continuity system existed. `.agents/` (plural) is a
-  tracked platform agent-convention directory (AGENTS.md, HI_AGENT_RAM.md),
-  not a handoff store. `docs/AI_HANDOFF.md` is a static dated log, not live
-  state. No `.agent/` (singular) existed.
-- The repository root holds the canonical project-memory docs (SESSION_BOOT,
-  MEMORY, NOVA_*, KNOWN_ISSUES, etc.). The `docs/` subtree holds operational
-  docs. Both must be preserved.
-- Pushing to `main` triggers automatic Render backend deploy, and EAS OTA
-  targets the `production` channel. Therefore `main` pushes are production
-  events and WIP must never checkpoint on `main`.
-- The clone is shallow: git history is a single snapshot commit. Checkpoint
-  branches are still safe to create and push; `--depth` full-history
-  assumptions do not apply.
-- `.gitignore` ignores `.env*`, scratch/dump files, dist and node_modules.
-  Nothing ignores `.agent/`, so continuity files are trackable.
+- `HI_AGENT_RAM.md` at root and `.agents/HI_AGENT_RAM.md` were duplicate Hi-Agent RAM snapshots and are not Human-OS runtime code.
+- `.agents/AGENTS.md` contained the active Hi-Agent command/mode-lock/model-routing instructions. Those instructions have been replaced with a concise canonical single-agent policy.
+- `.agents/memory/state.json` was stale Hi-Agent resume state and has been removed.
+- Human-OS runtime OTA/update, Nova self-improvement, and runtime model routing are separate product functionality and must remain intact.
+- `.agent/` singular is the canonical continuity store and must remain intact.
 
 ## Root Cause
-Not applicable. This task built infrastructure; there was no defect being
-investigated.
+The repository contained two overlapping agent-control layers: `.agents/` platform/persona instructions and the newer `.agent/` continuity system. The old layer could cause confusing command modes and model routing. This cleanup removes the obsolete control layer while preserving product behavior.
 
 ## Decisions
-See `.agent/DECISIONS.md` for full entries. Summary:
-- Continuity state lives in `.agent/` (singular) rather than `.agents/`
-  (plural, platform conventions) or the `docs/` subtree.
-- `SESSION_BOOT.md` is extended, not replaced, as the mandatory boot doc.
-- `CURRENT_HANDOFF.md` is the single live handoff with the required-section
-  schema; DECISIONS/FINDINGS are durable append-only knowledge.
-- WIP checkpoints use `agent-checkpoint/<task-name>`; never `main`.
-- Helper tooling is strictly read-only (`.agent/scripts/check_continuity.sh`).
-- No secrets/PII are ever written into continuity files.
+- Use exactly one active coding agent: MonkeyCode.
+- Use `.agent/` singular for durable session continuity.
+- Keep `SESSION_BOOT.md` as the canonical boot document.
+- Never use `main` as a WIP checkpoint.
+- Do not remove Human-OS runtime OTA or Nova self-improvement features merely because they contain the word “agent” or “upgrade”.
+- Historical logs may retain old command names; history is not active control logic.
 
 ## Implementation Completed
-- Created `.agent/README.md` (system description, protocols, security rules).
-- Created `.agent/CURRENT_TASK.md` (CONT-SESSION-CONTINUITY spec + queued
-  auth task).
-- Created `.agent/CURRENT_HANDOFF.md` (this file, all required sections).
-- Created `.agent/DECISIONS.md` and `.agent/FINDINGS.md`.
-- Created `.agent/scripts/check_continuity.sh` (read-only validator).
-- Extended `SESSION_BOOT.md` with the boot/resume protocol and pointers to
-  the continuity system.
-- Created Git checkpoint branch `agent-checkpoint/session-continuity` from
-  `main@6494bfb`; committed the continuity infrastructure there and pushed
-  the branch to origin (main untouched).
+- Replaced `.agents/AGENTS.md` with canonical single-agent/continuity/production-safety instructions.
+- Deleted root `HI_AGENT_RAM.md`.
+- Deleted `.agents/HI_AGENT_RAM.md`.
+- Deleted stale `.agents/memory/state.json`.
+- Preserved `.agent/` continuity infrastructure and `SESSION_BOOT.md`.
+- No backend/mobile production code changed.
+- No OTA, Render deployment, or `main` push performed.
 
 ## Tests Added
-No runtime tests were added (no production code changed). The following
-continuity validations were performed; actual exit codes recorded in
-"Test Results":
-- `.agent/CURRENT_HANDOFF.md` required-section presence check.
-- `.agent/scripts/check_continuity.sh` matching-state (resume) check.
-- Forced stale-state check (branch/commit mismatch) to prove detection.
-- Secret/PII scan across `.agent/` continuity files.
-- `git diff --check` whitespace check.
-- `git status --short` and `git diff --stat` review.
+No runtime tests. Maintenance validation is limited to repository/configuration inspection.
 
 ## Test Results
-- Continuity validator (matching state): exit 0 = PASS (CONTINUITY VERIFIED).
-- Stale-state detection (forced mismatch): exit 1 = PASS (detected).
-- Required-section scan: PASS (all 20 sections present).
-- Secrets scan: PASS (no secret-like assignments found in `.agent/`).
-- `git diff --check` (main..checkpoint): exit 0 = PASS.
-- `git status --short`: clean on the checkpoint branch.
-- Runtime test suites: NOT RUN (no production code changed; out of scope).
+- Reviewed the resulting agent instruction policy: PASS.
+- Confirmed obsolete RAM files are removed from this branch: PASS.
+- Confirmed stale Hi-Agent state is removed: PASS.
+- Confirmed `.agent/scripts/check_continuity.sh` remains present: PASS.
+- No production runtime tests run because runtime code was not changed.
 
 ## Known Failures
-None.
+- Local MonkeyCode task stopped with Payment Required after quota exhaustion, so its local workspace could not finish its own final verification. The required cleanup has been completed and committed directly on this checkpoint branch.
 
 ## Unresolved Questions
-- ~~Whether the checkpoint branch push is permitted by current
-  credentials.~~ RESOLVED: `agent-checkpoint/session-continuity` was pushed
-  successfully to origin on 2026-09-04.
-- Whether the continuity infra should eventually be merged into `main`.
-  Deferred; do not merge without an explicit decision.
+- Whether/when this cleanup branch should be merged into `main` remains an explicit production decision.
+- `.agents/NOVA_AGENT_V2.md`, `.agents/AUTOMATED_WORKFLOWS.md`, and `.agents/ANTIGRAVITY.md` remain as legacy documentation/tooling files but are no longer active through `.agents/AGENTS.md`. Retire them later only with a separate explicit decision.
 
 ## Important Invariants
-- Preserve Human-OS memory invariants: deterministic correctionTarget
-  authority, user-turn-grounded corrections, semantic filtering,
-  canonical-key enforcement, atomic supersession, exactly one CURRENT where
-  required, history preservation, stale-write protection, provenance/order
-  safety, no hard deletion, no cross-user mutation.
-- Auth invariants: never fabricate authenticated state; never treat a
-  known-invalid access token as valid; distinguish transient failures from
-  definitive auth failures.
-- Privacy: no token logging, no credentials in handoff, no unnecessary PII.
-- `main` is never used as a WIP checkpoint branch and is never pushed without
-  an explicit deploy decision.
+- Preserve memory authority, canonical-key, temporal, provenance, history, stale-write, and no-hard-delete invariants.
+- Never fabricate authenticated state or treat a known-invalid access token as valid.
+- No secrets, credentials, or unnecessary PII in continuity files.
+- No cross-user mutation.
+- `main` is production-sensitive and must not be pushed for WIP.
 
 ## DO NOT REDO
-- Do not re-create `.agent/` or re-invent the handoff schema; extend it.
-- Do not rebuild the boot sequence in a competing file; SESSION_BOOT.md is
-  the boot document.
-- Do not re-investigate whether `.agents/` is the continuity store (it is
-  not; it is the platform convention directory and stays untouched).
-- Do not re-derive the checkpoint branch strategy; use
-  `agent-checkpoint/<task-name>`.
-- Do not start the authentication bug from this handoff; it is queued, not
-  opened.
+- Do not recreate HI_AGENT_RAM.md.
+- Do not restore Hi-Agent mode-lock, Planner/Execute routing, or model auto-routing.
+- Do not create another continuity system.
+- Do not delete Human-OS runtime OTA/self-improvement/model-routing code.
+- Do not begin the authentication fix on this branch; use a new `agent-checkpoint/auth-bug` branch after the cleanup is reviewed.
 
 ## NEXT ACTION
-1. In a fresh session run `CONTINUE HUMAN-OS`: read SESSION_BOOT.md, then
-   `.agent/CURRENT_HANDOFF.md` and `.agent/CURRENT_TASK.md`, then execute
-   `bash .agent/scripts/check_continuity.sh`. Expect exit 0 and the banner
-   CONTINUITY VERIFIED.
-2. Confirm the checkpoint branch is fetchable: if not already present, run
-   `git fetch origin agent-checkpoint/session-continuity` and check out that
-   branch before continuing work.
-3. Do NOT begin the authentication bug. When the founder explicitly starts
-   that task, first rewrite `.agent/CURRENT_TASK.md` and
-   `.agent/CURRENT_HANDOFF.md` (status NOT_STARTED, objective = root-cause
-   the authentication bug in `backend/src`), commit on a new branch
-   `agent-checkpoint/auth-bug`, then begin investigation. Reference material:
-   `docs/AI_HANDOFF.md`, `KNOWN_ISSUES.md`, `docs/PROJECT_STATE.md`.
+1. Independently verify this cleanup branch against `main` and confirm only intended agent-framework files changed.
+2. If verification passes, this branch is the candidate source for merging the continuity + Hi-Agent retirement changes into `main` after explicit approval.
+3. Then create `agent-checkpoint/auth-bug` from the approved baseline and resume the authentication blocker with fresh MonkeyCode quota.
 
 ## Safe To Continue?
 YES
 
 ## Checkpoint Information
-CHECKPOINT_BRANCH=agent-checkpoint/session-continuity
+CHECKPOINT_BRANCH=agent-checkpoint/retire-hi-agent
 BASE_COMMIT=6494bfb77c9edaeeb6393eb788906063c82b7f23
-CHECKPOINT_COMMIT=b61e050c762def1eb0dd6937d489025256cf852d
-RELEVANT_FILES=.agent/README.md,.agent/CURRENT_TASK.md,.agent/CURRENT_HANDOFF.md,.agent/DECISIONS.md,.agent/FINDINGS.md,.agent/scripts/check_continuity.sh,SESSION_BOOT.md
-WORKING_TREE_STATE=clean (after checkpoint commit)
+CHECKPOINT_COMMIT=latest-on-branch
+RELEVANT_FILES=.agents/AGENTS.md,.agent/CURRENT_HANDOFF.md,.agent/CURRENT_TASK.md,.agent/DECISIONS.md,.agent/FINDINGS.md,.agent/scripts/check_continuity.sh,SESSION_BOOT.md
+WORKING_TREE_STATE=clean after committed changes
 CHECKPOINT_PUSHED=yes
 MAIN_PUSHED=no
 PRODUCTION_CHANGED=no
