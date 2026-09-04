@@ -1,69 +1,56 @@
 # CURRENT TASK
 
 ## Task ID
-CONT-SESSION-CONTINUITY
+PROD-OTA-MEMORY-SETTINGS
 
 ## Objective
-Establish a durable session-continuity system inside the Human-OS
-repository so that a fresh AI session (new account / token-quota switch /
-expired session) can read the repository and continue exactly where the
-previous session stopped, without the old conversation.
+Publish and verify the approved Human-OS Settings/memory mobile fix through the existing production EAS OTA path, with durable deployment instructions so future AI sessions and account/quota switches do not need to rediscover the process.
 
 ## Scope
-- Create the `.agent/` continuity store: README.md, CURRENT_TASK.md,
-  CURRENT_HANDOFF.md, DECISIONS.md, FINDINGS.md.
-- Add a read-only continuity-state validator script.
-- Extend (not replace) `SESSION_BOOT.md` so every AI session is instructed
-  to boot through the continuity system.
-- Define and document the boot/resume protocol (CONTINUE HUMAN-OS), manual
-  checkpoint protocol (HANDOFF SESSION NOW / CHECKPOINT SESSION), and
-  emergency handoff (EMERGENCY HANDOFF).
-- Establish the `agent-checkpoint/<task-name>` WIP branch strategy.
-- Create a durable Git checkpoint of the continuity infrastructure.
+- Keep `main` as the production source of truth.
+- Publish Android JavaScript/assets to the EAS `production` branch/channel.
+- Preserve the existing Expo/EAS runtime configuration and canonical memory architecture.
+- Maintain a repository-level deployment runbook and automated GitHub Actions OTA workflow.
+- Verify the update on a compatible physical Android production build after publication.
 
 ## Non-Goals
-- NOT fixing the authentication bug.
-- NOT fixing reminders, language, rate limits, Nova behavior.
-- NOT deploying, OTA, merging, or pushing `main`.
-- NOT altering runtime code under `backend/` or `mobile/`.
-- NOT duplicating or replacing existing project memory documents.
-- NOT building a competing boot system (SESSION_BOOT.md remains the boot
-  document).
+- Do not create a new memory system/store.
+- Do not modify unrelated auth, reminders, language, rate-limit, Nova-engine, or backend behavior.
+- Do not rebuild the native APK unless runtime incompatibility or a native change makes an OTA impossible.
+- Do not store Expo/EAS credentials in Git.
+- Do not silently switch Expo/Google accounts to work around authentication.
+
+## Approved Code
+Current approved mobile fix is on `main` at or after:
+`9d0052192e430d50f007e81efa632a4292dde390`
+
+The fix changes the invalid Settings `Brain -> Memories` navigation to the registered `Brain -> Manage` route and aligns the memory manager with the canonical backend API while preserving `PATCH /memories/:id` editing.
+
+## OTA Configuration
+- Android production channel: `production`
+- EAS Update branch: `production`
+- Runtime policy: `appVersion`
+- Current app version/runtime target: `1.1.0`
+- Production EAS environment: `production`
+- Canonical manual command:
+  `eas update --branch production --environment production --platform android`
+- Canonical workflow: `.github/workflows/mobile-ota-production.yml`
+- Canonical deployment instructions: `DEPLOYMENT.md`
+
+## Authentication Rule
+GitHub Actions requires a repository secret named `EXPO_TOKEN`. The token must never be committed to the repository or written into continuity files. If it is missing, the workflow must stop with a clear error. Future AI sessions must read `DEPLOYMENT.md` instead of asking the user to rediscover the deployment procedure.
 
 ## Acceptance Criteria
-1. `SESSION_BOOT.md` points to the continuity system.
-2. `.agent/CURRENT_HANDOFF.md` contains every required section.
-3. A checkpoint contains enough Git metadata (branch, base commit,
-   checkpoint commit, files, working-tree state).
-4. Resume detects matching state.
-5. Resume detects stale state.
-6. Sensitive values are rejected/omitted (none present).
-7. WIP checkpointing does not target `main`.
-8. `## NEXT ACTION` is explicit and concrete.
-9. Existing Human-OS source is untouched except continuity infrastructure.
-10. `git diff --check` is clean; validation commands report actual exit
-    codes.
+1. `main` contains the approved mobile fix.
+2. Production OTA is published successfully to EAS `production` for Android runtime `1.1.0`.
+3. The published update reports the correct source commit.
+4. Physical Android production build receives and applies the update.
+5. Settings memory management opens without the invalid-route crash.
+6. Existing memories load and search safely.
+7. Editing an existing memory persists through the canonical `PATCH /memories/:id` flow without creating a duplicate.
+8. Archive/forget behavior remains history-preserving.
+9. No native build is created unless required by runtime compatibility.
+10. Handoff records the exact update ID, runtime, branch/channel, source commit, test result, and next action.
 
-## Constraints
-- Preserve Human-OS invariants: memory authority/supersession rules, auth
-  non-fabrication, privacy (no tokens/PII in handoff).
-- `main` must not be pushed. Render auto-deploys backend on push to `main`.
-- Helper scripts must be safe and non-destructive.
-- ASCII-only content; no secrets; no unnecessary PII.
-
-## Relevant Subsystem
-Repository meta / documentation / engineering-continuity infrastructure.
-No runtime engine is touched. Runtime context this task respects:
-7-engine Nova backend (`backend/`), Expo mobile app (`mobile/`), Supabase
-storage, Render deploy, EAS OTA (`production` channel).
-
-## Status (of THIS task)
-COMPLETE once continuity infrastructure is committed on an
-`agent-checkpoint/` branch and this handoff is validated.
-
-## Queued Next Task (NOT STARTED)
-Authentication bug. Explicitly out of scope for this task. To be opened by a
-future session via a fresh task cycle: rewrite CURRENT_TASK.md and
-CURRENT_HANDOFF.md (status NOT_STARTED), then begin root-cause investigation
-in `backend/src`. Reference material: `docs/AI_HANDOFF.md`, `KNOWN_ISSUES.md`,
-and the existing auth code under `backend/`.
+## Continuity
+Every new AI session must read `SESSION_BOOT.md`, `.agent/CURRENT_HANDOFF.md`, this file, and `DEPLOYMENT.md` before performing deployment work. Use `CONTINUE HUMAN-OS` and continue only from `## NEXT ACTION`.
