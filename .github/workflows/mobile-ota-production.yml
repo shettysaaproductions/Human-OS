@@ -1,0 +1,64 @@
+name: Publish Production Mobile OTA
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-ota-production.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: production-mobile-ota
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Android Production OTA
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Verify Expo token is configured
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "ERROR: GitHub Actions secret EXPO_TOKEN is not configured."
+            echo "Create one in Repository Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Publish production Android OTA
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas update \
+            --branch production \
+            --environment production \
+            --platform android \
+            --message "Production OTA: ${GITHUB_SHA}" \
+            --non-interactive
