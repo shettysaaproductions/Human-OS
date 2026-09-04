@@ -1,102 +1,48 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-04 — Restore @react-navigation/bottom-tabs production dependency
+2026-09-04 — bounded semantic correction execution checkpoint
 
 ## Session / Agent
-Agent: MonkeyCode
-Task: Fix only the confirmed OTA Android bundling blocker. Do not publish an OTA.
-
-## Current Task
-FIX-OTA-BOTTOM-TABS: restore `@react-navigation/bottom-tabs` to `mobile/package.json` dependencies.
-
-## Objective
-Make `@react-navigation/bottom-tabs` resolvable for `BrainNavigator.tsx` during production OTA bundling. Do not change navigation architecture, memory, auth, Nova, backend, Settings, EAS config, or credentials. Do not publish an OTA.
+Agent: MonkeyCode worker under ChatGPT-directed execution.
+Task: Fix semantic memory corrections without broad repository exploration.
 
 ## Status
-FIXED locally on `main`; not pushed
+CHECKPOINTED — continue only from `.agent/SEMANTIC_CORRECTION_EXECUTION.md`.
 
-## Repository State
-- Current branch: `main`
-- Starting HEAD: `778b6758cdd8cdf9f8ad75abac51a341fecdfec9`
-- Approved application code remains `9d0052192e430d50f007e81efa632a4292dde390`
-- `BrainNavigator.tsx` was not modified
-- yarn.lock was already consistent and was not modified
-- OTA was not published by this session
+## Confirmed Root Cause
+Live Supabase background jobs showed the user turn `Ek correction hai mera favourite color green hai ab` was parsed as `correctionTarget=favourite_color_green` and `correctionValue=ab`. The error is upstream semantic parsing, not queue delivery.
 
-## Confirmed Findings
-- Android OTA bundling failed: Unable to resolve module `@react-navigation/bottom-tabs` from `mobile/src/navigation/BrainNavigator.tsx`.
-- `BrainNavigator.tsx` imports `createBottomTabNavigator` from `@react-navigation/bottom-tabs`.
-- The package was previously in `devDependencies` at `^7.18.3` and was removed in `db83715`.
-- `mobile/yarn.lock` already contains `@react-navigation/bottom-tabs@^7.18.3` resolved to `7.18.14`.
-- Restoring the same range in `dependencies` makes package.json consistent with the existing lockfile.
+## Current Main Architecture Finding
+`TurnAnalyzer` currently derives correction target/value and `chat.ts` queues those values to `extract_deterministic_fact`; `ConsolidatedMemoryAgent` currently has a deterministic correction bypass. This creates an unsafe deterministic semantic interpretation path and can create competing correction writers.
 
-## Root Cause
-`@react-navigation/bottom-tabs` was missing from `mobile/package.json` dependencies, so Metro/EAS bundling could not resolve the BrainNavigator import.
+## Required Direction
+- TurnAnalyzer detects correction intent only; its target/value are non-authoritative.
+- DeterministicFactAgent must not persist correction facts.
+- Existing `ConsolidatedMemoryAgent` must use the existing `complete('MEMORY', ...)` call to interpret correction target/value.
+- Deterministic validation then canonicalizes via `MemorySemanticResolver` and fails closed on malformed/ungrounded output.
+- Preserve MemoryRepository atomic supersession, provenance, history, and exactly-one-CURRENT behavior.
+- No Hinglish word dictionaries. No new LLM/provider. No DB schema/data changes. No deployment.
 
-## Decisions
-- Restore `@react-navigation/bottom-tabs` to `dependencies` at `^7.18.3` (React Navigation 7.x / Expo 56).
-- Do not change yarn.lock because it already has that range at `7.18.14`.
-- Do not change `BrainNavigator.tsx`.
-- Do not publish an OTA from this session.
+## Files
+Exact initial files: `backend/src/agents/ConsolidatedMemoryAgent.ts`, `backend/src/agents/DeterministicFactAgent.ts`, `backend/src/routes/chat.ts`, `backend/src/services/TurnAnalyzer.ts`, `backend/src/lib/MemorySemanticResolver.ts`.
 
-## Implementation Completed
-- Added `"@react-navigation/bottom-tabs": "^7.18.3"` to `mobile/package.json` dependencies.
-- Confirmed `mobile/yarn.lock` already lists `@react-navigation/bottom-tabs@^7.18.3` version `7.18.14`.
-- `git diff --check` PASS.
-- Continuity validator run after this handoff update.
+## Checkpoint Rule
+Do not reread unrelated repository areas. If context is lost, read this handoff and `.agent/SEMANTIC_CORRECTION_EXECUTION.md`, then inspect only the exact files above.
 
-## Tests Added
-None. Dependency-only change.
+## Verification Required
+Targeted correction tests + backend TypeScript typecheck. A live end-to-end test may be blocked without credentials; never claim it passed if it was not run.
 
-## Test Results
-- yarn.lock contains `@react-navigation/bottom-tabs@^7.18.3` at `7.18.14`: PASS
-- yarn.lock unchanged: PASS (already consistent)
-- `git diff --check`: PASS
-- Continuity validator: run after this handoff update
-- `yarn install --frozen-lockfile` / `yarn tsc --noEmit`: not re-run in this stop/commit pass
-
-## Known Failures
-- This commit is local until it is pushed.
-- Production OTA is still unpublished.
-- Physical Android OTA receipt is still unverified.
-
-## Unresolved Questions
-None for the missing-module blocker.
-
-## Important Invariants
-- Preserve deterministic correctionTarget authority, user-turn-grounded correction values, semantic filtering, canonical-key enforcement, atomic supersession, exactly-one-CURRENT, provenance/order safety, stale-write protection, history preservation / no hard delete, and forensic/PII hygiene.
-- Do not expose, create, replace, or modify credentials including EXPO_TOKEN.
-- Do not publish an OTA from this session.
-
-## DO NOT REDO
-- Do not remove `@react-navigation/bottom-tabs` from production dependencies.
-- Do not move it back to devDependencies.
-- Do not rewrite BrainNavigator or navigation architecture for this bug.
-- Do not run eas update or publish an OTA from this coding session.
-- Do not modify memory, auth, Nova, backend, Settings, or EAS configuration.
+## Stop Conditions
+Stop after bounded implementation and verification. Do not deploy, merge, or publish OTA.
 
 ## NEXT ACTION
-Land this dependency-only commit on origin `main` so the production OTA workflow can bundle Android again. Do not publish OTA from a local agent session. After a successful Actions OTA, NEXT ACTION = physical Android OTA verification.
-
-## Safe To Continue?
-YES
+Implement the bounded correction pipeline from `.agent/SEMANTIC_CORRECTION_EXECUTION.md`, then report exact changed files and test results.
 
 ## Checkpoint Information
-CHECKPOINT_BRANCH=main
-BASE_COMMIT=778b6758cdd8cdf9f8ad75abac51a341fecdfec9
-CHECKPOINT_COMMIT=778b6758cdd8cdf9f8ad75abac51a341fecdfec9
-APPROVED_CODE_COMMIT=9d0052192e430d50f007e81efa632a4292dde390
-RELEVANT_FILES=mobile/package.json,.agent/CURRENT_HANDOFF.md
-WORKING_TREE_STATE=dirty until this fix is committed
-CHECKPOINT_PUSHED=no
+BASE_COMMIT=5708100623453394d6a9c728c755c820ef7a8e45
+CHECKPOINT_BRANCH=agent/semantic-correction-execution
+CHECKPOINT_PUSHED=yes
 MAIN_PUSHED=no
 PRODUCTION_CHANGED=no
 OTA_PUBLISHED=no
-OTA_UPDATE_ID=none
-OTA_BRANCH=production
-OTA_CHANNEL=production
-OTA_RUNTIME=1.1.0
-DEVICE_VERIFIED=no
-CREDENTIALS_STORED_IN_REPO=no
-BOTTOM_TABS_VERSION=^7.18.3 resolved 7.18.14
