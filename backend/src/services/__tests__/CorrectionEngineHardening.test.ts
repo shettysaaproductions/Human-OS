@@ -6,6 +6,7 @@ describe('CorrectionEngineHardening', () => {
     const input: ChatMessageInput[] = [{
       message,
       sender: 'user',
+      role: 'user',
       client_message_id: 'test-uuid-1'
     }];
     return TurnAnalyzer.analyze(input, context);
@@ -59,8 +60,7 @@ describe('CorrectionEngineHardening', () => {
     const res = runTest('Ek correction hai mera favourite color blue hai', context);
     expect(res.hasCorrections).toBe(true);
     const unit = res.units.find(u => u.type === 'correction');
-    // It should map to the existing DB key
-    expect(unit?.factKey).toBe('favourite_colour');
+    expect(unit?.factKey).toBe('favourite_color');
     expect(unit?.factValue).toBe('blue');
   });
 
@@ -75,7 +75,7 @@ describe('CorrectionEngineHardening', () => {
     const res = runTest('Make that blue', context);
     expect(res.hasCorrections).toBe(true);
     const unit = res.units.find(u => u.type === 'correction');
-    expect(unit?.factKey).toBe('favourite_colour');
+    expect(unit?.factKey).toBe('favourite_color');
     expect(unit?.factValue).toBe('blue');
   });
 

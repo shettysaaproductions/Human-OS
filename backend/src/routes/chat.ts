@@ -1187,10 +1187,13 @@ chatRouter.post(
       const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
-      // Dispatch durable fact persistence immediately for deterministic facts & corrections
+      // Dispatch durable fact persistence immediately for deterministic facts.
+      // Correction units are NOT persisted here — ConsolidatedMemoryAgent is the
+      // single authoritative writer so malformed TurnAnalyzer target/value cannot
+      // be written independently of MEMORY LLM interpretation.
       // Privacy gate: when MEMORY_ENABLED is false, do not queue deterministic fact persistence
       const explicitFacts = turnAnalysis.units.filter(u => 
-        (u.type === 'fact' || u.type === 'correction') && 
+        u.type === 'fact' && 
         u.factKey && 
         !u.factKey.startsWith('UNKNOWN_') && 
         u.factValue
@@ -1999,6 +2002,11 @@ HINGLISH RULES:
 
         if (!isFiller) {
           // P0-A + P0-B: include turnId (traceability) and questionClauses (admission guard)
+          const recentContext = recentMessages
+            .filter((m: any) => m?.role === 'user' && typeof m.content === 'string')
+            .slice(-4)
+            .map((m: any) => m.content)
+            .join('\n');
           const payload = {
             userId,
             messageId: userMessageId,
@@ -2007,8 +2015,7 @@ HINGLISH RULES:
             questionClauses: brainContext.questionClauses,  // P0-B
             hasExplicitRemember: turnAnalysis.hasExplicitRemember,
             hasCorrections: turnAnalysis.hasCorrections,
-            correctionTarget: turnAnalysis.correctionTarget,
-            correctionValue: turnAnalysis.correctionValue,
+            recentContext,
           };
           memoryQueue.add('extract_all_memories', payload).catch(err => {
             logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });

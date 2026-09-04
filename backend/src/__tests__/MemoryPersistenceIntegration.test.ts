@@ -37,6 +37,11 @@ describe('Memory Persistence & Concurrency Integration', () => {
     expect(analysisRes.correctionTarget).toBe('favourite_color');
     expect(analysisRes.correctionValue).toBe('blue');
 
+    const nvidia = await import('../lib/nvidia');
+    const completeSpy = jest.spyOn(nvidia, 'complete').mockResolvedValue(JSON.stringify({
+      semantic_memories: [{ key: 'favourite_color', value: 'blue', shouldPersist: true }]
+    }));
+
     const payload = {
       userId: TEST_USER,
       messageId,
@@ -45,8 +50,6 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: analysisRes.hasExplicitRemember,
       hasCorrections: analysisRes.hasCorrections,
-      correctionTarget: analysisRes.correctionTarget || null,
-      correctionValue: analysisRes.correctionValue || null,
     };
 
     await supabaseAdmin.from('chat_history').insert([
@@ -55,6 +58,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const job = { payload } as any;
     await consolidatedMemoryAgent['execute'](job);
+    completeSpy.mockRestore();
 
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
@@ -72,6 +76,10 @@ describe('Memory Persistence & Concurrency Integration', () => {
   it('2. brother\'s name actually Amit -> brother_name + Amit', async () => {
     const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
     const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+    const nvidia = await import('../lib/nvidia');
+    const completeSpy = jest.spyOn(nvidia, 'complete').mockResolvedValue(JSON.stringify({
+      semantic_memories: [{ key: 'brother_name', value: 'Amit', shouldPersist: true }]
+    }));
 
     const messageId = randomUUID();
     const messageText = "My brother's name is actually Amit";
@@ -89,8 +97,6 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: analysisRes.hasExplicitRemember,
       hasCorrections: analysisRes.hasCorrections,
-      correctionTarget: analysisRes.correctionTarget || null,
-      correctionValue: analysisRes.correctionValue || null,
     };
 
     await supabaseAdmin.from('chat_history').insert([
@@ -99,6 +105,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const job = { payload } as any;
     await consolidatedMemoryAgent['execute'](job);
+    completeSpy.mockRestore();
 
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
@@ -130,9 +137,12 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: analysisRes.hasExplicitRemember,
       hasCorrections: analysisRes.hasCorrections,
-      correctionTarget: analysisRes.correctionTarget || null,
-      correctionValue: analysisRes.correctionValue || null,
     };
+
+    const nvidia = await import('../lib/nvidia');
+    const completeSpy = jest.spyOn(nvidia, 'complete').mockResolvedValue(JSON.stringify({
+      semantic_memories: [{ key: 'favourite_color', value: 'yellow', shouldPersist: true }]
+    }));
 
     await supabaseAdmin.from('chat_history').insert([
       { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
@@ -140,6 +150,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const job = { payload } as any;
     await consolidatedMemoryAgent['execute'](job);
+    completeSpy.mockRestore();
 
     const { data: rows } = await supabaseAdmin.from('memories')
       .select('*')
@@ -163,7 +174,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     expect(analysisRes.correctionValue).toBeFalsy();
   });
 
-  it('5. valid correction persists when NVIDIA fails WITHOUT calling NVIDIA', async () => {
+  it('5. NVIDIA failure on correction is fail-closed (zero durable mutation)', async () => {
     const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
     const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
     const nvidia = await import('../lib/nvidia');
@@ -175,8 +186,6 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const analysisRes = TurnAnalyzer.analyze([{ role: 'user', message: messageText }]);
     expect(analysisRes.hasCorrections).toBe(true);
-    expect(analysisRes.correctionTarget).toBe('favourite_color');
-    expect(analysisRes.correctionValue).toBe('blue');
 
     const payload = {
       userId: TEST_USER,
@@ -186,8 +195,6 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: analysisRes.hasExplicitRemember,
       hasCorrections: analysisRes.hasCorrections,
-      correctionTarget: analysisRes.correctionTarget || null,
-      correctionValue: analysisRes.correctionValue || null,
     };
 
     await supabaseAdmin.from('chat_history').insert([
@@ -195,7 +202,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     ]);
 
     const job = { payload } as any;
-    await consolidatedMemoryAgent['execute'](job);
+    await expect(consolidatedMemoryAgent['execute'](job)).rejects.toThrow();
 
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
@@ -204,18 +211,23 @@ describe('Memory Persistence & Concurrency Integration', () => {
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
-    expect(rows?.length).toBe(1);
-    expect(rows![0].value).toBe('blue');
-    expect(completeSpy).not.toHaveBeenCalled();
+    expect(rows?.length ?? 0).toBe(0);
+    expect(completeSpy).toHaveBeenCalled();
 
     completeSpy.mockRestore();
   });
 
-  it('6. hallucinated LLM value cannot override deterministic user value (e2e)', async () => {
-    // This test is now covered by test 5 - corrections bypass LLM entirely
-    // Keeping for explicit documentation
+  it('6. hallucinated LLM extra keys cannot persist alongside grounded correction', async () => {
     const { TurnAnalyzer } = await import('../services/TurnAnalyzer');
     const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+    const nvidia = await import('../lib/nvidia');
+
+    const completeSpy = jest.spyOn(nvidia, 'complete').mockResolvedValue(JSON.stringify({
+      semantic_memories: [
+        { key: 'brother_name', value: 'Amit', shouldPersist: true },
+        { key: 'likes_amit', value: 'yes', shouldPersist: true }
+      ]
+    }));
 
     const messageId = randomUUID();
     const messageText = "My brother's name is actually Amit";
@@ -232,8 +244,6 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: analysisRes.hasExplicitRemember,
       hasCorrections: analysisRes.hasCorrections,
-      correctionTarget: analysisRes.correctionTarget || null,
-      correctionValue: analysisRes.correctionValue || null,
     };
 
     await supabaseAdmin.from('chat_history').insert([
@@ -242,20 +252,27 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const job = { payload } as any;
     await consolidatedMemoryAgent['execute'](job);
+    completeSpy.mockRestore();
 
     const { data: rows, error } = await supabaseAdmin.from('memories')
       .select('*')
       .eq('user_id', TEST_USER)
-      .eq('key', 'brother_name')
       .eq('is_archived', false);
 
     if (error) throw new Error(`DB error: ${error.message}`);
-    expect(rows?.length).toBe(1);
-    expect(rows![0].value).toBe('Amit');
+    const brother = rows?.filter(r => r.key === 'brother_name') || [];
+    expect(brother.length).toBe(1);
+    expect(brother[0].value).toBe('Amit');
+    expect(rows?.some(r => r.key === 'likes_amit')).toBe(false);
   });
 
   it('7. stale cache cannot affect correction', async () => {
     const { consolidatedMemoryAgent } = await import('../agents/ConsolidatedMemoryAgent');
+
+    const nvidia = await import('../lib/nvidia');
+    const completeSpy = jest.spyOn(nvidia, 'complete').mockResolvedValue(JSON.stringify({
+      semantic_memories: [{ key: 'favourite_color', value: 'blue', shouldPersist: true }]
+    }));
 
     const payload = {
       userId: TEST_USER,
@@ -265,8 +282,6 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: false,
       hasCorrections: true,
-      correctionTarget: 'favourite_color',
-      correctionValue: 'blue',
     };
 
     await supabaseAdmin.from('chat_history').insert([
@@ -297,7 +312,9 @@ describe('Memory Persistence & Concurrency Integration', () => {
     if (error) throw new Error(`DB error: ${error.message}`);
     expect(rows?.length).toBe(1);
     expect(rows![0].value).toBe('blue');
+    expect(completeSpy).toHaveBeenCalled();
 
+    completeSpy.mockRestore();
     getSpy.mockRestore();
   });
 
@@ -319,9 +336,12 @@ describe('Memory Persistence & Concurrency Integration', () => {
       turnId: randomUUID(),
       hasExplicitRemember: analysisRes.hasExplicitRemember,
       hasCorrections: analysisRes.hasCorrections,
-      correctionTarget: analysisRes.correctionTarget || null,
-      correctionValue: analysisRes.correctionValue || null,
     };
+
+    const nvidia = await import('../lib/nvidia');
+    const completeSpy = jest.spyOn(nvidia, 'complete').mockResolvedValue(JSON.stringify({
+      semantic_memories: [{ key: 'unknown_target', value: 'yellow', shouldPersist: true }]
+    }));
 
     await supabaseAdmin.from('chat_history').insert([
       { id: payload.messageId, user_id: TEST_USER, conversation_id: randomUUID(), role: 'user', content: payload.message }
@@ -329,6 +349,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
 
     const job = { payload } as any;
     await consolidatedMemoryAgent['execute'](job);
+    completeSpy.mockRestore();
 
     const { data: rows } = await supabaseAdmin.from('memories')
       .select('*')

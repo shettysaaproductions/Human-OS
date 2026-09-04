@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { TemporalParser } from '../utils/temporalParser';
 import { TemporalMetadata } from '../types/memory';
 import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
+import { isValueDerivedKey } from '../lib/correctionSemantics';
 
 export type SemanticUnitType = 'question' | 'fact' | 'emotion' | 'action' | 'correction' | 'casual';
 export type FactClassification = 'HIGH_CONFIDENCE_DURABLE_FACT' | 'PROTECTED_FACT' | 'TRANSIENT_FACT';
@@ -191,6 +192,13 @@ export class TurnAnalyzer {
             resolvedVal = this.cleanValue(resolvedVal);
           }
 
+          // Grammar-extracted target/value is advisory only. Drop value-appended keys
+          // so they cannot be treated as an authoritative concept.
+          if (resolvedKey && resolvedVal && isValueDerivedKey(resolvedKey, resolvedVal)) {
+            resolvedKey = undefined;
+            resolvedVal = undefined;
+          }
+
           const temporalResult = TemporalParser.extractTemporalMetadata(clause);
           const temporalMetadata = TemporalParser.toMetadata(temporalResult);
 
@@ -239,6 +247,25 @@ export class TurnAnalyzer {
               temporalMetadata: TemporalParser.toMetadata(TemporalParser.extractTemporalMetadata(clause)),
             });
           }
+        }
+        // 1c. Classify favourite-color assertions as corrections without extracting target/value.
+        // Value interpretation is the MEMORY LLM's job.
+        else if (this.isFavouriteColorAssertion(clause)) {
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'correction',
+            text: clause,
+            importance: 8,
+            responseRequired: true,
+            acknowledgementPreferred: true,
+            memoryCandidate: true,
+            actionCandidate: false,
+            isProtected: false,
+            factClass: 'HIGH_CONFIDENCE_DURABLE_FACT',
+            temporalMetadata: TemporalParser.toMetadata(TemporalParser.extractTemporalMetadata(clause)),
+          });
         }
         // 2. Check for extracted facts
         else if (extractedFacts.length > 0) {
@@ -1072,6 +1099,14 @@ export class TurnAnalyzer {
    * Explicit correction-marked turns are intentionally excluded so they route
    * through the structured-correction branch instead.
    */
+  public static isFavouriteColorAssertion(text: string): boolean {
+    const lower = text.toLowerCase();
+    if (!/\b(?:favourite|favorite)\s+(?:colour|color)\b/i.test(lower)) return false;
+    if (/\?/.test(text)) return false;
+    if (/\b(kya|kaunsa|what|which)\b/i.test(lower)) return false;
+    return true;
+  }
+
   public static extractCanonicalFavourite(text: string): { key: string; value: string } | null {
     const lower = text.toLowerCase();
     const hasMarker = /\b(actually|correction|instead|wait no|wrong|incorrect|no, that is wrong|nahi|galat)\b/i.test(lower);

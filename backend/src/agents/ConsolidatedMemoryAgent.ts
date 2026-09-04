@@ -8,6 +8,7 @@ import { logger } from '../lib/logger';
 import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 import { isGarbageMemoryValue, filterGarbageWorkingMemories } from '../lib/memoryFilters';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
+import { selectAuthoritativeCorrections } from '../lib/correctionSemantics';
 
 // ── Hinglish vocative words that are NOT kinship facts ──────────────────────────
 // "Bhai, sun" = addressing the listener. "Mera bhai Amit hai" = kinship fact.
@@ -143,7 +144,7 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
   }
 
   protected async execute(job: Job): Promise<number> {
-    const { userId, messageId, message, questionClauses, turnId: _turnId, hasExplicitRemember, hasCorrections, correctionTarget } = job.payload;
+    const { userId, messageId, message, questionClauses, turnId: _turnId, hasExplicitRemember, hasCorrections, recentContext } = job.payload;
 
     // Privacy gate: when MEMORY_ENABLED is false, no persistent memory may be created
     // Check again at worker time for queued-job race safety
@@ -167,7 +168,7 @@ If the entire user message is a question, return empty arrays for all memory typ
 `
       : '';
 
-    const isExplicitAuthority = hasExplicitRemember || (hasCorrections && !!correctionTarget);
+    const isExplicitAuthority = !!hasExplicitRemember || !!hasCorrections;
 
     // Check cache first (UNLESS IT'S A CORRECTION)
     // Correction turns bypass the semantic extraction cache entirely (P0-2)
@@ -176,31 +177,8 @@ If the entire user message is a question, return empty arrays for all memory typ
       const cached = cache.get<ConsolidatedExtraction>(cacheKey);
       if (cached) {
         logger.info(`[ConsolidatedMemoryAgent] Cache hit for message ${messageId}`, { userId });
-        return this.persistExtraction(userId, messageId, message, cached, { isExplicitAuthority });
+        return this.persistExtraction(userId, messageId, message, cached, { isExplicitAuthority, hasCorrections: false, contextText: '' });
       }
-    }
-
-    // P0-2: ENFORCE DETERMINISTIC CORRECTION ARCHITECTURE - BYPASS LLM
-    if (hasCorrections) {
-      const parsedCorrection: ConsolidatedExtraction = {};
-      if (!correctionTarget || !job.payload.correctionValue || job.payload.correctionValue.trim() === '') {
-        // Ambiguous correction or missing value -> zero semantic mutation
-        parsedCorrection.semantic_memories = [];
-      } else {
-        // Unambiguous correction -> exactly ONE canonical target deterministically generated
-        parsedCorrection.semantic_memories = [{
-          shouldPersist: true,
-          type: 'fact',
-          key: correctionTarget,
-          value: job.payload.correctionValue,
-          importance: 100,
-          confidence: 1.0,
-          emotional_weight: 0,
-          correction_intent: true
-        }];
-      }
-      logger.info(`[ConsolidatedMemoryAgent] Correction deterministic bypass activated for message ${messageId}`);
-      return this.persistExtraction(userId, messageId, message, parsedCorrection, { isExplicitAuthority });
     }
 
     let safetyInstructions = '';
@@ -208,12 +186,16 @@ If the entire user message is a question, return empty arrays for all memory typ
       safetyInstructions += `\n- The user explicitly COMMANDED you to remember this. Prioritize the core fact they want remembered and assign high importance.`;
     }
 
+    const correctionContextBlock = hasCorrections
+      ? this.buildCorrectionInstruction(typeof recentContext === 'string' ? recentContext : '')
+      : '';
+
     const response = await complete('MEMORY', [
       {
         role: 'system',
         content: `You are the Unified Memory Extraction Agent for HumanOS.
 Analyze the user's message and extract ALL relevant memory types in ONE structured JSON response.
-${questionSuppressionBlock}
+${questionSuppressionBlock}${correctionContextBlock}
 Return ONLY a valid JSON object with these exact keys (omit empty arrays/objects if nothing to extract):
 
 {
@@ -287,6 +269,7 @@ Do NOT invent aliases, plurals, or possessive variants. Use ONLY canonical keys:
   birth_date     ← NOT birthday, dob, bday, child_birthdate
   marriage_date  ← NOT wedding_date, anniversary
   preferred_name ← NOT name, user_name, my_name
+  favourite_color ← NOT favorite_color, favourite_colour, and NEVER favourite_color_<value>
 RULE FOR NICKNAMES: NEVER output generic unscoped "real_name" or "nickname". For family members, ALWAYS use <relation>_name for the real name and <relation>_nickname for the nickname.
 For any other concept, use descriptive snake_case that clearly expresses the concept.
 
@@ -309,17 +292,58 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     });
 
     const parsed = JSON.parse(response) as ConsolidatedExtraction;
-    
-    // Cache the extraction result (1 hour TTL)
-    const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
-    cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
+    const contextText = typeof recentContext === 'string' ? recentContext : '';
 
-    let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority });
+    if (hasCorrections) {
+      const validated = selectAuthoritativeCorrections(parsed.semantic_memories, message, contextText);
+      parsed.semantic_memories = validated;
+      parsed.working_memories = [];
+      parsed.episodic_memories = [];
+      parsed.kg_entities = [];
+      parsed.emotional_state = null;
+      parsed.milestone = null;
+      parsed.short_term = null;
+      if (validated.length === 0) {
+        logger.info('[ConsolidatedMemoryAgent] Correction fail-closed: no grounded semantic mutation', { userId, messageId });
+      } else {
+        logger.info('[ConsolidatedMemoryAgent] Semantic correction interpreted by MEMORY LLM', {
+          userId,
+          messageId,
+          keys: validated.map(m => m.key),
+        });
+      }
+    } else {
+      const storeCacheKey = `memory_extraction:${hashMessage(message)}`;
+      cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
+    }
+
+    let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority, hasCorrections: !!hasCorrections, contextText });
 
     return totalCreated;
   }
 
-  private async persistExtraction(userId: string, messageId: string, messageText: string, parsed: ConsolidatedExtraction, opts?: { isExplicitAuthority?: boolean }): Promise<number> {
+  private buildCorrectionInstruction(recentContext: string): string {
+    const contextBlock = recentContext.trim()
+      ? `\nRecent conversation context (use only to resolve an otherwise incomplete correction; never invent a concept from it):\n${recentContext.trim()}\n`
+      : '';
+    return `
+
+CORRECTION SEMANTICS:
+The user is correcting a previous fact. Read the COMPLETE sentence. Identify:
+1. the concept being corrected (the thing, not the new value)
+2. the new value the user is asserting
+3. discourse/time/context modifiers (they are not the value)
+
+Rules:
+- Understand natural English, Hindi, Hinglish, and mixed phrasing from sentence meaning.
+- Do not invent a concept. If the concept or value is missing or ambiguous, omit semantic_memories.
+- Do not form a key by appending the value to the concept.
+- Output the concept as a descriptive snake_case key (or a short concept phrase) plus the asserted value.
+- Persist at most one correction fact unless the sentence clearly asserts multiple independent corrections.
+${contextBlock}`;
+  }
+
+  private async persistExtraction(userId: string, messageId: string, messageText: string, parsed: ConsolidatedExtraction, opts?: { isExplicitAuthority?: boolean; hasCorrections?: boolean; contextText?: string }): Promise<number> {
     // Privacy gate at persistence boundary — ensures queued jobs cannot bypass
     if (!(await memoryPolicyService.isMemoryEnabled(userId))) {
       logger.info('[ConsolidatedMemoryAgent] Memory paused — skipping persistExtraction', { userId, messageId });
@@ -329,7 +353,10 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     const { memoryRepository } = await import('../services/memoryRepository');
 
     // ── Semantic memories ──
-    const rawSemanticMemories = parsed.semantic_memories || [];
+    let rawSemanticMemories = parsed.semantic_memories || [];
+    if (opts?.hasCorrections) {
+      rawSemanticMemories = selectAuthoritativeCorrections(rawSemanticMemories, messageText, opts.contextText);
+    }
     // Apply pre-DB filters (BUG-01 generic value + BUG-02 vocative guard)
     // messageText is used as the source text for vocative check
     const semanticMemories = filterSemanticMemories(rawSemanticMemories, messageText);
@@ -353,6 +380,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
             importance: mem.importance || 100,
             confidence: 1.0,
             emotional_weight: mem.emotional_weight || 0,
+            correction_intent: opts.hasCorrections === true || mem.correction_intent === true,
             source_message_id: messageId,
             source_references: [{ type: 'turn', id: messageId }]
           }, messageText);
