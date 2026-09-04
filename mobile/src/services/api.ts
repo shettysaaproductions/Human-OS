@@ -2,7 +2,12 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // ── Base URL ───────────────────────────────────────────────────────────────────
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onrender.com';
+// Backend mounts all routes under /api. Accept either form of EXPO_PUBLIC_API_URL.
+function resolveApiBaseUrl(): string {
+  const raw = (process.env.EXPO_PUBLIC_API_URL || 'https://human-os-zitw.onrender.com').replace(/\/$/, '');
+  return raw.endsWith('/api') ? raw : `${raw}/api`;
+}
+const BASE_URL = resolveApiBaseUrl();
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -24,11 +29,11 @@ api.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-      
-      console.log(`[API REQUEST] ${config.method?.toUpperCase()} ${config.url}`);
-      console.log(`[API HEADERS]`, JSON.stringify(config.headers));
-      if (config.data) console.log(`[API PAYLOAD]`, JSON.stringify(config.data));
-      
+
+      if (__DEV__) {
+        console.log(`[API REQUEST] ${config.method?.toUpperCase()} ${config.url}`);
+      }
+
     } catch (error) {
       console.error('[api] Error reading accessToken from store', error);
     }
@@ -48,8 +53,9 @@ function drainQueue(error: any, token: string | null) {
 
 api.interceptors.response.use(
   (response) => {
-    console.log(`[API RESPONSE] ${response.status} ${response.config.url}`);
-    console.log(`[API BODY]`, JSON.stringify(response.data));
+    if (__DEV__) {
+      console.log(`[API RESPONSE] ${response.status} ${response.config.url}`);
+    }
     return response;
   },
   async (error) => {

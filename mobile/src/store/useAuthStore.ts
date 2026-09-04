@@ -49,8 +49,19 @@ export const useAuthStore = create<AuthState>((set) => ({
           notificationService.registerAfterAuth().catch(() => {});
           notificationService.ensureTokenFresh().catch(() => {}); // handles new APK install token change
           return;
-        } catch {
-          // Token expired — fall through to refresh
+        } catch (err: any) {
+          const status = err?.response?.status;
+          if (status && status !== 401) {
+            // Backend is up but errored — keep the session, don't wipe tokens
+            set({ accessToken, onboardingStatus: true, isLoading: false });
+            return;
+          }
+          if (!status) {
+            // Network / timeout / cold boot — keep stored tokens so testers are not logged out
+            set({ accessToken, onboardingStatus: true, isLoading: false });
+            return;
+          }
+          // 401 — fall through to refresh
         }
       }
 
@@ -64,8 +75,14 @@ export const useAuthStore = create<AuthState>((set) => ({
           notificationService.registerAfterAuth().catch(() => {});
           notificationService.ensureTokenFresh().catch(() => {}); // handles new APK install token change
           return;
-        } catch {
-          // Refresh token also expired — force re-login
+        } catch (err: any) {
+          const status = err?.response?.status;
+          if (!status || status !== 401) {
+            // Transient failure — keep whatever tokens we have
+            console.warn('[AuthStore] Refresh failed transiently, keeping session.');
+            set({ accessToken: accessToken || null, onboardingStatus: !!accessToken, isLoading: false });
+            return;
+          }
           console.warn('[AuthStore] Refresh token expired, clearing session.');
         }
       }

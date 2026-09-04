@@ -9,9 +9,10 @@ import { api } from '../services/api';
 import { useTheme, ThemeMode } from '../theme/ThemeContext';
 import { useChatStore } from '../store/useChatStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { useSettingsStore, LanguagePreference } from '../store/useSettingsStore';
 import * as Updates from 'expo-updates';
 
-const APP_VERSION = '0.2.0-beta';
+const APP_VERSION = '0.2.5-beta';
 
 // Countries Nova understands for local time + weekend detection
 const COUNTRIES = [
@@ -40,6 +41,7 @@ export function SettingsScreen() {
   const { colors, themeMode, setThemeMode } = useTheme();
   const { developerMode, setDeveloperMode } = useChatStore();
   const { logout } = useAuthStore();
+  const { language, setLanguage } = useSettingsStore();
 
   // Notification settings (local state — could persist to backend)
   const [momentNotifs, setMomentNotifs] = useState(true);
@@ -203,6 +205,27 @@ export function SettingsScreen() {
           </View>
         </View>
 
+        {/* ── Language ────────────────────────────────── */}
+        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>LANGUAGE</Text>
+        <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {([
+            { key: 'auto' as LanguagePreference, label: 'Auto', sub: 'Match how you write' },
+            { key: 'hi' as LanguagePreference, label: 'Hinglish', sub: 'Casual Roman Hinglish' },
+            { key: 'en' as LanguagePreference, label: 'English', sub: 'English only' },
+          ]).map((opt, idx, arr) => (
+            <React.Fragment key={opt.key}>
+              <TouchableOpacity style={st.row} onPress={() => setLanguage(opt.key)}>
+                <View>
+                  <Text style={[st.rowLabel, { color: colors.textPrimary }]}>{opt.label}</Text>
+                  <Text style={[st.rowSub, { color: colors.textSecondary }]}>{opt.sub}</Text>
+                </View>
+                {language === opt.key && <Text style={st.checkmark}>✓</Text>}
+              </TouchableOpacity>
+              {idx < arr.length - 1 && <View style={[st.divider, { backgroundColor: colors.divider }]} />}
+            </React.Fragment>
+          ))}
+        </View>
+
         {/* ── Memory Privacy ───────────────────────────── */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🧠 MEMORY</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -305,7 +328,20 @@ export function SettingsScreen() {
           </View>
         </Modal>
 
+        {/* ── Preferences ──────────────────────────────── */}
+        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>PROFILE</Text>
+        <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Preferences')}>
+            <View>
+              <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Edit Preferences</Text>
+              <Text style={[st.rowSub, { color: colors.textSecondary }]}>Name, passions, goals, personality</Text>
+            </View>
+            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* ── Theme ────────────────────────────────────── */}
+        <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>APPEARANCE</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('system')}>
             <Text style={[st.rowLabel, { color: colors.textPrimary }]}>System Default</Text>

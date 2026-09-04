@@ -16,11 +16,11 @@ export const AutonomousEyes: React.FC = () => {
   const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
-    // Request permission silently on mount if not already granted
-    if (!permission?.granted) {
-      requestPermission();
-    }
-  }, [permission]);
+    // Do not prompt on mount — wait until the user is authenticated and
+    // the OS permission dialog has not already been denied.
+    if (!user || !permission || permission.granted || !permission.canAskAgain) return;
+    requestPermission();
+  }, [user, permission]);
 
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener(TRIGGER_VISION_SNAP, async () => {

@@ -16,6 +16,8 @@ import * as Notifications from 'expo-notifications';
 import { ThoughtBubble } from '../components/ThoughtBubble';
 import { LiveThinkingIndicator } from '../components/LiveThinkingIndicator';
 import { useTheme } from '../theme/ThemeContext';
+import { OfflineBanner } from '../components/EmptyState';
+import NetInfo from '@react-native-community/netinfo';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 import { ScrollView as GHScrollView, Swipeable } from 'react-native-gesture-handler';
@@ -57,7 +59,7 @@ const formatDateSeparator = (dateString?: string) => {
 // Silent telemetry helper
 async function trackEvent(event_type: string, event_data?: object) {
   try {
-    await api.post('/telemetry', { event_type, event_data, platform: Platform.OS, app_version: '0.2.0-beta' });
+    await api.post('/telemetry', { event_type, event_data, platform: Platform.OS, app_version: '0.2.5-beta' });
   } catch {}
 }
 
@@ -457,6 +459,7 @@ export function ChatScreen() {
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
   const isFocused = useIsFocused();
+  const [isOffline, setIsOffline] = useState(false);
 
 
   const isSelectionMode = selectedMessageIds.length > 0;
@@ -515,6 +518,13 @@ export function ChatScreen() {
 
   useEffect(() => {
     presenceService.onChatOpen();
+  }, []);
+
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener(state => {
+      setIsOffline(!(state.isConnected && state.isInternetReachable !== false));
+    });
+    return () => unsub();
   }, []);
 
   const hasRenderedList = useRef(false);
@@ -911,6 +921,7 @@ export function ChatScreen() {
         behavior="padding"
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
+        <OfflineBanner visible={isOffline} />
         {/* Header */}
         {isSelectionMode ? (
           <View style={[s.header, { borderBottomColor: colors.border, backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}>

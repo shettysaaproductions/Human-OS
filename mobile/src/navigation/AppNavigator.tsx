@@ -9,6 +9,7 @@ import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { PreferencesScreen } from '../screens/PreferencesScreen';
 import { UpdateHistoryScreen } from '../screens/UpdateHistoryScreen';
 import { FeedbackScreen } from '../screens/FeedbackScreen';
 import { BrainNavigator } from './BrainNavigator';
@@ -37,26 +38,29 @@ export function AppNavigator({ navigationRef }: AppNavigatorProps) {
   const hasCompletedOnboarding = onboardingStatus;
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!isAuthenticated ? (
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Signup" component={SignupScreen} />
-          </>
-        ) : !hasCompletedOnboarding ? (
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        ) : (
-          <>
-            <Stack.Screen name="Chat" component={ChatScreen} />
-            <Stack.Screen name="Diagnostics" component={DiagnosticsScreen} />
-            <Stack.Screen name="Settings" component={SettingsScreen} />
-            <Stack.Screen name="UpdateHistory" component={UpdateHistoryScreen} />
-            <Stack.Screen name="Feedback" component={FeedbackScreen} />
-            <Stack.Screen name="Brain" component={BrainNavigator} />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ErrorBoundary>
+      <NavigationContainer ref={navigationRef}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {!isAuthenticated ? (
+            <>
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Signup" component={SignupScreen} />
+            </>
+          ) : !hasCompletedOnboarding ? (
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+          ) : (
+            <>
+              <Stack.Screen name="Chat" component={ChatScreen} />
+              <Stack.Screen name="Diagnostics" component={DiagnosticsScreen} />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="Preferences" component={PreferencesScreen} />
+              <Stack.Screen name="UpdateHistory" component={UpdateHistoryScreen} />
+              <Stack.Screen name="Feedback" component={FeedbackScreen} />
+              <Stack.Screen name="Brain" component={BrainNavigator} />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ErrorBoundary>
   );
 }

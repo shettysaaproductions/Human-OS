@@ -511,7 +511,7 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, messages, conversation_id, is_proactive, async_mode, reply_to_content, image_base64 } = parseResult.data;
+      const { message, messages, conversation_id, is_proactive, async_mode, reply_to_content, image_base64, language } = parseResult.data;
       let { reply_to_id, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
       
@@ -1367,6 +1367,7 @@ chatRouter.post(
         turnId,
         // P0-B: question clause texts — forwarded to memory extraction jobs
         questionClauses: turnAnalysis.questionClauses || [],
+        language: language || 'auto',
       };
 
 

@@ -338,7 +338,7 @@ export class NovaBrainService {
       context.profile?.preferred_name,
       context.profile?.companion_personality,
       context.shortTermMemories || [],
-      'auto',
+      context.language || 'auto',
       context.recentCrossSessionContext,
       'HUMAN_CHAT',
       context.situationBrief,
@@ -453,7 +453,7 @@ export class NovaBrainService {
       context.profile?.preferred_name,
       context.profile?.companion_personality,
       context.shortTermMemories || [],
-      'auto',
+      context.language || 'auto',
       context.recentCrossSessionContext,
       'HUMAN_CHAT',
       context.situationBrief

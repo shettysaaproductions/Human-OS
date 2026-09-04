@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.2.5-beta",
+    "date": "2026-09-04",
+    "title": "Tester-ready polish",
+    "message": [
+      "Language preference now actually reaches Nova (Auto / Hinglish / English in Settings).",
+      "Chat history polling no longer hits AI rate limits — replies should arrive instead of hanging.",
+      "Offline / cold-start no longer logs you out. Cached session is kept.",
+      "Login and signup screens are readable on dark theme with visible placeholders.",
+      "Offline banner on chat. Edit Preferences is in Settings. Camera is not prompted until you are signed in."
+    ]
+  },
+  {
     "version": "0.2.4-beta",
     "date": "2026-08-02",
     "title": "🧠 NACE Beast Mode Upgrade",

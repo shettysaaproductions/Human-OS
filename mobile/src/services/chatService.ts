@@ -1,6 +1,7 @@
 import { api } from './api';
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../store/useAuthStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import * as Crypto from 'expo-crypto';
 
 export const chatService = {
@@ -33,7 +34,7 @@ export const chatService = {
   },
 
   sendMessage: async (message: string, conversationId?: string, clientMessageId?: string) => {
-    const payload: any = { message };
+    const payload: any = { message, language: useSettingsStore.getState().language || 'auto' };
     if (conversationId) payload.conversation_id = conversationId;
     if (clientMessageId) payload.client_message_id = clientMessageId;
     else payload.client_message_id = Crypto.randomUUID();
@@ -48,7 +49,11 @@ export const chatService = {
       client_message_id: m.client_message_id || Crypto.randomUUID()
     }));
 
-    const payload: any = { messages: formattedMessages, async_mode: true };
+    const payload: any = {
+      messages: formattedMessages,
+      async_mode: true,
+      language: useSettingsStore.getState().language || 'auto',
+    };
     if (conversationId) payload.conversation_id = conversationId;
 
     // We use the native fetch API with keepalive: true so that the OS

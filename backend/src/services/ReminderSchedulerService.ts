@@ -359,7 +359,11 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
     } else if (recurrenceType === 'weeks') {
       next.setDate(next.getDate() + (recurrenceInterval * 7));
     } else if (recurrenceType === 'months') {
+      const day = next.getDate();
       next.setMonth(next.getMonth() + recurrenceInterval);
+      if (next.getDate() !== day) next.setDate(0);
+    } else if (recurrenceType === 'years') {
+      next.setFullYear(next.getFullYear() + recurrenceInterval);
     } else {
       next.setDate(next.getDate() + 1);
     }

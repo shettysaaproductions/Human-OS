@@ -77,10 +77,12 @@ export function createApp(): express.Application {
   app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
   // ── Global rate limiter ──────────────────────────────────────────────────────
-  // 100 requests per 15 minutes per IP — adjust per-route as needed
+  // 1000 / 15 min — mobile clients poll chat history every 2s while waiting
+  // for a reply (~450 GET /chat per window) plus presence/read. 100 was too low
+  // and 429'd testers mid-conversation.
   const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -89,6 +91,7 @@ export function createApp(): express.Application {
         message: 'Too many requests. Please wait and try again.',
       },
     },
+    skip: (req) => req.path === '/health' || req.path.startsWith('/health'),
   });
   app.use(globalLimiter);
 
@@ -104,6 +107,13 @@ export function createApp(): express.Application {
         code: 'RATE_LIMIT_EXCEEDED',
         message: 'AI rate limit reached. Please wait a moment before sending another message.',
       },
+    },
+    // Only throttle the AI send (POST /chat). History polling, read receipts,
+    // reactions, and thought fetches must not share this budget.
+    skip: (req) => {
+      if (req.method !== 'POST') return true;
+      const path = (req.path || '/').replace(/\/$/, '') || '/';
+      return path !== '/' && path !== '/chat';
     },
   });
 

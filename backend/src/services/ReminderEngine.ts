@@ -613,7 +613,13 @@ export class ReminderEngine {
       case 'hours':   d.setHours(d.getHours() + value); break;
       case 'days':    d.setDate(d.getDate() + value); break;
       case 'weeks':   d.setDate(d.getDate() + value * 7); break;
-      case 'months':  d.setMonth(d.getMonth() + value); break;
+      case 'months': {
+        const day = d.getDate();
+        d.setMonth(d.getMonth() + value);
+        if (d.getDate() !== day) d.setDate(0);
+        break;
+      }
+      case 'years':   d.setFullYear(d.getFullYear() + value); break;
     }
     return d;
   }
