@@ -1,100 +1,88 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-04 — Hi-Agent retirement checkpoint
+2026-09-04 — Production OTA automation and Settings/memory release handoff
 
 ## Session / Agent
-Agent: ChatGPT-assisted repository maintenance after MonkeyCode Basic quota exhaustion.
-Task: Retire obsolete Hi-Agent coding workflow without changing Human-OS runtime behavior.
-
-## Current Task
-RETIRE-HI-AGENT: remove obsolete Hi-Agent RAM/command framework and establish one active coding-agent workflow.
-
-## Objective
-MonkeyCode is the single active coding agent. Durable continuity lives in `.agent/` and `SESSION_BOOT.md`. The old Hi-Agent persona, RAM cache, command mode-lock, planner/execute routing, and stale resume cache must not control future coding sessions.
+Agent: ChatGPT-assisted repository maintenance with MonkeyCode as the single active coding agent.
+Task: Publish/verify the approved Settings + existing memory-manager mobile fix through production EAS OTA and make deployment continuity durable across future AI/account/quota sessions.
 
 ## Status
-CHECKPOINTED
+READY_FOR_REVIEW
 
 ## Repository State
-- Base production branch: `main` at `6494bfb77c9edaeeb6393eb788906063c82b7f23`.
-- `main` must remain untouched for this maintenance task.
-- Active cleanup branch: `agent-checkpoint/retire-hi-agent`.
-- Previous continuity branch: `agent-checkpoint/session-continuity`.
-- Production runtime code is not part of this task.
+- Production branch: `main`.
+- Approved code fix landed at `9d0052192e430d50f007e81efa632a4292dde390`.
+- Follow-up deployment automation/docs commits were added after the approved code fix.
+- Latest main includes `.github/workflows/mobile-ota-production.yml`, `DEPLOYMENT.md`, updated OTA scripts, and current continuity task/handoff.
+- Main is production-sensitive. Do not rewrite/reset it.
 
 ## Confirmed Findings
-- `HI_AGENT_RAM.md` at root and `.agents/HI_AGENT_RAM.md` were duplicate Hi-Agent RAM snapshots and are not Human-OS runtime code.
-- `.agents/AGENTS.md` contained the active Hi-Agent command/mode-lock/model-routing instructions. Those instructions have been replaced with a concise canonical single-agent policy.
-- `.agents/memory/state.json` was stale Hi-Agent resume state and has been removed.
-- Human-OS runtime OTA/update, Nova self-improvement, and runtime model routing are separate product functionality and must remain intact.
-- `.agent/` singular is the canonical continuity store and must remain intact.
+- `SettingsScreen.tsx` previously navigated to `Brain -> Memories`, but `BrainNavigator.tsx` registers `Manage` for `MemoryManagementScreen`; the invalid route was a confirmed client bug.
+- `MemoryManagementScreen.tsx` previously expected legacy snake_case fields while the canonical `/memories` API returns camelCase fields such as `canonicalKey`, `label`, `memoryType`, `isArchived`, `createdAt`, and `updatedAt`.
+- The existing memory architecture is canonical and server-authoritative. Editing uses `PATCH /memories/:id`; no second memory store was introduced.
+- Backend memory tests reported 35/35 PASS for canonical authority, edit/supersession, archive/unarchive, forget/not-hard-delete, and exactly-one-CURRENT protections.
+- Mobile TypeScript validation reported PASS.
+- Real Android crash behavior was not verifiable in the previous MonkeyCode environment because Android SDK/emulator/adb/Java and runtime crash logs were unavailable. Physical-device verification remains required.
 
-## Root Cause
-The repository contained two overlapping agent-control layers: `.agents/` platform/persona instructions and the newer `.agent/` continuity system. The old layer could cause confusing command modes and model routing. This cleanup removes the obsolete control layer while preserving product behavior.
+## Production OTA Configuration
+- Android production EAS channel: `production`.
+- EAS Update branch: `production`.
+- Runtime policy: `appVersion`.
+- Current app version/runtime target: `1.1.0`.
+- Production EAS environment: `production`.
+- Canonical command:
+  `eas update --branch production --environment production --platform android --non-interactive`
+- The `--environment production` flag is required for EAS Update on SDK 55+.
+- `mobile/package.json` production update script now includes the production environment.
 
-## Decisions
-- Use exactly one active coding agent: MonkeyCode.
-- Use `.agent/` singular for durable session continuity.
-- Keep `SESSION_BOOT.md` as the canonical boot document.
-- Never use `main` as a WIP checkpoint.
-- Do not remove Human-OS runtime OTA or Nova self-improvement features merely because they contain the word “agent” or “upgrade”.
-- Historical logs may retain old command names; history is not active control logic.
+## Durable Deployment Automation
+- `.github/workflows/mobile-ota-production.yml` publishes Android production OTA on `main` mobile changes and supports manual `workflow_dispatch`.
+- The workflow requires the GitHub Actions repository secret `EXPO_TOKEN`.
+- The token is intentionally NOT stored in Git, continuity files, or documentation.
+- `DEPLOYMENT.md` is the canonical deployment runbook and tells future AI sessions exactly what to do without rediscovery.
+- If `EXPO_TOKEN` is missing, the workflow must fail clearly. Do not ask for or commit a token in repository files and do not silently switch accounts.
 
-## Implementation Completed
-- Replaced `.agents/AGENTS.md` with canonical single-agent/continuity/production-safety instructions.
-- Deleted root `HI_AGENT_RAM.md`.
-- Deleted `.agents/HI_AGENT_RAM.md`.
-- Deleted stale `.agents/memory/state.json`.
-- Preserved `.agent/` continuity infrastructure and `SESSION_BOOT.md`.
-- No backend/mobile production code changed.
-- No OTA, Render deployment, or `main` push performed.
+## Current OTA Blocker
+The first OTA attempt through MonkeyCode failed before publication because EAS was not authenticated and `EXPO_TOKEN` was absent. No update ID was created by that attempt.
 
-## Tests Added
-No runtime tests. Maintenance validation is limited to repository/configuration inspection.
+## Important Release Note
+The approved fix is already on `main`. Do not make another application-code change just to publish the OTA. Once the GitHub Actions `EXPO_TOKEN` secret is configured, use the existing production OTA workflow. If the workflow is not triggered by a later mobile commit, run it manually from GitHub Actions.
 
-## Test Results
-- Reviewed the resulting agent instruction policy: PASS.
-- Confirmed obsolete RAM files are removed from this branch: PASS.
-- Confirmed stale Hi-Agent state is removed: PASS.
-- Confirmed `.agent/scripts/check_continuity.sh` remains present: PASS.
-- No production runtime tests run because runtime code was not changed.
-
-## Known Failures
-- Local MonkeyCode task stopped with Payment Required after quota exhaustion, so its local workspace could not finish its own final verification. The required cleanup was completed through GitHub on this checkpoint branch.
-
-## Unresolved Questions
-- Whether/when this cleanup branch should be merged into `main` remains an explicit production decision.
-- `.agents/NOVA_AGENT_V2.md`, `.agents/AUTOMATED_WORKFLOWS.md`, and `.agents/ANTIGRAVITY.md` remain as legacy documentation/tooling files but are no longer active through `.agents/AGENTS.md`. Retire them later only with a separate explicit decision.
-
-## Important Invariants
-- Preserve memory authority, canonical-key, temporal, provenance, history, stale-write, and no-hard-delete invariants.
-- Never fabricate authenticated state or treat a known-invalid access token as valid.
-- No secrets, credentials, or unnecessary PII in continuity files.
-- No cross-user mutation.
-- `main` is production-sensitive and must not be pushed for WIP.
+## Memory Invariants
+Preserve all existing memory invariants: canonical-key authority, deterministic correctionTarget authority, user-turn-grounded correction values, semantic filtering, canonical-key enforcement, atomic supersession, exactly one CURRENT, provenance/order safety, stale-write protection, history preservation, no hard delete, and PII/forensic hygiene.
 
 ## DO NOT REDO
-- Do not recreate HI_AGENT_RAM.md.
-- Do not restore Hi-Agent mode-lock, Planner/Execute routing, or model auto-routing.
-- Do not create another continuity system.
-- Do not delete Human-OS runtime OTA/self-improvement/model-routing code.
-- Do not begin the authentication fix on this branch; use a new `agent-checkpoint/auth-bug` branch after the cleanup is reviewed.
+- Do not re-investigate the already-confirmed Settings route mismatch unless device evidence shows a different failure.
+- Do not redesign memory or create a parallel memory store.
+- Do not use MonkeyCode for broad repository exploration for this release.
+- Do not rebuild the native APK unless the installed build is runtime-incompatible or native code/configuration changed.
+- Do not put EXPO_TOKEN or any credential in Git.
+- Do not switch Google/Expo accounts silently.
+- Do not claim the Android crash is fixed until the physical device has received the OTA and the Settings destinations have been tested.
 
 ## NEXT ACTION
-1. Independently compare `agent-checkpoint/retire-hi-agent` with `main` and confirm only intended agent-framework/continuity files changed.
-2. If verification passes, this branch is the candidate source for merging the continuity + Hi-Agent retirement changes into `main` after explicit approval.
-3. Then create `agent-checkpoint/auth-bug` from the approved baseline and resume the authentication blocker with fresh MonkeyCode quota.
+1. Configure the one-time GitHub Actions repository secret `EXPO_TOKEN` for the Expo account that owns the Human-OS EAS project.
+2. Run `.github/workflows/mobile-ota-production.yml` manually once for the current release if the prior workflow attempts were blocked by the missing secret.
+3. Confirm the workflow reports a successful Android EAS update on branch/channel `production`, runtime `1.1.0`, and record the exact update group ID and source commit.
+4. On a compatible physical Android production build, force-close and reopen the app up to two times so Expo Updates can download/apply the update.
+5. Test all relevant Settings destinations, especially Manage Nova's memories and the Shoot Dead modal.
+6. In Memory Management, load/search/edit an existing memory, reopen the screen, and verify persistence without duplication.
+7. Record device results here. If a hard crash remains, capture Android/Metro/Logcat evidence before any further code change.
 
 ## Safe To Continue?
-YES
+YES — deployment/verification only.
 
 ## Checkpoint Information
-CHECKPOINT_BRANCH=agent-checkpoint/retire-hi-agent
-BASE_COMMIT=6494bfb77c9edaeeb6393eb788906063c82b7f23
-CHECKPOINT_COMMIT=431daada34d36113a4e7f64ad00d2b30f0de3b78
-RELEVANT_FILES=.agents/AGENTS.md,.agent/CURRENT_HANDOFF.md,.agent/CURRENT_TASK.md,.agent/DECISIONS.md,.agent/FINDINGS.md,.agent/scripts/check_continuity.sh,SESSION_BOOT.md
-WORKING_TREE_STATE=clean after committed changes
-CHECKPOINT_PUSHED=yes
-MAIN_PUSHED=no
-PRODUCTION_CHANGED=no
+APPROVED_CODE_COMMIT=9d0052192e430d50f007e81efa632a4292dde390
+LATEST_DEPLOYMENT_DOC_COMMIT=39f0d0950fdff7964cdce8a1406c0dd065d2ae2e
+LATEST_OTA_SCRIPT_COMMIT=db837150b9fd7b854c0ab2a06270726f5c61c3f0
+CURRENT_TASK=PROD-OTA-MEMORY-SETTINGS
+OTA_PUBLISHED=no
+OTA_UPDATE_ID=none
+OTA_BRANCH=production
+OTA_CHANNEL=production
+OTA_RUNTIME=1.1.0
+DEVICE_VERIFIED=no
+PRODUCTION_CHANGED=yes
+CREDENTIALS_STORED_IN_REPO=no
