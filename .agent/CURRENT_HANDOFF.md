@@ -152,3 +152,4 @@ WORKING_TREE_STATE=clean after committed changes
 CHECKPOINT_PUSHED=no
 MAIN_PUSHED=no
 PRODUCTION_CHANGED=no
+READY_FOR_REVIEW=yes-for-code-review; real-device crash resolution UNVERIFIED (needs founder device test before production merge)
