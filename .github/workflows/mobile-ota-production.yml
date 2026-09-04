@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    defaults:
-      run:
-        working-directory: mobile
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
       - name: Verify Expo token is configured
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -31,9 +31,6 @@ jobs:
             echo "Create one in Repository Settings > Secrets and variables > Actions."
             exit 1
           fi
-
-      - name: Checkout repository
-        uses: actions/checkout@v5
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -49,9 +46,11 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
+        working-directory: mobile
         run: yarn install --frozen-lockfile
 
       - name: Publish production Android OTA
+        working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
