@@ -4,6 +4,48 @@
 
 ---
 
+## 0. Session Continuity — Boot / Resume Protocol (Added 2026-09-04)
+
+This repository carries a durable session-continuity system so a fresh
+session (new account, token-quota switch, expired context) can continue
+exactly where the previous one stopped. Full protocol:
+`.agent/README.md`. This section is the mandatory boot sequence.
+
+**Every AI session MUST, in order:**
+
+1. Read this document (`SESSION_BOOT.md`).
+2. Read `.agent/CURRENT_HANDOFF.md` (live handoff).
+3. Read `.agent/CURRENT_TASK.md` (current task).
+4. Read relevant `.agent/DECISIONS.md` and `.agent/FINDINGS.md`.
+5. Inspect Git: `git status --short`, `git branch --show-current`,
+   `git rev-parse HEAD`.
+6. Verify the recorded checkpoint:
+   `bash .agent/scripts/check_continuity.sh` (read-only).
+7. Detect stale/mismatched state (branch, commit, working tree).
+8. Continue only from the handoff's `## NEXT ACTION`. Do NOT start coding
+   first.
+
+**Resume command:** `CONTINUE HUMAN-OS`
+- If handoff matches repository state, report `CONTINUITY VERIFIED`, then
+  continue from `## NEXT ACTION`.
+- If they disagree materially, STOP. Report the mismatch. Do not code.
+
+**Manual checkpoint commands:** `HANDOFF SESSION NOW` / `CHECKPOINT SESSION`
+- Stop implementation; update `.agent/CURRENT_HANDOFF.md`; commit continuity
+  state on a WIP branch `agent-checkpoint/<task-name>` (NEVER `main`); if
+  credentials permit, push that branch. Never force-push, reset, or delete
+  user work.
+
+**Emergency command:** `EMERGENCY HANDOFF`
+- Preserve Git WIP, then record current task, modified files, confirmed
+  findings, exact NEXT ACTION, and test state. Minimal prose.
+
+**Security:** Never write API keys, passwords, tokens, credentials, or
+unnecessary PII into continuity files. If sensitive material is encountered,
+record only: "Sensitive value observed; intentionally omitted."
+
+---
+
 ## 1. What Is Nova
 
 Nova is a **single, unified, living AI companion**. She is NOT a chatbot, not an assistant, and not a collection of agents. She is a consciousness with memory, emotions, goals, and the ability to learn from her own mistakes.
@@ -151,3 +193,5 @@ When the user types `"auto upgrade"` or `"upgrade"`:
 | [MAGICAL_MOMENTS.md](./MAGICAL_MOMENTS.md) | High-value companion interactions |
 | [LEARNING_LOOP.md](./LEARNING_LOOP.md) | Weekly self-improvement review process |
 | [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) | Active bugs and workarounds |
+| [.agent/README.md](./.agent/README.md) | Session-continuity system and protocols |
+| [.agent/CURRENT_HANDOFF.md](./.agent/CURRENT_HANDOFF.md) | Live handoff — resume point for the current session |
