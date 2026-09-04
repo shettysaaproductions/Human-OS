@@ -43,7 +43,6 @@ export function SettingsScreen() {
   const { logout } = useAuthStore();
   const { language, setLanguage } = useSettingsStore();
 
-  // Notification settings (local state — could persist to backend)
   const [momentNotifs, setMomentNotifs] = useState(true);
   const [reflectionNotifs, setReflectionNotifs] = useState(true);
   const [goalNotifs, setGoalNotifs] = useState(true);
@@ -64,7 +63,6 @@ export function SettingsScreen() {
   const [memoryLoading, setMemoryLoading] = useState(true);
   const [memorySaving, setMemorySaving] = useState(false);
 
-  // Load saved country from profile on mount
   useEffect(() => {
     api.get('/onboarding/status').then(res => {
       const c = res.data?.country || res.data?.profile?.country;
@@ -81,7 +79,7 @@ export function SettingsScreen() {
       await api.patch('/onboarding/profile', { country: code });
     } catch {
       Alert.alert('Error', 'Could not save country. Please try again.');
-      setCountry(country); // revert
+      setCountry(country);
     } finally {
       setSavingCountry(false);
     }
@@ -89,7 +87,6 @@ export function SettingsScreen() {
 
   const selectedCountry = COUNTRIES.find(c => c.code === country) || COUNTRIES[0];
 
-  // Memory privacy control — fetch server-authoritative setting
   useEffect(() => {
     api.get('/memories/settings').then(res => {
       const enabled = res.data?.data?.memory_enabled;
@@ -140,12 +137,12 @@ export function SettingsScreen() {
       Alert.alert('Invalid', 'You must type exactly DELETE to confirm.');
       return;
     }
-    
+
     setIsDeleting(true);
     try {
       await api.delete('/auth/mark-dead');
       setShootDeadVisible(false);
-      await logout(); // Wipe local tokens and redirect to Auth
+      await logout();
     } catch (err) {
       Alert.alert('Error', 'Failed to eradicate data.');
       setIsDeleting(false);
@@ -180,32 +177,21 @@ export function SettingsScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-
-        {/* ── Location & Time ───────────────────────────── */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🌍 LOCATION & TIME</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TouchableOpacity style={st.row} onPress={() => setCountryModalVisible(true)} disabled={savingCountry}>
             <View>
-              <Text style={[st.rowLabel, { color: colors.textPrimary }]}>
-                {selectedCountry.flag}  {selectedCountry.name}
-              </Text>
-              <Text style={[st.rowSub, { color: colors.textSecondary }]}>
-                {selectedCountry.tz}  ·  Weekend: {selectedCountry.weekend}
-              </Text>
+              <Text style={[st.rowLabel, { color: colors.textPrimary }]}>{selectedCountry.flag}  {selectedCountry.name}</Text>
+              <Text style={[st.rowSub, { color: colors.textSecondary }]}>{selectedCountry.tz}  ·  Weekend: {selectedCountry.weekend}</Text>
             </View>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>
-              {savingCountry ? '...' : '›'}
-            </Text>
+            <Text style={[st.chevron, { color: colors.textSecondary }]}>{savingCountry ? '...' : '›'}</Text>
           </TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
           <View style={st.row}>
-            <Text style={[st.rowSub, { color: colors.textSecondary, flex: 1 }]}>
-              Nova uses this to know your current time, day of the week, and what counts as a weekend for you.
-            </Text>
+            <Text style={[st.rowSub, { color: colors.textSecondary, flex: 1 }]}>Nova uses this to know your current time, day of the week, and what counts as a weekend for you.</Text>
           </View>
         </View>
 
-        {/* ── Language ────────────────────────────────── */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>LANGUAGE</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {([
@@ -226,54 +212,36 @@ export function SettingsScreen() {
           ))}
         </View>
 
-        {/* ── Memory Privacy ───────────────────────────── */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🧠 MEMORY</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={st.row}>
             <View style={{ flex: 1, marginRight: 12 }}>
               <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Memory</Text>
-              <Text style={[st.rowSub, { color: colors.textSecondary }]}>
-                {memoryLoading ? 'Loading...' : memoryEnabled ? 'On' : 'Off'}
-              </Text>
+              <Text style={[st.rowSub, { color: colors.textSecondary }]}>{memoryLoading ? 'Loading...' : memoryEnabled ? 'On' : 'Off'}</Text>
             </View>
-            <Switch
-              value={memoryEnabled}
-              onValueChange={handleToggleMemory}
-              disabled={memoryLoading || memorySaving}
-              trackColor={{ true: '#8B5CF6', false: colors.border }}
-              thumbColor={memoryEnabled ? '#fff' : '#666'}
-            />
+            <Switch value={memoryEnabled} onValueChange={handleToggleMemory} disabled={memoryLoading || memorySaving} trackColor={{ true: '#8B5CF6', false: colors.border }} thumbColor={memoryEnabled ? '#fff' : '#666'} />
           </View>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
           <View style={st.row}>
-            <Text style={[st.rowSub, { color: colors.textSecondary, flex: 1 }]}>
-              Nova won't save or use persistent memories while this is off.
-            </Text>
+            <Text style={[st.rowSub, { color: colors.textSecondary, flex: 1 }]}>Nova won't save or use persistent memories while this is off.</Text>
           </View>
-          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Memories' })}>
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Manage' })}>
             <Text style={[st.rowLabel, { color: '#06B6D4' }]}>Manage Nova's memories</Text>
             <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ── Country Picker Modal ──────────────────────── */}
         <Modal visible={countryModalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setCountryModalVisible(false)}>
           <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
             <View style={[st.modalHeader, { borderBottomColor: colors.divider }]}>
               <Text style={[st.modalTitle, { color: colors.textPrimary }]}>Select Your Country</Text>
-              <TouchableOpacity onPress={() => setCountryModalVisible(false)}>
-                <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '600' }}>Done</Text>
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setCountryModalVisible(false)}><Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '600' }}>Done</Text></TouchableOpacity>
             </View>
             <FlatList
               data={COUNTRIES}
               keyExtractor={item => item.code}
               renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[st.countryRow, { borderBottomColor: colors.divider },
-                    item.code === country && { backgroundColor: colors.card }]}
-                  onPress={() => handleSelectCountry(item.code)}
-                >
+                <TouchableOpacity style={[st.countryRow, { borderBottomColor: colors.divider }, item.code === country && { backgroundColor: colors.card }]} onPress={() => handleSelectCountry(item.code)}>
                   <Text style={{ fontSize: 26, marginRight: 12 }}>{item.flag}</Text>
                   <View style={{ flex: 1 }}>
                     <Text style={[{ fontSize: 15, fontWeight: '500' }, { color: colors.textPrimary }]}>{item.name}</Text>
@@ -286,41 +254,17 @@ export function SettingsScreen() {
           </SafeAreaView>
         </Modal>
 
-        {/* ── Shoot Dead Modal ──────────────────────────── */}
         <Modal visible={shootDeadVisible} transparent={true} animationType="fade" onRequestClose={() => !isDeleting && setShootDeadVisible(false)}>
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
             <View style={{ backgroundColor: colors.card, padding: 24, borderRadius: 16, borderColor: '#EF4444', borderWidth: 2 }}>
               <Text style={{ color: '#EF4444', fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>⚠️ Shoot Dead User</Text>
-              
-              <Text style={{ color: colors.textPrimary, fontSize: 16, marginBottom: 12, lineHeight: 22 }}>
-                This will permanently delete your account and ALL Nova data associated with it, including memories, conversations, LifeThreads, reminders, tasks, presence, cognitive state, and proactive history.
-              </Text>
-              
-              <Text style={{ color: colors.textSecondary, fontSize: 15, marginBottom: 20, fontWeight: '600' }}>
-                This cannot be undone.
-              </Text>
-              
-              <Text style={{ color: colors.textPrimary, fontSize: 14, marginBottom: 8 }}>
-                Type <Text style={{ fontWeight: 'bold', color: '#EF4444' }}>DELETE</Text> to confirm.
-              </Text>
-              
-              <TextInput
-                style={{ backgroundColor: colors.background, color: colors.textPrimary, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border, marginBottom: 24, fontSize: 16 }}
-                value={deleteInput}
-                onChangeText={setDeleteInput}
-                autoCapitalize="none"
-                editable={!isDeleting}
-              />
-              
+              <Text style={{ color: colors.textPrimary, fontSize: 16, marginBottom: 12, lineHeight: 22 }}>This will permanently delete your account and ALL Nova data associated with it, including memories, conversations, LifeThreads, reminders, tasks, presence, cognitive state, and proactive history.</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 15, marginBottom: 20, fontWeight: '600' }}>This cannot be undone.</Text>
+              <Text style={{ color: colors.textPrimary, fontSize: 14, marginBottom: 8 }}>Type <Text style={{ fontWeight: 'bold', color: '#EF4444' }}>DELETE</Text> to confirm.</Text>
+              <TextInput style={{ backgroundColor: colors.background, color: colors.textPrimary, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border, marginBottom: 24, fontSize: 16 }} value={deleteInput} onChangeText={setDeleteInput} autoCapitalize="none" editable={!isDeleting} />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
-                <TouchableOpacity onPress={() => setShootDeadVisible(false)} disabled={isDeleting} style={{ paddingVertical: 12, paddingHorizontal: 16 }}>
-                  <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 16 }}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={confirmShootDead} 
-                  disabled={isDeleting || deleteInput !== 'DELETE'}
-                  style={{ backgroundColor: deleteInput === 'DELETE' ? '#EF4444' : '#ef444460', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 }}
-                >
+                <TouchableOpacity onPress={() => setShootDeadVisible(false)} disabled={isDeleting} style={{ paddingVertical: 12, paddingHorizontal: 16 }}><Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 16 }}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity onPress={confirmShootDead} disabled={isDeleting || deleteInput !== 'DELETE'} style={{ backgroundColor: deleteInput === 'DELETE' ? '#EF4444' : '#ef444460', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 }}>
                   <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{isDeleting ? 'Deleting...' : 'Shoot Dead'}</Text>
                 </TouchableOpacity>
               </View>
@@ -328,38 +272,23 @@ export function SettingsScreen() {
           </View>
         </Modal>
 
-        {/* ── Preferences ──────────────────────────────── */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>PROFILE</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Preferences')}>
-            <View>
-              <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Edit Preferences</Text>
-              <Text style={[st.rowSub, { color: colors.textSecondary }]}>Name, passions, goals, personality</Text>
-            </View>
+            <View><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Edit Preferences</Text><Text style={[st.rowSub, { color: colors.textSecondary }]}>Name, passions, goals, personality</Text></View>
             <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ── Theme ────────────────────────────────────── */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>APPEARANCE</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('system')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>System Default</Text>
-            {themeMode === 'system' && <Text style={st.checkmark}>✓</Text>}
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('system')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>System Default</Text>{themeMode === 'system' && <Text style={st.checkmark}>✓</Text>}</TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('dark')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Dark Mode</Text>
-            {themeMode === 'dark' && <Text style={st.checkmark}>✓</Text>}
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('dark')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Dark Mode</Text>{themeMode === 'dark' && <Text style={st.checkmark}>✓</Text>}</TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('light')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Light Mode</Text>
-            {themeMode === 'light' && <Text style={st.checkmark}>✓</Text>}
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => handleSelectTheme('light')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Light Mode</Text>{themeMode === 'light' && <Text style={st.checkmark}>✓</Text>}</TouchableOpacity>
         </View>
 
-        {/* Moments & Notifications */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>⚡ MOMENTS & NOTIFICATIONS</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <SettingsRow label="Moment notifications" value={momentNotifs} onToggle={setMomentNotifs} />
@@ -371,69 +300,37 @@ export function SettingsScreen() {
           <SettingsRow label="Quiet hours (10pm – 8am)" value={quietHoursEnabled} onToggle={setQuietHoursEnabled} />
         </View>
 
-        {/* Privacy */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>🔒 PRIVACY</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity style={st.row} onPress={() => Alert.alert('Privacy', 'All your data is encrypted at rest and never shared with third parties.')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Privacy Policy</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => Alert.alert('Privacy', 'All your data is encrypted at rest and never shared with third parties.')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Privacy Policy</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => Alert.alert('Data', 'Nova stores your memories, emotions, goals, and reflections on secure servers using Supabase with encryption.')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>How Nova stores your data</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => Alert.alert('Data', 'Nova stores your memories, emotions, goals, and reflections on secure servers using Supabase with encryption.')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>How Nova stores your data</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
         </View>
 
-        {/* Data Export */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>📦 DATA</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity style={st.row} onPress={handleExport} disabled={exporting}>
-            <Text style={[st.rowLabel, { color: '#06B6D4' }]}>{exporting ? 'Exporting...' : 'Export My Data'}</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={handleExport} disabled={exporting}><Text style={[st.rowLabel, { color: '#06B6D4' }]}>{exporting ? 'Exporting...' : 'Export My Data'}</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Memories' })}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Manage Memories</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Manage' })}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Manage Memories</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          
           <TouchableOpacity style={[st.row, st.markDeadBtn]} onPress={handleMarkDead}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={st.markDeadIcon}>🔫</Text>
-              <Text style={st.markDeadText}>Mark Dead (Shoot)</Text>
-            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}><Text style={st.markDeadIcon}>🔫</Text><Text style={st.markDeadText}>Mark Dead (Shoot)</Text></View>
           </TouchableOpacity>
         </View>
 
-        {/* Feedback */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>💬 FEEDBACK</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Feedback')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Send Feedback</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Feedback')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Send Feedback</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <TouchableOpacity style={st.row} onPress={() => Linking.openURL('mailto:hello@nova.ai?subject=Nova Feedback')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Email the team</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => Linking.openURL('mailto:hello@nova.ai?subject=Nova Feedback')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Email the team</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
         </View>
 
-        {/* About */}
         <Text style={[st.sectionLabel, { color: colors.textSecondary }]}>ℹ️ ABOUT NOVA</Text>
         <View style={[st.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={st.row}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Version</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary }]}>{APP_VERSION}</Text>
-          </View>
+          <View style={st.row}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Version</Text><Text style={[st.rowValue, { color: colors.textSecondary }]}>{APP_VERSION}</Text></View>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
-          <View style={st.row}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Build</Text>
-            <Text style={[st.rowValue, { color: colors.textSecondary }]}>Beta</Text>
-          </View>
-          <View style={[st.divider, { backgroundColor: colors.divider }]} />
+          <View style={st.row}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Build</Text><Text style={[st.rowValue, { color: colors.textSecondary }]}>Beta</Text></View>
+          <View style={[st.divider, { backgroundColor: colors.border }]} />
           <TouchableOpacity style={st.row} onPress={async () => {
             try {
               Alert.alert('Checking...', 'Looking for updates.');
@@ -441,58 +338,30 @@ export function SettingsScreen() {
               if (update.isAvailable) {
                 Alert.alert('Update Found', 'Downloading the latest update...');
                 await Updates.fetchUpdateAsync();
-                Alert.alert('Success', 'Update downloaded! Restarting app...', [
-                  { text: 'OK', onPress: () => Updates.reloadAsync() }
-                ]);
+                Alert.alert('Success', 'Update downloaded! Restarting app...', [{ text: 'OK', onPress: () => Updates.reloadAsync() }]);
               } else {
                 Alert.alert('Up to date', 'You are already on the latest version.');
               }
             } catch (err: any) {
               Alert.alert('Error', err.message || 'Failed to check for updates.');
             }
-          }}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Check for Updates</Text>
-          </TouchableOpacity>
+          }}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Check for Updates</Text></TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.border }]} />
-          
-          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('UpdateHistory')}>
-            <Text style={[st.rowLabel, { color: colors.textPrimary }]}>Update History</Text>
-            <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={st.row} onPress={() => navigation.navigate('UpdateHistory')}><Text style={[st.rowLabel, { color: colors.textPrimary }]}>Update History</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
           <View style={[st.divider, { backgroundColor: colors.divider }]} />
           <SettingsRow label="Developer Mode" value={developerMode} onToggle={setDeveloperMode} />
-          {developerMode && (
-            <>
-              <View style={[st.divider, { backgroundColor: colors.divider }]} />
-              <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Diagnostics')}>
-                <Text style={[st.rowLabel, { color: '#F59E0B' }]}>View Diagnostics</Text>
-                <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-              </TouchableOpacity>
-              <View style={[st.divider, { backgroundColor: colors.divider }]} />
-              <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Founder' })}>
-                <Text style={[st.rowLabel, { color: '#F59E0B' }]}>Founder Dashboard</Text>
-                <Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          {developerMode && <>
+            <View style={[st.divider, { backgroundColor: colors.divider }]} />
+            <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Diagnostics')}><Text style={[st.rowLabel, { color: '#F59E0B' }]}>View Diagnostics</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
+            <View style={[st.divider, { backgroundColor: colors.divider }]} />
+            <TouchableOpacity style={st.row} onPress={() => navigation.navigate('Brain', { screen: 'Founder' })}><Text style={[st.rowLabel, { color: '#F59E0B' }]}>Founder Dashboard</Text><Text style={[st.chevron, { color: colors.textSecondary }]}>›</Text></TouchableOpacity>
+          </>}
         </View>
 
         <View style={{ height: 32 }} />
-        <TouchableOpacity 
-          style={{
-            marginHorizontal: 12,
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            padding: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: 'rgba(239, 68, 68, 0.2)'
-          }} 
-          onPress={handleLogout}
-        >
+        <TouchableOpacity style={{ marginHorizontal: 12, backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }} onPress={handleLogout}>
           <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 16 }}>Log Out</Text>
         </TouchableOpacity>
-
         <View style={{ height: 48 }} />
       </ScrollView>
     </SafeAreaView>
@@ -504,12 +373,7 @@ function SettingsRow({ label, value, onToggle }: { label: string; value: boolean
   return (
     <View style={st.row}>
       <Text style={[st.rowLabel, { color: colors.textPrimary }]}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        trackColor={{ true: '#8B5CF6', false: colors.border }}
-        thumbColor={value ? '#fff' : '#666'}
-      />
+      <Switch value={value} onValueChange={onToggle} trackColor={{ true: '#8B5CF6', false: colors.border }} thumbColor={value ? '#fff' : '#666'} />
     </View>
   );
 }
@@ -521,11 +385,7 @@ const st = StyleSheet.create({
   backText: { color: '#8B5CF6', fontSize: 18 },
   title: { fontSize: 18, fontWeight: 'bold' },
   sectionLabel: { fontSize: 11, fontWeight: '700', marginHorizontal: 16, marginTop: 24, marginBottom: 6, letterSpacing: 0.8 },
-  section: {
-    borderRadius: 14,
-    borderWidth: 1,
-    marginHorizontal: 12
-  },
+  section: { borderRadius: 14, borderWidth: 1, marginHorizontal: 12 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
   rowLabel: { fontSize: 15 },
   rowSub: { fontSize: 12, marginTop: 2 },
@@ -536,11 +396,7 @@ const st = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
   modalTitle: { fontSize: 17, fontWeight: '700' },
   countryRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
-  markDeadBtn: { 
-    backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-    borderBottomLeftRadius: 14, 
-    borderBottomRightRadius: 14 
-  },
+  markDeadBtn: { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   markDeadIcon: { fontSize: 20, marginRight: 10 },
   markDeadText: { color: '#EF4444', fontSize: 15, fontWeight: 'bold', letterSpacing: 0.5 },
 });
