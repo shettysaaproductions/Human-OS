@@ -8,15 +8,15 @@ import { api } from '../../services/api';
 
 type Memory = {
   id: string;
-  key: string;
+  canonicalKey: string;
+  label: string;
   value: string;
-  memory_type: string;
+  memoryType: string;
   importance: number;
   confidence: number;
-  frequency: number;
-  is_archived: boolean;
-  created_at: string;
-  updated_at: string;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export function MemoryManagementScreen() {
@@ -50,7 +50,7 @@ export function MemoryManagementScreen() {
   const handleDelete = useCallback((id: string, key: string) => {
     Alert.alert(
       'Delete Memory',
-      `Delete "${key}"? This cannot be undone.`,
+      `Delete "${key}"? This will archive the memory and preserve its history.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -71,7 +71,7 @@ export function MemoryManagementScreen() {
   const handleArchive = useCallback(async (id: string, isArchived: boolean) => {
     try {
       await api.patch(`/memories/${id}/archive`, { archived: !isArchived });
-      setMemories(prev => prev.map(m => m.id === id ? { ...m, is_archived: !isArchived } : m));
+      setMemories(prev => prev.map(m => m.id === id ? { ...m, isArchived: !isArchived } : m));
     } catch (err) {
       Alert.alert('Error', 'Failed to archive memory');
     }
@@ -83,9 +83,19 @@ export function MemoryManagementScreen() {
   }, []);
 
   const handleSaveEdit = useCallback(async (id: string) => {
+    const nextValue = editValue.trim();
+    if (!nextValue) {
+      Alert.alert('Invalid', 'Memory value cannot be empty.');
+      return;
+    }
     try {
-      await api.patch(`/memories/${id}`, { value: editValue });
-      setMemories(prev => prev.map(m => m.id === id ? { ...m, value: editValue } : m));
+      const res = await api.patch(`/memories/${id}`, { value: nextValue });
+      const updated = res.data?.data;
+      setMemories(prev => prev.map(m => m.id === id ? {
+        ...m,
+        value: typeof updated?.value === 'string' ? updated.value : nextValue,
+        updatedAt: typeof updated?.updatedAt === 'string' ? updated.updatedAt : m.updatedAt,
+      } : m));
       setEditingId(null);
     } catch (err) {
       Alert.alert('Error', 'Failed to save edit');
@@ -95,7 +105,11 @@ export function MemoryManagementScreen() {
   const filteredMemories = useMemo(() => {
     if (!searchQuery.trim()) return memories;
     const q = searchQuery.toLowerCase();
-    return memories.filter(m => m.key.toLowerCase().includes(q) || m.value.toLowerCase().includes(q));
+    return memories.filter(m =>
+      (m.canonicalKey || '').toLowerCase().includes(q) ||
+      (m.label || '').toLowerCase().includes(q) ||
+      (m.value || '').toLowerCase().includes(q)
+    );
   }, [memories, searchQuery]);
 
   if (loading) {
@@ -116,7 +130,6 @@ export function MemoryManagementScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Search */}
       <View style={ms.searchRow}>
         <View style={ms.searchBar}>
           <Text>🔍 </Text>
@@ -151,12 +164,12 @@ export function MemoryManagementScreen() {
             <View style={ms.card}>
               <View style={ms.cardTop}>
                 <View style={ms.typeBadge}>
-                  <Text style={ms.typeText}>{item.memory_type || 'unknown'}</Text>
+                  <Text style={ms.typeText}>{item.memoryType || 'unknown'}</Text>
                 </View>
                 <Text style={ms.importance}>imp: {item.importance}</Text>
               </View>
 
-              <Text style={ms.keyText}>{item.key}</Text>
+              <Text style={ms.keyText}>{item.label || item.canonicalKey}</Text>
 
               {isEditing ? (
                 <View style={ms.editArea}>
@@ -186,10 +199,10 @@ export function MemoryManagementScreen() {
                     <Text style={ms.actionText}>✏️ Edit</Text>
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity style={ms.actionBtn} onPress={() => handleArchive(item.id, item.is_archived)}>
-                  <Text style={ms.actionText}>{item.is_archived ? '📤 Unarchive' : '📦 Archive'}</Text>
+                <TouchableOpacity style={ms.actionBtn} onPress={() => handleArchive(item.id, item.isArchived)}>
+                  <Text style={ms.actionText}>{item.isArchived ? '📤 Unarchive' : '📦 Archive'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[ms.actionBtn, ms.deleteBtn]} onPress={() => handleDelete(item.id, item.key)}>
+                <TouchableOpacity style={[ms.actionBtn, ms.deleteBtn]} onPress={() => handleDelete(item.id, item.label || item.canonicalKey)}>
                   <Text style={ms.deleteText}>🗑 Delete</Text>
                 </TouchableOpacity>
               </View>
@@ -208,26 +221,17 @@ const ms = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 16, marginTop: 8, marginBottom: 12 },
   title: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
-  archiveToggle: {
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 20,
-    paddingHorizontal: 12, paddingVertical: 5
-  },
+  archiveToggle: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
   archiveToggleActive: { borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.1)' },
   archiveToggleText: { color: '#888', fontSize: 12 },
   archiveToggleTextActive: { color: '#F59E0B' },
   searchRow: { marginHorizontal: 16, marginBottom: 8 },
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 10, paddingHorizontal: 12
-  },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, paddingHorizontal: 12 },
   searchInput: { flex: 1, color: '#fff', paddingVertical: 10, fontSize: 15 },
   clearBtn: { color: '#666', fontSize: 18 },
   countText: { fontSize: 12, color: '#555', marginHorizontal: 16, marginBottom: 8 },
   listContent: { paddingHorizontal: 16, paddingBottom: 40 },
-  card: {
-    backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10
-  },
+  card: { backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   typeBadge: { backgroundColor: 'rgba(6,182,212,0.1)', borderColor: '#06B6D4', borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   typeText: { fontSize: 11, color: '#06B6D4', fontWeight: '600' },
@@ -235,10 +239,7 @@ const ms = StyleSheet.create({
   keyText: { fontSize: 13, fontWeight: '700', color: '#06B6D4', marginBottom: 6 },
   valueText: { fontSize: 14, color: '#ccc', lineHeight: 20, marginBottom: 12 },
   editArea: { marginBottom: 10 },
-  editInput: {
-    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: 10,
-    color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#06B6D4', marginBottom: 8
-  },
+  editInput: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#06B6D4', marginBottom: 8 },
   editActions: { flexDirection: 'row', gap: 8 },
   saveBtn: { backgroundColor: '#06B6D4', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 6 },
   saveBtnText: { color: '#000', fontWeight: '700', fontSize: 13 },
