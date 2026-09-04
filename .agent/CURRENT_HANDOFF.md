@@ -75,7 +75,8 @@ See `.agent/DECISIONS.md` for full entries. Summary:
 - Extended `SESSION_BOOT.md` with the boot/resume protocol and pointers to
   the continuity system.
 - Created Git checkpoint branch `agent-checkpoint/session-continuity` from
-  `main@6494bfb`; committed the continuity infrastructure there.
+  `main@6494bfb`; committed the continuity infrastructure there and pushed
+  the branch to origin (main untouched).
 
 ## Tests Added
 No runtime tests were added (no production code changed). The following
@@ -89,20 +90,21 @@ continuity validations were performed; actual exit codes recorded in
 - `git status --short` and `git diff --stat` review.
 
 ## Test Results
-- Continuity validator (matching state): expected exit 0 = PASS.
-- Stale-state detection (forced mismatch): expected exit 1 = PASS.
-- Required-section scan: PASS.
-- Secrets scan: PASS (no secrets found).
-- `git diff --check`: PASS (no whitespace errors).
+- Continuity validator (matching state): exit 0 = PASS (CONTINUITY VERIFIED).
+- Stale-state detection (forced mismatch): exit 1 = PASS (detected).
+- Required-section scan: PASS (all 20 sections present).
+- Secrets scan: PASS (no secret-like assignments found in `.agent/`).
+- `git diff --check` (main..checkpoint): exit 0 = PASS.
+- `git status --short`: clean on the checkpoint branch.
 - Runtime test suites: NOT RUN (no production code changed; out of scope).
 
 ## Known Failures
 None.
 
 ## Unresolved Questions
-- Whether the checkpoint branch push is permitted by current credentials.
-  (Recorded in Checkpoint Information; if push failed, the next session must
-  push or fetch it manually.)
+- ~~Whether the checkpoint branch push is permitted by current
+  credentials.~~ RESOLVED: `agent-checkpoint/session-continuity` was pushed
+  successfully to origin on 2026-09-04.
 - Whether the continuity infra should eventually be merged into `main`.
   Deferred; do not merge without an explicit decision.
 
@@ -151,9 +153,9 @@ YES
 ## Checkpoint Information
 CHECKPOINT_BRANCH=agent-checkpoint/session-continuity
 BASE_COMMIT=6494bfb77c9edaeeb6393eb788906063c82b7f23
-CHECKPOINT_COMMIT=<PENDING - recorded at final checkpoint commit>
+CHECKPOINT_COMMIT=b61e050c762def1eb0dd6937d489025256cf852d
 RELEVANT_FILES=.agent/README.md,.agent/CURRENT_TASK.md,.agent/CURRENT_HANDOFF.md,.agent/DECISIONS.md,.agent/FINDINGS.md,.agent/scripts/check_continuity.sh,SESSION_BOOT.md
 WORKING_TREE_STATE=clean (after checkpoint commit)
-CHECKPOINT_PUSHED=<PENDING - yes/no>
+CHECKPOINT_PUSHED=yes
 MAIN_PUSHED=no
 PRODUCTION_CHANGED=no
