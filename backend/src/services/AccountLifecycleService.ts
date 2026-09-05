@@ -1,24 +1,9 @@
 /**
- * AccountLifecycleService.ts — Phase 2F-E Canonical Account Lifecycle & Deletion Engine
- *
- * Responsibilities:
- * 1. Single authoritative entry point for complete, deterministic, irreversible account eradication ("Mark Dead").
- * 2. Exhaustive 32-table deletion inventory executed in strict topological dependency order.
- * 3. Primary Key fix: Deletes from `profiles` using `.eq('id', userId)` (NOT `user_id`).
- * 4. Safe detection and auditable cleanup of confirmed zombie/orphan accounts (profiles without auth.users records).
- * 5. Cache invalidation and verification logging.
+ * Canonical account lifecycle and irreversible deletion service.
  */
-
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { cache } from '../lib/cache';
-
-export interface TableCleanupResult {
-  table: string;
-  deletedCount: number;
-  status: 'ok' | 'error' | 'skipped';
-  error?: string;
-}
 
 export interface AccountDeletionResult {
   success: boolean;
@@ -44,32 +29,20 @@ export interface ZombieScanResult {
 }
 
 export class AccountLifecycleService {
-  /**
-   * Complete inventory of user-owned application/cognitive tables
-   * in strict topological deletion order (child tables first).
-   */
+  /** Every public table currently identified as directly user-owned. */
   public static readonly USER_OWNED_TABLES: Array<{ table: string; userColumn: string }> = [
-    // 1. Knowledge Graph (edges first, then nodes)
     { table: 'kg_edges', userColumn: 'user_id' },
     { table: 'kg_nodes', userColumn: 'user_id' },
-
-    // 2. Guardian System (repairs -> anomalies -> runs)
     { table: 'nova_guardian_repairs', userColumn: 'user_id' },
     { table: 'nova_guardian_anomalies', userColumn: 'user_id' },
     { table: 'nova_guardian_runs', userColumn: 'user_id' },
-
-    // 3. Cognitive Doubts, Watchtower Signals, Attention, Timing & Concurrency Leases
     { table: 'watchtower_timing_logs', userColumn: 'user_id' },
     { table: 'watchtower_attention_decisions', userColumn: 'user_id' },
     { table: 'watchtower_cognitive_signals', userColumn: 'user_id' },
     { table: 'nova_cognitive_doubts', userColumn: 'user_id' },
     { table: 'candidate_synthesis_claims', userColumn: 'user_id' },
-
-    // 4. Autonomous Actions & Life Threads (actions first, then threads)
     { table: 'nova_actions', userColumn: 'user_id' },
     { table: 'life_threads', userColumn: 'user_id' },
-
-    // 5. Scheduled Events, Followups & Reminders
     { table: 'nova_followups', userColumn: 'user_id' },
     { table: 'reminders', userColumn: 'user_id' },
     { table: 'nova_agenda', userColumn: 'user_id' },
@@ -77,312 +50,283 @@ export class AccountLifecycleService {
     { table: 'user_routines', userColumn: 'user_id' },
     { table: 'nova_corrections_log', userColumn: 'user_id' },
     { table: 'action_idempotency', userColumn: 'user_id' },
-
-    // 6. User Experience, Moments & Feedback
     { table: 'user_moments', userColumn: 'user_id' },
     { table: 'user_moment_preferences', userColumn: 'user_id' },
     { table: 'user_presence', userColumn: 'user_id' },
+    { table: 'user_presence_history', userColumn: 'user_id' },
     { table: 'user_feedback', userColumn: 'user_id' },
     { table: 'reflections', userColumn: 'user_id' },
     { table: 'emotional_states', userColumn: 'user_id' },
-
-    // 7. Conversations & Sessions
     { table: 'conversation_sessions', userColumn: 'user_id' },
     { table: 'chat_history', userColumn: 'user_id' },
-
-    // 8. Cognitive Memories
+    { table: 'nova_thoughts', userColumn: 'user_id' },
     { table: 'short_term_memories', userColumn: 'user_id' },
     { table: 'working_memory', userColumn: 'user_id' },
     { table: 'episodic_memories', userColumn: 'user_id' },
     { table: 'memory_access_log', userColumn: 'user_id' },
     { table: 'memory_events', userColumn: 'user_id' },
     { table: 'memories', userColumn: 'user_id' },
-
-    // 9. Core Profile (PK is 'id', NOT 'user_id')
+    { table: 'telemetry_events', userColumn: 'user_id' },
     { table: 'profiles', userColumn: 'id' },
   ];
 
-  /**
-   * Nuclear Account Deletion ("Mark Dead").
-   * Authoritative, irreversible eradication of an account and all its user-owned data.
-   */
-  public async deleteAccount(userId: string): Promise<AccountDeletionResult> {
-    const startTime = Date.now();
-    let authDeleted = false;
-    let profileDeleted = false;
-    const tablesCleaned: Record<string, number> = {};
-    const errors: string[] = [];
-
-    if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
-      throw new Error('Cannot delete account: invalid or empty userId');
-    }
-
-    const cleanUserId = userId.trim();
-    logger.info(`[AccountLifecycle] Starting exhaustive erasure for user: ${cleanUserId}`);
-
-    // ── STEP 0: Create account_tombstone (Architectural Invariant) ───────────────────
+  private async deleteRows(table: string, column: string, userId: string, tablesCleaned: Record<string, number>, errors: string[]) {
     try {
-      const { error: tombstoneErr } = await supabaseAdmin
-        .from('account_tombstones')
-        .upsert({ user_id: cleanUserId, deleted_at: new Date().toISOString() });
-      if (tombstoneErr) {
-        throw new Error(`Failed to create account tombstone: ${tombstoneErr.message}`);
+      const { count, error } = await supabaseAdmin.from(table).delete({ count: 'exact' }).eq(column, userId);
+      if (error) {
+        errors.push(`Failed to delete from ${table}: ${error.message}`);
+        tablesCleaned[table] = 0;
+        return;
       }
-      logger.info(`[AccountLifecycle] Created tombstone for user: ${cleanUserId}. All concurrent background writes are now blocked.`);
+      tablesCleaned[table] = count || 0;
     } catch (e: any) {
-      logger.error(`[AccountLifecycle] Fatal Tombstone Error: ${e.message}`);
-      return {
-        success: false,
-        userId: cleanUserId,
-        authDeleted: false,
-        profileDeleted: false,
-        tablesCleaned,
-        errors: [`Tombstone creation failed: ${e.message}`],
-        durationMs: Date.now() - startTime
-      };
+      errors.push(`Exception deleting from ${table}: ${e?.message || String(e)}`);
+      tablesCleaned[table] = 0;
     }
+  }
 
-    // ── STEP 0.5: Cancel pending jobs ────────────────────────────────────────────────
-    try {
-      // Find jobs containing the user id in the payload
-      const { data: pendingJobs } = await supabaseAdmin
-        .from('background_jobs')
-        .select('id, payload')
-        .eq('status', 'pending');
-        
-      if (pendingJobs && pendingJobs.length > 0) {
-        const jobsToCancel = pendingJobs.filter(j => 
-          j.payload?.userId === cleanUserId || j.payload?.user_id === cleanUserId
-        ).map(j => j.id);
-
-        if (jobsToCancel.length > 0) {
-          await supabaseAdmin
-            .from('background_jobs')
-            .update({ status: 'failed', error: 'ACCOUNT_TOMBSTONE_VIOLATION' })
-            .in('id', jobsToCancel);
-          logger.info(`[AccountLifecycle] Cancelled ${jobsToCancel.length} pending background jobs for user: ${cleanUserId}`);
-        }
-      }
-    } catch (e: any) {
-      logger.error(`[AccountLifecycle] Failed to cancel pending jobs: ${e.message}`);
-      // Proceed with deletion even if queue cancellation partially failed, 
-      // because the DB trigger will block them anyway if they run.
-    }
-
-    // ── STEP 1: Disassociate Telemetry Events (SET NULL for anonymized retention) ──
-    try {
-      await supabaseAdmin
-        .from('telemetry_events')
-        .update({ user_id: null })
-        .eq('user_id', cleanUserId);
-    } catch (e: any) {
-      logger.warn('[AccountLifecycle] Telemetry anonymization notice', { error: e.message });
-    }
-
-    // ── STEP 1.5: Delete Orphan Records (recovery_archive, audit_logs, tombstones) ──
-    try {
-      // Find all chat_history IDs for this user (both active and soft-deleted)
-      const { data: chats } = await supabaseAdmin
-        .from('chat_history')
-        .select('id')
-        .eq('user_id', cleanUserId);
-
-      if (chats && chats.length > 0) {
-        const chatIds = chats.map(c => c.id);
-        
-        // Wipe audit_logs and tombstones safely (using chunks if > 1000 items)
-        const chunkSize = 1000;
-        for (let i = 0; i < chatIds.length; i += chunkSize) {
-          const chunk = chatIds.slice(i, i + chunkSize);
-          await supabaseAdmin.from('audit_logs').delete().in('source_message_id', chunk);
-          await supabaseAdmin.from('tombstones').delete().in('id', chunk);
-        }
-      }
-
-      // Wipe recovery_archive which holds physical payloads
-      // (Using JSON operator to match user_id inside original_payload)
-      const { data: archived } = await supabaseAdmin
-        .from('recovery_archive')
-        .select('id');
-        
-      // Safely filter on the node side in case JSON operators have cast issues
-      // Or we can just try to run it via raw query if available, but doing it in memory is safe enough for admin scripts
-      if (archived && archived.length > 0) {
-        // We will just do a standard supabase JSON delete
-        await supabaseAdmin
-          .from('recovery_archive')
-          .delete()
-          .eq('original_payload->>user_id', cleanUserId);
-      }
-    } catch (e: any) {
-      logger.error(`[AccountLifecycle] Failed to wipe orphan records: ${e.message}`);
-      errors.push(`Orphan wipe failed: ${e.message}`);
-    }
-
-    // ── STEP 2: Delete All User-Scoped Application & Cognitive Tables ──────────────
-    for (const item of AccountLifecycleService.USER_OWNED_TABLES) {
+  private async deleteJsonOwnedRows(table: string, userId: string, tablesCleaned: Record<string, number>, errors: string[]) {
+    for (const key of ['userId', 'user_id']) {
       try {
         const { count, error } = await supabaseAdmin
-          .from(item.table)
+          .from(table)
           .delete({ count: 'exact' })
-          .eq(item.userColumn, cleanUserId);
+          .eq(`original_payload->>${key}`, userId);
+        if (error) errors.push(`Failed to delete ${table} rows for ${key}: ${error.message}`);
+        else tablesCleaned[table] = (tablesCleaned[table] || 0) + (count || 0);
+      } catch (e: any) {
+        errors.push(`Exception deleting ${table} rows for ${key}: ${e?.message || String(e)}`);
+      }
+    }
+  }
 
+  private async deleteJobPayloadRows(table: 'background_jobs' | 'failed_jobs', userId: string, tablesCleaned: Record<string, number>, errors: string[]) {
+    for (const key of ['userId', 'user_id']) {
+      try {
+        const { count, error } = await supabaseAdmin
+          .from(table)
+          .delete({ count: 'exact' })
+          .eq(`payload->>${key}`, userId);
+        if (error) errors.push(`Failed to delete ${table} rows for ${key}: ${error.message}`);
+        else tablesCleaned[table] = (tablesCleaned[table] || 0) + (count || 0);
+      } catch (e: any) {
+        errors.push(`Exception deleting ${table} rows for ${key}: ${e?.message || String(e)}`);
+      }
+    }
+  }
+
+  private async captureUserChatIds(userId: string, errors: string[]): Promise<string[]> {
+    const ids: string[] = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      try {
+        const { data: chats, error } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userId)
+          .range(from, from + pageSize - 1);
         if (error) {
-          const errMsg = `Failed to delete from ${item.table}: ${error.message}`;
-          logger.error(`[AccountLifecycle] ${errMsg}`);
-          errors.push(errMsg);
-          tablesCleaned[item.table] = 0;
-        } else {
-          tablesCleaned[item.table] = count || 0;
-          if (item.table === 'profiles' && (count || 0) > 0) {
-            profileDeleted = true;
-          }
+          errors.push(`Failed to inspect chat_history before indirect cleanup: ${error.message}`);
+          break;
         }
-      } catch (tableErr: any) {
-        const errMsg = `Exception deleting from ${item.table}: ${tableErr.message}`;
-        logger.error(`[AccountLifecycle] ${errMsg}`);
-        errors.push(errMsg);
-        tablesCleaned[item.table] = 0;
+        const page = (chats || []).map((c: any) => String(c.id));
+        ids.push(...page);
+        if (page.length < pageSize) break;
+      } catch (e: any) {
+        errors.push(`Chat ownership lookup failed: ${e?.message || String(e)}`);
+        break;
+      }
+    }
+    return ids;
+  }
+
+  public async deleteAccount(userId: string): Promise<AccountDeletionResult> {
+    const startTime = Date.now();
+    const tablesCleaned: Record<string, number> = {};
+    const errors: string[] = [];
+    let authDeleted = false;
+    let profileDeleted = false;
+    const cleanUserId = typeof userId === 'string' ? userId.trim() : '';
+    if (!cleanUserId) throw new Error('Cannot delete account: invalid or empty userId');
+
+    logger.info('[AccountLifecycle] Starting COMPLETE account erasure', { userId: cleanUserId });
+
+    const { error: tombstoneError } = await supabaseAdmin.from('account_tombstones').upsert({
+      user_id: cleanUserId,
+      deleted_at: new Date().toISOString(),
+    });
+    if (tombstoneError) {
+      return { success: false, userId: cleanUserId, authDeleted: false, profileDeleted: false, tablesCleaned, errors: [`Tombstone creation failed: ${tombstoneError.message}`], durationMs: Date.now() - startTime };
+    }
+
+    // Capture every chat ID in pages before deleting chat_history. These IDs are also
+    // the ownership key for audit_logs, tombstones and processed_jobs.
+    const userChatIds = await this.captureUserChatIds(cleanUserId, errors);
+
+    // Delete all user-owned job payloads regardless of status. This avoids leaving
+    // completed/failed/pending jobs containing user messages or identifiers.
+    await this.deleteJobPayloadRows('background_jobs', cleanUserId, tablesCleaned, errors);
+    await this.deleteJobPayloadRows('failed_jobs', cleanUserId, tablesCleaned, errors);
+
+    // Delete message-linked data before deleting chat_history.
+    if (userChatIds.length) {
+      try {
+        const { count, error } = await supabaseAdmin.from('audit_logs').delete({ count: 'exact' }).in('source_message_id', userChatIds);
+        if (error) errors.push(`Failed to delete audit_logs: ${error.message}`);
+        else tablesCleaned.audit_logs = count || 0;
+      } catch (e: any) {
+        errors.push(`Audit log cleanup failed: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('tombstones').delete({ count: 'exact' }).in('id', userChatIds);
+        if (error) errors.push(`Failed to delete message tombstones: ${error.message}`);
+        else tablesCleaned.tombstones = count || 0;
+      } catch (e: any) {
+        errors.push(`Message tombstone cleanup failed: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('processed_jobs').delete({ count: 'exact' }).in('message_id', userChatIds);
+        if (error) errors.push(`Failed to delete processed_jobs: ${error.message}`);
+        else tablesCleaned.processed_jobs = count || 0;
+      } catch (e: any) {
+        errors.push(`Processed job cleanup failed: ${e?.message || String(e)}`);
       }
     }
 
-    // ── STEP 3: Delete Auth User from Supabase Auth ────────────────────────────────
-    try {
-      const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(cleanUserId);
-      if (authErr) {
-        // If the auth user was already deleted, treat as success
-        if (authErr.message?.includes('User not found') || (authErr as any).status === 404) {
-          authDeleted = true;
-        } else {
-          const errMsg = `Failed to delete auth user identity: ${authErr.message}`;
-          logger.error(`[AccountLifecycle] ${errMsg}`);
-          errors.push(errMsg);
-        }
-      } else {
-        authDeleted = true;
-      }
-    } catch (authException: any) {
-      const errMsg = `Exception during auth user deletion: ${authException.message}`;
-      logger.error(`[AccountLifecycle] ${errMsg}`);
-      errors.push(errMsg);
+    await this.deleteJsonOwnedRows('recovery_archive', cleanUserId, tablesCleaned, errors);
+
+    // Delete every directly user-owned table. Telemetry is deleted, not anonymized.
+    for (const item of AccountLifecycleService.USER_OWNED_TABLES) {
+      await this.deleteRows(item.table, item.userColumn, cleanUserId, tablesCleaned, errors);
+      if (item.table === 'profiles') profileDeleted = (tablesCleaned[item.table] || 0) > 0;
     }
 
-    // ── STEP 4: Invalidate In-Memory Caches ─────────────────────────────────────────
+    // Verify direct ownership by exact user ID.
+    for (const item of AccountLifecycleService.USER_OWNED_TABLES) {
+      try {
+        const { count, error } = await supabaseAdmin.from(item.table).select(item.userColumn, { count: 'exact', head: true }).eq(item.userColumn, cleanUserId);
+        if (error) errors.push(`Verification failed for ${item.table}: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in ${item.table}`);
+      } catch (e: any) {
+        errors.push(`Verification exception for ${item.table}: ${e?.message || String(e)}`);
+      }
+    }
+
+    // Verify indirect ownership using database-side filters, not paginated reads.
+    for (const key of ['userId', 'user_id']) {
+      for (const table of ['background_jobs', 'failed_jobs'] as const) {
+        try {
+          const { count, error } = await supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).eq(`payload->>${key}`, cleanUserId);
+          if (error) errors.push(`Verification failed for ${table}/${key}: ${error.message}`);
+          else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in ${table}`);
+        } catch (e: any) {
+          errors.push(`Verification exception for ${table}/${key}: ${e?.message || String(e)}`);
+        }
+
+        try {
+          const { count, error } = await supabaseAdmin.from('recovery_archive').select('id', { count: 'exact', head: true }).eq(`original_payload->>${key}`, cleanUserId);
+          if (error) errors.push(`Verification failed for recovery_archive/${key}: ${error.message}`);
+          else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in recovery_archive`);
+        } catch (e: any) {
+          errors.push(`Verification exception for recovery_archive/${key}: ${e?.message || String(e)}`);
+        }
+      }
+    }
+
+    if (userChatIds.length) {
+      try {
+        const { count, error } = await supabaseAdmin.from('processed_jobs').select('id', { count: 'exact', head: true }).in('message_id', userChatIds);
+        if (error) errors.push(`Verification failed for processed_jobs message links: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in processed_jobs`);
+      } catch (e: any) {
+        errors.push(`Processed job verification exception: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('audit_logs').select('id', { count: 'exact', head: true }).in('source_message_id', userChatIds);
+        if (error) errors.push(`Verification failed for audit_logs message links: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in audit_logs`);
+      } catch (e: any) {
+        errors.push(`Audit log verification exception: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('tombstones').select('id', { count: 'exact', head: true }).in('id', userChatIds);
+        if (error) errors.push(`Verification failed for tombstones: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in tombstones`);
+      } catch (e: any) {
+        errors.push(`Tombstone verification exception: ${e?.message || String(e)}`);
+      }
+    }
+
+    // Auth deletion is strictly last and is skipped on any cleanup/verification failure.
+    if (errors.length === 0) {
+      try {
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(cleanUserId);
+        if (!error || error.message?.includes('User not found') || (error as any).status === 404) authDeleted = true;
+        else errors.push(`Failed to delete auth user identity: ${error.message}`);
+      } catch (e: any) {
+        errors.push(`Exception during auth user deletion: ${e?.message || String(e)}`);
+      }
+    }
+
     try {
       cache.invalidate(`profile:${cleanUserId}`);
       cache.invalidate(`memories:${cleanUserId}`);
-    } catch (cacheErr: any) {
-      logger.warn('[AccountLifecycle] Cache invalidation notice', { error: cacheErr.message });
+    } catch (e: any) {
+      logger.warn('[AccountLifecycle] Cache invalidation failed', { error: e?.message || String(e) });
     }
 
-    const durationMs = Date.now() - startTime;
-    const isSuccess = errors.length === 0 && authDeleted;
-
-    logger.info('[AccountLifecycle] Account eradication completed', {
+    const success = errors.length === 0 && authDeleted;
+    logger.info('[AccountLifecycle] COMPLETE account erasure finished', {
       userId: cleanUserId,
-      success: isSuccess,
+      success,
       authDeleted,
       profileDeleted,
-      totalTablesCleaned: Object.keys(tablesCleaned).length,
-      durationMs,
       errorCount: errors.length,
+      durationMs: Date.now() - startTime,
     });
-
-    return {
-      success: isSuccess,
-      userId: cleanUserId,
-      authDeleted,
-      profileDeleted,
-      tablesCleaned,
-      errors,
-      durationMs,
-    };
+    return { success, userId: cleanUserId, authDeleted, profileDeleted, tablesCleaned, errors, durationMs: Date.now() - startTime };
   }
 
-  /**
-   * Scans production database for confirmed zombie profiles
-   * (profiles where profile.id does not exist in auth.users).
-   * Strictly READ-ONLY.
-   */
   public async scanZombieProfiles(): Promise<ZombieScanResult> {
-    // 1. Fetch all auth users
     const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
     if (authErr) throw new Error(`Failed to list auth users: ${authErr.message}`);
-
     const activeAuthUserIds = new Set((authData?.users || []).map(u => u.id));
-
-    // 2. Fetch all profiles
     const { data: profiles, error: profErr } = await supabaseAdmin.from('profiles').select('*');
     if (profErr) throw new Error(`Failed to list profiles: ${profErr.message}`);
-
     const allProfiles = profiles || [];
     const zombieList: ZombieScanResult['zombieProfiles'] = [];
     let activeLinkedCount = 0;
-
-    for (const p of allProfiles) {
-      if (activeAuthUserIds.has(p.id)) {
-        activeLinkedCount++;
-      } else {
-        zombieList.push({
-          id: p.id,
-          preferredName: p.preferred_name || null,
-          onboardingCompleted: p.onboarding_completed || false,
-          createdAt: p.created_at || undefined,
-          ownedRowCounts: {},
-        });
-      }
+    for (const p of allProfiles as any[]) {
+      if (activeAuthUserIds.has(p.id)) activeLinkedCount++;
+      else zombieList.push({ id: p.id, preferredName: p.preferred_name || null, onboardingCompleted: p.onboarding_completed || false, createdAt: p.created_at || undefined, ownedRowCounts: {} });
     }
-
-    if (zombieList.length > 0) {
-      const zombieIds = zombieList.map(z => z.id);
-      const zombieMap = new Map(zombieList.map(z => [z.id, z]));
-
-      // Query each table once for all zombie IDs in parallel
-      await Promise.all(
-        AccountLifecycleService.USER_OWNED_TABLES.map(async item => {
-          if (item.table === 'profiles') return;
-          try {
-            const { data: rows } = await supabaseAdmin
-              .from(item.table)
-              .select(item.userColumn)
-              .in(item.userColumn, zombieIds);
-
-            if (rows && rows.length > 0) {
-              for (const r of rows as any[]) {
-                const uid = r[item.userColumn];
-                if (uid && zombieMap.has(uid)) {
-                  const z = zombieMap.get(uid)!;
-                  z.ownedRowCounts[item.table] = (z.ownedRowCounts[item.table] || 0) + 1;
-                }
-              }
+    const zombieIds = zombieList.map(z => z.id);
+    const zombieMap = new Map(zombieList.map(z => [z.id, z]));
+    if (zombieIds.length) {
+      await Promise.all(AccountLifecycleService.USER_OWNED_TABLES.map(async item => {
+        if (item.table === 'profiles') return;
+        try {
+          const { data: rows } = await supabaseAdmin.from(item.table).select(item.userColumn).in(item.userColumn, zombieIds);
+          for (const r of (rows || []) as any[]) {
+            const uid = r[item.userColumn];
+            if (uid && zombieMap.has(uid)) {
+              const z = zombieMap.get(uid)!;
+              z.ownedRowCounts[item.table] = (z.ownedRowCounts[item.table] || 0) + 1;
             }
-          } catch {
-            // Ignore missing table during scan
           }
-        })
-      );
+        } catch { /* read-only diagnostic; ignore an unavailable table */ }
+      }));
     }
-
-    return {
-      totalProfiles: allProfiles.length,
-      activeLinkedCount,
-      zombieCount: zombieList.length,
-      zombieProfiles: zombieList,
-    };
+    return { totalProfiles: allProfiles.length, activeLinkedCount, zombieCount: zombieList.length, zombieProfiles: zombieList };
   }
 
-  /**
-   * Controlled, safe purging of confirmed zombie account residue.
-   * Only deletes records belonging to a profile ID verified NOT to exist in auth.users.
-   */
   public async purgeConfirmedZombie(zombieProfileId: string): Promise<AccountDeletionResult> {
-    // Defense-in-depth: Verify that this ID is NOT in auth.users
     const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(zombieProfileId);
-    if (authUser?.user) {
-      throw new Error(`CRITICAL ABORT: Refusing to purge ${zombieProfileId} because it is an ACTIVE auth user!`);
-    }
-
-    // Execute safe application-level eradication of zombie residue
+    if (authUser?.user) throw new Error(`CRITICAL ABORT: Refusing to purge ${zombieProfileId} because it is an ACTIVE auth user!`);
     return this.deleteAccount(zombieProfileId);
   }
 }

@@ -21,7 +21,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: yarn
           cache-dependency-path: backend/package.json
 
@@ -32,4 +32,14 @@ jobs:
         run: yarn typecheck
 
       - name: Test
-        run: yarn test --runInBand
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            yarn test --runInBand
+          else
+            echo "Supabase integration credentials are not configured; skipping the live integration suite."
+            yarn test --runInBand --testPathIgnorePatterns=src/__tests__/MemoryPersistenceIntegration.test.ts
+          fi
