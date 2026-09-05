@@ -32,11 +32,12 @@ CREATE OR REPLACE FUNCTION public.enforce_account_tombstone()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $function$
 DECLARE
     uid UUID;
 BEGIN
-    EXECUTE format('SELECT ($1).%I', TG_ARGV[0]) USING NEW INTO uid;
+    EXECUTE pg_catalog.format('SELECT ($1).%I', TG_ARGV[0]) USING NEW INTO uid;
 
     IF EXISTS (
         SELECT 1
@@ -54,6 +55,7 @@ CREATE OR REPLACE FUNCTION public.restore_soft_deleted_memory(p_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $function$
 DECLARE
     v_payload JSONB;
@@ -61,7 +63,7 @@ DECLARE
     v_user_id UUID;
 BEGIN
     SELECT original_payload, expected_expiry INTO v_payload, v_expiry
-    FROM recovery_archive
+    FROM public.recovery_archive
     WHERE id = p_id
     FOR UPDATE;
 
@@ -76,13 +78,13 @@ BEGIN
     v_user_id := (v_payload->>'user_id')::uuid;
     IF EXISTS (
         SELECT 1
-        FROM account_tombstones
+        FROM public.account_tombstones
         WHERE user_id = v_user_id
     ) THEN
         RETURN FALSE;
     END IF;
 
-    INSERT INTO chat_history (
+    INSERT INTO public.chat_history (
         id, role, content, created_at, user_id,
         compaction_status, compacted_at, compaction_version, episode_id
     )
@@ -100,11 +102,11 @@ BEGIN
         compaction_status = 'raw',
         content = EXCLUDED.content;
 
-    INSERT INTO audit_logs (action, source_message_id, actor, result)
+    INSERT INTO public.audit_logs (action, source_message_id, actor, result)
     VALUES ('RESTORE', p_id, 'system', 'SUCCESS');
 
-    DELETE FROM recovery_archive WHERE id = p_id;
-    DELETE FROM tombstones WHERE id = p_id;
+    DELETE FROM public.recovery_archive WHERE id = p_id;
+    DELETE FROM public.tombstones WHERE id = p_id;
 
     RETURN TRUE;
 END;
@@ -114,29 +116,30 @@ CREATE OR REPLACE FUNCTION public.process_physical_deletion_batch(p_batch_size i
 RETURNS SETOF uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $function$
 DECLARE
     v_deleted_ids uuid[];
 BEGIN
     WITH target_archives AS (
-        SELECT id FROM recovery_archive
+        SELECT id FROM public.recovery_archive
         WHERE expected_expiry < NOW()
         FOR UPDATE SKIP LOCKED
         LIMIT p_batch_size
     ),
     deleted_chat AS (
-        DELETE FROM chat_history
+        DELETE FROM public.chat_history
         WHERE id IN (SELECT id FROM target_archives)
           AND compaction_status = 'soft_deleted'
         RETURNING id
     ),
     deleted_archive AS (
-        DELETE FROM recovery_archive
+        DELETE FROM public.recovery_archive
         WHERE id IN (SELECT id FROM deleted_chat)
         RETURNING id
     ),
     inserted_audits AS (
-        INSERT INTO audit_logs (action, source_message_id, actor, result)
+        INSERT INTO public.audit_logs (action, source_message_id, actor, result)
         SELECT 'PHYSICAL_DELETE', id, 'system', 'SUCCESS'
         FROM deleted_chat
         RETURNING source_message_id
@@ -202,7 +205,7 @@ BEGIN
                  AND t.tgname = r.trigger_name
            )
         THEN
-            EXECUTE format(
+            EXECUTE pg_catalog.format(
                 'CREATE TRIGGER %I BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.enforce_account_tombstone(%L)',
                 r.trigger_name, r.table_name, r.user_column
             );
