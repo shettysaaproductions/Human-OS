@@ -1,10 +1,59 @@
--- ─────────────────────────────────────────────────────────────────────────────
--- HUMAN OS — MIGRATION 038: Lifecycle Function Source of Truth
--- Reproduces the current live definitions and execute ACLs for account
--- lifecycle functions. No explicit function-level search_path is configured.
--- ─────────────────────────────────────────────────────────────────────────────
+-- HUMAN OS — MIGRATION 038: Lifecycle schema and functions
+--
+-- Establishes the lifecycle objects that exist in production but were previously
+-- missing from the repository migration chain. Safe to replay against an existing
+-- database: tables use IF NOT EXISTS and functions use CREATE OR REPLACE.
 
-CREATE FUNCTION public.restore_soft_deleted_memory(p_id uuid)
+CREATE TABLE IF NOT EXISTS public.account_tombstones (
+    user_id uuid PRIMARY KEY,
+    deleted_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.recovery_archive (
+    id uuid PRIMARY KEY,
+    original_payload jsonb NOT NULL,
+    deleted_at timestamptz DEFAULT now(),
+    expected_expiry timestamptz DEFAULT (now() + interval '7 days')
+);
+
+CREATE INDEX IF NOT EXISTS idx_recovery_archive_expiry
+    ON public.recovery_archive USING btree (expected_expiry);
+
+CREATE TABLE IF NOT EXISTS public.tombstones (
+    id uuid PRIMARY KEY,
+    table_name text NOT NULL,
+    reason text NOT NULL,
+    deleted_at timestamptz DEFAULT now()
+);
+
+-- Production has RLS enabled on account_tombstones with no public policies;
+-- service_role/server-side administration remains the intended access path.
+ALTER TABLE public.account_tombstones ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.enforce_account_tombstone()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $function$
+DECLARE
+    uid UUID;
+BEGIN
+    -- TG_ARGV[0] contains the column name for the user ID (e.g., 'user_id' or 'id')
+    EXECUTE format('SELECT ($1).%I', TG_ARGV[0]) USING NEW INTO uid;
+
+    IF EXISTS (
+        SELECT 1
+        FROM public.account_tombstones
+        WHERE user_id = uid
+    ) THEN
+        RAISE EXCEPTION 'ACCOUNT_TOMBSTONE_VIOLATION: Cannot write data for deleted user %', uid;
+    END IF;
+
+    RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.restore_soft_deleted_memory(p_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -14,18 +63,17 @@ DECLARE
     v_expiry TIMESTAMPTZ;
     v_user_id UUID;
 BEGIN
-    -- Get and lock the archive row
     SELECT original_payload, expected_expiry INTO v_payload, v_expiry
     FROM recovery_archive
     WHERE id = p_id
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        RETURN FALSE; -- Physically deleted or never archived
+        RETURN FALSE;
     END IF;
 
     IF v_expiry < NOW() THEN
-        RETURN FALSE; -- Expired, ineligible for restore
+        RETURN FALSE;
     END IF;
 
     -- A deleted account must never be resurrected from its recovery archive.
@@ -38,7 +86,6 @@ BEGIN
         RETURN FALSE;
     END IF;
 
-    -- Upsert the original row
     INSERT INTO chat_history (
         id, role, content, created_at, user_id,
         compaction_status, compacted_at, compaction_version, episode_id
@@ -57,11 +104,9 @@ BEGIN
         compaction_status = 'raw',
         content = EXCLUDED.content;
 
-    -- Log audit
     INSERT INTO audit_logs (action, source_message_id, actor, result)
     VALUES ('RESTORE', p_id, 'system', 'SUCCESS');
 
-    -- Cleanup
     DELETE FROM recovery_archive WHERE id = p_id;
     DELETE FROM tombstones WHERE id = p_id;
 
@@ -69,7 +114,7 @@ BEGIN
 END;
 $function$;
 
-CREATE FUNCTION public.process_physical_deletion_batch(p_batch_size integer)
+CREATE OR REPLACE FUNCTION public.process_physical_deletion_batch(p_batch_size integer)
 RETURNS SETOF uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -77,9 +122,6 @@ AS $function$
 DECLARE
     v_deleted_ids uuid[];
 BEGIN
-    -- Verify safety flag (passed in by caller or checked here - we rely on the application to not call this if disabled, 
-    -- but we enforce the expiry strictly here).
-
     WITH target_archives AS (
         SELECT id FROM recovery_archive
         WHERE expected_expiry < NOW()
@@ -112,10 +154,70 @@ BEGIN
 END;
 $function$;
 
--- SECURITY DEFINER functions must not be callable by PUBLIC, anon, or
--- authenticated. The server-side Human-OS path uses service_role.
+-- Recreate the production tombstone-write guards idempotently.
+DO $do$
+DECLARE
+    r record;
+BEGIN
+    FOR r IN
+        SELECT * FROM (VALUES
+            ('action_idempotency','tr_enforce_tombstone_action_idempotency','user_id'),
+            ('candidate_synthesis_claims','tr_enforce_tombstone_candidate_synthesis_claims','user_id'),
+            ('chat_history','tr_enforce_tombstone_chat_history','user_id'),
+            ('conversation_sessions','tr_enforce_tombstone_conversation_sessions','user_id'),
+            ('emotional_states','tr_enforce_tombstone_emotional_states','user_id'),
+            ('episodic_memories','tr_enforce_tombstone_episodic_memories','user_id'),
+            ('kg_edges','tr_enforce_tombstone_kg_edges','user_id'),
+            ('kg_nodes','tr_enforce_tombstone_kg_nodes','user_id'),
+            ('life_threads','tr_enforce_tombstone_life_threads','user_id'),
+            ('memories','tr_enforce_tombstone_memories','user_id'),
+            ('memory_access_log','tr_enforce_tombstone_memory_access_log','user_id'),
+            ('memory_events','tr_enforce_tombstone_memory_events','user_id'),
+            ('nova_actions','tr_enforce_tombstone_nova_actions','user_id'),
+            ('nova_agenda','tr_enforce_tombstone_nova_agenda','user_id'),
+            ('nova_cognitive_doubts','tr_enforce_tombstone_nova_cognitive_doubts','user_id'),
+            ('nova_corrections_log','tr_enforce_tombstone_nova_corrections_log','user_id'),
+            ('nova_followups','tr_enforce_tombstone_nova_followups','user_id'),
+            ('nova_guardian_anomalies','tr_enforce_tombstone_nova_guardian_anomalies','user_id'),
+            ('nova_guardian_repairs','tr_enforce_tombstone_nova_guardian_repairs','user_id'),
+            ('nova_guardian_runs','tr_enforce_tombstone_nova_guardian_runs','user_id'),
+            ('nova_outreach_log','tr_enforce_tombstone_nova_outreach_log','user_id'),
+            ('profiles','tr_enforce_tombstone_profiles','id'),
+            ('reflections','tr_enforce_tombstone_reflections','user_id'),
+            ('short_term_memories','tr_enforce_tombstone_short_term_memories','user_id'),
+            ('user_feedback','tr_enforce_tombstone_user_feedback','user_id'),
+            ('user_moment_preferences','tr_enforce_tombstone_user_moment_preferences','user_id'),
+            ('user_moments','tr_enforce_tombstone_user_moments','user_id'),
+            ('user_presence','tr_enforce_tombstone_user_presence','user_id'),
+            ('user_routines','tr_enforce_tombstone_user_routines','user_id'),
+            ('watchtower_attention_decisions','tr_enforce_tombstone_watchtower_attention_decisions','user_id'),
+            ('watchtower_cognitive_signals','tr_enforce_tombstone_watchtower_cognitive_signals','user_id'),
+            ('watchtower_timing_logs','tr_enforce_tombstone_watchtower_timing_logs','user_id'),
+            ('working_memory','tr_enforce_tombstone_working_memory','user_id')
+        ) AS x(table_name, trigger_name, user_column)
+    LOOP
+        IF to_regclass('public.' || r.table_name) IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM pg_trigger t
+               JOIN pg_class c ON c.oid = t.tgrelid
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'public'
+                 AND c.relname = r.table_name
+                 AND t.tgname = r.trigger_name
+           )
+        THEN
+            EXECUTE format(
+                'CREATE TRIGGER %I BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.enforce_account_tombstone(%L)',
+                r.trigger_name, r.table_name, r.user_column
+            );
+        END IF;
+    END LOOP;
+END;
+$do$;
+
+-- SECURITY DEFINER lifecycle functions are server-side only.
 REVOKE ALL ON FUNCTION public.restore_soft_deleted_memory(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.process_physical_deletion_batch(integer) FROM PUBLIC, anon, authenticated;
-
 GRANT EXECUTE ON FUNCTION public.restore_soft_deleted_memory(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.process_physical_deletion_batch(integer) TO service_role;
