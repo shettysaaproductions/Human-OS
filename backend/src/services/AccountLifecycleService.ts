@@ -115,6 +115,31 @@ export class AccountLifecycleService {
     }
   }
 
+  private async captureUserChatIds(userId: string, errors: string[]): Promise<string[]> {
+    const ids: string[] = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      try {
+        const { data: chats, error } = await supabaseAdmin
+          .from('chat_history')
+          .select('id')
+          .eq('user_id', userId)
+          .range(from, from + pageSize - 1);
+        if (error) {
+          errors.push(`Failed to inspect chat_history before indirect cleanup: ${error.message}`);
+          break;
+        }
+        const page = (chats || []).map((c: any) => String(c.id));
+        ids.push(...page);
+        if (page.length < pageSize) break;
+      } catch (e: any) {
+        errors.push(`Chat ownership lookup failed: ${e?.message || String(e)}`);
+        break;
+      }
+    }
+    return ids;
+  }
+
   public async deleteAccount(userId: string): Promise<AccountDeletionResult> {
     const startTime = Date.now();
     const tablesCleaned: Record<string, number> = {};
@@ -134,16 +159,9 @@ export class AccountLifecycleService {
       return { success: false, userId: cleanUserId, authDeleted: false, profileDeleted: false, tablesCleaned, errors: [`Tombstone creation failed: ${tombstoneError.message}`], durationMs: Date.now() - startTime };
     }
 
-    // Capture the user's chat IDs before deleting chat_history. These IDs are also the
-    // ownership key for audit_logs, tombstones and processed_jobs.
-    let userChatIds: string[] = [];
-    try {
-      const { data: chats, error } = await supabaseAdmin.from('chat_history').select('id').eq('user_id', cleanUserId);
-      if (error) errors.push(`Failed to inspect chat_history before indirect cleanup: ${error.message}`);
-      else userChatIds = (chats || []).map((c: any) => String(c.id));
-    } catch (e: any) {
-      errors.push(`Chat ownership lookup failed: ${e?.message || String(e)}`);
-    }
+    // Capture every chat ID in pages before deleting chat_history. These IDs are also
+    // the ownership key for audit_logs, tombstones and processed_jobs.
+    const userChatIds = await this.captureUserChatIds(cleanUserId, errors);
 
     // Delete all user-owned job payloads regardless of status. This avoids leaving
     // completed/failed/pending jobs containing user messages or identifiers.
@@ -177,7 +195,6 @@ export class AccountLifecycleService {
       }
     }
 
-    // Delete recovery payloads without first loading the whole table into memory.
     await this.deleteJsonOwnedRows('recovery_archive', cleanUserId, tablesCleaned, errors);
 
     // Delete every directly user-owned table. Telemetry is deleted, not anonymized.
@@ -218,8 +235,6 @@ export class AccountLifecycleService {
       }
     }
 
-    // Verify processed_jobs against the chat IDs captured before deletion. Do not
-    // re-query chat_history after it has been erased, because that would lose the key.
     if (userChatIds.length) {
       try {
         const { count, error } = await supabaseAdmin.from('processed_jobs').select('id', { count: 'exact', head: true }).in('message_id', userChatIds);
