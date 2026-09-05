@@ -26,3 +26,7 @@ jobs:
         run: yarn typecheck
       - name: Test
         run: yarn test --runInBand
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+          SUPABASE_ENVIRONMENT: test
