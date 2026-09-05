@@ -84,6 +84,36 @@ export class AccountLifecycleService {
     }
   }
 
+  private async deleteJsonOwnedRows(table: string, userId: string, tablesCleaned: Record<string, number>, errors: string[]) {
+    for (const key of ['userId', 'user_id']) {
+      try {
+        const { count, error } = await supabaseAdmin
+          .from(table)
+          .delete({ count: 'exact' })
+          .eq(`original_payload->>${key}`, userId);
+        if (error) errors.push(`Failed to delete ${table} rows for ${key}: ${error.message}`);
+        else tablesCleaned[table] = (tablesCleaned[table] || 0) + (count || 0);
+      } catch (e: any) {
+        errors.push(`Exception deleting ${table} rows for ${key}: ${e?.message || String(e)}`);
+      }
+    }
+  }
+
+  private async deleteJobPayloadRows(table: 'background_jobs' | 'failed_jobs', userId: string, tablesCleaned: Record<string, number>, errors: string[]) {
+    for (const key of ['userId', 'user_id']) {
+      try {
+        const { count, error } = await supabaseAdmin
+          .from(table)
+          .delete({ count: 'exact' })
+          .eq(`payload->>${key}`, userId);
+        if (error) errors.push(`Failed to delete ${table} rows for ${key}: ${error.message}`);
+        else tablesCleaned[table] = (tablesCleaned[table] || 0) + (count || 0);
+      } catch (e: any) {
+        errors.push(`Exception deleting ${table} rows for ${key}: ${e?.message || String(e)}`);
+      }
+    }
+  }
+
   public async deleteAccount(userId: string): Promise<AccountDeletionResult> {
     const startTime = Date.now();
     const tablesCleaned: Record<string, number> = {};
@@ -95,7 +125,6 @@ export class AccountLifecycleService {
 
     logger.info('[AccountLifecycle] Starting COMPLETE account erasure', { userId: cleanUserId });
 
-    // Tombstone first so concurrent application writes are rejected while erasure runs.
     const { error: tombstoneError } = await supabaseAdmin.from('account_tombstones').upsert({
       user_id: cleanUserId,
       deleted_at: new Date().toISOString(),
@@ -104,91 +133,59 @@ export class AccountLifecycleService {
       return { success: false, userId: cleanUserId, authDeleted: false, profileDeleted: false, tablesCleaned, errors: [`Tombstone creation failed: ${tombstoneError.message}`], durationMs: Date.now() - startTime };
     }
 
-    // Delete every background job owned by this user, regardless of current status.
+    // Capture the user's chat IDs before deleting chat_history. These IDs are also the
+    // ownership key for audit_logs, tombstones and processed_jobs.
+    let userChatIds: string[] = [];
     try {
-      const { data: jobs, error } = await supabaseAdmin.from('background_jobs').select('id, payload');
-      if (error) errors.push(`Failed to inspect background_jobs: ${error.message}`);
-      for (const job of jobs || []) {
-        const payload = job.payload as any;
-        if (payload?.userId === cleanUserId || payload?.user_id === cleanUserId) {
-          const { error: deleteError } = await supabaseAdmin.from('background_jobs').delete().eq('id', job.id);
-          if (deleteError) errors.push(`Failed to delete background job ${job.id}: ${deleteError.message}`);
-          else tablesCleaned.background_jobs = (tablesCleaned.background_jobs || 0) + 1;
-        }
-      }
+      const { data: chats, error } = await supabaseAdmin.from('chat_history').select('id').eq('user_id', cleanUserId);
+      if (error) errors.push(`Failed to inspect chat_history before indirect cleanup: ${error.message}`);
+      else userChatIds = (chats || []).map((c: any) => String(c.id));
     } catch (e: any) {
-      errors.push(`Background job cleanup failed: ${e?.message || String(e)}`);
+      errors.push(`Chat ownership lookup failed: ${e?.message || String(e)}`);
     }
 
-    // Delete failed job records whose JSON payload identifies this user.
-    try {
-      const { data: failedJobs, error } = await supabaseAdmin.from('failed_jobs').select('id, payload');
-      if (error) errors.push(`Failed to inspect failed_jobs: ${error.message}`);
-      for (const job of failedJobs || []) {
-        const payload = job.payload as any;
-        if (payload?.userId === cleanUserId || payload?.user_id === cleanUserId) {
-          const { error: deleteError } = await supabaseAdmin.from('failed_jobs').delete().eq('id', job.id);
-          if (deleteError) errors.push(`Failed to delete failed job ${job.id}: ${deleteError.message}`);
-          else tablesCleaned.failed_jobs = (tablesCleaned.failed_jobs || 0) + 1;
-        }
-      }
-    } catch (e: any) {
-      errors.push(`Failed job cleanup failed: ${e?.message || String(e)}`);
-    }
+    // Delete all user-owned job payloads regardless of status. This avoids leaving
+    // completed/failed/pending jobs containing user messages or identifiers.
+    await this.deleteJobPayloadRows('background_jobs', cleanUserId, tablesCleaned, errors);
+    await this.deleteJobPayloadRows('failed_jobs', cleanUserId, tablesCleaned, errors);
 
-    // Delete audit entries and processing records tied to this user's chat messages before deleting chats.
-    try {
-      const { data: chats, error: chatLookupError } = await supabaseAdmin.from('chat_history').select('id').eq('user_id', cleanUserId);
-      if (chatLookupError) errors.push(`Failed to inspect chat_history: ${chatLookupError.message}`);
-      const chatIds = (chats || []).map((c: any) => c.id);
-      if (chatIds.length) {
-        const { error } = await supabaseAdmin.from('audit_logs').delete().in('source_message_id', chatIds);
+    // Delete message-linked data before deleting chat_history.
+    if (userChatIds.length) {
+      try {
+        const { count, error } = await supabaseAdmin.from('audit_logs').delete({ count: 'exact' }).in('source_message_id', userChatIds);
         if (error) errors.push(`Failed to delete audit_logs: ${error.message}`);
-        else tablesCleaned.audit_logs = chatIds.length;
-
-        const { error: tombstoneRowsError } = await supabaseAdmin.from('tombstones').delete().in('id', chatIds);
-        if (tombstoneRowsError) errors.push(`Failed to delete message tombstones: ${tombstoneRowsError.message}`);
-        else tablesCleaned.tombstones = chatIds.length;
-
-        const messageIds = chatIds.map(String);
-        const { data: processedRows, error: processedLookupError } = await supabaseAdmin
-          .from('processed_jobs')
-          .select('id, message_id')
-          .in('message_id', messageIds);
-        if (processedLookupError) errors.push(`Failed to inspect processed_jobs: ${processedLookupError.message}`);
-        for (const row of processedRows || []) {
-          const { error: deleteError } = await supabaseAdmin.from('processed_jobs').delete().eq('id', row.id);
-          if (deleteError) errors.push(`Failed to delete processed job ${row.id}: ${deleteError.message}`);
-          else tablesCleaned.processed_jobs = (tablesCleaned.processed_jobs || 0) + 1;
-        }
+        else tablesCleaned.audit_logs = count || 0;
+      } catch (e: any) {
+        errors.push(`Audit log cleanup failed: ${e?.message || String(e)}`);
       }
-    } catch (e: any) {
-      errors.push(`Chat-linked cleanup failed: ${e?.message || String(e)}`);
+
+      try {
+        const { count, error } = await supabaseAdmin.from('tombstones').delete({ count: 'exact' }).in('id', userChatIds);
+        if (error) errors.push(`Failed to delete message tombstones: ${error.message}`);
+        else tablesCleaned.tombstones = count || 0;
+      } catch (e: any) {
+        errors.push(`Message tombstone cleanup failed: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('processed_jobs').delete({ count: 'exact' }).in('message_id', userChatIds);
+        if (error) errors.push(`Failed to delete processed_jobs: ${error.message}`);
+        else tablesCleaned.processed_jobs = count || 0;
+      } catch (e: any) {
+        errors.push(`Processed job cleanup failed: ${e?.message || String(e)}`);
+      }
     }
 
-    // Delete JSON-owned recovery payloads.
-    try {
-      const { data: archives, error: archiveLookupError } = await supabaseAdmin.from('recovery_archive').select('id, original_payload');
-      if (archiveLookupError) errors.push(`Failed to inspect recovery_archive: ${archiveLookupError.message}`);
-      for (const row of archives || []) {
-        const payload = row.original_payload as any;
-        if (payload?.userId === cleanUserId || payload?.user_id === cleanUserId) {
-          const { error: deleteError } = await supabaseAdmin.from('recovery_archive').delete().eq('id', row.id);
-          if (deleteError) errors.push(`Failed to delete recovery archive row ${row.id}: ${deleteError.message}`);
-          else tablesCleaned.recovery_archive = (tablesCleaned.recovery_archive || 0) + 1;
-        }
-      }
-    } catch (e: any) {
-      errors.push(`Recovery archive cleanup failed: ${e?.message || String(e)}`);
-    }
+    // Delete recovery payloads without first loading the whole table into memory.
+    await this.deleteJsonOwnedRows('recovery_archive', cleanUserId, tablesCleaned, errors);
 
-    // Delete every directly user-owned table. Do NOT anonymize telemetry: this is a full wipe.
+    // Delete every directly user-owned table. Telemetry is deleted, not anonymized.
     for (const item of AccountLifecycleService.USER_OWNED_TABLES) {
       await this.deleteRows(item.table, item.userColumn, cleanUserId, tablesCleaned, errors);
       if (item.table === 'profiles') profileDeleted = (tablesCleaned[item.table] || 0) > 0;
     }
 
-    // Verify that no directly user-owned rows survived. Never report success if residue remains.
+    // Verify direct ownership by exact user ID.
     for (const item of AccountLifecycleService.USER_OWNED_TABLES) {
       try {
         const { count, error } = await supabaseAdmin.from(item.table).select(item.userColumn, { count: 'exact', head: true }).eq(item.userColumn, cleanUserId);
@@ -199,41 +196,56 @@ export class AccountLifecycleService {
       }
     }
 
-    // Verify indirect stores as well before removing the auth identity.
-    try {
-      const { data: jobs, error } = await supabaseAdmin.from('background_jobs').select('id, payload');
-      if (error) errors.push(`Verification failed for background_jobs: ${error.message}`);
-      else if ((jobs || []).some((job: any) => {
-        const p = job.payload as any;
-        return p?.userId === cleanUserId || p?.user_id === cleanUserId;
-      })) errors.push('Deletion verification found surviving user-owned row(s) in background_jobs');
+    // Verify indirect ownership using database-side filters, not paginated reads.
+    for (const key of ['userId', 'user_id']) {
+      for (const table of ['background_jobs', 'failed_jobs'] as const) {
+        try {
+          const { count, error } = await supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).eq(`payload->>${key}`, cleanUserId);
+          if (error) errors.push(`Verification failed for ${table}/${key}: ${error.message}`);
+          else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in ${table}`);
+        } catch (e: any) {
+          errors.push(`Verification exception for ${table}/${key}: ${e?.message || String(e)}`);
+        }
 
-      const { data: failedJobs, error: failedError } = await supabaseAdmin.from('failed_jobs').select('id, payload');
-      if (failedError) errors.push(`Verification failed for failed_jobs: ${failedError.message}`);
-      else if ((failedJobs || []).some((job: any) => {
-        const p = job.payload as any;
-        return p?.userId === cleanUserId || p?.user_id === cleanUserId;
-      })) errors.push('Deletion verification found surviving user-owned row(s) in failed_jobs');
-
-      const { data: remainingChats, error: chatError } = await supabaseAdmin.from('chat_history').select('id').eq('user_id', cleanUserId);
-      if (chatError) errors.push(`Verification failed for chat_history links: ${chatError.message}`);
-      else {
-        const remainingIds = (remainingChats || []).map((c: any) => String(c.id));
-        if (remainingIds.length) errors.push('Deletion verification found surviving chat rows before processed_jobs verification');
-        else {
-          const { data: processed, error: processedError } = await supabaseAdmin.from('processed_jobs').select('id, message_id');
-          if (processedError) errors.push(`Verification failed for processed_jobs: ${processedError.message}`);
-          else {
-            const userMessageIds = new Set(remainingIds);
-            if ((processed || []).some((row: any) => userMessageIds.has(String(row.message_id)))) errors.push('Deletion verification found surviving user-owned row(s) in processed_jobs');
-          }
+        try {
+          const { count, error } = await supabaseAdmin.from('recovery_archive').select('id', { count: 'exact', head: true }).eq(`original_payload->>${key}`, cleanUserId);
+          if (error) errors.push(`Verification failed for recovery_archive/${key}: ${error.message}`);
+          else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in recovery_archive`);
+        } catch (e: any) {
+          errors.push(`Verification exception for recovery_archive/${key}: ${e?.message || String(e)}`);
         }
       }
-    } catch (e: any) {
-      errors.push(`Indirect deletion verification failed: ${e?.message || String(e)}`);
     }
 
-    // Remove auth identity only after application data has been erased and verified.
+    // Verify processed_jobs against the chat IDs captured before deletion. Do not
+    // re-query chat_history after it has been erased, because that would lose the key.
+    if (userChatIds.length) {
+      try {
+        const { count, error } = await supabaseAdmin.from('processed_jobs').select('id', { count: 'exact', head: true }).in('message_id', userChatIds);
+        if (error) errors.push(`Verification failed for processed_jobs message links: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in processed_jobs`);
+      } catch (e: any) {
+        errors.push(`Processed job verification exception: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('audit_logs').select('id', { count: 'exact', head: true }).in('source_message_id', userChatIds);
+        if (error) errors.push(`Verification failed for audit_logs message links: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in audit_logs`);
+      } catch (e: any) {
+        errors.push(`Audit log verification exception: ${e?.message || String(e)}`);
+      }
+
+      try {
+        const { count, error } = await supabaseAdmin.from('tombstones').select('id', { count: 'exact', head: true }).in('id', userChatIds);
+        if (error) errors.push(`Verification failed for tombstones: ${error.message}`);
+        else if ((count || 0) > 0) errors.push(`Deletion verification found ${count} surviving row(s) in tombstones`);
+      } catch (e: any) {
+        errors.push(`Tombstone verification exception: ${e?.message || String(e)}`);
+      }
+    }
+
+    // Auth deletion is strictly last and is skipped on any cleanup/verification failure.
     if (errors.length === 0) {
       try {
         const { error } = await supabaseAdmin.auth.admin.deleteUser(cleanUserId);
@@ -252,7 +264,14 @@ export class AccountLifecycleService {
     }
 
     const success = errors.length === 0 && authDeleted;
-    logger.info('[AccountLifecycle] COMPLETE account erasure finished', { userId: cleanUserId, success, authDeleted, profileDeleted, errorCount: errors.length, durationMs: Date.now() - startTime });
+    logger.info('[AccountLifecycle] COMPLETE account erasure finished', {
+      userId: cleanUserId,
+      success,
+      authDeleted,
+      profileDeleted,
+      errorCount: errors.length,
+      durationMs: Date.now() - startTime,
+    });
     return { success, userId: cleanUserId, authDeleted, profileDeleted, tablesCleaned, errors, durationMs: Date.now() - startTime };
   }
 
