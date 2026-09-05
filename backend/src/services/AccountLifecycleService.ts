@@ -53,6 +53,7 @@ export class AccountLifecycleService {
     { table: 'user_moments', userColumn: 'user_id' },
     { table: 'user_moment_preferences', userColumn: 'user_id' },
     { table: 'user_presence', userColumn: 'user_id' },
+    { table: 'user_presence_history', userColumn: 'user_id' },
     { table: 'user_feedback', userColumn: 'user_id' },
     { table: 'reflections', userColumn: 'user_id' },
     { table: 'emotional_states', userColumn: 'user_id' },
