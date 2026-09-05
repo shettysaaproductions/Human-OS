@@ -45,7 +45,6 @@ export function isConceptGrounded(
     .split('_')
     .map(t => normalizeConceptText(t))
     .filter(t => t && !GENERIC_KEY_TOKENS.has(t));
-
   if (tokens.length === 0) return false;
   return tokens.every(t => hasWord(haystack, t));
 }
@@ -72,7 +71,6 @@ export function validateSemanticCorrection(
   const rawValue = (mem.value ?? '').trim();
   if (!rawKey || !rawValue) return null;
   if (!sourceMessage || !sourceMessage.trim()) return null;
-
   if (!isValueGroundedInSource(rawValue, sourceMessage)) return null;
 
   const snake = rawKey.toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_');
