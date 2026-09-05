@@ -80,7 +80,6 @@ describe('Phase 2F-E: Account Lifecycle & Deletion Hardening', () => {
 
     expect(result.success).toBe(true);
     expect(result.profileDeleted).toBe(true);
-    // Check that profiles table was queried with 'id'
     const profileCall = fromSpy.mock.calls.find(c => c[0] === 'profiles');
     expect(profileCall).toBeDefined();
   });
@@ -268,22 +267,23 @@ describe('Phase 2F-E: Account Lifecycle & Deletion Hardening', () => {
     expect(res2.success).toBe(true);
   });
 
-  // 21. Telemetry/audit SET NULL behavior remains correct
-  it('21. Telemetry events are anonymized with user_id = null instead of deleting crash telemetry', async () => {
-    const updateSpy = jest.fn().mockReturnValue({
-      eq: jest.fn().mockResolvedValue({ error: null }),
+  // 21. Telemetry is deleted as part of the full wipe
+  it('21. Telemetry events are deleted, not anonymized, as required by full wipe', async () => {
+    const deleteSpy = jest.fn().mockReturnValue({
+      eq: jest.fn().mockResolvedValue({ count: 1, error: null }),
     });
     (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
       if (table === 'telemetry_events') {
-        return { update: updateSpy };
+        return { delete: deleteSpy };
       }
       return {
         delete: jest.fn().mockReturnValue({ eq: jest.fn().mockResolvedValue({ count: 1, error: null }) }),
       };
     });
 
-    await accountLifecycleService.deleteAccount('user-telemetry');
-    expect(updateSpy).toHaveBeenCalledWith({ user_id: null });
+    const result = await accountLifecycleService.deleteAccount('user-telemetry');
+    expect(deleteSpy).toHaveBeenCalled();
+    expect(result.tablesCleaned['telemetry_events']).toBe(1);
   });
 
   // 22. FK cascade behavior verified
