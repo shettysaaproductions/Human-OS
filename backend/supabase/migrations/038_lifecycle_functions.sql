@@ -6,7 +6,7 @@
 
 CREATE TABLE IF NOT EXISTS public.account_tombstones (
     user_id uuid PRIMARY KEY,
-    deleted_at timestamptz DEFAULT now()
+    deleted_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.recovery_archive (
@@ -26,8 +26,6 @@ CREATE TABLE IF NOT EXISTS public.tombstones (
     deleted_at timestamptz DEFAULT now()
 );
 
--- Production has RLS enabled on account_tombstones with no public policies;
--- service_role/server-side administration remains the intended access path.
 ALTER TABLE public.account_tombstones ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION public.enforce_account_tombstone()
@@ -38,7 +36,6 @@ AS $function$
 DECLARE
     uid UUID;
 BEGIN
-    -- TG_ARGV[0] contains the column name for the user ID (e.g., 'user_id' or 'id')
     EXECUTE format('SELECT ($1).%I', TG_ARGV[0]) USING NEW INTO uid;
 
     IF EXISTS (
@@ -76,7 +73,6 @@ BEGIN
         RETURN FALSE;
     END IF;
 
-    -- A deleted account must never be resurrected from its recovery archive.
     v_user_id := (v_payload->>'user_id')::uuid;
     IF EXISTS (
         SELECT 1
@@ -154,7 +150,6 @@ BEGIN
 END;
 $function$;
 
--- Recreate the production tombstone-write guards idempotently.
 DO $do$
 DECLARE
     r record;
@@ -216,7 +211,6 @@ BEGIN
 END;
 $do$;
 
--- SECURITY DEFINER lifecycle functions are server-side only.
 REVOKE ALL ON FUNCTION public.restore_soft_deleted_memory(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.process_physical_deletion_batch(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.restore_soft_deleted_memory(uuid) TO service_role;
