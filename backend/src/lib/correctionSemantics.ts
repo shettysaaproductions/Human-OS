@@ -45,7 +45,6 @@ export function isConceptGrounded(
     .split('_')
     .map(t => normalizeConceptText(t))
     .filter(t => t && !GENERIC_KEY_TOKENS.has(t));
-
   if (tokens.length === 0) return false;
   return tokens.every(t => hasWord(haystack, t));
 }
@@ -72,7 +71,6 @@ export function validateSemanticCorrection(
   const rawValue = (mem.value ?? '').trim();
   if (!rawKey || !rawValue) return null;
   if (!sourceMessage || !sourceMessage.trim()) return null;
-
   if (!isValueGroundedInSource(rawValue, sourceMessage)) return null;
 
   const snake = rawKey.toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_');
@@ -87,16 +85,45 @@ export function validateSemanticCorrection(
   return { key: canonicalKey, value: rawValue };
 }
 
+function deterministicCorrectionFromUserTurn(sourceMessage: string): ValidatedCorrection | null {
+  try {
+    // Loaded dynamically to avoid the existing TurnAnalyzer -> correctionSemantics dependency cycle.
+    const { TurnAnalyzer } = require('../services/TurnAnalyzer') as typeof import('../services/TurnAnalyzer');
+    const analysis = TurnAnalyzer.analyze([{ role: 'user', message: sourceMessage }]);
+    const target = analysis.correctionTarget ?? null;
+    const value = analysis.correctionValue ?? null;
+    if (!target || !value) return null;
+    return validateSemanticCorrection({ key: target, value, shouldPersist: true }, sourceMessage);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Select corrections only when there is exactly one distinct valid semantic
- * correction. Multiple distinct valid candidates are ambiguous and therefore
- * fail closed rather than allowing array order to determine authority.
+ * correction. If TurnAnalyzer deterministically resolved target+value from the
+ * user turn, that pair is authoritative and the LLM cannot substitute either.
+ * Multiple fallback candidates are ambiguous and therefore fail closed.
  */
 export function selectAuthoritativeCorrections(
   memories: any[] | null | undefined,
   sourceMessage: string,
   contextText?: string
 ): any[] {
+  const deterministic = deterministicCorrectionFromUserTurn(sourceMessage);
+  if (deterministic) {
+    return [{
+      shouldPersist: true,
+      type: 'fact',
+      key: deterministic.key,
+      value: deterministic.value,
+      importance: 100,
+      confidence: 1.0,
+      emotional_weight: 0,
+      correction_intent: true,
+    }];
+  }
+
   if (!Array.isArray(memories) || memories.length === 0) return [];
 
   const valid = memories
