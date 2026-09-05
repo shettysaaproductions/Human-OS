@@ -214,7 +214,9 @@ BEGIN
 END;
 $do$;
 
+REVOKE ALL ON FUNCTION public.enforce_account_tombstone() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.restore_soft_deleted_memory(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.process_physical_deletion_batch(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.enforce_account_tombstone() TO service_role;
 GRANT EXECUTE ON FUNCTION public.restore_soft_deleted_memory(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.process_physical_deletion_batch(integer) TO service_role;
