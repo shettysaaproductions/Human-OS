@@ -21,6 +21,11 @@ export interface Job {
 
 type JobProcessor = (job: Job) => Promise<void>;
 
+function isAccountTombstoneViolation(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes('ACCOUNT_TOMBSTONE_VIOLATION');
+}
+
 export class QueueService {
   private queueName: string;
   private processor?: JobProcessor;
@@ -144,12 +149,27 @@ export class QueueService {
     reserveNvidiaCapacity(this.defaultProfile);
     try {
       await this.processor(job);
-      await supabaseAdmin
+      const { error: completionError } = await supabaseAdmin
         .from('background_jobs')
         .update({ status: 'completed', finished_at: new Date().toISOString() })
         .eq('id', job.id);
+
+      // Deletion may have started while the worker was executing. The tombstone is the
+      // authoritative write barrier; never turn a correctly blocked completion update into
+      // a retry/DLQ record containing the deleted user's payload. Discard the queue row.
+      if (completionError) {
+        if (isAccountTombstoneViolation(completionError)) {
+          await this.discardTombstonedJob(job);
+          return;
+        }
+        throw completionError;
+      }
     } catch (jobError: any) {
       const errorMessage = jobError instanceof Error ? jobError.message : String(jobError);
+      if (isAccountTombstoneViolation(jobError)) {
+        await this.discardTombstonedJob(job);
+        return;
+      }
       logger.error(`Job ${job.id} failed`, { error: errorMessage });
       const isPermanent = jobError?.isPermanent === true || 
                           jobError?.name === 'SchemaValidationError' || 
@@ -163,7 +183,31 @@ export class QueueService {
     }
   }
 
+  private async discardTombstonedJob(job: Job): Promise<void> {
+    const { error } = await supabaseAdmin
+      .from('background_jobs')
+      .delete()
+      .eq('id', job.id);
+
+    if (error) {
+      // Deletion of the queue row is always permitted by the tombstone barrier. If this
+      // nevertheless fails, surface it rather than attempting a failed_jobs write that may
+      // contain deleted user data.
+      logger.error(`Failed to discard tombstoned job ${job.id}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    logger.info(`Discarded job ${job.id} for tombstoned account`);
+  }
+
   private async handleJobFailure(job: Job, errorMessage: string, isPermanent = false) {
+    if (isAccountTombstoneViolation(errorMessage)) {
+      await this.discardTombstonedJob(job);
+      return;
+    }
+
     const newAttempts = isPermanent ? this.maxAttempts : job.attempts + 1;
     
     if (newAttempts >= this.maxAttempts || isPermanent) {
