@@ -61,11 +61,12 @@ export interface ValidatedCorrection {
  * and rejects value-appended keys.
  */
 export function validateSemanticCorrection(
-  mem: { key?: string; concept?: string; value?: string } | null | undefined,
+  mem: { key?: string; concept?: string; value?: string; shouldPersist?: boolean } | null | undefined,
   sourceMessage: string,
   contextText?: string
 ): ValidatedCorrection | null {
   if (!mem) return null;
+  if (mem.shouldPersist !== true) return null;
 
   const rawKey = (mem.key ?? mem.concept ?? '').trim();
   const rawValue = (mem.value ?? '').trim();
@@ -86,6 +87,11 @@ export function validateSemanticCorrection(
   return { key: canonicalKey, value: rawValue };
 }
 
+/**
+ * Select corrections only when there is exactly one distinct valid semantic
+ * correction. Multiple distinct valid candidates are ambiguous and therefore
+ * fail closed rather than allowing array order to determine authority.
+ */
 export function selectAuthoritativeCorrections(
   memories: any[] | null | undefined,
   sourceMessage: string,
@@ -93,20 +99,31 @@ export function selectAuthoritativeCorrections(
 ): any[] {
   if (!Array.isArray(memories) || memories.length === 0) return [];
 
-  const out: any[] = [];
-  for (const mem of memories) {
-    const validated = validateSemanticCorrection(mem, sourceMessage, contextText);
-    if (!validated) continue;
-    out.push({
-      shouldPersist: true,
-      type: mem.type || 'fact',
-      key: validated.key,
-      value: validated.value,
-      importance: 100,
-      confidence: 1.0,
-      emotional_weight: mem.emotional_weight || 0,
-      correction_intent: true,
-    });
+  const valid = memories
+    .map(mem => {
+      const validated = validateSemanticCorrection(mem, sourceMessage, contextText);
+      if (!validated) return null;
+      return { mem, validated };
+    })
+    .filter((entry): entry is { mem: any; validated: ValidatedCorrection } => entry !== null);
+
+  const unique = new Map<string, { mem: any; validated: ValidatedCorrection }>();
+  for (const entry of valid) {
+    const identity = `${entry.validated.key}\u0000${entry.validated.value.trim().toLowerCase()}`;
+    if (!unique.has(identity)) unique.set(identity, entry);
   }
-  return out;
+
+  if (unique.size !== 1) return [];
+
+  const { mem, validated } = unique.values().next().value as { mem: any; validated: ValidatedCorrection };
+  return [{
+    shouldPersist: true,
+    type: mem.type || 'fact',
+    key: validated.key,
+    value: validated.value,
+    importance: 100,
+    confidence: 1.0,
+    emotional_weight: mem.emotional_weight || 0,
+    correction_intent: true,
+  }];
 }
