@@ -22,8 +22,11 @@ export interface Job {
 type JobProcessor = (job: Job) => Promise<void>;
 
 function isAccountTombstoneViolation(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  return message.includes('ACCOUNT_TOMBSTONE_VIOLATION');
+  if (error instanceof Error) return error.message.includes('ACCOUNT_TOMBSTONE_VIOLATION');
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '').includes('ACCOUNT_TOMBSTONE_VIOLATION');
+  }
+  return String(error ?? '').includes('ACCOUNT_TOMBSTONE_VIOLATION');
 }
 
 export class QueueService {
@@ -56,8 +59,6 @@ export class QueueService {
 
       if (error) throw error;
 
-      // Kick off processing in the background (fire-and-forget). A DB network failure here
-      // must NOT become an unhandled rejection — that kills the whole server.
       this.startProcessing().catch(err =>
         logger.error(`Queue ${this.queueName} startProcessing failed`, { error: err instanceof Error ? err.message : String(err) })
       );
@@ -74,7 +75,6 @@ export class QueueService {
    */
   process(processor: JobProcessor) {
     this.processor = processor;
-    // Start processing any pending jobs
     this.startProcessing().catch(err =>
       logger.error(`Queue ${this.queueName} startProcessing failed (process)`, { error: err instanceof Error ? err.message : String(err) })
     );
@@ -85,8 +85,6 @@ export class QueueService {
     this.isProcessing = true;
 
     try {
-      // Crash-safety: requeue jobs left 'running' by a process that died mid-job. A fresh
-      // poll cycle (this process just started) is the right time to reclaim them.
       const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       await supabaseAdmin
         .from('background_jobs')
@@ -105,9 +103,8 @@ export class QueueService {
           return;
         }
 
-        // Advisory yield: check NVIDIA capability. Priority 1 means background work.
         if (!canRunNvidia(this.defaultProfile, 1)) {
-          setTimeout(poll, 5000); // 5s backoff if constrained
+          setTimeout(poll, 5000);
           return;
         }
 
@@ -154,9 +151,6 @@ export class QueueService {
         .update({ status: 'completed', finished_at: new Date().toISOString() })
         .eq('id', job.id);
 
-      // Deletion may have started while the worker was executing. The tombstone is the
-      // authoritative write barrier; never turn a correctly blocked completion update into
-      // a retry/DLQ record containing the deleted user's payload. Discard the queue row.
       if (completionError) {
         if (isAccountTombstoneViolation(completionError)) {
           await this.discardTombstonedJob(job);
@@ -190,9 +184,6 @@ export class QueueService {
       .eq('id', job.id);
 
     if (error) {
-      // Deletion of the queue row is always permitted by the tombstone barrier. If this
-      // nevertheless fails, surface it rather than attempting a failed_jobs write that may
-      // contain deleted user data.
       logger.error(`Failed to discard tombstoned job ${job.id}`, {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -211,7 +202,6 @@ export class QueueService {
     const newAttempts = isPermanent ? this.maxAttempts : job.attempts + 1;
     
     if (newAttempts >= this.maxAttempts || isPermanent) {
-      // Move to DLQ immediately without endless retry cycles
       await supabaseAdmin
         .from('background_jobs')
         .update({ status: 'failed', error: errorMessage, attempts: newAttempts, finished_at: new Date().toISOString() })
@@ -226,7 +216,6 @@ export class QueueService {
           error: errorMessage
         });
     } else {
-      // Retry
       await supabaseAdmin
         .from('background_jobs')
         .update({ status: 'pending', error: errorMessage, attempts: newAttempts })
@@ -254,9 +243,9 @@ export const reflectionQueue = new QueueService('reflectionQueue', ['daily_refle
 export const subconsciousQueue = new QueueService('subconsciousQueue', [
   'extract_subconscious_actions',
   'extract_life_threads',
-  'suppress_life_thread',       // Amendment 3: deterministic thread suppression
+  'suppress_life_thread',
   'session_start_cognition',
-  'session_end_proactive_check', // Amendment 5: idempotent session-end proactive check
+  'session_end_proactive_check',
 ], 'SUBCONSCIOUS');
 
 export const maintenanceQueue = new QueueService('maintenanceQueue', [
