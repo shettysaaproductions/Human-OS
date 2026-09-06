@@ -18,7 +18,10 @@ function authorityRank(a?: string | null): number {
   return AUTHORITY_RANK[(a ?? 'subconscious_inference') as SourceAuthority] ?? 1;
 }
 
-// GET /analytics/memories — active canonical memories for UI
+// GET /analytics/memories — three-layer Brain view:
+//   currentMemories  = canonical CURRENT, not archived/superseded
+//   workingContext   = ephemeral working_memory rows still in scope
+//   archivedMemories = superseded/archived history (provenance display)
 analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -27,20 +30,26 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       return;
     }
 
-    // 1. Fetch all active, non-archived memories
-    const { data: allMemories, error: memoriesError } = await supabaseAdmin
+    const now = new Date().toISOString();
+
+    // ── 1. Fetch all non-archived memories for canonical CURRENT layer ────────
+    // Bounded at 500 (invariant: ~22 canonical keys per user — well within limit)
+    const { data: activeMemories, error: activeErr } = await supabaseAdmin
       .from('memories')
-      .select('id, memory_type, created_at, updated_at, key, value, importance, is_archived, source_authority')
+      .select('id, memory_type, created_at, updated_at, key, value, importance, is_archived, source_authority, lifecycle_state')
       .eq('user_id', userId)
       .eq('is_archived', false)
-      .order('created_at', { ascending: false });
+      .order('importance', { ascending: false })
+      .limit(500);
 
-    if (memoriesError) throw memoriesError;
+    if (activeErr) throw activeErr;
 
-    // 2. Canonicalize aliases and deduplicate semantic concepts
-    // Group by canonical key and keep the single active canonical record with highest authority / latest timestamp
+    // ── 2. Canonicalize + deduplicate: keep highest-authority CURRENT per key ─
     const canonicalMap = new Map<string, any>();
-    for (const mem of (allMemories || [])) {
+    for (const mem of (activeMemories || [])) {
+      // Exclude superseded/invalidated rows that slipped past is_archived flag
+      if (mem.lifecycle_state === 'SUPERSEDED' || mem.lifecycle_state === 'INVALIDATED') continue;
+
       const { canonical } = canonicalizeKey(mem.key || '');
       const normalizedMem = { ...mem, key: canonical };
 
@@ -62,30 +71,77 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       }
     }
 
-    const uniqueCanonicalMemories = Array.from(canonicalMap.values());
+    // Sort by importance desc, then updated_at desc
+    const currentMemories = Array.from(canonicalMap.values()).sort((a, b) => {
+      if ((b.importance || 0) !== (a.importance || 0)) return (b.importance || 0) - (a.importance || 0);
+      return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+    });
 
-    // 3. Categories breakdown based on active canonical concepts
-    const categories = uniqueCanonicalMemories.reduce((acc: any, mem: any) => {
+    // ── 3. thisWeekCount — computed from the FULL canonical set, not a slice ──
+    // Uses updated_at (reinforcement timestamp), falls back to created_at when null.
+    const oneWeekAgo = Date.now() - 7 * 86400000;
+    const thisWeekCount = currentMemories.filter(m => {
+      const ts = m.updated_at ?? m.created_at;
+      return ts && new Date(ts).getTime() >= oneWeekAgo;
+    }).length;
+
+    // ── 4. Categories — from canonical current set ────────────────────────────
+    const categories = currentMemories.reduce((acc: Record<string, number>, mem) => {
       const type = mem.memory_type || 'uncategorized';
       acc[type] = (acc[type] || 0) + 1;
       return acc;
     }, {});
 
-    // 4. Recent memories (sorted by updated_at / created_at desc)
-    uniqueCanonicalMemories.sort((a, b) => {
-      const tA = new Date(a.updated_at || a.created_at).getTime();
-      const tB = new Date(b.updated_at || b.created_at).getTime();
-      return tB - tA;
-    });
+    // ── 5. Working context — ephemeral working_memory rows still in scope ─────
+    // Convention (canonical from CognitiveContextService):
+    //   - NULL expires_at = never expires = displayable
+    //   - expires_at set AND < now = expired = excluded
+    //   - promotion_status SUPERSEDED or INVALIDATED = excluded
+    const { data: wmRows, error: wmErr } = await supabaseAdmin
+      .from('working_memory')
+      .select('id, key, value, created_at, promotion_status, expires_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-    const recent = uniqueCanonicalMemories.slice(0, 10);
+    if (wmErr) {
+      logger.warn('[Analytics/memories] Working memory fetch failed — returning empty', { error: wmErr.message });
+    }
+
+    const workingContext = (wmRows || []).filter((wm: any) =>
+      wm.promotion_status !== 'SUPERSEDED' &&
+      wm.promotion_status !== 'INVALIDATED' &&
+      (!wm.expires_at || wm.expires_at > now)  // NULL = never expires
+    );
+
+    // ── 6. Archived/history layer — superseded + archived for provenance ──────
+    const { data: archivedRows, error: archErr } = await supabaseAdmin
+      .from('memories')
+      .select('id, memory_type, created_at, updated_at, key, value, importance, is_archived, source_authority, lifecycle_state')
+      .eq('user_id', userId)
+      .or('is_archived.eq.true,lifecycle_state.in.(SUPERSEDED,INVALIDATED)')
+      .order('updated_at', { ascending: false })
+      .limit(50);
+
+    if (archErr) {
+      logger.warn('[Analytics/memories] Archived memories fetch failed — returning empty', { error: archErr.message });
+    }
+
+    // Canonicalize keys for display but do NOT deduplicate — show full provenance history
+    const archivedMemories = (archivedRows || []).map((mem: any) => {
+      const { canonical } = canonicalizeKey(mem.key || '');
+      return { ...mem, key: canonical };
+    });
 
     res.status(200).json({
       success: true,
       data: {
-        totalMemories: uniqueCanonicalMemories.length,
+        currentMemories,
+        workingContext,
+        archivedMemories,
+        totalCount: currentMemories.length,
         categories,
-        recentMemories: recent
+        thisWeekCount,
       }
     });
   } catch (err) {
