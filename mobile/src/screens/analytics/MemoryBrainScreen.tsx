@@ -6,6 +6,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../services/api';
 
+// ── Human-readable memory type labels ─────────────────────────────────────────
+const MEMORY_TYPE_LABEL: Record<string, string> = {
+  semantic:  'Fact',
+  episodic:  'Memory',
+  working:   'Context',
+  procedural:'Skill',
+};
+
+// ── Category meta for the filter chips & heatmap ──────────────────────────────
 const CATEGORY_META: Record<string, { color: string; emoji: string }> = {
   memories:      { color: '#8B5CF6', emoji: '🧠' },
   goals:         { color: '#10B981', emoji: '🎯' },
@@ -15,8 +24,44 @@ const CATEGORY_META: Record<string, { color: string; emoji: string }> = {
   places:        { color: '#06B6D4', emoji: '📍' },
   projects:      { color: '#F97316', emoji: '🚀' },
   lessons:       { color: '#A78BFA', emoji: '📚' },
+  semantic:      { color: '#8B5CF6', emoji: '🧠' },
+  episodic:      { color: '#EC4899', emoji: '💬' },
+  working:       { color: '#06B6D4', emoji: '⚡' },
+  procedural:    { color: '#10B981', emoji: '🔧' },
   uncategorized: { color: '#6B7280', emoji: '📦' },
 };
+
+// ── Authority badge ────────────────────────────────────────────────────────────
+const AUTHORITY_META: Record<string, { label: string; color: string }> = {
+  explicit_user:          { label: 'You told me',  color: '#10B981' },
+  deterministic:          { label: 'Confirmed',    color: '#3B82F6' },
+  confirmed_memory:       { label: 'Reinforced',   color: '#8B5CF6' },
+  subconscious_inference: { label: 'Inferred',     color: '#6B7280' },
+  needs_review:           { label: 'Unverified',   color: '#F59E0B' },
+};
+
+// ── Human-readable key label ───────────────────────────────────────────────────
+function toLabel(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ── Relative timestamp ─────────────────────────────────────────────────────────
+function relativeTime(iso: string | undefined): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
 
 export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
   const [loading, setLoading] = useState(true);
@@ -50,6 +95,14 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     return list;
   }, [data, searchQuery, selectedType]);
 
+  // Fix: use updated_at (not created_at) for "This Week" calculation
+  const thisWeekCount = useMemo(() => {
+    return (data?.recentMemories || []).filter((m: any) => {
+      const ts = m.updated_at || m.created_at;
+      return ts && Date.now() - new Date(ts).getTime() < 7 * 86400000;
+    }).length;
+  }, [data]);
+
   const categories = useMemo(() => Object.entries(data?.categories || {}), [data]);
 
   if (loading) {
@@ -58,9 +111,9 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <Text style={s.title}>Memory Brain</Text>
+      <Text style={s.title}>Brain</Text>
 
-      {/* Total Count */}
+      {/* Stats row */}
       <View style={s.statsRow}>
         <View style={s.statCard}>
           <Text style={s.statNum}>{data?.totalMemories || 0}</Text>
@@ -68,15 +121,10 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         </View>
         <View style={s.statCard}>
           <Text style={[s.statNum, { color: '#10B981' }]}>{categories.length}</Text>
-          <Text style={s.statLabel}>Categories</Text>
+          <Text style={s.statLabel}>Types</Text>
         </View>
         <View style={s.statCard}>
-          <Text style={[s.statNum, { color: '#F59E0B' }]}>
-            {(data?.recentMemories || []).filter((m: any) => {
-              const d = new Date(m.created_at);
-              return Date.now() - d.getTime() < 7 * 86400000;
-            }).length}
-          </Text>
+          <Text style={[s.statNum, { color: '#F59E0B' }]}>{thisWeekCount}</Text>
           <Text style={s.statLabel}>This Week</Text>
         </View>
       </View>
@@ -109,19 +157,22 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         {categories.map(([type, count]) => {
           const meta = CATEGORY_META[type] || CATEGORY_META.uncategorized;
           const isActive = selectedType === type;
+          const typeLabel = MEMORY_TYPE_LABEL[type] || type;
           return (
             <TouchableOpacity
               key={type}
               style={[s.filterChip, isActive && { borderColor: meta.color, backgroundColor: `${meta.color}20` }]}
               onPress={() => setSelectedType(isActive ? null : type)}
             >
-              <Text style={s.filterText}>{meta.emoji} {type} ({String(count)})</Text>
+              <Text style={[s.filterText, isActive && { color: meta.color }]}>
+                {meta.emoji} {typeLabel} ({String(count)})
+              </Text>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
 
-      {/* Heatmap row */}
+      {/* Heatmap */}
       <View style={s.heatmapRow}>
         {categories.slice(0, 7).map(([type, count]) => {
           const meta = CATEGORY_META[type] || CATEGORY_META.uncategorized;
@@ -143,16 +194,32 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         removeClippedSubviews
         windowSize={10}
         renderItem={({ item }) => {
-          const meta = CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
+          const typeMeta = CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
+          const typeLabel = MEMORY_TYPE_LABEL[item.memory_type] || item.memory_type || 'memory';
+          const authMeta = AUTHORITY_META[item.source_authority] || AUTHORITY_META.subconscious_inference;
+          const timeStr = relativeTime(item.updated_at || item.created_at);
+
           return (
             <View style={s.card}>
+              {/* Header row: type badge + authority badge + timestamp */}
               <View style={s.cardHeader}>
-                <View style={[s.badge, { backgroundColor: `${meta.color}20`, borderColor: meta.color }]}>
-                  <Text style={[s.badgeText, { color: meta.color }]}>{meta.emoji} {item.memory_type || 'unknown'}</Text>
+                <View style={[s.badge, { backgroundColor: `${typeMeta.color}20`, borderColor: typeMeta.color }]}>
+                  <Text style={[s.badgeText, { color: typeMeta.color }]}>
+                    {typeMeta.emoji} {typeLabel}
+                  </Text>
                 </View>
-                <Text style={s.importanceText}>imp: {item.importance}</Text>
+                <View style={s.cardHeaderRight}>
+                  <View style={[s.authBadge, { borderColor: authMeta.color }]}>
+                    <Text style={[s.authBadgeText, { color: authMeta.color }]}>{authMeta.label}</Text>
+                  </View>
+                  {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
+                </View>
               </View>
-              <Text style={s.cardKey}>{item.key}</Text>
+
+              {/* Human-readable key label */}
+              <Text style={s.cardKey}>{toLabel(item.key)}</Text>
+
+              {/* Value */}
               <Text style={s.cardVal}>{item.value}</Text>
             </View>
           );
@@ -191,7 +258,10 @@ const s = StyleSheet.create({
   filterChipActive: { borderColor: '#8B5CF6', backgroundColor: 'rgba(139,92,246,0.15)' },
   filterText: { color: '#999', fontSize: 13 },
   filterTextActive: { color: '#8B5CF6' },
-  heatmapRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', marginHorizontal: 16, marginBottom: 16, height: 52 },
+  heatmapRow: {
+    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end',
+    marginHorizontal: 16, marginBottom: 16, height: 52
+  },
   heatCell: { alignItems: 'center', flex: 1 },
   heatBar: { width: 28, borderRadius: 4, marginBottom: 4 },
   heatLabel: { fontSize: 14 },
@@ -201,9 +271,12 @@ const s = StyleSheet.create({
     borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   badge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { fontSize: 11, fontWeight: '600' },
-  importanceText: { fontSize: 11, color: '#555' },
+  authBadge: { borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 },
+  authBadgeText: { fontSize: 10, fontWeight: '500' },
+  timeText: { fontSize: 10, color: '#555' },
   cardKey: { fontSize: 13, fontWeight: '700', color: '#06B6D4', marginBottom: 4 },
   cardVal: { fontSize: 14, color: '#ccc', lineHeight: 20 },
   emptyText: { color: '#555', textAlign: 'center', marginTop: 48, fontSize: 15 },
