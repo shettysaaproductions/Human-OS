@@ -8,6 +8,20 @@ import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { deterministicGuardian } from './DeterministicGuardianService';
 import { sourceDependencyService } from './SourceDependencyService';
 import { memoryPolicyService } from './MemoryPolicyService';
+import { cache, CACHE_NS } from '../lib/cache';
+
+// ── CorrectionEvent — emitted after a correction is successfully persisted ——————
+// Downstream consumers (context cache, working memory invalidation) react to this.
+// Architecture invariant: CorrectionEvent is ONLY emitted after the atomic RPC
+// has succeeded. It is never emitted for reinforcements or fresh inserts.
+export interface CorrectionEvent {
+  userId: string;
+  canonicalKey: string;        // the canonical key that was corrected
+  newValue: string;            // the authoritative new value
+  oldValue?: string;           // the superseded value (if a conflicting row existed)
+  sourceAuthority: string;     // 'explicit_user' for user-initiated corrections
+  correctedAt: string;         // ISO timestamp
+}
 
 // Explicit column list — never use select('*') on memories
 const MEMORY_COLUMNS = 'id, user_id, key, value, importance, confidence, frequency, emotional_weight, last_accessed_at, created_at, updated_at, is_archived, memory_type, source_authority, protection_source, protected_at, compression_status, lifecycle_state, superseded_by, superseded_at, supersession_reason, valid_from, valid_until, temporal_precision, temporal_metadata';
@@ -466,6 +480,16 @@ export class MemoryRepository {
 
         // Pre-Heartbeat Hardening: Invalidate stale working memory for this canonical key
         await this.invalidateStaleWorkingMemory(userId, normalizedMemory.key, normalizedMemory.value);
+
+        // Emit CorrectionEvent for downstream observers
+        this.emitCorrectionEvent({
+          userId,
+          canonicalKey: normalizedMemory.key,
+          newValue: normalizedMemory.value,
+          oldValue: conflictingCurrentRow?.value,
+          sourceAuthority: incomingAuthority,
+          correctedAt: new Date().toISOString(),
+        });
       } else {
         // No conflicting CURRENT row found and not a correction: clean fresh insert
         await executeInsert({
@@ -520,8 +544,19 @@ export class MemoryRepository {
   }
 
   /**
-   * Explicitly protects a memory from pruning or overwriting
+   * Emits a CorrectionEvent for downstream consumers.
+   * Currently used for logging; can be extended to EventEmitter or message queue.
    */
+  private emitCorrectionEvent(event: CorrectionEvent): void {
+    logger.info('[CorrectionEvent] Correction persisted', {
+      userId: event.userId,
+      canonicalKey: event.canonicalKey,
+      sourceAuthority: event.sourceAuthority,
+      correctedAt: event.correctedAt,
+    });
+    // Future: emit to EventEmitter / message bus for other consumers
+  }
+
   async protectMemory(userId: string, memoryId: string, source: string): Promise<void> {
     await qt.track('protect_memory', 'memories', () =>
       supabaseAdmin
@@ -1017,6 +1052,10 @@ export class MemoryRepository {
           invalidatedCount: staleRowIds.length,
           staleRowIds,
         });
+
+        // Phase 0 Step 4: Invalidate in-process context cache after working memory supersession
+        cache.invalidateNamespace(CACHE_NS.PROFILE);
+        cache.invalidateNamespace(CACHE_NS.WORKING_MEMORY);
 
         return staleRowIds.length;
       }
