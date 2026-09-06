@@ -2,6 +2,10 @@ import { memoryRepository } from '../services/memoryRepository';
 import { MemoryType } from '../types/memory';
 import { logger } from '../lib/logger';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
+import { propagateCorrection } from '../services/CorrectionPropagator';
+import type { FactCorrectedEvent } from '../types/semanticEvent';
+
+
 
 function getMemoryTypeForKey(key: string): MemoryType {
   if ([
@@ -27,9 +31,9 @@ function getMemoryTypeForKey(key: string): MemoryType {
 
 export class DeterministicFactAgent {
   async processJob(job: any): Promise<void> {
-    const { userId, facts, sourceMessage, messageId } = job.payload;
+    const { userId, facts, corrections: eventCorrections, sourceMessage, messageId } = job.payload;
 
-    if (!userId || !facts || !Array.isArray(facts)) {
+    if (!userId || (!facts && !eventCorrections)) {
       throw new Error('Invalid payload for extract_deterministic_fact');
     }
 
@@ -38,6 +42,42 @@ export class DeterministicFactAgent {
       logger.info('[DeterministicFactAgent] Memory paused — skipping fact persistence', { userId, messageId });
       return;
     }
+
+    // ── Phase 10: FactCorrectedEvent propagation ────────────────────────
+    // Corrections from the SemanticEvent stream are propagated via CorrectionPropagator
+    // which handles all scopes (memories, working_memory, profiles, kg_entities).
+    if (Array.isArray(eventCorrections) && eventCorrections.length > 0) {
+      for (const corrEvent of eventCorrections as FactCorrectedEvent[]) {
+        try {
+          const result = await propagateCorrection(userId, corrEvent);
+          // Phase 10 amendment: explicitly log partial failures — never treat partial as success
+          if (!result.fullySucceeded) {
+            logger.warn('[DeterministicFactAgent][Phase10] Partial correction propagation failure', {
+              userId,
+              canonicalKey: corrEvent.canonicalKey,
+              newValue: corrEvent.newValue,
+              failedScopes: result.scopes.filter(s => !s.success).map(s => ({ scope: s.scope, error: s.error })),
+              succeededScopes: result.scopes.filter(s => s.success).map(s => s.scope),
+            });
+          } else {
+            logger.info('[DeterministicFactAgent][Phase10] Correction propagated fully', {
+              userId,
+              canonicalKey: corrEvent.canonicalKey,
+              newValue: corrEvent.newValue,
+              supersededValue: result.supersedesValue,
+            });
+          }
+        } catch (err) {
+          logger.error('[DeterministicFactAgent][Phase10] CorrectionPropagator threw unexpectedly', {
+            canonicalKey: corrEvent.canonicalKey,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
+    // ── Standard deterministic fact upserts ───────────────────────────────
+    if (!Array.isArray(facts)) return;
 
     for (const fact of facts) {
       if (!fact.key || !fact.value) continue;
@@ -72,7 +112,6 @@ export class DeterministicFactAgent {
           source_references: messageId ? [{ type: 'turn', id: messageId }] : undefined,
         }, sourceMessage || 'Direct Fact Extraction');
 
-
         logger.info('[DeterministicFactAgent] Successfully persisted deterministic fact', {
           userId,
           key: fact.key,
@@ -91,3 +130,4 @@ export class DeterministicFactAgent {
 }
 
 export const deterministicFactAgent = new DeterministicFactAgent();
+

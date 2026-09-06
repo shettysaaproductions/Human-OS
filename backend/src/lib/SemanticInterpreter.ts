@@ -36,6 +36,19 @@
 
 import { geminiComplete } from './gemini';
 import { logger } from './logger';
+import {
+  SemanticEvent,
+  FactAssertedEvent,
+  FactCorrectedEvent,
+  ScheduleAssertedEvent,
+  RelationshipAssertedEvent,
+  GoalAssertedEvent,
+  GoalCorrectedEvent,
+  SemanticAuthority,
+  isRelationshipKey,
+} from '../types/semanticEvent';
+import type { ValidatedTurn } from './SemanticValidator';
+
 
 // ── SemanticTurn Types ────────────────────────────────────────────────────────
 
@@ -274,7 +287,36 @@ CRITICAL RULES:
 4. "facts" = new information being shared. "corrections" = changing something previously stated.
 5. If multiple things are said (e.g. a correction AND a reminder), use intent "MIXED" and fill both arrays.
 6. If the message is pure conversation with no fact, correction, action, or question about stored info — use intent "CHAT" with empty arrays.
-7. Return ONLY the JSON object. No preamble. No explanation. No markdown.`;
+7. Return ONLY the JSON object. No preamble. No explanation. No markdown.
+
+DAY-OF-WEEK HANDLING (for reminder actions):
+- "Mon to Sat" / "mon se sat" / "Monday se Saturday" / "mom to sat" → active_days: ["monday","tuesday","wednesday","thursday","friday","saturday"]
+- "Mon" / "monday" alone → active_days: ["monday"]
+- "weekdays" → active_days: ["monday","tuesday","wednesday","thursday","friday"]
+- "weekends" → active_days: ["saturday","sunday"]
+- When a day range is detected, set them in a new field: "active_days": [<array of lowercase day names>]
+
+AMBIGUITY RULE — "mom" in Hinglish:
+"mom" is context-dependent and MUST NOT be assumed to mean Monday.
+Evaluate based on the FULL sentence meaning:
+  • "mom yaad dilao" → relationship/person context (mother). intent=MEMORY, extract as fact.
+  • "mom se baat karunga" → talking to mother. intent=CHAT.
+  • "mom to sat" → Monday to Saturday range. active_days=[monday..saturday].
+  • "mon ko gym reminder" → Monday only. active_days=[monday].
+  • "mom ko 9 baje yaad dilana" → AMBIGUOUS: cannot determine if "mom" means mother or Monday
+    without prior conversation context. Set clarification.required=true, clarification.question=
+    "Kya 'mom' se mummy (mother) matlab hai, ya Monday?". Do NOT produce a REMINDER action.
+The key signal: if the message contains a person-action verb (se baat, ko phone, ko yaad) AND
+no day-range pattern (to sat/se sat/to Sunday), interpret "mom" as mother.
+Only interpret "mom" as Monday when paired with a clear scheduling context ("to sat", "ko <time>").
+
+AMBIGUITY RULE — incomplete reminders:
+If a reminder intent is detected but the time is ambiguous or unknown:
+  → Set clarification.required=true
+  → Set completenessScore < 1.0
+  → Do NOT invent a time or default to any time
+  → Do NOT produce a REMINDER action
+A low-confidence reminder is still a real mutation. Clarify first.`;
 
 /**
  * Interprets a user message semantically using Gemini Flash.
@@ -458,4 +500,127 @@ export async function clearPendingClarification(
     .delete()
     .eq('user_id', userId)
     .eq('key', 'pending_clarification');
+}
+
+// ── toSemanticEvents — post-validation event conversion ───────────────────────
+
+/**
+ * Converts a ValidatedTurn into the canonical SemanticEvent[] stream.
+ *
+ * CONTRACT:
+ *   - Only accepts ValidatedTurn (post-SemanticValidator). Never accepts raw SemanticTurn.
+ *   - Invalid/unvalidated interpretation must never become a SemanticEvent.
+ *   - eventId is provenance only — NEVER use as idempotencyKey or logicalKey.
+ *   - Ambiguous ScheduleAsserted events must not be emitted; they should have
+ *     been caught by SemanticValidator (requiresClarification = true).
+ *
+ * @param validatedTurn - The output of SemanticValidator.validateTurn()
+ * @param userId
+ * @param sourceMessageId - The chat_history row id of the originating user message
+ * @returns SemanticEvent[] — the canonical state-authoritative representation
+ */
+export function toSemanticEvents(
+  validatedTurn: ValidatedTurn,
+  userId: string,
+  sourceMessageId: string,
+): SemanticEvent[] {
+  const events: SemanticEvent[] = [];
+  const createdAt = new Date().toISOString();
+
+  const baseFields = (authority: SemanticAuthority, confidence: number) => ({
+    eventId: crypto.randomUUID(),
+    userId,
+    sourceMessageId,
+    authority,
+    confidence,
+    createdAt,
+  });
+
+  // ── ValidatedFacts → FactAsserted or RelationshipAsserted ─────────────────
+  for (const fact of validatedTurn.facts) {
+    const base = baseFields('subconscious_inference', fact.confidence);
+
+    if (isRelationshipKey(fact.canonicalKey)) {
+      // Emit RelationshipAsserted for KG propagation
+      const relationship = fact.canonicalKey.replace(/_name$|_nickname$/, '');
+      const relEvent: RelationshipAssertedEvent = {
+        ...base,
+        family: 'RelationshipAsserted',
+        relationship,
+        relatedPersonName: fact.value,
+        canonicalKey: fact.canonicalKey,
+      };
+      events.push(relEvent);
+    } else {
+      const factEvent: FactAssertedEvent = {
+        ...base,
+        family: 'FactAsserted',
+        canonicalKey: fact.canonicalKey,
+        value: fact.value,
+      };
+      events.push(factEvent);
+    }
+  }
+
+  // ── ValidatedCorrections → FactCorrected ──────────────────────────────────
+  for (const correction of validatedTurn.corrections) {
+    const base = baseFields('explicit_user', correction.confidence);
+    const corrEvent: FactCorrectedEvent = {
+      ...base,
+      family: 'FactCorrected',
+      canonicalKey: correction.canonicalKey,
+      newValue: correction.value,
+      correctionIntent: 'replace',
+      // supersedesEventId / supersedesValue populated by CorrectionPropagator from DB
+    };
+    events.push(corrEvent);
+  }
+
+  // ── ValidatedActions → ScheduleAsserted or GoalAsserted/GoalCorrected ─────
+  for (const actionRaw of validatedTurn.actions) {
+    const action = actionRaw as any;
+    if (!action.complete) continue; // incomplete = clarification pending, no event
+
+    if (action.type === 'REMINDER') {
+      const base = baseFields('explicit_user', 1.0);
+      const schedEvent: ScheduleAssertedEvent = {
+        ...base,
+        family: 'ScheduleAsserted',
+        reminderSpec: action.data ?? {},
+      };
+      events.push(schedEvent);
+
+    } else if (action.type === 'GOAL_UPDATE') {
+      const data = (action as any).data ?? {};
+      const base = baseFields('explicit_user', 1.0);
+
+      if (data.status === 'paused' || data.status === 'abandoned' || data.status === 'resumed') {
+        const goalCorrEvent: GoalCorrectedEvent = {
+          ...base,
+          family: 'GoalCorrected',
+          goalKey: data.target_fact_key ?? data.goal_key,
+          goalDescription: data.goal_name ?? data.goal_description,
+          status: data.status as 'paused' | 'abandoned' | 'resumed',
+        };
+        events.push(goalCorrEvent);
+      } else {
+        const goalEvent: GoalAssertedEvent = {
+          ...base,
+          family: 'GoalAsserted',
+          goalDescription: data.goal_name ?? data.goal_description ?? '',
+          goalKey: data.target_fact_key ?? data.goal_key,
+        };
+        events.push(goalEvent);
+      }
+    }
+  }
+
+  logger.debug('[SemanticInterpreter][toSemanticEvents] events produced', {
+    userId,
+    sourceMessageId,
+    count: events.length,
+    families: events.map(e => e.family),
+  });
+
+  return events;
 }

@@ -770,10 +770,12 @@ chatRouter.post(
       // Runs the semantic interpretation layer.
       let validatedSemanticTurn: any = null;
       let semanticClarificationQuestion: string | null = null;
+      // Phase 10: canonical SemanticEvent[] — the ONLY state-authoritative representation
+      let semanticEvents: import('../types/semanticEvent').SemanticEvent[] = [];
 
       if (!is_proactive && primaryMessage.length > 1) {
         try {
-          const { interpretTurn, getPendingClarification, setPendingClarification } = await import('../lib/SemanticInterpreter');
+          const { interpretTurn, getPendingClarification, setPendingClarification, toSemanticEvents } = await import('../lib/SemanticInterpreter');
           const { validateTurn: validate } = await import('../lib/SemanticValidator');
           
           const pending = await getPendingClarification(userId, supabaseAdmin);
@@ -785,6 +787,10 @@ chatRouter.post(
           
           if (semanticTurn) {
             validatedSemanticTurn = validate(semanticTurn, primaryMessage);
+
+            // Phase 10: emit canonical SemanticEvent[] from validated turn only
+            // eventId = provenance identifier — NEVER use as idempotencyKey
+            semanticEvents = toSemanticEvents(validatedSemanticTurn, userId, userMessageId || turnId);
             
             logger.info('[SemanticInterpreter][PROD] Turn interpreted', {
               userId,
@@ -797,6 +803,8 @@ chatRouter.post(
               validatedCorrections: validatedSemanticTurn.corrections.length,
               validatedActions: validatedSemanticTurn.actions.length,
               requiresClarification: validatedSemanticTurn.requiresClarification,
+              semanticEventCount: semanticEvents.length,
+              semanticEventFamilies: semanticEvents.map((e: any) => e.family),
             });
 
             if (validatedSemanticTurn.requiresClarification && validatedSemanticTurn.clarificationQuestion) {
@@ -1443,6 +1451,9 @@ chatRouter.post(
         // BUG-06: Forward negated correction concepts so NovaBrainService can pass them
         // to the extract_life_threads job → LifeThreadAgent.updateThreadProvenanceForCorrection()
         negativeCorrectionConcepts: turnAnalysis.negativeCorrectionConcepts || [],
+        // Phase 10: canonical GoalCorrectedEvents replace raw TurnAnalyzer negation regex
+        // LifeThreadAgent uses these for deterministic goal suppression
+        goalCorrectedEvents: semanticEvents.filter((e: any) => e.family === 'GoalCorrected'),
         deterministicReminderCreated,
         deterministicReminderNote,
         lengthInstruction: primaryMessage.length < 20
@@ -2114,6 +2125,9 @@ HINGLISH RULES:
             hasExplicitRemember: turnAnalysis.hasExplicitRemember,
             hasCorrections: turnAnalysis.hasCorrections,
             recentContext,
+            // Phase 10: canonical SemanticEvent[] — consumers must use these instead of
+            // re-interpreting the raw message for authoritative durable state
+            semanticEvents: semanticEvents.length > 0 ? semanticEvents : undefined,
           };
           memoryQueue.add('extract_all_memories', payload).catch(err => {
             logger.error('Failed to enqueue consolidated memory extraction job', { error: err instanceof Error ? err.message : String(err) });

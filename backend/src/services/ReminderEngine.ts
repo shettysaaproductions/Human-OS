@@ -17,6 +17,93 @@ import { logger } from '../lib/logger';
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 const MONTH_NAMES = ['january','february','march','april','may','june','july','august','september','october','november','december'];
 
+/**
+ * Day name abbreviations and Hinglish variants.
+ * Used by parseDayRange() for Mon to Sat / mon se sat / Monday se Saturday patterns.
+ */
+const DAY_ALIASES: Record<string, number> = {
+  // Full names
+  sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
+  // Standard 3-letter
+  sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
+  // Hinglish "mom" for Monday (ONLY in day-range context, not as a person word)
+  mom: 1,
+};
+
+/**
+ * Expands a day index range [start..end] wrapping correctly around the week.
+ * e.g. fri (5) to mon (1) = [5, 6, 0, 1]
+ */
+function expandDayRange(start: number, end: number): string[] {
+  const result: string[] = [];
+  let i = start;
+  while (true) {
+    result.push(DAY_NAMES[i]);
+    if (i === end) break;
+    i = (i + 1) % 7;
+    if (result.length > 7) break; // safety guard
+  }
+  return result;
+}
+
+/**
+ * parseDayRange — deterministic parser for day-of-week range expressions.
+ *
+ * Handles:
+ *   "Mon to Sat"         → ['monday','tuesday','wednesday','thursday','friday','saturday']
+ *   "mon se sat"         → same (Hinglish se = to)
+ *   "Monday se Saturday" → same
+ *   "mom to sat"         → same (mom = Monday in day-range context only)
+ *   "Mon"                → ['monday'] (single day)
+ *   "weekdays"           → ['monday','tuesday','wednesday','thursday','friday']
+ *   "weekends"           → ['saturday','sunday']
+ *   "everyday" / "daily" → [] (means no restriction = every day)
+ *
+ * Returns null if the phrase cannot be parsed as a day expression.
+ * Returns [] for "every day" (no active_days restriction needed).
+ *
+ * NOTE: "mom" is ONLY treated as Monday here because this function is called
+ * exclusively when a day-range context has been established. In person/relationship
+ * context, "mom" is always "mother" — that disambiguation happens in SemanticInterpreter.
+ */
+export function parseDayRange(phrase: string): string[] | null {
+  const lower = phrase.toLowerCase().trim();
+
+  // Shorthand keywords
+  if (/\b(every\s*day|daily|everyday)\b/.test(lower)) return [];
+  if (/\b(weekdays?|working\s*days?|weekday)\b/.test(lower)) {
+    return ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+  }
+  if (/\b(weekends?)\b/.test(lower)) return ['saturday', 'sunday'];
+
+  // Range pattern: "<day> to <day>" or "<day> se <day>" (Hinglish)
+  const rangeMatch = lower.match(
+    /\b(sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|mom)\b\s+(?:to|se)\s+\b(sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|mom)\b/
+  );
+  if (rangeMatch) {
+    const startKey = rangeMatch[1].slice(0, 3); // normalize to 3-char prefix
+    const endKey   = rangeMatch[2].slice(0, 3);
+    const startIdx = DAY_ALIASES[startKey] ?? DAY_ALIASES[rangeMatch[1]];
+    const endIdx   = DAY_ALIASES[endKey]   ?? DAY_ALIASES[rangeMatch[2]];
+    if (startIdx === undefined || endIdx === undefined) return null;
+    return expandDayRange(startIdx, endIdx);
+  }
+
+  // Single day: "on Monday" / "Monday only" / "every Monday"
+  const singleMatch = lower.match(
+    /(?:\bon\b\s+)?(?:\bevery\b\s+)?\b(sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?)\b/
+  );
+  if (singleMatch) {
+    const key = singleMatch[1].slice(0, 3);
+    const idx = DAY_ALIASES[key] ?? DAY_ALIASES[singleMatch[1]];
+    if (idx === undefined) return null;
+    return [DAY_NAMES[idx]];
+  }
+
+  return null;
+}
+
+
 export interface ReminderSpec {
   title: string;
   // Time specification (one of these)

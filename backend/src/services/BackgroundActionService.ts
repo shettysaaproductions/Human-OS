@@ -123,6 +123,38 @@ export class BackgroundActionService {
         logger.warn('[BackgroundAction] Rejected action originating from assistant content', { tool: action.tool, action: action.action });
         continue;
       }
+
+      // ── Phase 10: BLOCKED_TOOLS authority guard ──────────────────────────────
+      // The following tools write canonical durable state that MUST originate
+      // from the SemanticEvent stream (via DeterministicFactAgent or CorrectionPropagator).
+      // A subconscious_action from the response LLM is NOT an authoritative source
+      // for these categories. Block them here.
+      //
+      // ALLOWED via subconscious_actions: MomentEngine (short_term), LifeEventExtractor
+      //   (agenda/routine), AgendaManager, NovaFollowupService, NovaAction, ExternalApiEngine
+      //   (webhook), WorkingMemory for non-canonical schedule keys only.
+      // BLOCKED via subconscious_actions: MemoryRepository.save (long-term semantic),
+      //   LifeThread.upsert/create (user-assertion-derived state),
+      //   ReminderEngine.schedule (reminders must come from ScheduleAssertedEvent).
+      const PHASE10_BLOCKED: Array<{ tool: string; action: string }> = [
+        { tool: 'MemoryRepository', action: 'save' },
+        { tool: 'LifeThread', action: 'upsert' },
+        { tool: 'LifeThread', action: 'create' },
+        { tool: 'ReminderEngine', action: 'schedule' },
+      ];
+      const isBlocked = PHASE10_BLOCKED.some(
+        b => b.tool === action.tool && b.action === action.action
+      );
+      if (isBlocked) {
+        logger.warn('[BackgroundAction][Phase10] BLOCKED — canonical state mutation must come from SemanticEvent stream', {
+          tool: action.tool,
+          action: action.action,
+          userId,
+          reason: 'Phase10_Authority_Guard',
+        });
+        continue;
+      }
+
       try {
         if (action.tool === 'ReminderEngine' && action.action === 'schedule') {
           const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;

@@ -147,6 +147,25 @@ export class LifeThreadAgent {
       await this.updateThreadProvenanceForCorrection(user_id, activeThreads, negatedConcepts, turnId);
     }
 
+    // ── Phase 10: GoalCorrectedEvents from canonical SemanticEvent stream ─────
+    // These are produced by toSemanticEvents() from ValidatedTurn — they carry
+    // deterministic goal key and status (paused/abandoned/resumed) without re-parsing.
+    const goalCorrectedEvents: any[] = turn_context?.goalCorrectedEvents || [];
+    if (goalCorrectedEvents.length > 0 && activeThreads && activeThreads.length > 0) {
+      for (const evt of goalCorrectedEvents) {
+        if (evt.status === 'paused' || evt.status === 'abandoned' || evt.status === 'resumed') {
+          const concept = evt.goalKey || evt.goalDescription;
+          if (concept && !negatedConcepts.includes(concept)) {
+            // Inject into negated concepts so updateThreadProvenanceForCorrection covers it
+            await this.updateThreadProvenanceForCorrection(user_id, activeThreads, [concept], turnId);
+            logger.info('[LifeThreadAgent][Phase10] Applied GoalCorrectedEvent to thread provenance', {
+              user_id, concept, status: evt.status, goalKey: evt.goalKey,
+            });
+          }
+        }
+      }
+    }
+
     // 3. Prompt LLM to analyze (with canonical identity & dedup context injected)
     const threads = activeThreads || [];
     const prompt = this.buildPrompt(threads, activeActions || [], recentChat);

@@ -144,7 +144,12 @@ export class ConsolidatedMemoryAgent extends BaseAgent {
   }
 
   protected async execute(job: Job): Promise<number> {
-    const { userId, messageId, message, questionClauses, turnId: _turnId, hasExplicitRemember, hasCorrections, recentContext } = job.payload;
+    const { userId, messageId, message, questionClauses, turnId: _turnId, hasExplicitRemember, hasCorrections, recentContext, semanticEvents } = job.payload;
+    // Phase 10: when canonical SemanticEvent[] arrived, semantic_memories for durable facts
+    // are already handled by DeterministicFactAgent via the event stream.
+    // This agent must NOT re-extract them — that would be an independent re-parse.
+    const hasCanonicalEvents = Array.isArray(semanticEvents) && semanticEvents.length > 0;
+
 
     // Privacy gate: when MEMORY_ENABLED is false, no persistent memory may be created
     // Check again at worker time for queued-job race safety
@@ -186,8 +191,22 @@ If the entire user message is a question, return empty arrays for all memory typ
       safetyInstructions += `\n- The user explicitly COMMANDED you to remember this. Prioritize the core fact they want remembered and assign high importance.`;
     }
 
-    const correctionContextBlock = hasCorrections
+    const correctionContextBlock = hasCorrections && !hasCanonicalEvents
       ? this.buildCorrectionInstruction(typeof recentContext === 'string' ? recentContext : '')
+      : '';
+
+    // Phase 10: semantic suppression block — when canonical events are present,
+    // instruct the LLM to produce EMPTY semantic_memories.
+    // The authoritative facts already flow via DeterministicFactAgent.
+    const semanticSuppressionBlock = hasCanonicalEvents
+      ? `
+
+SEMANTIC AUTHORITY SUPPRESSION (CRITICAL):
+The durable semantic facts from this turn have already been extracted and persisted by the
+authoritative SemanticInterpreter pipeline. You MUST return an empty array for "semantic_memories".
+Do NOT re-extract facts, relationships, names, corrections, or any durable user state from this message.
+Your task is ONLY to extract: episodic_memories, emotional_state, milestone, short_term.
+`
       : '';
 
     const response = await complete('MEMORY', [
@@ -195,7 +214,7 @@ If the entire user message is a question, return empty arrays for all memory typ
         role: 'system',
         content: `You are the Unified Memory Extraction Agent for HumanOS.
 Analyze the user's message and extract ALL relevant memory types in ONE structured JSON response.
-${questionSuppressionBlock}${correctionContextBlock}
+${questionSuppressionBlock}${correctionContextBlock}${semanticSuppressionBlock}
 Return ONLY a valid JSON object with these exact keys (omit empty arrays/objects if nothing to extract):
 
 {
@@ -294,7 +313,18 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     const parsed = JSON.parse(response) as ConsolidatedExtraction;
     const contextText = typeof recentContext === 'string' ? recentContext : '';
 
-    if (hasCorrections) {
+    if (hasCanonicalEvents) {
+      // Phase 10: canonical event stream is authoritative for semantic_memories.
+      // Clear any LLM-extracted semantic_memories to enforce single authority.
+      if (parsed.semantic_memories && parsed.semantic_memories.length > 0) {
+        logger.info('[ConsolidatedMemoryAgent][Phase10] Suppressed LLM semantic_memories — canonical events are authoritative', {
+          userId, messageId, suppressed: parsed.semantic_memories.length,
+        });
+        parsed.semantic_memories = [];
+      }
+      // Also clear corrections extracted by LLM — corrections come from FactCorrectedEvent only
+      parsed.working_memories = [];
+    } else if (hasCorrections) {
       const validated = selectAuthoritativeCorrections(parsed.semantic_memories, message, contextText);
       parsed.semantic_memories = validated;
       parsed.working_memories = [];
@@ -317,7 +347,7 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
       cache.set(storeCacheKey, parsed, 60 * 60 * 1000, CACHE_NS.WORKING_MEMORY);
     }
 
-    let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority, hasCorrections: !!hasCorrections, contextText });
+    let totalCreated = await this.persistExtraction(userId, messageId, message, parsed, { isExplicitAuthority, hasCorrections: !!hasCorrections && !hasCanonicalEvents, contextText });
 
     return totalCreated;
   }
