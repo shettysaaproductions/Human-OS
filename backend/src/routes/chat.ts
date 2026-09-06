@@ -766,55 +766,56 @@ chatRouter.post(
 
       logger.info('[Chat][P0-A] Turn ID assigned', { userId, turnId, userMessageId });
 
-      // ── [PHASE 0 — OBSERVATIONAL MODE] SemanticInterpreter ────────────────────
-      // Runs the new semantic interpretation layer alongside the existing path.
-      // OBSERVATIONAL ONLY: outputs are logged but NOT used for any state mutations yet.
-      // This lets us validate SemanticTurn outputs against the adversarial test suite
-      // before cutting over. Old paths are untouched.
-      //
-      // Safe migration rule: Do NOT delete or modify existing memory/reminder paths
-      // until SemanticTurn outputs are proven consistent across all turn types.
+      // ── [PHASE 1 — PRODUCTION MODE] SemanticInterpreter ────────────────────
+      // Runs the semantic interpretation layer.
+      let validatedSemanticTurn: any = null;
+      let semanticClarificationQuestion: string | null = null;
+
       if (!is_proactive && primaryMessage.length > 1) {
-        import('../lib/SemanticInterpreter').then(async ({ interpretTurn, getPendingClarification }) => {
-          // Import validator too for end-to-end observational logging
+        try {
+          const { interpretTurn, getPendingClarification, setPendingClarification } = await import('../lib/SemanticInterpreter');
           const { validateTurn: validate } = await import('../lib/SemanticValidator');
-          try {
-            const pending = await getPendingClarification(userId, supabaseAdmin);
-            const semanticTurn = await interpretTurn(
-              primaryMessage,
-              userMessageId,
-              pending ?? null,
-            );
-            if (semanticTurn) {
-              const validated = validate(semanticTurn, primaryMessage);
-              logger.info('[SemanticInterpreter][OBS] Turn interpreted', {
-                userId,
-                turnId,
-                intent: semanticTurn.intent,
-                facts: semanticTurn.facts.length,
-                corrections: semanticTurn.corrections.length,
-                actions: semanticTurn.actions.length,
-                clarificationRequired: semanticTurn.clarification.required,
-                resolvesPending: !!semanticTurn.resolvesPending,
-                confidence: semanticTurn.confidence,
-                // Validated output (what state engines WOULD act on)
-                validatedFacts: validated.facts.length,
-                validatedCorrections: validated.corrections.length,
-                validatedActions: validated.actions.length,
-                validatedClarification: validated.requiresClarification,
-                validatedClarificationQ: validated.clarificationQuestion,
-              });
-            } else {
-              logger.debug('[SemanticInterpreter][OBS] Skipped (not actionable or timeout)', { userId, turnId });
-            }
-          } catch (semErr) {
-            // OBSERVATIONAL: never block the conversational path on SemanticInterpreter failure
-            logger.warn('[SemanticInterpreter][OBS] Non-blocking error in observational mode', {
+          
+          const pending = await getPendingClarification(userId, supabaseAdmin);
+          const semanticTurn = await interpretTurn(
+            primaryMessage,
+            userMessageId,
+            pending ?? null,
+          );
+          
+          if (semanticTurn) {
+            validatedSemanticTurn = validate(semanticTurn, primaryMessage);
+            
+            logger.info('[SemanticInterpreter][PROD] Turn interpreted', {
               userId,
-              error: semErr instanceof Error ? semErr.message : String(semErr),
+              turnId,
+              intent: semanticTurn.intent,
+              facts: semanticTurn.facts.length,
+              corrections: semanticTurn.corrections.length,
+              actions: semanticTurn.actions.length,
+              validatedFacts: validatedSemanticTurn.facts.length,
+              validatedCorrections: validatedSemanticTurn.corrections.length,
+              validatedActions: validatedSemanticTurn.actions.length,
+              requiresClarification: validatedSemanticTurn.requiresClarification,
             });
+
+            if (validatedSemanticTurn.requiresClarification && validatedSemanticTurn.clarificationQuestion) {
+               semanticClarificationQuestion = validatedSemanticTurn.clarificationQuestion;
+               await setPendingClarification(userId, {
+                 turnId,
+                 type: validatedSemanticTurn.actions?.[0]?.type === 'REMINDER' ? 'REMINDER' : 'CORRECTION',
+                 originalAction: validatedSemanticTurn.actions?.[0] || validatedSemanticTurn.corrections?.[0],
+                 missingFields: validatedSemanticTurn.actions?.[0]?.missingFields || [],
+                 askedQuestion: validatedSemanticTurn.clarificationQuestion
+               }, supabaseAdmin);
+            }
           }
-        }).catch(() => {}); // import failure must never propagate
+        } catch (semErr) {
+          logger.warn('[SemanticInterpreter][PROD] Non-blocking error', {
+            userId,
+            error: semErr instanceof Error ? semErr.message : String(semErr),
+          });
+        }
       }
 
       // If the user signalled sleep/unavailability, write the DB lock IMMEDIATELY so
@@ -1240,36 +1241,53 @@ chatRouter.post(
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // Dispatch durable fact persistence immediately for deterministic facts.
-      // Correction units are NOT persisted here — ConsolidatedMemoryAgent is the
-      // single authoritative writer so malformed TurnAnalyzer target/value cannot
-      // be written independently of MEMORY LLM interpretation.
-      // Privacy gate: when MEMORY_ENABLED is false, do not queue deterministic fact persistence
-      const explicitFacts = turnAnalysis.units.filter(u => 
-        u.type === 'fact' && 
-        u.factKey && 
-        !u.factKey.startsWith('UNKNOWN_') && 
-        u.factValue
-      );
-      if (explicitFacts.length > 0 && memoryEnabledForChat) {
-        const factMap = new Map<string, { value: string, is_protected?: boolean, is_correction?: boolean, factClass?: string }>();
+      const payloadFacts: any[] = [];
+      if (validatedSemanticTurn) {
+        // Collect facts
+        for (const f of validatedSemanticTurn.facts) {
+          payloadFacts.push({
+            key: f.canonicalKey,
+            value: f.value,
+            is_protected: f.confidence >= 0.95, // heuristic
+            is_correction: false,
+            isCorrection: false,
+            factClass: 'HIGH_CONFIDENCE_DURABLE_FACT'
+          });
+        }
+        // Collect corrections
+        for (const c of validatedSemanticTurn.corrections) {
+          payloadFacts.push({
+            key: c.canonicalKey,
+            value: c.value,
+            is_protected: c.authority === 'explicit_user',
+            is_correction: c.correctionIntent,
+            isCorrection: c.correctionIntent,
+            factClass: c.authority === 'explicit_user' ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT'
+          });
+        }
+      } else {
+        // Fallback to TurnAnalyzer if SemanticInterpreter failed or didn't run
+        const explicitFacts = turnAnalysis.units.filter((u: any) => 
+          u.type === 'fact' && 
+          u.factKey && 
+          !u.factKey.startsWith('UNKNOWN_') && 
+          u.factValue
+        );
         for (const f of explicitFacts) {
           if (f.factKey && !f.factKey.startsWith('UNKNOWN_') && f.factValue) {
-            factMap.set(f.factKey, {
+            payloadFacts.push({
+              key: f.factKey,
               value: f.factValue,
               is_protected: f.isProtected || false,
               is_correction: f.type === 'correction',
+              isCorrection: f.type === 'correction',
               factClass: f.factClass || 'HIGH_CONFIDENCE_DURABLE_FACT'
             });
           }
         }
-        const payloadFacts = Array.from(factMap.entries()).map(([key, data]) => ({
-          key,
-          value: data.value,
-          is_protected: data.is_protected,
-          is_correction: data.is_correction,
-          isCorrection: data.is_correction,
-          factClass: data.factClass
-        }));
+      }
+
+      if (payloadFacts.length > 0 && memoryEnabledForChat) {
         try {
           await memoryQueue.add('extract_deterministic_fact', {
             userId,
@@ -1285,19 +1303,52 @@ chatRouter.post(
       }
 
       // ── BUG-03: Deterministic reminder persistence ─────────────────────────────
-      // If TurnAnalyzer detected an explicit reminder intent with a clear time phrase,
-      // persist the reminder synchronously BEFORE the LLM call so it is guaranteed to
-      // exist in the DB regardless of LLM subconscious_actions emission.
       let deterministicReminderCreated = false;
       let deterministicReminderNote = '';
-      const reminderIntent = turnAnalysis.reminderIntent;
-      if (reminderIntent && !reminderIntent.isAmbiguous) {
+      
+      let finalReminderSpec = null;
+      let isReminderAmbiguous = false;
+      
+      if (validatedSemanticTurn) {
+        const reminderActions = validatedSemanticTurn.actions.filter((a: any) => a.type === 'REMINDER');
+        if (reminderActions.length > 0) {
+          const action = reminderActions[0];
+          if (validatedSemanticTurn.requiresClarification) {
+            isReminderAmbiguous = true;
+          } else {
+            // Need to map SemanticAction to what ReminderEngine parse expects
+            // Actually SemanticAction data is already structured for ReminderEngine!
+            const d = action.data;
+            let timePhrase = d.time_of_day || '';
+            if (!timePhrase && d.relative_value) {
+               timePhrase = `in ${d.relative_value} ${d.relative_unit}`;
+            }
+            finalReminderSpec = {
+               text: effectiveMessage,
+               timePhrase: timePhrase,
+               rawTime: d.time_of_day || d.relative_value || '',
+               isAmbiguous: false
+            };
+            if (!finalReminderSpec.rawTime && d.event_trigger) {
+               // event triggered reminder
+               finalReminderSpec = null; // Let the fallback handle if possible, or just let LLM handle
+            }
+          }
+        }
+      } else {
+        const reminderIntent = turnAnalysis.reminderIntent;
+        if (reminderIntent && !reminderIntent.isAmbiguous) {
+          finalReminderSpec = reminderIntent;
+        } else if (reminderIntent?.isAmbiguous) {
+          isReminderAmbiguous = true;
+        }
+      }
+
+      if (finalReminderSpec) {
         try {
           const userTzHours = resolveUserTzOffsetHours(profile);
-          const spec = buildReminderSpecFromIntent(reminderIntent, userTzHours);
+          const spec = buildReminderSpecFromIntent(finalReminderSpec, userTzHours);
           if (!spec) {
-            // buildReminderSpecFromIntent found no parseable time (not a 5-min default).
-            // Treat as ambiguous: ask the user for exact time.
             deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time. Do not guess or assume a time.';
           } else {
             const engine = new ReminderEngine(userTzHours);
@@ -1307,40 +1358,43 @@ chatRouter.post(
               deterministicReminderCreated = true;
               const isAlreadyActive = scheduled.some((r: any) => r.alreadyExists);
               if (isAlreadyActive) {
-                deterministicReminderNote = `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. Inform the user naturally that it's already set (e.g. "Already laga hua hai yaar — 4 baje office se nikalne ka reminder set hai"). Do NOT claim you just created a new one.`;
+                deterministicReminderNote = `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. Inform the user naturally that it's already set.`;
               } else {
-                deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. Do NOT say you are "setting" it — it is already set. Just confirm the time casually.`;
+                deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user.`;
               }
               logger.info('[Chat][BUG-03] Deterministic reminder handled', {
-                userId,
-                reminderId: scheduled[0].id,
-                alreadyExists: isAlreadyActive,
-                trigger_at: scheduled[0].trigger_at,
-                userTzHours
+                userId, reminderId: scheduled[0].id, alreadyExists: isAlreadyActive, trigger_at: scheduled[0].trigger_at, userTzHours
               });
             }
           }
         } catch (e) {
-          logger.error('[Chat][BUG-03] Deterministic reminder failed — LLM may still create it via subconscious_actions', {
-            error: e instanceof Error ? e.message : String(e)
-          });
+          logger.error('[Chat][BUG-03] Deterministic reminder failed', { error: e instanceof Error ? e.message : String(e) });
           deterministicReminderNote = 'REMINDER_PERSISTENCE_FAILED: The reminder could not be saved right now. Do NOT confirm a reminder was set. Tell the user there was an issue and ask them to try again.';
         }
-      } else if (reminderIntent?.isAmbiguous) {
+      } else if (isReminderAmbiguous) {
         deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time.';
       }
 
       // ── Amendment 3: Deterministic negation propagation ──────────────────────
-      // Queue suppress_life_thread for ALL negated goals — both temporary pauses
-      // (isCurrent=true → state: 'waiting') and permanent drops
-      // (isCurrent=false → state: 'abandoned').
-      // BUG-NEGATION FIX: The previous code only dispatched isCurrent=false;
-      // "abhi nahi" / "hold pe rakha" (isCurrent=true) were silently dropped.
-      // This runs BEFORE the LLM call so the PAUSED THREADS note in the
-      // subsequent extract_life_threads prompt prevents re-creation.
-      const negatedGoals = turnAnalysis.negatedGoals || [];
-      if (negatedGoals.length > 0) {
-        for (const neg of negatedGoals) {
+      const negatedGoalsToSuppress = [];
+      if (validatedSemanticTurn) {
+        const goalActions = validatedSemanticTurn.actions.filter((a: any) => a.type === 'GOAL_UPDATE');
+        for (const action of goalActions) {
+          const data = action.data || {};
+          if (data.status === 'paused' || data.status === 'abandoned') {
+            negatedGoalsToSuppress.push({
+              concept: data.goal_name || data.target_fact_key || 'unknown',
+              targetFactKey: data.target_fact_key,
+              isCurrent: data.status === 'paused'
+            });
+          }
+        }
+      } else {
+        negatedGoalsToSuppress.push(...(turnAnalysis.negatedGoals || []));
+      }
+
+      if (negatedGoalsToSuppress.length > 0) {
+        for (const neg of negatedGoalsToSuppress) {
           try {
             await subconsciousQueue.add('suppress_life_thread', {
               user_id: userId,
@@ -1439,6 +1493,17 @@ chatRouter.post(
       let rawReply = '';
       if (isExcessiveRequest(effectiveMessage)) {
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
+        if (isStreaming) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.flushHeaders();
+          res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+        }
+      } else if (semanticClarificationQuestion) {
+        // Semantic clarification short-circuit
+        rawReply = semanticClarificationQuestion;
         if (isStreaming) {
           res.setHeader('Content-Type', 'text/event-stream');
           res.setHeader('Cache-Control', 'no-cache');

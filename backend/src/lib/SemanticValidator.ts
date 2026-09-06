@@ -171,6 +171,29 @@ export function isAttributionUnambiguous(
 
 // ── Canonical Validation ───────────────────────────────────────────────────────
 
+/**
+ * Check 4: Is the value reflexively naming the concept itself?
+ * 
+ * E.g. concept = "wife_name", value = "wife"
+ * "My wife's name is wife" -> rejected.
+ */
+export function isValueReflexive(concept: string, value: string): boolean {
+  const v = value.toLowerCase().trim();
+  if (!v || v.length < 2) return true;
+  
+  const genericRelations = new Set([
+    'wife', 'husband', 'son', 'daughter', 'mom', 'dad', 'mother', 'father',
+    'brother', 'sister', 'bhai', 'behen', 'didi', 'mummy', 'papa', 'friend', 'dost'
+  ]);
+  
+  if (genericRelations.has(v)) return true;
+  
+  const tokens = concept.split('_').map(t => t.toLowerCase());
+  if (tokens.includes(v)) return true;
+  
+  return false;
+}
+
 function isValueDerivedKey(canonicalKey: string, value: string): boolean {
   const key = canonicalKey.trim().toLowerCase();
   const v = value.trim().toLowerCase().replace(/\s+/g, '_');
@@ -274,6 +297,9 @@ export function validateTurn(turn: SemanticTurn, sourceMessage: string): Validat
     if (!isAttributionUnambiguous(fact.concept, fact.value, allConceptsInTurn)) {
       continue;
     }
+    if (isValueReflexive(fact.concept, fact.value)) {
+      continue;
+    }
 
     const snake = fact.concept.toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_');
     const resolution = MemorySemanticResolver.resolveProposedKey(snake);
@@ -298,6 +324,7 @@ export function validateTurn(turn: SemanticTurn, sourceMessage: string): Validat
     if (!isValueGroundedInSource(correction.new_value, sourceMessage)) continue;
     if (!isConceptRelationshipSupported(correction.concept, correction.new_value, sourceMessage, true)) continue;
     if (!isAttributionUnambiguous(correction.concept, correction.new_value, allConceptsInTurn)) continue;
+    if (isValueReflexive(correction.concept, correction.new_value)) continue;
 
     const snake = correction.concept.toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_');
     const resolution = MemorySemanticResolver.resolveProposedKey(snake);

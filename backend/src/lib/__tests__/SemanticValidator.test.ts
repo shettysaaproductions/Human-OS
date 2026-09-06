@@ -452,6 +452,40 @@ describe('Grounding — three-part definition', () => {
   });
 });
 
+// ── 6.5. Anti-reflexive Validation ────────────────────────────────────────────
+
+describe('Anti-reflexive validation', () => {
+  it('rejects reflexively named concepts like wife_name = wife', () => {
+    const source = "meri wife ka naam wife hai";
+    const turn = makeTurn({
+      intent: 'MEMORY',
+      facts: [makeFact('wife_name', 'wife')]
+    });
+    const result = validateTurn(turn, source);
+    expect(result.facts).toHaveLength(0);
+  });
+
+  it('rejects generic nouns', () => {
+    const source = "mera ek dost hai jiska naam dost hai";
+    const turn = makeTurn({
+      intent: 'MEMORY',
+      facts: [makeFact('friend_name', 'dost')]
+    });
+    const result = validateTurn(turn, source);
+    expect(result.facts).toHaveLength(0);
+  });
+
+  it('rejects correction with reflexive value', () => {
+    const source = "nahi, wife ka naam wife hai";
+    const turn = makeTurn({
+      intent: 'CORRECTION',
+      corrections: [makeCorrection('wife_name', 'wife')]
+    });
+    const result = validateTurn(turn, source);
+    expect(result.corrections).toHaveLength(0);
+  });
+});
+
 // ── 7. Clarification Scoping ───────────────────────────────────────────────────
 
 describe('Clarification scoping invariant', () => {
