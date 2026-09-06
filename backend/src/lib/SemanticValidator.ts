@@ -181,13 +181,9 @@ export function isValueReflexive(concept: string, value: string): boolean {
   const v = value.toLowerCase().trim();
   if (!v || v.length < 2) return true;
   
-  const genericRelations = new Set([
-    'wife', 'husband', 'son', 'daughter', 'mom', 'dad', 'mother', 'father',
-    'brother', 'sister', 'bhai', 'behen', 'didi', 'mummy', 'papa', 'friend', 'dost'
-  ]);
-  
-  if (genericRelations.has(v)) return true;
-  
+  // A generic semantic rule: if the value is precisely one of the tokens 
+  // that makes up the concept key (e.g., concept: "wife_name", value: "wife"),
+  // or the concept is just the value with an appended identifier like _name.
   const tokens = concept.split('_').map(t => t.toLowerCase());
   if (tokens.includes(v)) return true;
   

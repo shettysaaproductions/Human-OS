@@ -465,14 +465,25 @@ describe('Anti-reflexive validation', () => {
     expect(result.facts).toHaveLength(0);
   });
 
-  it('rejects generic nouns', () => {
-    const source = "mera ek dost hai jiska naam dost hai";
+  it('rejects legitimate generic nouns if they match concept tokens (e.g. company_name = company)', () => {
+    const source = "I work at a company called company";
     const turn = makeTurn({
       intent: 'MEMORY',
-      facts: [makeFact('friend_name', 'dost')]
+      facts: [makeFact('company_name', 'company')]
     });
     const result = validateTurn(turn, source);
     expect(result.facts).toHaveLength(0);
+  });
+
+  it('accepts legitimate names that partially resemble concepts (e.g. company_name = The Company Store)', () => {
+    const source = "I work at The Company Store";
+    const turn = makeTurn({
+      intent: 'MEMORY',
+      facts: [makeFact('company_name', 'The Company Store')]
+    });
+    const result = validateTurn(turn, source);
+    expect(result.facts).toHaveLength(1);
+    expect(result.facts[0].value).toBe('The Company Store');
   });
 
   it('rejects correction with reflexive value', () => {
