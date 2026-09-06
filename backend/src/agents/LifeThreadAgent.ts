@@ -148,18 +148,72 @@ export class LifeThreadAgent {
     }
 
     // ── Phase 10: GoalCorrectedEvents from canonical SemanticEvent stream ─────
-    // These are produced by toSemanticEvents() from ValidatedTurn — they carry
-    // deterministic goal key and status (paused/abandoned/resumed) without re-parsing.
+    // These carry a deterministic goal key and status (paused/abandoned/resumed)
+    // from toSemanticEvents(). Route each status to its explicit state transition.
+    //
+    // ── State semantics ────────────────────────────────────────────────────────
+    // paused    → thread state = 'waiting'   (user put goal on hold; still known)
+    // abandoned → thread state = 'abandoned' (terminal; user explicitly quit)
+    // resumed   → thread state = 'active'    (reactivates a waiting/paused thread)
+    //
+    // These transitions use lifeThreadRepository.createOrUpdateThread() with the
+    // correct target state rather than the negation/provenance-correction path,
+    // which has different semantics (concept supersession ≠ state transition).
     const goalCorrectedEvents: any[] = turn_context?.goalCorrectedEvents || [];
-    if (goalCorrectedEvents.length > 0 && activeThreads && activeThreads.length > 0) {
+    if (goalCorrectedEvents.length > 0) {
+      const allThreads = await lifeThreadRepository.getActiveThreads(user_id);
       for (const evt of goalCorrectedEvents) {
-        if (evt.status === 'paused' || evt.status === 'abandoned' || evt.status === 'resumed') {
-          const concept = evt.goalKey || evt.goalDescription;
-          if (concept && !negatedConcepts.includes(concept)) {
-            // Inject into negated concepts so updateThreadProvenanceForCorrection covers it
-            await this.updateThreadProvenanceForCorrection(user_id, activeThreads, [concept], turnId);
-            logger.info('[LifeThreadAgent][Phase10] Applied GoalCorrectedEvent to thread provenance', {
-              user_id, concept, status: evt.status, goalKey: evt.goalKey,
+        const goalKey = evt.goalKey;
+        const goalDesc = evt.goalDescription;
+
+        // Map GoalCorrected status → LifeThreadState
+        let targetState: 'waiting' | 'abandoned' | 'active';
+        if (evt.status === 'paused') {
+          targetState = 'waiting';
+        } else if (evt.status === 'abandoned') {
+          targetState = 'abandoned';
+        } else if (evt.status === 'resumed') {
+          targetState = 'active';
+        } else {
+          logger.warn('[LifeThreadAgent][Phase10] Unknown GoalCorrected status — skipped', {
+            user_id, status: evt.status,
+          });
+          continue;
+        }
+
+        // Find the matching thread: canonical_key match first, then description fuzzy
+        const matchingThread = allThreads.find(
+          t => (goalKey && t.canonical_key === goalKey) ||
+               (goalDesc && (t.topic ?? '').toLowerCase().includes(goalDesc.toLowerCase()))
+        );
+
+        if (matchingThread) {
+          try {
+            await lifeThreadRepository.createOrUpdateThread(
+              user_id,
+              {
+                threadId: matchingThread.id,
+                topic: matchingThread.topic,
+                state: targetState,
+                provenance: `GoalCorrected:${evt.status}:turn=${turnId ?? 'unknown'}`,
+              },
+              { isExplicitResume: evt.status === 'resumed', sourceAuthority: 'deterministic_turn_analysis', turnId }
+            );
+            logger.info('[LifeThreadAgent][Phase10] GoalCorrectedEvent state transition applied', {
+              user_id, goalKey, targetState, threadId: matchingThread.id,
+            });
+          } catch (err: any) {
+            logger.error('[LifeThreadAgent][Phase10] GoalCorrectedEvent state transition failed', {
+              user_id, goalKey, targetState, error: err?.message,
+            });
+          }
+        } else {
+          // Thread not found — fall back to negation/provenance path as best-effort
+          const concept = goalKey || goalDesc;
+          if (concept) {
+            await this.updateThreadProvenanceForCorrection(user_id, allThreads, [concept], turnId);
+            logger.info('[LifeThreadAgent][Phase10] GoalCorrectedEvent: no matching thread; applied provenance fallback', {
+              user_id, goalKey, status: evt.status,
             });
           }
         }

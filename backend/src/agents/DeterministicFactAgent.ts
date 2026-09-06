@@ -63,8 +63,7 @@ export class DeterministicFactAgent {
             logger.info('[DeterministicFactAgent][Phase10] Correction propagated fully', {
               userId,
               canonicalKey: corrEvent.canonicalKey,
-              newValue: corrEvent.newValue,
-              supersededValue: result.supersedesValue,
+              supersedesEventId: result.supersedesEventId,
             });
           }
         } catch (err) {

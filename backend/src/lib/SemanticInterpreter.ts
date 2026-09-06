@@ -524,6 +524,30 @@ export function toSemanticEvents(
   userId: string,
   sourceMessageId: string,
 ): SemanticEvent[] {
+  // ── CLARIFICATION BARRIER ─────────────────────────────────────────────────
+  // If the turn is pending clarification, the user's intent is ambiguous.
+  // No semantic events may be emitted until clarification is resolved.
+  //
+  // This is the AUTHORITATIVE gate. It takes precedence over per-action
+  // completeness checks. Even a "complete" action inside a clarification-pending
+  // turn must NOT produce an event, because the turn-level ambiguity (e.g.
+  // "mom" = mother OR Monday?) invalidates the entire interpretation.
+  //
+  // Event classes that are NEVER safe to emit from a clarification-pending turn:
+  //   FactAsserted, FactCorrected, RelationshipAsserted, ScheduleAsserted,
+  //   GoalAsserted, GoalCorrected.
+  //
+  // Resolution: once the clarification is answered, the RESOLVED turn (with
+  // requiresClarification=false) will pass through this barrier normally.
+  if (validatedTurn.requiresClarification) {
+    logger.debug('[SemanticInterpreter][toSemanticEvents] BLOCKED — turn requires clarification', {
+      userId,
+      sourceMessageId,
+      clarificationQuestion: validatedTurn.clarificationQuestion ?? null,
+    });
+    return [];
+  }
+
   const events: SemanticEvent[] = [];
   const createdAt = new Date().toISOString();
 
