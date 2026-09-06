@@ -1294,24 +1294,30 @@ chatRouter.post(
         try {
           const userTzHours = resolveUserTzOffsetHours(profile);
           const spec = buildReminderSpecFromIntent(reminderIntent, userTzHours);
-          const engine = new ReminderEngine(userTzHours);
-          const parsed = engine.parse(spec);
-          const scheduled = await engine.scheduleAll(userId, parsed);
-          if (scheduled && scheduled.length > 0) {
-            deterministicReminderCreated = true;
-            const isAlreadyActive = scheduled.some((r: any) => r.alreadyExists);
-            if (isAlreadyActive) {
-              deterministicReminderNote = `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. Inform the user naturally that it's already set (e.g. "Already laga hua hai yaar — 4 baje office se nikalne ka reminder set hai"). Do NOT claim you just created a new one.`;
-            } else {
-              deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. Do NOT say you are "setting" it — it is already set. Just confirm the time casually.`;
+          if (!spec) {
+            // buildReminderSpecFromIntent found no parseable time (not a 5-min default).
+            // Treat as ambiguous: ask the user for exact time.
+            deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time. Do not guess or assume a time.';
+          } else {
+            const engine = new ReminderEngine(userTzHours);
+            const parsed = engine.parse(spec);
+            const scheduled = await engine.scheduleAll(userId, parsed);
+            if (scheduled && scheduled.length > 0) {
+              deterministicReminderCreated = true;
+              const isAlreadyActive = scheduled.some((r: any) => r.alreadyExists);
+              if (isAlreadyActive) {
+                deterministicReminderNote = `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. Inform the user naturally that it's already set (e.g. "Already laga hua hai yaar — 4 baje office se nikalne ka reminder set hai"). Do NOT claim you just created a new one.`;
+              } else {
+                deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. Do NOT say you are "setting" it — it is already set. Just confirm the time casually.`;
+              }
+              logger.info('[Chat][BUG-03] Deterministic reminder handled', {
+                userId,
+                reminderId: scheduled[0].id,
+                alreadyExists: isAlreadyActive,
+                trigger_at: scheduled[0].trigger_at,
+                userTzHours
+              });
             }
-            logger.info('[Chat][BUG-03] Deterministic reminder handled', {
-              userId,
-              reminderId: scheduled[0].id,
-              alreadyExists: isAlreadyActive,
-              trigger_at: scheduled[0].trigger_at,
-              userTzHours
-            });
           }
         } catch (e) {
           logger.error('[Chat][BUG-03] Deterministic reminder failed — LLM may still create it via subconscious_actions', {

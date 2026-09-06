@@ -120,7 +120,7 @@ export function resolveUserTzOffsetHours(profile?: { timezone_offset?: number | 
  *   - "N baje" / "N am/pm" / "at N" / "shaam/subah/dopahar/raat" → time_of_day (24h)
  *   - "HH:MM"              → time_of_day
  */
-export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: string; rawTime: string; isAmbiguous: boolean; periodWord?: string }, userTzOffsetHours: number = 5.5): ReminderSpec {
+export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: string; rawTime: string; isAmbiguous: boolean; periodWord?: string }, userTzOffsetHours: number = 5.5): ReminderSpec | null {
   const fullText = intent.text;
   const textLower = fullText.toLowerCase();
   // Period word from TurnAnalyzer (authoritative — extracted from same regex that captured rawTime)
@@ -220,8 +220,10 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
     return { title, date: dateStr, time_of_day: timeStr, is_auto: false };
   }
 
-  // Fallback: relative 5 minutes
-  return { title, relative_value: 5, relative_unit: 'minutes', is_auto: false };
+  // No parseable time found and intent was not flagged ambiguous by TurnAnalyzer.
+  // Architecture invariant: NEVER default to a made-up time (9AM, 5min, etc.).
+  // Return null so the callsite treats this as needing clarification.
+  return null;
 }
 
 export class ReminderEngine {
