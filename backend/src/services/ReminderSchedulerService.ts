@@ -225,7 +225,7 @@ export class ReminderSchedulerService {
     const idempotencyKey = `reminder:fire:${reminder.id}`;
     const logicalKey = `reminder:fire:${reminder.id}`;
 
-    const finalStatus = await outboundDispatcherService.dispatch({
+    const dispatchResult = await outboundDispatcherService.dispatch({
       userId: reminder.user_id,
       sourceEngine: 'REMINDER' as OutboundSource,
       intentType: 'reminder',
@@ -238,9 +238,10 @@ export class ReminderSchedulerService {
       skipMinGapCheck: true,   // User-requested reminders bypass ignored-count escalation
       proposedAction: 'REMINDER',
     });
+    const finalStatus = dispatchResult.status;
 
     if (finalStatus === 'SUPPRESSED') {
-      logger.info('[Reminder] Delivery suppressed by gate (quiet hours or cooldown)', { reminderId, bypassQuietHours });
+      logger.info('[Reminder] Delivery suppressed by gate (quiet hours or cooldown)', { reminderId, bypassQuietHours, reason: dispatchResult.reason });
       // Still handle recurrence below — the reminder logic continues even if this firing is suppressed.
     } else if (finalStatus === 'FAILED_TRANSIENT') {
       logger.warn('[Reminder] Delivery failed transiently — will retry on next poll', { reminderId });
@@ -248,12 +249,12 @@ export class ReminderSchedulerService {
       // checkAndFireReminders poll retries with the same idempotencyKey.
       return;
     } else if (finalStatus === 'FAILED_TERMINAL') {
-      logger.error('[Reminder] Delivery failed terminally (e.g., account deleted)', { reminderId });
+      logger.error('[Reminder] Delivery failed terminally (e.g., account deleted)', { reminderId, reason: dispatchResult.reason });
       // Terminal — mark reminder cancelled to prevent infinite retry.
       await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', reminderId);
       return;
     } else {
-      logger.info('[Reminder] Delivered successfully', { reminderId, finalStatus });
+      logger.info('[Reminder] Delivered successfully', { reminderId, finalStatus, terminal: dispatchResult.terminal });
     }
 
     // 3. Handle recurrence or mark completed

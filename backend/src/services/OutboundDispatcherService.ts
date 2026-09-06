@@ -5,6 +5,98 @@ import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import crypto from 'crypto';
 import type { OutboundSource } from '../types/outbound';
 
+// ── Structured dispatch result ─────────────────────────────────────────────
+
+/** Terminal statuses: the intent lifecycle is complete, no retry meaningful. */
+export type DispatchStatus =
+  | 'DELIVERED'           // chat_history persisted + push sent
+  | 'DELIVERED_PARTIAL'   // chat_history persisted, push failed or skipped
+  | 'NOTIFICATION_SKIPPED' // chat_history persisted, no push token
+  | 'SUPPRESSED'          // gate blocked — intent was NOT delivered; retry-eligible
+  | 'FAILED_TRANSIENT'    // transient error — retry may succeed
+  | 'FAILED_TERMINAL';    // permanent failure — no retry
+
+/** Reason codes for SUPPRESSED status. Closed union — no | string widening. */
+export type DispatchSuppressReason =
+  | 'DUPLICATE'
+  | 'QUIET_HOURS'
+  | 'BURDEN'
+  | 'MIN_GAP'
+  | 'TOMBSTONED'
+  | 'POLICY';
+
+/** Reason codes for failure statuses. */
+export type DispatchFailureReason =
+  | 'ACCOUNT_TOMBSTONED'
+  | 'EMPTY_MESSAGE'
+  | 'UNKNOWN_STRATEGY'
+  | 'RPC_COMMIT_FAILED'
+  | 'INTENT_RACE'
+  | 'PUSH_FAILED'
+  | 'CRASH_WINDOW'
+  | 'UNHANDLED';
+
+/** Closed union of all structured reason codes. */
+export type DispatchReason = DispatchSuppressReason | DispatchFailureReason;
+
+/**
+ * Structured result from OutboundDispatcherService.dispatch().
+ *
+ * PUSH DELIVERY POLICY: AT-MOST-ONCE
+ * ─────────────────────────────────────────────────────────────────────────
+ * This dispatcher implements AT-MOST-ONCE push delivery. The sequence is:
+ *   1. Insert action_idempotency row (push guard)
+ *   2. HTTP push call
+ *
+ * If the process crashes between steps 1 and 2, the push is permanently
+ * skipped on retry (action_idempotency hit → DELIVERED_PARTIAL).
+ *
+ * This is an intentional trade-off:
+ *   ✅ chat_history is durable (RPC-committed before push)
+ *   ✅ Duplicate pushes are prevented
+ *   ✅ App-open hydration can recover the message
+ *   ❌ A push may be lost in the crash window
+ *
+ * Do NOT describe this as "guaranteed delivery". If eventual push
+ * delivery is required, redesign around a durable outbox provider.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export interface DispatchResult {
+  /** Terminal dispatch status. */
+  status: DispatchStatus;
+  /** Structured reason code. Always set for SUPPRESSED and FAILED_*. */
+  reason?: DispatchReason;
+  /** Human-readable detail for logging (not for programmatic branching). */
+  detail?: string;
+  /** The outbound_intents row ID, if an intent was created. */
+  intentId?: string;
+  /** True if a transient retry is meaningful. */
+  retryable: boolean;
+  /** True if the lifecycle is permanently complete (no retry needed). */
+  terminal: boolean;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function delivered(intentId: string): DispatchResult {
+  return { status: 'DELIVERED', intentId, retryable: false, terminal: true };
+}
+function deliveredPartial(intentId: string, detail?: string): DispatchResult {
+  return { status: 'DELIVERED_PARTIAL', intentId, detail, retryable: false, terminal: true };
+}
+function notificationSkipped(intentId: string, detail?: string): DispatchResult {
+  return { status: 'NOTIFICATION_SKIPPED', intentId, detail, retryable: false, terminal: true };
+}
+function suppressed(intentId: string | undefined, reason: DispatchSuppressReason, detail?: string): DispatchResult {
+  return { status: 'SUPPRESSED', reason, detail, intentId, retryable: true, terminal: false };
+}
+function failedTransient(intentId?: string, detail?: string): DispatchResult {
+  return { status: 'FAILED_TRANSIENT', reason: 'UNHANDLED', detail, intentId, retryable: true, terminal: false };
+}
+function failedTerminal(intentId: string | undefined, reason: DispatchFailureReason, detail?: string): DispatchResult {
+  return { status: 'FAILED_TERMINAL', reason, detail, intentId, retryable: false, terminal: true };
+}
+
 export interface OutboundIntentPayload {
   userId: string;
   sourceEngine: OutboundSource;
@@ -27,6 +119,11 @@ export interface OutboundIntentPayload {
 
 export type GenerationStrategy = (context: any) => Promise<string>;
 
+/**
+ * OutboundDispatcherService — canonical outbound lifecycle manager.
+ *
+ * PUSH DELIVERY POLICY: AT-MOST-ONCE (see DispatchResult jsdoc for full contract)
+ */
 export class OutboundDispatcherService {
   private strategies = new Map<string, GenerationStrategy>();
 
@@ -43,14 +140,14 @@ export class OutboundDispatcherService {
   /**
    * Dispatch an outbound intent following the canonical crash-safe lifecycle.
    */
-  public async dispatch(payload: OutboundIntentPayload): Promise<string> {
+  public async dispatch(payload: OutboundIntentPayload): Promise<DispatchResult> {
     const { userId, idempotencyKey, logicalKey, sourceEngine, intentType, context, generationStrategy, proposedMessage, outreachId: providedOutreachId } = payload;
-    let intentId: string;
+    let intentId: string | undefined;
 
     // ── 0. Account Deletion Check ──────────────────────────────────────────
     if (await this.isTombstoned(userId)) {
       logger.warn('[OutboundDispatcher] Aborting dispatch: Account is tombstoned', { userId, idempotencyKey });
-      return 'FAILED_TERMINAL'; // Terminal failure
+      return failedTerminal(undefined, 'ACCOUNT_TOMBSTONED', 'Account tombstoned before intent creation');
     }
 
     // ── 1. CREATE Intent ───────────────────────────────────────────────────
@@ -74,7 +171,6 @@ export class OutboundDispatcherService {
 
       if (createErr) {
         if (createErr.code === '23505') {
-          // Idempotency constraint hit. We must fetch the existing intent to resume it.
           const { data: existing } = await supabaseAdmin
             .from('outbound_intents')
             .select('id, status, outreach_id, chat_message_id')
@@ -84,15 +180,10 @@ export class OutboundDispatcherService {
 
           if (!existing) {
              logger.error('[OutboundDispatcher] Race condition fetching existing intent', { userId, idempotencyKey });
-             return 'FAILED_TERMINAL';
+             return failedTerminal(undefined, 'INTENT_RACE', 'Race condition: existing intent not found after conflict');
           }
           intentId = existing.id;
 
-          // ── FAILED_TRANSIENT retry: safe reset with gate release ──────────
-          // If the previous attempt failed transiently, we must:
-          //   1. Release any stale gate reservation so nova_outreach_log has no phantom placeholder.
-          //   2. Reset status to CREATED so this retry gets a fresh gate acquisition.
-          // The same idempotency key is preserved — guaranteeing single-message semantics.
           if (existing.status === 'FAILED_TRANSIENT') {
             logger.info('[OutboundDispatcher] Resetting FAILED_TRANSIENT intent for retry', { intentId, existingOutreachId: existing.outreach_id });
             if (existing.outreach_id) {
@@ -116,7 +207,7 @@ export class OutboundDispatcherService {
       return await this.resumeIntent(created, payload);
     } catch (e: any) {
       logger.error('[OutboundDispatcher] Failed to create intent', { error: e.message, userId, idempotencyKey });
-      return 'FAILED_TRANSIENT';
+      return failedTransient(intentId, e.message);
     }
   }
 
@@ -129,7 +220,7 @@ export class OutboundDispatcherService {
    * Resume processing an intent from its current state.
    * This method handles the state machine and retries idempotently.
    */
-  private async resumeIntent(intent: { id: string, status: string, outreach_id: string | null, chat_message_id: string | null }, payload: OutboundIntentPayload): Promise<string> {
+  private async resumeIntent(intent: { id: string, status: string, outreach_id: string | null, chat_message_id: string | null }, payload: OutboundIntentPayload): Promise<DispatchResult> {
     let currentStatus = intent.status;
     let outreachId = intent.outreach_id;
 
@@ -146,9 +237,17 @@ export class OutboundDispatcherService {
           });
 
           if (!gateRes.allowed) {
-            await this.updateStatus(intent.id, 'SUPPRESSED', { failure_reason: gateRes.blockedBy });
-            logger.info('[OutboundDispatcher] Intent suppressed by gate', { intentId: intent.id, blockedBy: gateRes.blockedBy });
-            return 'SUPPRESSED';
+            const blockedBy = gateRes.blockedBy || 'POLICY';
+            // Map gate block reason to structured DispatchSuppressReason
+            const suppressReason: DispatchSuppressReason =
+              blockedBy === 'DUPLICATE'    ? 'DUPLICATE'
+              : blockedBy === 'QUIET_HOURS' ? 'QUIET_HOURS'
+              : blockedBy === 'BURDEN'      ? 'BURDEN'
+              : blockedBy === 'MIN_GAP'     ? 'MIN_GAP'
+              : 'POLICY';
+            await this.updateStatus(intent.id, 'SUPPRESSED', { failure_reason: blockedBy });
+            logger.info('[OutboundDispatcher] Intent suppressed by gate', { intentId: intent.id, blockedBy });
+            return suppressed(intent.id, suppressReason, blockedBy);
           }
 
           outreachId = gateRes.outreachId;
@@ -171,7 +270,7 @@ export class OutboundDispatcherService {
           const strategy = this.strategies.get(payload.generationStrategy);
           if (!strategy) {
             await this.handleTerminalFailure(intent.id, outreachId, `Unknown generation strategy: ${payload.generationStrategy}`);
-            return 'FAILED_TERMINAL';
+            return failedTerminal(intent.id, 'UNKNOWN_STRATEGY', `Unknown strategy: ${payload.generationStrategy}`);
           }
           try {
             finalMessage = await strategy(payload.context);
@@ -184,7 +283,7 @@ export class OutboundDispatcherService {
         
         if (!finalMessage) {
            await this.handleTerminalFailure(intent.id, outreachId, 'Generation produced empty message');
-           return 'FAILED_TERMINAL';
+           return failedTerminal(intent.id, 'EMPTY_MESSAGE', 'Generation produced empty message');
         }
       }
 
@@ -252,7 +351,7 @@ export class OutboundDispatcherService {
       if (currentStatus === 'NOTIFICATION_ATTEMPTED') {
         if (await this.isTombstoned(payload.userId)) {
            await this.updateStatus(intent.id, 'FAILED_TERMINAL', { failure_reason: 'Account tombstoned before push' });
-           return 'FAILED_TERMINAL';
+           return failedTerminal(intent.id, 'ACCOUNT_TOMBSTONED', 'Account tombstoned before push');
         }
 
         // Fetch the push token and the exact message
@@ -268,7 +367,7 @@ export class OutboundDispatcherService {
         
         if (!profile?.push_token) {
            await this.updateStatus(intent.id, 'NOTIFICATION_SKIPPED', { failure_reason: 'No push token' });
-           return 'NOTIFICATION_SKIPPED';
+           return notificationSkipped(intent.id, 'No push token');
         }
 
         // We use the idempotency key in the action_idempotency table to prevent 
@@ -280,12 +379,14 @@ export class OutboundDispatcherService {
 
         if (idempErr) {
           if (idempErr.code === '23505') {
-            // We already attempted this push in a previous crashed run.
-            logger.info('[OutboundDispatcher] At-most-once push guard hit, skipping push', { intentId: intent.id });
-            await this.updateStatus(intent.id, 'DELIVERED_PARTIAL', { failure_reason: 'Push skipped due to previous crash' });
-            return 'DELIVERED_PARTIAL';
+            // AT-MOST-ONCE DELIVERY — crash-window behavior:
+            // The action_idempotency row was inserted in a previous attempt that crashed
+            // before the HTTP push completed. Per the AT-MOST-ONCE policy, the push
+            // is permanently skipped. chat_history is durable; app-open hydration recovers.
+            logger.info('[OutboundDispatcher] At-most-once push guard hit: previous attempt crashed in push window', { intentId: intent.id });
+            await this.updateStatus(intent.id, 'DELIVERED_PARTIAL', { failure_reason: 'Push skipped: at-most-once crash window' });
+            return deliveredPartial(intent.id, 'at-most-once crash window: push skipped, chat durable');
           }
-          // If insert fails for other reasons, we abort. The intent stays in NOTIFICATION_ATTEMPTED.
           throw idempErr;
         }
 
@@ -301,7 +402,11 @@ export class OutboundDispatcherService {
         }
       }
 
-      return currentStatus;
+      // Return structured result based on final status
+      if (currentStatus === 'DELIVERED') return delivered(intent.id);
+      if (currentStatus === 'DELIVERED_PARTIAL') return deliveredPartial(intent.id);
+      if (currentStatus === 'NOTIFICATION_SKIPPED') return notificationSkipped(intent.id);
+      return failedTransient(intent.id, `Unexpected terminal status: ${currentStatus}`);
     } catch (err: any) {
       logger.error('[OutboundDispatcher] Unhandled error during intent resume', { error: err.message, intentId: intent.id });
       throw err; // Allow job to retry if it's transient

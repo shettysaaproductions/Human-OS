@@ -29,6 +29,8 @@ import {
 } from '../types/watchtowerTiming';
 import { WatchtowerAttentionDecision } from '../types/watchtowerAttention';
 import type { OutboundSource } from '../types/outbound';
+import type { DispatchResult } from './OutboundDispatcherService';
+
 
 export interface WatchtowerHandoffRecord {
   attentionDecisionId: string;
@@ -54,13 +56,19 @@ export interface WatchtowerHandoffSummary {
   evaluatedDecisionsCount: number;
   eligibleDecisionsCount: number;
   burdenAllowedCount: number;
+  /** Incremented only when the gate actually acquired (not just burden-allowed). */
   gateAllowedCount: number;
+  /** Incremented only on DELIVERED or DELIVERED_PARTIAL outcomes. */
   dispatchedOpportunitiesCount: number;
+  /** Incremented on timing block, burden block, gate SUPPRESSED, or missing att.id. */
   blockedOpportunitiesCount: number;
+  /** Incremented on FAILED_TRANSIENT or FAILED_TERMINAL outcomes. */
+  failedOpportunitiesCount: number;
   llmCallsAdded: number;
   handoffs: WatchtowerHandoffRecord[];
   durationMs: number;
 }
+
 
 export class WatchtowerProactiveIntegrationService {
   /**
@@ -80,10 +88,12 @@ export class WatchtowerProactiveIntegrationService {
       gateAllowedCount: 0,
       dispatchedOpportunitiesCount: 0,
       blockedOpportunitiesCount: 0,
+      failedOpportunitiesCount: 0,
       llmCallsAdded: 0,
       handoffs: [],
       durationMs: 0,
     };
+
 
     if (!userId) return summary;
 
@@ -263,7 +273,7 @@ export class WatchtowerProactiveIntegrationService {
           continue;
         }
 
-        const dispatchStatus = await outboundDispatcherService.dispatch({
+        const dispatchResult: DispatchResult = await outboundDispatcherService.dispatch({
           userId,
           sourceEngine: 'WATCHTOWER' as OutboundSource,
           intentType: 'proactive',
@@ -274,9 +284,22 @@ export class WatchtowerProactiveIntegrationService {
           skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false
         });
 
-        // Mark attention decision as ACTED only after successful handoff to dispatcher
-        // This prevents permanently losing the opportunity if dispatch throws before persistence
-        if (att.id && ['GATED', 'DISPATCHING', 'PERSISTED', 'DELIVERED', 'DELIVERED_PARTIAL', 'SUPPRESSED'].includes(dispatchStatus)) {
+        // ── ACTED semantics ─────────────────────────────────────────────────
+        // ACTED = opportunity was terminally handled (chat persisted to user).
+        // SUPPRESSED = opportunity was NOT acted on; leave retry-eligible.
+        //
+        // Only DELIVERED and DELIVERED_PARTIAL result in ACTED.
+        // SUPPRESSED, FAILED_*, GATED, DISPATCHING, PERSISTED do NOT mark ACTED.
+        //
+        // SUPPRESSED invariant: different suppress reasons (QUIET_HOURS, BURDEN,
+        // DUPLICATE, MIN_GAP) are all retry-eligible. A future explicit EXHAUSTED
+        // state would be required to permanently close an opportunity.
+        const wasDelivered =
+          dispatchResult.status === 'DELIVERED' ||
+          dispatchResult.status === 'DELIVERED_PARTIAL' ||
+          dispatchResult.status === 'NOTIFICATION_SKIPPED'; // chat persisted, push skipped
+
+        if (wasDelivered && att.id) {
           await qt.track('integration_mark_acted', 'watchtower_attention_decisions', () =>
             supabaseAdmin
               .from('watchtower_attention_decisions')
@@ -288,9 +311,24 @@ export class WatchtowerProactiveIntegrationService {
           );
         }
 
-        summary.gateAllowedCount += 1;
-        summary.dispatchedOpportunitiesCount += 1;
+        // ── Counter truthfulness ─────────────────────────────────────────────
+        // gateAllowedCount: gate acquisition happened (regardless of delivery outcome)
+        // dispatchedOpportunitiesCount: only genuine delivery (chat persisted)
+        // blockedOpportunitiesCount: gate suppressed
+        // failedOpportunitiesCount: transient/terminal failures
+        summary.gateAllowedCount += 1; // gate was at least attempted/acquired
+        if (wasDelivered) {
+          summary.dispatchedOpportunitiesCount += 1;
+        } else if (dispatchResult.status === 'SUPPRESSED') {
+          summary.blockedOpportunitiesCount += 1;
+        } else if (
+          dispatchResult.status === 'FAILED_TRANSIENT' ||
+          dispatchResult.status === 'FAILED_TERMINAL'
+        ) {
+          summary.failedOpportunitiesCount += 1;
+        }
 
+        const handoffDispatched = wasDelivered;
         summary.handoffs.push({
           attentionDecisionId: att.id || 'att_unknown',
           timingDecisionId: timingDecision.id || null,
@@ -302,17 +340,20 @@ export class WatchtowerProactiveIntegrationService {
           outreachEligibility: timingDecision.outreachEligibility,
           burdenDecision: 'ALLOW',
           gateAllowed: true,
-          outreachId: 'dispatched',
-          dispatched: true,
+          outreachId: dispatchResult.intentId || 'dispatched',
+          dispatched: handoffDispatched,
           logicalKey,
           timestamp: new Date().toISOString(),
         });
 
-        logger.info('[WatchtowerProactiveIntegration] Cleared proactive handoff opportunity', {
+        logger.info('[WatchtowerProactiveIntegration] Dispatch outcome', {
           userId,
           targetType: att.targetType,
           logicalKey,
-          outreachId: 'dispatched',
+          status: dispatchResult.status,
+          reason: dispatchResult.reason,
+          terminal: dispatchResult.terminal,
+          acted: wasDelivered,
         });
       }
 

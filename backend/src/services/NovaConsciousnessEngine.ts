@@ -809,7 +809,7 @@ ${sessionStartContextNote}`;
       // idempotencyKey is derived from logicalKey — a stable, caller-supplied durable identity.
       // Do NOT use crypto.randomUUID() here: a retry or restart would produce a different key
       // and break idempotency guarantees.
-      const finalStatus = await outboundDispatcherService.dispatch({
+      const dispatchResult = await outboundDispatcherService.dispatch({
         userId,
         sourceEngine: 'NACE' as OutboundSource,
         intentType,
@@ -820,8 +820,9 @@ ${sessionStartContextNote}`;
         proposedMessage: message,
         skipQuietHoursCheck: true // NACE already checked
       });
+      const finalStatus = dispatchResult.status;
 
-      if (['DELIVERED', 'DELIVERED_PARTIAL', 'NOTIFICATION_SKIPPED', 'PERSISTED', 'NOTIFICATION_ATTEMPTED'].includes(finalStatus)) {
+      if (dispatchResult.terminal && dispatchResult.status !== 'FAILED_TERMINAL') {
         if (_result) _result.dispatched += 1;
         logger.info('[NACE] ✅ Proactive message processed by dispatcher', {
           userId, messagePreview: message.substring(0, 60),
@@ -830,7 +831,7 @@ ${sessionStartContextNote}`;
         });
       } else {
         if (_result) _result.suppressed += 1;
-        logger.info('[NACE] 🚫 Intent blocked or failed in dispatcher', { userId, finalStatus });
+        logger.info('[NACE] 🚫 Intent blocked or failed in dispatcher', { userId, finalStatus, reason: dispatchResult.reason });
       }
     } catch (e) {
       logger.warn('[NACE] Tier 2 generation or send failed', { error: e instanceof Error ? e.message : String(e) });

@@ -412,7 +412,7 @@ export class NovaFollowupService {
       }
 
       try {
-        const finalStatus = await outboundDispatcherService.dispatch({
+        const dispatchResult = await outboundDispatcherService.dispatch({
           userId: followup.user_id,
           sourceEngine: 'FOLLOWUP' as OutboundSource,
           intentType: 'followup',
@@ -423,11 +423,12 @@ export class NovaFollowupService {
           proposedMessage: followup.message,
           skipQuietHoursCheck: true // Already checked above
         });
+        const finalStatus = dispatchResult.status;
 
         if (finalStatus === 'SUPPRESSED') {
           // Gate blocked it (e.g. burden or duplicate logical key)
           // Since quiet hours were already checked, it's blocked by duplicate logic
-          logger.info('[NovaFollowup] Cancelled follow-up: gate blocked (duplicate or burden)', { id: followup.id });
+          logger.info('[NovaFollowup] Cancelled follow-up: gate blocked (duplicate or burden)', { id: followup.id, reason: dispatchResult.reason });
           await supabaseAdmin.from('nova_followups').update({ status: 'cancelled' }).eq('id', followup.id);
           return;
         }
@@ -437,7 +438,7 @@ export class NovaFollowupService {
         }
 
         logger.info('[NovaFollowup] ✅ Proactive follow-up processed by dispatcher', {
-          id: followup.id, finalStatus
+          id: followup.id, finalStatus, terminal: dispatchResult.terminal
         });
       } catch (err) {
         // Delivery failed — revert the claim so the next poll retries
