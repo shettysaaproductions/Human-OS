@@ -1265,27 +1265,9 @@ chatRouter.post(
             factClass: c.authority === 'explicit_user' ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT'
           });
         }
-      } else {
-        // Fallback to TurnAnalyzer if SemanticInterpreter failed or didn't run
-        const explicitFacts = turnAnalysis.units.filter((u: any) => 
-          u.type === 'fact' && 
-          u.factKey && 
-          !u.factKey.startsWith('UNKNOWN_') && 
-          u.factValue
-        );
-        for (const f of explicitFacts) {
-          if (f.factKey && !f.factKey.startsWith('UNKNOWN_') && f.factValue) {
-            payloadFacts.push({
-              key: f.factKey,
-              value: f.factValue,
-              is_protected: f.isProtected || false,
-              is_correction: f.type === 'correction',
-              isCorrection: f.type === 'correction',
-              factClass: f.factClass || 'HIGH_CONFIDENCE_DURABLE_FACT'
-            });
-          }
-        }
       }
+      // REMOVED: TurnAnalyzer fallback for payloadFacts.
+      // If SemanticInterpreter fails, we fail closed for mutation.
 
       if (payloadFacts.length > 0 && memoryEnabledForChat) {
         try {
@@ -1305,46 +1287,38 @@ chatRouter.post(
       // ── BUG-03: Deterministic reminder persistence ─────────────────────────────
       let deterministicReminderCreated = false;
       let deterministicReminderNote = '';
-      
-      let finalReminderSpec = null;
       let isReminderAmbiguous = false;
+      
+      const reminderSpecsToProcess: any[] = [];
       
       if (validatedSemanticTurn) {
         const reminderActions = validatedSemanticTurn.actions.filter((a: any) => a.type === 'REMINDER');
-        if (reminderActions.length > 0) {
-          const action = reminderActions[0];
+        for (const action of reminderActions) {
           if (validatedSemanticTurn.requiresClarification) {
             isReminderAmbiguous = true;
           } else {
-            // Need to map SemanticAction to what ReminderEngine parse expects
-            // Actually SemanticAction data is already structured for ReminderEngine!
             const d = action.data;
             let timePhrase = d.time_of_day || '';
             if (!timePhrase && d.relative_value) {
                timePhrase = `in ${d.relative_value} ${d.relative_unit}`;
             }
-            finalReminderSpec = {
+            const spec = {
                text: effectiveMessage,
                timePhrase: timePhrase,
                rawTime: d.time_of_day || d.relative_value || '',
                isAmbiguous: false
             };
-            if (!finalReminderSpec.rawTime && d.event_trigger) {
-               // event triggered reminder
-               finalReminderSpec = null; // Let the fallback handle if possible, or just let LLM handle
+            if (!spec.rawTime && d.event_trigger) {
+               // event triggered reminder, skip deterministic engine
+               continue;
             }
+            reminderSpecsToProcess.push(spec);
           }
         }
-      } else {
-        const reminderIntent = turnAnalysis.reminderIntent;
-        if (reminderIntent && !reminderIntent.isAmbiguous) {
-          finalReminderSpec = reminderIntent;
-        } else if (reminderIntent?.isAmbiguous) {
-          isReminderAmbiguous = true;
-        }
       }
+      // REMOVED: TurnAnalyzer fallback for reminderIntent.
 
-      if (finalReminderSpec) {
+      for (const finalReminderSpec of reminderSpecsToProcess) {
         try {
           const userTzHours = resolveUserTzOffsetHours(profile);
           const spec = buildReminderSpecFromIntent(finalReminderSpec, userTzHours);
@@ -1358,9 +1332,9 @@ chatRouter.post(
               deterministicReminderCreated = true;
               const isAlreadyActive = scheduled.some((r: any) => r.alreadyExists);
               if (isAlreadyActive) {
-                deterministicReminderNote = `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. Inform the user naturally that it's already set.`;
+                deterministicReminderNote += `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. `;
               } else {
-                deterministicReminderNote = `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user.`;
+                deterministicReminderNote += `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. `;
               }
               logger.info('[Chat][BUG-03] Deterministic reminder handled', {
                 userId, reminderId: scheduled[0].id, alreadyExists: isAlreadyActive, trigger_at: scheduled[0].trigger_at, userTzHours
@@ -1369,9 +1343,11 @@ chatRouter.post(
           }
         } catch (e) {
           logger.error('[Chat][BUG-03] Deterministic reminder failed', { error: e instanceof Error ? e.message : String(e) });
-          deterministicReminderNote = 'REMINDER_PERSISTENCE_FAILED: The reminder could not be saved right now. Do NOT confirm a reminder was set. Tell the user there was an issue and ask them to try again.';
+          deterministicReminderNote += 'REMINDER_PERSISTENCE_FAILED: The reminder could not be saved right now. Do NOT confirm a reminder was set. ';
         }
-      } else if (isReminderAmbiguous) {
+      }
+      
+      if (isReminderAmbiguous && reminderSpecsToProcess.length === 0) {
         deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time.';
       }
 
@@ -1389,9 +1365,8 @@ chatRouter.post(
             });
           }
         }
-      } else {
-        negatedGoalsToSuppress.push(...(turnAnalysis.negatedGoals || []));
       }
+      // REMOVED: TurnAnalyzer fallback for negated goals.
 
       if (negatedGoalsToSuppress.length > 0) {
         for (const neg of negatedGoalsToSuppress) {
