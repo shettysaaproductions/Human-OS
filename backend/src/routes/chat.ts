@@ -765,6 +765,57 @@ chatRouter.post(
 
       logger.info('[Chat][P0-A] Turn ID assigned', { userId, turnId, userMessageId });
 
+      // ── [PHASE 0 — OBSERVATIONAL MODE] SemanticInterpreter ────────────────────
+      // Runs the new semantic interpretation layer alongside the existing path.
+      // OBSERVATIONAL ONLY: outputs are logged but NOT used for any state mutations yet.
+      // This lets us validate SemanticTurn outputs against the adversarial test suite
+      // before cutting over. Old paths are untouched.
+      //
+      // Safe migration rule: Do NOT delete or modify existing memory/reminder paths
+      // until SemanticTurn outputs are proven consistent across all turn types.
+      if (!is_proactive && primaryMessage.length > 1) {
+        import('../lib/SemanticInterpreter').then(async ({ interpretTurn, getPendingClarification }) => {
+          // Import validator too for end-to-end observational logging
+          const { validateTurn: validate } = await import('../lib/SemanticValidator');
+          try {
+            const pending = await getPendingClarification(userId, supabaseAdmin);
+            const semanticTurn = await interpretTurn(
+              primaryMessage,
+              userMessageId,
+              pending ?? null,
+            );
+            if (semanticTurn) {
+              const validated = validate(semanticTurn, primaryMessage);
+              logger.info('[SemanticInterpreter][OBS] Turn interpreted', {
+                userId,
+                turnId,
+                intent: semanticTurn.intent,
+                facts: semanticTurn.facts.length,
+                corrections: semanticTurn.corrections.length,
+                actions: semanticTurn.actions.length,
+                clarificationRequired: semanticTurn.clarification.required,
+                resolvesPending: !!semanticTurn.resolvesPending,
+                confidence: semanticTurn.confidence,
+                // Validated output (what state engines WOULD act on)
+                validatedFacts: validated.facts.length,
+                validatedCorrections: validated.corrections.length,
+                validatedActions: validated.actions.length,
+                validatedClarification: validated.requiresClarification,
+                validatedClarificationQ: validated.clarificationQuestion,
+              });
+            } else {
+              logger.debug('[SemanticInterpreter][OBS] Skipped (not actionable or timeout)', { userId, turnId });
+            }
+          } catch (semErr) {
+            // OBSERVATIONAL: never block the conversational path on SemanticInterpreter failure
+            logger.warn('[SemanticInterpreter][OBS] Non-blocking error in observational mode', {
+              userId,
+              error: semErr instanceof Error ? semErr.message : String(semErr),
+            });
+          }
+        }).catch(() => {}); // import failure must never propagate
+      }
+
       // If the user signalled sleep/unavailability, write the DB lock IMMEDIATELY so
       // NACE + follow-up engines stay silent — don't wait for the reactive sleep-guard.
       // Otherwise cancel any pending follow-ups since the user replied.
