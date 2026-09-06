@@ -20,6 +20,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { proactiveGate } from './ProactiveGate';
 import { outboundDispatcherService } from './OutboundDispatcherService';
+import type { OutboundSource } from '../types/outbound';
 
 // NOTE: Global proactive cooldown is now enforced by ProactiveGate (DB-backed).
 // lastProactiveSentAt and GLOBAL_PROACTIVE_COOLDOWN_MS removed — they reset on server restart.
@@ -370,7 +371,7 @@ export class NovaFollowupService {
       try {
         const finalStatus = await outboundDispatcherService.dispatch({
           userId: followup.user_id,
-          sourceEngine: 'Followup',
+          sourceEngine: 'FOLLOWUP' as OutboundSource,
           intentType: 'followup',
           logicalKey: `followup:fired:${followup.id}`,
           idempotencyKey: `followup:${followup.id}`,
@@ -483,128 +484,130 @@ export class NovaFollowupService {
           continue;
         }
 
-        // Determine how serious/deep this message is
-        const content = (userMsg.content || '').toLowerCase();
-        const ageMinutes = (Date.now() - new Date(userMsg.created_at).getTime()) / 60000;
-
-        // Serious signals → follow up very quickly (2 min)
-        const SERIOUS_SIGNALS = [
-          'stressed', 'stressed out', 'tension', 'fight', 'breakup', 'anxiety', 'anxious',
-          'depressed', 'crying', 'cried', 'dukhi', 'pareshan', 'takleef', 'bura lag raha',
-          'help', 'kya karu', 'samajh nahi', 'confused', 'scared', 'dar lag raha', 'nervous',
-          'accident', 'emergency', 'urgent', 'important', 'bata', 'sunlo', 'sunna',
-          'miss you', 'miss kar raha', 'miss kar rahi', 'alone', 'akela', 'akeli',
-          'rona aa raha', 'bahut bura', 'bahut pareshan', 'kuch hua', 'problem'
-        ];
-        const isSerious = SERIOUS_SIGNALS.some(s => content.includes(s));
-        
-        // Personal/emotional but not critical → follow up in ~5 min
-        const PERSONAL_SIGNALS = [
-          'kaise ho', 'theek ho', 'baat karo', 'suno yaar', 'ek baat', 'batao', 'kya lagta',
-          'kya sochte', 'opinion', 'feel', 'feeling', 'mood', 'pyaar', 'love', 'crush',
-          'relationship', 'job', 'college', 'exam', 'result', 'interview'
-        ];
-        const isPersonal = PERSONAL_SIGNALS.some(s => content.includes(s));
-
-        // Determine the cutoff based on seriousness:
-        // CRITICAL FIX: Old values (1/2/3 min) were firing BEFORE the LLM (30s timeout)
-        // had time to respond, creating a cascade: Nova times out → stuck detector fires
-        // immediately → queues fallback → user sees "Busy lag raha hai" instead of a reply.
-        // New values give the LLM + async pipeline enough time to complete.
-        const cutoffMinutes = isSerious ? 2 : isPersonal ? 3 : 5;
-
-        // Not old enough yet — skip for now
-        if (ageMinutes < cutoffMinutes) continue;
-
-        const { data: newerMsgs } = await supabaseAdmin
-          .from('chat_history')
-          .select('id, role, content')
-          .eq('conversation_id', convId)
-          .eq('role', 'assistant')  // BUG-05 fix: must be an assistant reply, not just any message
-          .gt('created_at', userMsg.created_at)
-          .limit(1);
-
-        if (newerMsgs && newerMsgs.length > 0) {
-          if (newerMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
-            logger.info('[NovaFollowup] Found fallback reply, treating conversation as stuck', { convId });
-          } else {
-            // Nova replied with a real message after this user message. Not stuck.
-            // BUG-05: Release the gate reservation so this valid reply doesn't pollute ignoredCount
-            await proactiveGate.release(unanswGateDecision.outreachId);
-            continue;
-          }
-        }
-
-
-        // Add additional check: was ANY assistant message sent in the last 2 minutes?
-        // This handles cases where conversationId rotated or time filtering is slightly off
-        const { data: recentAssistantMsgs } = await supabaseAdmin
-          .from('chat_history')
-          .select('id, content')
-          .eq('user_id', userMsg.user_id)
-          .eq('role', 'assistant')
-          .gte('created_at', new Date(Date.now() - 90 * 1000).toISOString()) // 90s guard (was 2 min)
-          .limit(1);
-
-        if (recentAssistantMsgs && recentAssistantMsgs.length > 0) {
-           if (recentAssistantMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
-             // Fallback doesn't count as a real reply
-           } else {
-             continue; // Real reply already sent recently
-           }
-        }
-
-        // It is stuck! Check if a follow-up is already queued (fire_at in the future)
-        // OR recently sent (cooldown). The "queued with a future fire_at" check is what
-        // prevents the re-queue loop: this poll runs every 10s, but a queued follow-up's
-        // fire_at is ~15 min out — the old 5-minute created_at window expired before it
-        // fired, so every poll cancelled it and queued a NEW one (+15 min each time),
-        // postponing delivery to ~75 min and churning DB rows.
-        const nowIso = new Date().toISOString();
-        const fiveMinAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        const [pendingFuture, recentSent] = await Promise.all([
-          supabaseAdmin
-            .from('nova_followups')
-            .select('id')
-            .eq('user_id', userMsg.user_id)
-            .eq('status', 'pending')
-            .gt('fire_at', nowIso)
-            .limit(1),
-          supabaseAdmin
-            .from('nova_followups')
-            .select('id')
-            .eq('user_id', userMsg.user_id)
-            .eq('status', 'sent')
-            .gte('created_at', fiveMinAgoIso)
-            .limit(1),
-        ]);
-
-        if ((pendingFuture.data && pendingFuture.data.length > 0) ||
-            (recentSent.data && recentSent.data.length > 0)) {
-          continue; // A follow-up is already scheduled to fire, or one was just sent
-        }
-
-        // Schedule a follow-up right now using an LLM-generated context-aware message
-        logger.info('[NovaFollowup] Detected stuck conversation, scheduling double-text', { userId: userMsg.user_id, convId });
-        
-        // Generate a context-aware follow-up rather than a generic hard-coded one
-        // FALLBACK: Use a neutral "I missed your message" tone — NOT "busy lag raha hai"
-        // because saying the user is busy when Nova is the one who didn't reply is wrong.
-        let doubleTextMsg = "Arre yaar, lagta hai mera message pehunch nahi gaya — phir se baat karte hain!";
         try {
-          const { novaBrain } = await import('./NovaBrainService');
-          const lastContent = userMsg.content?.substring(0, 200) || '';
-          const generated = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a short casual Hinglish reply directly answering their message. Make it sound natural, as if you just got a chance to respond. Do NOT say the user is busy or apologize heavily, just answer them.`
-          );
-          if (generated?.message && generated.message.length < 200) {
-            doubleTextMsg = generated.message;
+          // Determine how serious/deep this message is
+          const content = (userMsg.content || '').toLowerCase();
+          const ageMinutes = (Date.now() - new Date(userMsg.created_at).getTime()) / 60000;
+
+          // Serious signals → follow up very quickly (2 min)
+          const SERIOUS_SIGNALS = [
+            'stressed', 'stressed out', 'tension', 'fight', 'breakup', 'anxiety', 'anxious',
+            'depressed', 'crying', 'cried', 'dukhi', 'pareshan', 'takleef', 'bura lag raha',
+            'help', 'kya karu', 'samajh nahi', 'confused', 'scared', 'dar lag raha', 'nervous',
+            'accident', 'emergency', 'urgent', 'important', 'bata', 'sunlo', 'sunna',
+            'miss you', 'miss kar raha', 'miss kar rahi', 'alone', 'akela', 'akeli',
+            'rona aa raha', 'bahut bura', 'bahut pareshan', 'kuch hua', 'problem'
+          ];
+          const isSerious = SERIOUS_SIGNALS.some(s => content.includes(s));
+          
+          // Personal/emotional but not critical → follow up in ~5 min
+          const PERSONAL_SIGNALS = [
+            'kaise ho', 'theek ho', 'baat karo', 'suno yaar', 'ek baat', 'batao', 'kya lagta',
+            'kya sochte', 'opinion', 'feel', 'feeling', 'mood', 'pyaar', 'love', 'crush',
+            'relationship', 'job', 'college', 'exam', 'result', 'interview'
+          ];
+          const isPersonal = PERSONAL_SIGNALS.some(s => content.includes(s));
+
+          // Determine the cutoff based on seriousness:
+          // CRITICAL FIX: Old values (1/2/3 min) were firing BEFORE the LLM (30s timeout)
+          // had time to respond, creating a cascade: Nova times out → stuck detector fires
+          // immediately → queues fallback → user sees "Busy lag raha hai" instead of a reply.
+          // New values give the LLM + async pipeline enough time to complete.
+          const cutoffMinutes = isSerious ? 2 : isPersonal ? 3 : 5;
+
+          // Not old enough yet — skip for now
+          if (ageMinutes < cutoffMinutes) continue;
+
+          const { data: newerMsgs } = await supabaseAdmin
+            .from('chat_history')
+            .select('id, role, content')
+            .eq('conversation_id', convId)
+            .eq('role', 'assistant')  // BUG-05 fix: must be an assistant reply, not just any message
+            .gt('created_at', userMsg.created_at)
+            .limit(1);
+
+          if (newerMsgs && newerMsgs.length > 0) {
+            if (newerMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
+              logger.info('[NovaFollowup] Found fallback reply, treating conversation as stuck', { convId });
+            } else {
+              // Nova replied with a real message after this user message. Not stuck.
+              continue;
+            }
           }
-        } catch (e) {
-          logger.warn('[NovaFollowup] LLM double-text generation failed, using fallback', { error: e instanceof Error ? e.message : String(e) });
+
+
+          // Add additional check: was ANY assistant message sent in the last 2 minutes?
+          // This handles cases where conversationId rotated or time filtering is slightly off
+          const { data: recentAssistantMsgs } = await supabaseAdmin
+            .from('chat_history')
+            .select('id, content')
+            .eq('user_id', userMsg.user_id)
+            .eq('role', 'assistant')
+            .gte('created_at', new Date(Date.now() - 90 * 1000).toISOString()) // 90s guard (was 2 min)
+            .limit(1);
+
+          if (recentAssistantMsgs && recentAssistantMsgs.length > 0) {
+             if (recentAssistantMsgs[0].content === 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.') {
+               // Fallback doesn't count as a real reply
+             } else {
+               continue; // Real reply already sent recently
+             }
+          }
+
+          // It is stuck! Check if a follow-up is already queued (fire_at in the future)
+          // OR recently sent (cooldown). The "queued with a future fire_at" check is what
+          // prevents the re-queue loop: this poll runs every 10s, but a queued follow-up's
+          // fire_at is ~15 min out — the old 5-minute created_at window expired before it
+          // fired, so every poll cancelled it and queued a NEW one (+15 min each time),
+          // postponing delivery to ~75 min and churning DB rows.
+          const nowIso = new Date().toISOString();
+          const fiveMinAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          const [pendingFuture, recentSent] = await Promise.all([
+            supabaseAdmin
+              .from('nova_followups')
+              .select('id')
+              .eq('user_id', userMsg.user_id)
+              .eq('status', 'pending')
+              .gt('fire_at', nowIso)
+              .limit(1),
+            supabaseAdmin
+              .from('nova_followups')
+              .select('id')
+              .eq('user_id', userMsg.user_id)
+              .eq('status', 'sent')
+              .gte('created_at', fiveMinAgoIso)
+              .limit(1),
+          ]);
+
+          if ((pendingFuture.data && pendingFuture.data.length > 0) ||
+              (recentSent.data && recentSent.data.length > 0)) {
+            continue; // A follow-up is already scheduled to fire, or one was just sent
+          }
+
+          // Schedule a follow-up right now using an LLM-generated context-aware message
+          logger.info('[NovaFollowup] Detected stuck conversation, scheduling double-text', { userId: userMsg.user_id, convId });
+          
+          // Generate a context-aware follow-up rather than a generic hard-coded one
+          // FALLBACK: Use a neutral "I missed your message" tone — NOT "busy lag raha hai"
+          // because saying the user is busy when Nova is the one who didn't reply is wrong.
+          let doubleTextMsg = "Arre yaar, lagta hai mera message pehunch nahi gaya — phir se baat karte hain!";
+          try {
+            const { novaBrain } = await import('./NovaBrainService');
+            const lastContent = userMsg.content?.substring(0, 200) || '';
+            const generated = await novaBrain.evaluateConsciousnessTier2(
+              `Name: yaar\nSituation: User sent this message ${Math.round((Date.now() - new Date(userMsg.created_at).getTime()) / 60000)} minutes ago but got no reply yet: "${lastContent}"\nGenerate a short casual Hinglish reply directly answering their message. Make it sound natural, as if you just got a chance to respond. Do NOT say the user is busy or apologize heavily, just answer them.`
+            );
+            if (generated?.message && generated.message.length < 200) {
+              doubleTextMsg = generated.message;
+            }
+          } catch (e) {
+            logger.warn('[NovaFollowup] LLM double-text generation failed, using fallback', { error: e instanceof Error ? e.message : String(e) });
+          }
+          
+          await this.queueFollowup(userMsg.user_id, convId, doubleTextMsg, 0); // fire immediately
+        } finally {
+          await proactiveGate.release(unanswGateDecision.outreachId);
         }
-        
-        await this.queueFollowup(userMsg.user_id, convId, doubleTextMsg, 0); // fire immediately
       }
 
     } catch (err) {
@@ -695,178 +698,178 @@ export class NovaFollowupService {
         // Reserve outreachId — will release if generation fails
         const ignoredOutreachId = ignoredGateDecision.outreachId;
 
-        // ── ANTI-CHAINING GUARD: Don't follow up on our own follow-ups ──────────────
-        if (await this._hasUnansweredFollowup(userId)) {
-          logger.info('[NovaFollowup] Unanswered follow-up already exists — not chaining', { userId });
-          continue;
-        }
+        try {
 
-        // Skip if user replied after Nova's message
-        const { data: userReply } = await supabaseAdmin
-          .from('chat_history')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('role', 'user')
-          .gt('created_at', novaMsg.created_at)
-          .limit(1);
-        if (userReply && userReply.length > 0) {
-          await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
-          await proactiveGate.release(ignoredOutreachId); // release — not spam, user replied
-          continue;
-        }
-
-        // Skip if Nova already sent another message after this one (within last 2h)
-        const { data: newerNova } = await supabaseAdmin
-          .from('chat_history')
-          .select('id, created_at')
-          .eq('user_id', userId)
-          .eq('role', 'assistant')
-          .gt('created_at', novaMsg.created_at)
-          .order('created_at', { ascending: false })
-          .limit(1);
-        if (newerNova && newerNova.length > 0) {
-          const novaAgeMin = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 60000;
-          if (novaAgeMin < 120) continue;
-        }
-
-        // ── SEEN vs UNSEEN classification ──────────────────────────────────────
-        const { data: presence } = await supabaseAdmin
-          .from('user_presence')
-          .select('status, updated_at')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        const presenceAt = presence?.updated_at ? new Date(presence.updated_at).getTime() : 0;
-        const isOnline = presence?.status === 'online' || presence?.status === 'typing';
-        const activelyInApp = isOnline && Date.now() - presenceAt < SEEN_RECENCY_MS;
-
-        // Skip if Nova's last message was marked BUSY
-        if (novaMsg.meta?.situationBrief?.includes('USER AVAILABILITY: User signalled they are BUSY')) {
-          continue;
-        }
-
-        // Suppression lock check (sleep/busy/24h give-space)
-        const { data: suppression } = await supabaseAdmin
-          .from('working_memory')
-          .select('value')
-          .eq('user_id', userId)
-          .eq('key', 'followup_suppressed_until')
-          .maybeSingle();
-        if (suppression?.value && Date.now() < new Date(suppression.value).getTime()) {
-          continue;
-        }
-
-        // Skip if a follow-up is already pending within 2h
-        const { data: recentPending } = await supabaseAdmin
-          .from('nova_followups')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('status', 'pending')
-          .gte('created_at', new Date(Date.now() - 120 * 60 * 1000).toISOString())
-          .limit(1);
-        if (recentPending && recentPending.length > 0) continue;
-
-        const ageMinutes = (Date.now() - new Date(novaMsg.created_at).getTime()) / 60000;
-
-        // ── SEEN: user is actively in-app → escalating nudges, then give space ──
-        // User is ONLINE — Nova must keep the conversation going!
-        // Escalation: nudge 1 (warm), nudge 2 (different angle), nudge 3 → give space
-        if (activelyInApp) {
-          const { data: escData } = await supabaseAdmin.from('working_memory').select('value').eq('user_id', userId).eq('key', 'ignore_escalation_count').maybeSingle();
-          const escalation = parseInt(escData?.value || '0', 10) + 1;
-          await supabaseAdmin.from('working_memory').upsert({ user_id: userId, key: 'ignore_escalation_count', value: String(escalation), expires_at: new Date(Date.now() + 2 * 3600e3).toISOString() }, { onConflict: 'user_id,key' });
-
-          // Hard cap: after 3 online nudges with no reply, give space (don't harass)
-          if (escalation > 3) {
-            await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
-            await this._writeSuppression(userId, 1); // 1h cooldown, not 24h
-            logger.info('[NovaFollowup] Online escalation cap — brief cooldown', { userId, escalation });
+          // ── ANTI-CHAINING GUARD: Don't follow up on our own follow-ups ──────────────
+          if (await this._hasUnansweredFollowup(userId)) {
+            logger.info('[NovaFollowup] Unanswered follow-up already exists — not chaining', { userId });
             continue;
           }
 
-          const escalationPrompts: Record<number, string> = {
-            1: `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied. Send ONE short, warm nudge. Vary the angle — don't just say "busy ho?". E.g., try teasing them, sharing a thought, or asking one specific thing.`,
-            2: `Your first nudge was ignored. User is STILL online. Try a completely DIFFERENT approach — a joke, a new topic, or something curious. Do NOT repeat any phrase from your previous message.`,
-            3: `User is still not replying despite being online. Send ONE very low-pressure closing note. E.g., "Chal theek hai, jab free ho bata dena.".`
-          };
-          const escalationFallbacks: Record<number, string> = {
-            1: 'Arey, busy hai kya? Jab time mile tab batana!',
-            2: 'Btw, kuch interesting chal raha tha... baat karte hain?',
-            3: 'Chal theek hai yaar, jab free ho toh ping kar dena.'
-          };
+          // Skip if user replied after Nova's message
+          const { data: userReply } = await supabaseAdmin
+            .from('chat_history')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('role', 'user')
+            .gt('created_at', novaMsg.created_at)
+            .limit(1);
+          if (userReply && userReply.length > 0) {
+            await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
+            await proactiveGate.release(ignoredOutreachId); // release — not spam, user replied
+            continue;
+          }
 
-          const prompt = escalationPrompts[escalation] || escalationPrompts[3];
-          const fallback = escalationFallbacks[escalation] || escalationFallbacks[3];
+          // Skip if Nova already sent another message after this one (within last 2h)
+          const { data: newerNova } = await supabaseAdmin
+            .from('chat_history')
+            .select('id, created_at')
+            .eq('user_id', userId)
+            .eq('role', 'assistant')
+            .gt('created_at', novaMsg.created_at)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          if (newerNova && newerNova.length > 0) {
+            const novaAgeMin = (Date.now() - new Date(newerNova[0].created_at).getTime()) / 60000;
+            if (novaAgeMin < 120) continue;
+          }
 
-          let msg = fallback;
+          // ── SEEN vs UNSEEN classification ──────────────────────────────────────
+          const { data: presence } = await supabaseAdmin
+            .from('user_presence')
+            .select('status, updated_at')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          const presenceAt = presence?.updated_at ? new Date(presence.updated_at).getTime() : 0;
+          const isOnline = presence?.status === 'online' || presence?.status === 'typing';
+          const activelyInApp = isOnline && Date.now() - presenceAt < SEEN_RECENCY_MS;
+
+          // Skip if Nova's last message was marked BUSY
+          if (novaMsg.meta?.situationBrief?.includes('USER AVAILABILITY: User signalled they are BUSY')) {
+            continue;
+          }
+
+          // Suppression lock check (sleep/busy/24h give-space)
+          const { data: suppression } = await supabaseAdmin
+            .from('working_memory')
+            .select('value')
+            .eq('user_id', userId)
+            .eq('key', 'followup_suppressed_until')
+            .maybeSingle();
+          if (suppression?.value && Date.now() < new Date(suppression.value).getTime()) {
+            continue;
+          }
+
+          // Skip if a follow-up is already pending within 2h
+          const { data: recentPending } = await supabaseAdmin
+            .from('nova_followups')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('status', 'pending')
+            .gte('created_at', new Date(Date.now() - 120 * 60 * 1000).toISOString())
+            .limit(1);
+          if (recentPending && recentPending.length > 0) continue;
+
+          const ageMinutes = (Date.now() - new Date(novaMsg.created_at).getTime()) / 60000;
+
+          // ── SEEN: user is actively in-app → escalating nudges, then give space ──
+          // User is ONLINE — Nova must keep the conversation going!
+          // Escalation: nudge 1 (warm), nudge 2 (different angle), nudge 3 → give space
+          if (activelyInApp) {
+            const { data: escData } = await supabaseAdmin.from('working_memory').select('value').eq('user_id', userId).eq('key', 'ignore_escalation_count').maybeSingle();
+            const escalation = parseInt(escData?.value || '0', 10) + 1;
+            await supabaseAdmin.from('working_memory').upsert({ user_id: userId, key: 'ignore_escalation_count', value: String(escalation), expires_at: new Date(Date.now() + 2 * 3600e3).toISOString() }, { onConflict: 'user_id,key' });
+
+            // Hard cap: after 3 online nudges with no reply, give space (don't harass)
+            if (escalation > 3) {
+              await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
+              await this._writeSuppression(userId, 1); // 1h cooldown, not 24h
+              logger.info('[NovaFollowup] Online escalation cap — brief cooldown', { userId, escalation });
+              continue;
+            }
+
+            const escalationPrompts: Record<number, string> = {
+              1: `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied. Send ONE short, warm nudge. Vary the angle — don't just say "busy ho?". E.g., try teasing them, sharing a thought, or asking one specific thing.`,
+              2: `Your first nudge was ignored. User is STILL online. Try a completely DIFFERENT approach — a joke, a new topic, or something curious. Do NOT repeat any phrase from your previous message.`,
+              3: `User is still not replying despite being online. Send ONE very low-pressure closing note. E.g., "Chal theek hai, jab free ho bata dena.".`
+            };
+            const escalationFallbacks: Record<number, string> = {
+              1: 'Arey, busy hai kya? Jab time mile tab batana!',
+              2: 'Btw, kuch interesting chal raha tha... baat karte hain?',
+              3: 'Chal theek hai yaar, jab free ho toh ping kar dena.'
+            };
+
+            const prompt = escalationPrompts[escalation] || escalationPrompts[3];
+            const fallback = escalationFallbacks[escalation] || escalationFallbacks[3];
+
+            let msg = fallback;
+            try {
+              const { novaBrain } = await import('./NovaBrainService');
+              const gen = await novaBrain.evaluateConsciousnessTier2(
+                `Name: yaar\nSituation: ${prompt}\nOutput ONE short Hinglish message only. Max 1 sentence.`
+              );
+              if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) msg = gen.message;
+            } catch (e) {
+              logger.warn('[NovaFollowup] LLM gen failed', { escalation });
+            }
+
+            logger.info('[NovaFollowup] Online (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
+            try {
+              await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0, { isOnlineNudge: true });
+              await proactiveGate.commit(ignoredOutreachId, msg);
+            } catch {
+              await proactiveGate.release(ignoredOutreachId);
+            }
+            continue;
+          }
+
+          // ── UNSEEN: user is offline → exponential backoff check-ins ──
+          // Backoff schedule: 1min → 2min → 4min → 8min → 16min → (cap 3.5h) → 24h give space
+          const { data: countRow } = await supabaseAdmin
+            .from('working_memory')
+            .select('value')
+            .eq('user_id', userId)
+            .eq('key', UNSEEN_COUNTER_KEY)
+            .maybeSingle();
+          const unseenCount = parseInt(countRow?.value || '0', 10) || 0;
+
+          if (unseenCount >= UNSEEN_MAX_CHECK_INS) {
+            await this._writeSuppression(userId, 24);
+            logger.info('[NovaFollowup] Offline backoff cap reached — giving 24h space', { userId, count: unseenCount });
+            continue;
+          }
+
+          // Compute exponential backoff delay
+          const backoffHours = offlineBackoffHours(unseenCount);
+          const backoffMinutes = Math.round(backoffHours * 60);
+
+          let deferredMsg = 'Arre, kaisa chal raha? Bas check kar raha tha — kabhi free ho toh bata dena.';
           try {
             const { novaBrain } = await import('./NovaBrainService');
             const gen = await novaBrain.evaluateConsciousnessTier2(
-              `Name: yaar\nSituation: ${prompt}\nOutput ONE short Hinglish message only. Max 1 sentence.`
+              `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User is offline and hasn't replied (attempt ${unseenCount + 1}). Send ONE short, very low-pressure check-in. Vary your angle completely from previous nudges — different energy each time.`
             );
-            if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) msg = gen.message;
+            if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) deferredMsg = gen.message;
           } catch (e) {
-            logger.warn('[NovaFollowup] LLM gen failed', { escalation });
+            logger.warn('[NovaFollowup] Offline check-in gen failed, using fallback');
           }
 
-          logger.info('[NovaFollowup] Online (left on read) — queuing nudge', { userId, ageMinutes: Math.round(ageMinutes), escalation });
-          try {
-            await this.queueFollowup(userId, novaMsg.conversation_id, msg, 0, { isOnlineNudge: true });
-            await proactiveGate.commit(ignoredOutreachId, msg);
-          } catch {
-            await proactiveGate.release(ignoredOutreachId);
-          }
-          continue;
-        }
-
-        // ── UNSEEN: user is offline → exponential backoff check-ins ──
-        // Backoff schedule: 1min → 2min → 4min → 8min → 16min → (cap 3.5h) → 24h give space
-        const { data: countRow } = await supabaseAdmin
-          .from('working_memory')
-          .select('value')
-          .eq('user_id', userId)
-          .eq('key', UNSEEN_COUNTER_KEY)
-          .maybeSingle();
-        const unseenCount = parseInt(countRow?.value || '0', 10) || 0;
-
-        if (unseenCount >= UNSEEN_MAX_CHECK_INS) {
-          await this._writeSuppression(userId, 24);
-          logger.info('[NovaFollowup] Offline backoff cap reached — giving 24h space', { userId, count: unseenCount });
-          continue;
-        }
-
-        // Compute exponential backoff delay
-        const backoffHours = offlineBackoffHours(unseenCount);
-        const backoffMinutes = Math.round(backoffHours * 60);
-
-        let deferredMsg = 'Arre, kaisa chal raha? Bas check kar raha tha — kabhi free ho toh bata dena.';
-        try {
-          const { novaBrain } = await import('./NovaBrainService');
-          const gen = await novaBrain.evaluateConsciousnessTier2(
-            `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User is offline and hasn't replied (attempt ${unseenCount + 1}). Send ONE short, very low-pressure check-in. Vary your angle completely from previous nudges — different energy each time.`
-          );
-          if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) deferredMsg = gen.message;
-        } catch (e) {
-          logger.warn('[NovaFollowup] Offline check-in gen failed, using fallback');
-        }
-
-        try {
           await this.queueFollowup(userId, novaMsg.conversation_id, deferredMsg, backoffHours, { cancelExisting: false });
-          await proactiveGate.commit(ignoredOutreachId, deferredMsg);
-        } catch {
+
+          await supabaseAdmin.from('working_memory').upsert({
+            user_id: userId,
+            key: UNSEEN_COUNTER_KEY,
+            value: String(unseenCount + 1),
+            expires_at: new Date(Date.now() + 48 * 3600e3).toISOString()
+          }, { onConflict: 'user_id,key' });
+
+          logger.info('[NovaFollowup] Offline exponential backoff check-in booked', {
+            userId, ageMinutes: Math.round(ageMinutes), backoffMinutes, attempt: unseenCount + 1
+          });
+        } finally {
           await proactiveGate.release(ignoredOutreachId);
         }
-
-        await supabaseAdmin.from('working_memory').upsert({
-          user_id: userId,
-          key: UNSEEN_COUNTER_KEY,
-          value: String(unseenCount + 1),
-          expires_at: new Date(Date.now() + 48 * 3600e3).toISOString()
-        }, { onConflict: 'user_id,key' });
-
-        logger.info('[NovaFollowup] Offline exponential backoff check-in booked', {
-          userId, ageMinutes: Math.round(ageMinutes), backoffMinutes, attempt: unseenCount + 1
-        });
       }
     } catch (err) {
       logger.warn('[NovaFollowup] checkIgnoredNovaMessages error', {

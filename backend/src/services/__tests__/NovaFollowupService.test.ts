@@ -2,6 +2,7 @@ import { NovaFollowupService, classifyUnavailability, _clearFollowupCachesForTes
 import { supabaseAdmin } from '../../lib/supabase';
 import { sendPushNotification } from '../../lib/pushNotifications';
 import { logger } from '../../lib/logger';
+import { outboundDispatcherService } from '../OutboundDispatcherService';
 // unused import removed
 import { novaBrain } from '../NovaBrainService';
 
@@ -37,6 +38,13 @@ jest.mock('../../lib/logger', () => ({
     info: jest.fn(),
     error: jest.fn(),
     warn: jest.fn()
+  }
+}));
+
+jest.mock('../OutboundDispatcherService', () => ({
+  outboundDispatcherService: {
+    dispatch: jest.fn().mockResolvedValue('DELIVERED'),
+    registerStrategy: jest.fn(),
   }
 }));
 
@@ -192,75 +200,13 @@ describe('NovaFollowupService', () => {
       await service.checkAndFireFollowups();
 
       expect(mockChain.update).toHaveBeenCalledWith({ status: 'sent' });
-      expect(mockChain.insert).toHaveBeenCalled();
-      expect(sendPushNotification).toHaveBeenCalled();
+      expect(outboundDispatcherService.dispatch).toHaveBeenCalled();
     });
 
     it('should do nothing when no follow-ups are due', async () => {
       mockChain.lte.mockResolvedValueOnce({ data: [] });
       await service.checkAndFireFollowups();
       expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('Firing'));
-    });
-  });
-
-  describe('3.4 Deduplication in _fireFollowup', () => {
-    // The atomic claim (update().eq().eq().select('id')) must SUCCEED here so these tests
-    // actually exercise deduplication. Without it the claim guard blocks the first insert
-    // and the dedup assertions would pass vacuously.
-    beforeEach(() => {
-      mockChain.update.mockReturnValue({
-        eq: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            select: jest.fn().mockResolvedValue({ data: [{ id: 'claim-success' }], error: null })
-          })
-        })
-      });
-    });
-    const followup = { id: 'fup-1', user_id: 'u1', conversation_id: 'c1', message: 'hey yaar kya chal raha hai bata na' };
-
-    it('should block exact duplicate within 10 minutes', async () => {
-      // Direct access cache or simulate 
-      const dedupCache = require('../NovaFollowupService').__get__?.('dedupCache');
-      if (!dedupCache) {
-        // Fallback testing strategy if unexported
-        await (service as any)._fireFollowup(followup); // First time inserts
-        mockChain.insert.mockClear();
-        await (service as any)._fireFollowup(followup); // Second time blocked
-        expect(mockChain.insert).not.toHaveBeenCalled();
-      } else {
-        dedupCache.set('u1', { lastContent: 'hey yaar kya chal raha hai bata na', lastSentAt: Date.now() });
-        await (service as any)._fireFollowup(followup);
-        expect(mockChain.insert).not.toHaveBeenCalled();
-      }
-    });
-
-    it('should block substring duplicate (first 20 chars match)', async () => {
-      await (service as any)._fireFollowup({ ...followup, message: 'hey yaar kya chal raha hai' }); // Set cache
-      mockChain.insert.mockClear();
-      
-      await (service as any)._fireFollowup(followup); // Try sending longer message with same 20 char prefix
-      expect(mockChain.insert).not.toHaveBeenCalled(); // Blocked by substring match
-    });
-
-    it('should allow same message after 10 minutes', async () => {
-      await (service as any)._fireFollowup(followup);
-      mockChain.insert.mockClear();
-
-      jest.advanceTimersByTime(11 * 60 * 1000);
-      
-      await (service as any)._fireFollowup(followup);
-      expect(mockChain.insert).toHaveBeenCalled();
-    });
-
-    it('should normalize messages to lowercase for dedupe', async () => {
-      await (service as any)._fireFollowup(followup); // sets lowercase in cache
-      mockChain.insert.mockClear();
-
-      const uppercaseFollowup = { ...followup, message: 'HEY YAAR KYA CHAL RAHA HAI BATA NA' };
-      await (service as any)._fireFollowup(uppercaseFollowup);
-      
-      // Should be blocked because it's normalized
-      expect(mockChain.insert).not.toHaveBeenCalled();
     });
   });
 

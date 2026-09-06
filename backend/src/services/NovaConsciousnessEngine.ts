@@ -11,6 +11,7 @@ import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 import { outboundDispatcherService } from './OutboundDispatcherService';
+import type { OutboundSource } from '../types/outbound';
 // Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
 // The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
 const MIN_GAP_MINUTES = 1;
@@ -742,7 +743,7 @@ ${sessionStartContextNote}`;
       // Dispatch through OutboundDispatcher
       const finalStatus = await outboundDispatcherService.dispatch({
         userId,
-        sourceEngine: 'NACE',
+        sourceEngine: 'NACE' as OutboundSource,
         intentType,
         logicalKey,
         idempotencyKey: `nace:${crypto.randomUUID()}`, // Unique operation

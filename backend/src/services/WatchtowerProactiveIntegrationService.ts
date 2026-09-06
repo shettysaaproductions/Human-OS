@@ -28,6 +28,7 @@ import {
   WatchtowerTimingDecision,
 } from '../types/watchtowerTiming';
 import { WatchtowerAttentionDecision } from '../types/watchtowerAttention';
+import type { OutboundSource } from '../types/outbound';
 
 export interface WatchtowerHandoffRecord {
   attentionDecisionId: string;
@@ -255,7 +256,7 @@ export class WatchtowerProactiveIntegrationService {
 
         const dispatchStatus = await outboundDispatcherService.dispatch({
           userId,
-          sourceEngine: 'Watchtower',
+          sourceEngine: 'WATCHTOWER' as OutboundSource,
           intentType: 'proactive',
           logicalKey,
           idempotencyKey: `watchtower:dispatch:${att.id || `fallback-${Date.now()}`}`, // Durable idempotency tied to opportunity

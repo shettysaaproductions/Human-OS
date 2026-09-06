@@ -3,10 +3,11 @@ import { logger } from '../lib/logger';
 import { proactiveGate } from './ProactiveGate';
 import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import crypto from 'crypto';
+import type { OutboundSource } from '../types/outbound';
 
 export interface OutboundIntentPayload {
   userId: string;
-  sourceEngine: string;
+  sourceEngine: OutboundSource;
   intentType: string;
   logicalKey: string;
   idempotencyKey: string;
@@ -15,6 +16,10 @@ export interface OutboundIntentPayload {
   proposedMessage?: string;
   skipQuietHoursCheck?: boolean;
   outreachId?: string;
+  /** Optional priority hint (higher = more important). Used for logging and future scheduling. */
+  priority?: number;
+  /** Semantic category of what Nova intends to do. */
+  proposedAction?: 'MESSAGE' | 'REMINDER' | 'QUESTION' | 'CHECK_IN';
 }
 
 export type GenerationStrategy = (context: any) => Promise<string>;
@@ -79,6 +84,25 @@ export class OutboundDispatcherService {
              return 'FAILED_TERMINAL';
           }
           intentId = existing.id;
+
+          // ── FAILED_TRANSIENT retry: safe reset with gate release ──────────
+          // If the previous attempt failed transiently, we must:
+          //   1. Release any stale gate reservation so nova_outreach_log has no phantom placeholder.
+          //   2. Reset status to CREATED so this retry gets a fresh gate acquisition.
+          // The same idempotency key is preserved — guaranteeing single-message semantics.
+          if (existing.status === 'FAILED_TRANSIENT') {
+            logger.info('[OutboundDispatcher] Resetting FAILED_TRANSIENT intent for retry', { intentId, existingOutreachId: existing.outreach_id });
+            if (existing.outreach_id) {
+              await proactiveGate.release(existing.outreach_id);
+            }
+            await supabaseAdmin
+              .from('outbound_intents')
+              .update({ status: 'CREATED', failure_reason: null, outreach_id: null, updated_at: new Date().toISOString() })
+              .eq('id', existing.id);
+            existing.status = 'CREATED';
+            existing.outreach_id = null;
+          }
+
           logger.info('[OutboundDispatcher] Resuming existing intent', { intentId, status: existing.status });
           return await this.resumeIntent(existing, payload);
         } else {
@@ -181,7 +205,9 @@ export class OutboundDispatcherService {
             hasThoughts: false, // We omit nova_thoughts as per architectural correction 3
             situationBrief: `Proactive message triggered by ${payload.sourceEngine}`
           },
-          source_type: payload.intentType === 'followup' ? 'followup' : 'nace_outreach',
+          source_type: payload.intentType === 'followup' ? 'followup'
+                     : payload.intentType === 'reminder'  ? 'reminder'
+                     : 'nace_outreach',
           outreach_log_id: outreachId
         };
 

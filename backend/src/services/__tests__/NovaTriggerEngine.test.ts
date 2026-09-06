@@ -1,6 +1,5 @@
-﻿import { NovaTriggerEngine } from '../NovaTriggerEngine';
+import { NovaTriggerEngine } from '../NovaTriggerEngine';
 import { supabaseAdmin } from '../../lib/supabase';
-import { sendNovaReplyNotification } from '../../lib/pushNotifications';
 import { logger } from '../../lib/logger';
 
 // Mock these EXACTLY as requested
@@ -22,8 +21,13 @@ jest.mock('../../lib/supabase', () => {
   };
 });
 
-jest.mock('../../lib/pushNotifications', () => ({
-  sendNovaReplyNotification: jest.fn()
+// NovaTriggerEngine now routes delivery through OutboundDispatcherService.
+// Mock the dispatcher so tests do not require live DB.
+jest.mock('../OutboundDispatcherService', () => ({
+  outboundDispatcherService: {
+    dispatch: jest.fn().mockResolvedValue('DELIVERED'),
+    registerStrategy: jest.fn(),
+  }
 }));
 
 jest.mock('../../lib/logger', () => ({
@@ -64,19 +68,18 @@ describe('NovaTriggerEngine', () => {
       (engine as any).dedupeCache.set('user-1', { lastContent: 'Same message', lastSentAt: Date.now() - 5 * 60 * 1000 });
       const messageGenerator = jest.fn().mockResolvedValue('Same message');
       
-      await engine.scheduleMessage('user-1', getContext(), messageGenerator);
+      await engine.scheduleMessage('user-1', getContext(), messageGenerator, { logicalKey: 'test:key', idempotencyKey: 'test:idemp-1' });
       jest.runAllTimers();
       for (let i = 0; i < 10; i++) await Promise.resolve();
 
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Deduplicated exact message'));
-      expect(sendNovaReplyNotification).not.toHaveBeenCalled();
     });
 
     it('should allow same message after 10-min window expires', async () => {
       (engine as any).dedupeCache.set('user-1', { lastContent: 'Same message', lastSentAt: Date.now() - 11 * 60 * 1000 });
       const messageGenerator = jest.fn().mockResolvedValue('Same message');
 
-      await engine.scheduleMessage('user-1', getContext(), messageGenerator);
+      await engine.scheduleMessage('user-1', getContext(), messageGenerator, { logicalKey: 'test:key2', idempotencyKey: 'test:idemp-2' });
       jest.runAllTimers();
       for (let i = 0; i < 10; i++) await Promise.resolve();
 
@@ -87,7 +90,7 @@ describe('NovaTriggerEngine', () => {
       (engine as any).dedupeCache.set('user-a', { lastContent: 'Same message', lastSentAt: Date.now() - 5 * 60 * 1000 });
       const messageGenerator = jest.fn().mockResolvedValue('Same message');
 
-      await engine.scheduleMessage('user-b', getContext(), messageGenerator);
+      await engine.scheduleMessage('user-b', getContext(), messageGenerator, { logicalKey: 'test:user-b:key', idempotencyKey: 'test:user-b:idemp' });
       jest.runAllTimers();
       for (let i = 0; i < 10; i++) await Promise.resolve();
 
@@ -218,54 +221,66 @@ describe('NovaTriggerEngine', () => {
       const mockClearTimeout = jest.spyOn(global, 'clearTimeout');
       const messageGenerator = jest.fn().mockResolvedValue('Hello');
       
-      await engine.scheduleMessage('u1', getContext(), messageGenerator);
+      await engine.scheduleMessage('u1', getContext(), messageGenerator, { logicalKey: 'test:u1:1', idempotencyKey: 'test:u1:idemp-1' });
       const firstTimeout = (engine as any).scheduledMessages.get('u1');
       
-      await engine.scheduleMessage('u1', getContext(), messageGenerator);
+      await engine.scheduleMessage('u1', getContext(), messageGenerator, { logicalKey: 'test:u1:2', idempotencyKey: 'test:u1:idemp-2' });
       
       expect(mockClearTimeout).toHaveBeenCalledWith(firstTimeout);
     });
 
-    it('should save message to chat_history and outreach_log', async () => {
+    it('routes delivery through OutboundDispatcherService with canonical TRIGGER_ENGINE source', async () => {
+      const { outboundDispatcherService } = require('../OutboundDispatcherService');
       engine.shouldTrigger = jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 10 });
       const messageGenerator = jest.fn().mockResolvedValue('Hello integration');
-      const mockChain = (supabaseAdmin.from as jest.Mock)();
 
-      mockChain.maybeSingle.mockResolvedValueOnce({ data: { push_token: 'token-123' } });
-      mockChain.maybeSingle.mockResolvedValueOnce({ data: { conversation_id: 'conv-1' } });
-      // The chainable mock returns itself on insert, so we need to handle the .select().single() chain
-      mockChain.insert.mockReturnValue(mockChain);
-
-      await engine.scheduleMessage('u-integration', getContext(), messageGenerator);
+      await engine.scheduleMessage('u-integration', getContext(), messageGenerator, {
+        logicalKey: 'trigger:u-integration:event-abc',
+        idempotencyKey: 'trigger:u-integration:event-abc'
+      });
 
       await jest.runAllTimersAsync();
 
-      if ((logger.error as jest.Mock).mock.calls.length > 0) {
-        console.error('Logger error called:', (logger.error as jest.Mock).mock.calls);
-      }
-
-      // First insert: chat_history via saveAssistantMessage (with role, content, user_id, meta)
-      // Second insert: nova_outreach_log (with message, user_id, outreach_type)
-      const insertCalls = (mockChain.insert as jest.Mock).mock.calls;
-      expect(insertCalls.length).toBeGreaterThanOrEqual(2);
-
-      // chat_history insert
-      expect(insertCalls[0]).toEqual(expect.arrayContaining([
+      // Dispatcher must be called with canonical source and the stable keys
+      expect(outboundDispatcherService.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
-          role: 'assistant',
-          content: 'Hello integration',
-          user_id: 'u-integration'
+          userId: 'u-integration',
+          sourceEngine: 'TRIGGER_ENGINE',
+          logicalKey: 'trigger:u-integration:event-abc',
+          idempotencyKey: 'trigger:u-integration:event-abc',
+          proposedMessage: 'Hello integration',
         })
-      ]));
+      );
+      // CRITICAL: TriggerEngine must NOT write to nova_outreach_log directly
+      expect(supabaseAdmin.from).not.toHaveBeenCalledWith('nova_outreach_log');
+    });
 
-      // nova_outreach_log insert is the 3rd insert (1st: chat_history, 2nd: nova_thoughts, 3rd: nova_outreach_log)
-      expect(insertCalls[2]).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          message: 'Hello integration',
-          user_id: 'u-integration',
-          outreach_type: 'proactive'
-        })
-      ]));
+    it('same message within 10-min dedup window dispatches only once (in-memory idempotency)', async () => {
+      // This tests the in-memory dedup layer. Durable idempotency across restarts
+      // is guaranteed by the Dispatcher+Gate via the stable idempotencyKey.
+      const { outboundDispatcherService } = require('../OutboundDispatcherService');
+      (outboundDispatcherService.dispatch as jest.Mock).mockClear();
+      engine.shouldTrigger = jest.fn().mockResolvedValue({ shouldSend: true, delayMs: 0 });
+      const messageGenerator = jest.fn().mockResolvedValue('Stable message');
+      const stableOpts = { logicalKey: 'trigger:user-42:event-xyz', idempotencyKey: 'trigger:user-42:event-xyz' };
+
+      // First call
+      await engine.scheduleMessage('user-42', getContext(), messageGenerator, stableOpts);
+      await jest.runAllTimersAsync();
+      const firstCount = (outboundDispatcherService.dispatch as jest.Mock).mock.calls.length;
+      expect(firstCount).toBe(1);
+
+      // Second call with identical message within 10-min window — dedup cache blocks
+      await engine.scheduleMessage('user-42', getContext(), messageGenerator, stableOpts);
+      await jest.runAllTimersAsync();
+      const secondCount = (outboundDispatcherService.dispatch as jest.Mock).mock.calls.length;
+      expect(secondCount).toBe(1); // Still 1 — dedup blocked
+    });
+
+    it('throws if no stable logicalKey/idempotencyKey provided (Correction 1)', async () => {
+      await expect(
+        engine.scheduleMessage('user-1', getContext(), async () => 'msg', {} as any)
+      ).rejects.toThrow('requires a stable logicalKey');
     });
   });
 });

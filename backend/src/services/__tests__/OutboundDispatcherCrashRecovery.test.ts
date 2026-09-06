@@ -40,7 +40,7 @@ describe('OutboundDispatcherCrashRecovery', () => {
     jest.clearAllMocks();
 
     eqMock = jest.fn().mockReturnThis();
-    singleMock = jest.fn().mockResolvedValue({ data: null, error: null });
+    singleMock = jest.fn().mockResolvedValue({ data: { id: 'dummy', content: 'hello', push_token: 'token', user_id: 'user-1' }, error: null });
     updateMock = jest.fn().mockReturnValue({ eq: eqMock });
     selectMock = jest.fn().mockReturnValue({ 
       eq: jest.fn().mockReturnValue({ 
@@ -57,17 +57,25 @@ describe('OutboundDispatcherCrashRecovery', () => {
     insertMock = jest.fn().mockResolvedValue({ error: null, data: null });
     insertMock.mockReturnValue({ select: selectMock, single: singleMock, then: (cb: any) => cb({ error: null, data: null }) });
 
-    (supabaseAdmin.from as jest.Mock).mockReturnValue({
-      select: selectMock,
-      insert: insertMock,
-      update: updateMock,
-      delete: jest.fn().mockReturnThis(),
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'account_tombstones') {
+        return {
+          select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: null }) }) })
+        };
+      }
+      return {
+        select: selectMock,
+        insert: insertMock,
+        update: updateMock,
+        delete: jest.fn().mockReturnThis(),
+      };
     });
+    (supabaseAdmin.rpc as jest.Mock).mockResolvedValue({ data: null, error: null });
     
     (proactiveGate.acquire as jest.Mock).mockResolvedValue({ allowed: true, outreachId: 'test-outreach' });
   });
 
-  // 1. CREATED recovery
+    // 1. CREATED recovery
   it('TEST 1: Crash in CREATED (retry acquires gate and advances)', async () => {
     // Mock the uniqueness constraint failure
     insertMock.mockReturnValueOnce({
@@ -85,17 +93,6 @@ describe('OutboundDispatcherCrashRecovery', () => {
           })
         })
       })
-    });
-    
-    // Mock tombstone check
-    (supabaseAdmin.from as jest.Mock).mockReturnValueOnce({
-      select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: null }) }) })
-    });
-    
-    (supabaseAdmin.from as jest.Mock).mockReturnValue({
-      select: selectMock,
-      insert: insertMock,
-      update: updateMock,
     });
     
     await outboundDispatcherService.dispatch({
@@ -129,21 +126,9 @@ describe('OutboundDispatcherCrashRecovery', () => {
       })
     });
 
-    // Mock tombstone check
-    (supabaseAdmin.from as jest.Mock).mockReturnValueOnce({
-      select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: null }) }) })
-    });
+    // Mock chat fetch is handled by default singleMock
 
-    // Mock chat fetch
-    singleMock.mockResolvedValueOnce({ data: { content: 'hello' } }); 
-
-    (supabaseAdmin.from as jest.Mock).mockReturnValue({
-      select: selectMock,
-      insert: insertMock,
-      update: updateMock,
-    });
-
-    await outboundDispatcherService.dispatch({
+    const status = await outboundDispatcherService.dispatch({
       userId: 'user-1',
       sourceEngine: 'Test',
       intentType: 'test',
@@ -153,6 +138,7 @@ describe('OutboundDispatcherCrashRecovery', () => {
       generationStrategy: 'none',
       proposedMessage: 'hello'
     });
+    console.log('TEST 5 STATUS:', status);
 
     expect(proactiveGate.commit).toHaveBeenCalledWith('outreach-1', 'hello');
     expect(sendNovaReplyNotification).toHaveBeenCalled();
@@ -161,8 +147,18 @@ describe('OutboundDispatcherCrashRecovery', () => {
   // 8. account deletion
   it('TEST 8: Account deletion halts dispatch', async () => {
     // Mock tombstone check returning true
-    (supabaseAdmin.from as jest.Mock).mockReturnValueOnce({
-      select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: { user_id: 'user-1' } }) }) })
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'account_tombstones') {
+        return {
+          select: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: { user_id: 'user-1' } }) }) })
+        };
+      }
+      return {
+        select: selectMock,
+        insert: insertMock,
+        update: updateMock,
+        delete: jest.fn().mockReturnThis(),
+      };
     });
     
     const status = await outboundDispatcherService.dispatch({

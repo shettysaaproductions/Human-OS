@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
-import { sendPushNotification } from '../lib/pushNotifications';
+import { outboundDispatcherService } from './OutboundDispatcherService';
+import type { OutboundSource } from '../types/outbound';
 import crypto from 'crypto';
 
 export class ReminderSchedulerService {
@@ -142,7 +142,9 @@ export class ReminderSchedulerService {
     const isEventReminder = !reminder.trigger_at;
     const triggerTime = isEventReminder ? now : new Date(reminder.trigger_at);
 
-    // Generate a warm, Nova-style reminder message (natural Hinglish, not "🔔 Reminder: x")
+    // Pre-generate the reminder message (natural Hinglish, not "🔔 Reminder: x").
+    // We do this before dispatch so it can be passed as proposedMessage (strategy:'none').
+    // If generation fails, generateReminderMessage() returns a safe template — never throws.
     const message = await this.generateReminderMessage(reminder);
 
     // Safety check: if trigger time is in the future, do not fire yet (time-based only)
@@ -151,41 +153,68 @@ export class ReminderSchedulerService {
       return;
     }
 
-    // Insert chat message and moment with retry
-    let retryCount = 0;
-    let conversationId = '';
-    while (retryCount < 2) {
-      try {
-        await supabaseAdmin.from('user_moments').insert({
-          user_id: reminder.user_id,
-          moment_type: 'REMINDER',
-          title: 'Reminder',
-          body: reminder.text,
-          status: 'generated'
-        });
+    // 1. Insert a Moment entry (separate from delivery — not part of the dispatch lifecycle).
+    try {
+      await supabaseAdmin.from('user_moments').insert({
+        user_id: reminder.user_id,
+        moment_type: 'REMINDER',
+        title: 'Reminder',
+        body: reminder.text,
+        status: 'generated'
+      });
+    } catch (momentErr) {
+      // Non-fatal — moment log is informational only.
+      logger.warn('[Reminder] Failed to insert user_moment', { reminderId, error: momentErr instanceof Error ? momentErr.message : String(momentErr) });
+    }
 
-        const { data: latestChat } = await supabaseAdmin
-          .from('chat_history')
-          .select('conversation_id')
-          .eq('user_id', reminder.user_id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+    // 2. Deliver through the canonical Dispatcher.
+    //
+    // Quiet-hours bypass policy (Correction 3):
+    //   - User-explicitly-requested reminders (is_auto = false) with high urgency bypass quiet hours.
+    //   - Auto-detected / system-generated reminders (is_auto = true) NEVER bypass quiet hours,
+    //     regardless of urgency — a system-classified "high" does not equal user intent.
+    //   - This prevents a future system-generated reminder from accidentally breaking quiet hours
+    //     simply because it was classified as high urgency.
+    const isUserRequested = reminder.is_auto === false;
+    const isHighUrgency = reminder.urgency === 'high';
+    const bypassQuietHours = isUserRequested && isHighUrgency;
 
-        conversationId = latestChat?.conversation_id || crypto.randomUUID();
+    // Stable idempotency key: same reminder.id = same logical firing operation.
+    // On retry (e.g., transient DB failure), the Dispatcher resumes from existing intent state.
+    // The Dispatcher's FAILED_TRANSIENT reset logic releases the stale gate reservation
+    // before re-acquiring, preventing phantom nova_outreach_log rows.
+    const idempotencyKey = `reminder:fire:${reminder.id}`;
+    const logicalKey = `reminder:fire:${reminder.id}`;
 
-        await saveAssistantMessage(
-          reminder.user_id, conversationId, message,
-          'ReminderSchedulerService', undefined,
-          { sourceType: 'reminder' }   // P0-C: attribution
-        );
-        break; // Success
-      } catch (insertErr) {
-        retryCount++;
-        logger.warn('[Reminder] DB insert failed on fire, retrying...', { attempt: retryCount, error: insertErr instanceof Error ? insertErr.message : String(insertErr) });
-        if (retryCount >= 2) throw insertErr;
-        await new Promise(r => setTimeout(r, 2000));
-      }
+    const finalStatus = await outboundDispatcherService.dispatch({
+      userId: reminder.user_id,
+      sourceEngine: 'REMINDER' as OutboundSource,
+      intentType: 'reminder',
+      logicalKey,
+      idempotencyKey,
+      context: { reminderId: reminder.id, reminderText: reminder.text, urgency: reminder.urgency },
+      generationStrategy: 'none',
+      proposedMessage: message,
+      skipQuietHoursCheck: bypassQuietHours,
+      skipMinGapCheck: true,   // User-requested reminders bypass ignored-count escalation
+      proposedAction: 'REMINDER',
+    });
+
+    if (finalStatus === 'SUPPRESSED') {
+      logger.info('[Reminder] Delivery suppressed by gate (quiet hours or cooldown)', { reminderId, bypassQuietHours });
+      // Still handle recurrence below — the reminder logic continues even if this firing is suppressed.
+    } else if (finalStatus === 'FAILED_TRANSIENT') {
+      logger.warn('[Reminder] Delivery failed transiently — will retry on next poll', { reminderId });
+      // Do NOT advance recurrence — leave the reminder in current state so the next
+      // checkAndFireReminders poll retries with the same idempotencyKey.
+      return;
+    } else if (finalStatus === 'FAILED_TERMINAL') {
+      logger.error('[Reminder] Delivery failed terminally (e.g., account deleted)', { reminderId });
+      // Terminal — mark reminder cancelled to prevent infinite retry.
+      await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', reminderId);
+      return;
+    } else {
+      logger.info('[Reminder] Delivered successfully', { reminderId, finalStatus });
     }
 
     // 3. Handle recurrence or mark completed
@@ -283,30 +312,6 @@ export class ReminderSchedulerService {
 
     }
 
-    // 4. Send push notification to the user
-    try {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('push_token')
-        .eq('id', reminder.user_id)
-        .maybeSingle();
-      if (profile?.push_token) {
-        await sendPushNotification([{
-          to: profile.push_token,
-          title: '🔔 Nova Reminder',
-          body: message.length > 100 ? message.substring(0, 97) + '...' : message,
-          sound: 'default',
-          channelId: 'nova_reminders',
-          priority: 'high',
-          data: { type: 'nova_reminder', conversationId: conversationId },
-        }]);
-        logger.info('Reminder push notification sent', { reminderId });
-      }
-    } catch (pushErr) {
-      logger.warn('Failed to send reminder push notification', {
-        error: pushErr instanceof Error ? pushErr.message : String(pushErr)
-      });
-    }
   }
 
   private async generateReminderMessage(reminder: any): Promise<string> {

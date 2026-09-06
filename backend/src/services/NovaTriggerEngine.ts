@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '../lib/supabase';
-import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
-import { sendNovaReplyNotification } from '../lib/pushNotifications';
+import { outboundDispatcherService } from './OutboundDispatcherService';
+import type { OutboundSource } from '../types/outbound';
 
 interface TriggerContext {
   userPresence: 'online' | 'typing' | 'away' | 'offline';
@@ -23,7 +23,19 @@ export class NovaTriggerEngine {
   private scheduledMessages: Map<string, NodeJS.Timeout> = new Map();
   private dedupeCache: Map<string, { lastContent: string, lastSentAt: number }> = new Map();
 
-  async scheduleMessage(userId: string, context: TriggerContext, messageGenerator: () => Promise<string>): Promise<void> {
+  async scheduleMessage(
+    userId: string,
+    context: TriggerContext,
+    messageGenerator: () => Promise<string>,
+    opts: { logicalKey: string; idempotencyKey: string }
+  ): Promise<void> {
+    // Correction 1: Stable identity is REQUIRED for any durable outbound operation.
+    // Callers must supply the event-specific stable key — the TriggerEngine cannot
+    // safely invent one from Date.now() because a retry crossing a minute boundary
+    // would produce a different key and break idempotency.
+    if (!opts?.logicalKey || !opts?.idempotencyKey) {
+      throw new Error('[TriggerEngine] scheduleMessage requires a stable logicalKey and idempotencyKey from the caller');
+    }
     const triggerResult = await this.shouldTrigger(context);
     
     if (!triggerResult.shouldSend) {
@@ -39,7 +51,7 @@ export class NovaTriggerEngine {
     const timeout = setTimeout(async () => {
       try {
         const message = await messageGenerator();
-        
+
         // Deduplication check
         const cached = this.dedupeCache.get(userId);
         if (cached && cached.lastContent === message && (Date.now() - cached.lastSentAt) < 10 * 60 * 1000) {
@@ -48,51 +60,32 @@ export class NovaTriggerEngine {
         }
         this.dedupeCache.set(userId, { lastContent: message, lastSentAt: Date.now() });
 
-        // Send via push notification
-        const { data: user } = await supabaseAdmin
-          .from('profiles')
-          .select('push_token')
-          .eq('id', userId)
-          .maybeSingle();
-          
-        if (user?.push_token) {
-          await sendNovaReplyNotification(user.push_token, message);
-        }
-        
-        // Also save to chat_history so Nova remembers saying this
-        const { data: latestChat } = await supabaseAdmin
-          .from('chat_history')
-          .select('conversation_id')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        const conversationId = latestChat?.conversation_id || crypto.randomUUID();
-
-        await saveAssistantMessage(
-          userId, conversationId, message,
-          'NovaTriggerEngine', undefined,
-          { sourceType: 'nace_outreach' }   // P0-C: attribution
-        );
-
-        // Also save to outreach log (schema columns are outreach_type/created_at,
-        // NOT type/sent_at — the old insert failed every time)
-        await supabaseAdmin.from('nova_outreach_log').insert({
-          user_id: userId,
-          message,
-          outreach_type: 'proactive',
+        // Route through canonical Dispatcher — owns gate, chat_history, push, and audit.
+        // The caller-supplied opts.idempotencyKey guarantees this exact logical event
+        // produces exactly one outbound_intents row, one chat_history row, and at-most-one push,
+        // even across process restarts.
+        await outboundDispatcherService.dispatch({
+          userId,
+          sourceEngine: 'TRIGGER_ENGINE' as OutboundSource,
+          intentType: 'proactive',
+          logicalKey: opts.logicalKey,
+          idempotencyKey: opts.idempotencyKey,
+          context: {},
+          generationStrategy: 'none',
+          proposedMessage: message,
+          proposedAction: 'MESSAGE',
         });
       } catch (e) {
-        logger.error('[TriggerEngine] Failed to send scheduled message:', e);
+        logger.error('[TriggerEngine] Failed to dispatch scheduled message:', e);
       }
-      
+
       this.scheduledMessages.delete(userId);
     }, triggerResult.delayMs);
-    
+
     this.scheduledMessages.set(userId, timeout);
     logger.info(`[TriggerEngine] Scheduled message for ${userId} in ${triggerResult.delayMs}ms`);
   }
+
 
   // Timing profiles based on user presence
   private readonly TIMING_PROFILES = {

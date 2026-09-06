@@ -2,7 +2,8 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import axios from 'axios';
-import { proactiveGate } from './ProactiveGate';
+import { outboundDispatcherService } from './OutboundDispatcherService';
+import type { OutboundSource } from '../types/outbound';
 
 // Interface for Open-Meteo Geocoding
 interface GeocodeResult {
@@ -106,38 +107,30 @@ Write a very short, casual text message warning them or checking in. (e.g., "hey
       const alertMessage = await complete('PROACTIVE', [{ role: 'system', content: prompt }], { maxTokens: 50 });
       const cleanAlertMessage = alertMessage.trim().replace(/^["']|["']$/g, '').trim();
 
-      // ── AUTHORITATIVE PROACTIVE GATE ───────────────────────────────────────────
-      // Single DB-backed gate — enforces 12h weather cooldown via logical_key.
-      // Replaces the inline 12h + topic-dedup checks above.
-      const weatherKey = `weather:alert:${userId}:${new Date().toISOString().slice(0, 13)}`; // hourly bucket
-      const gateDecision = await proactiveGate.acquire(userId, {
-        outreachType: 'proactive_weather',
+
+      // ── CANONICAL DISPATCH ─────────────────────────────────────────────────────
+      // Route through OutboundDispatcherService which owns the complete gate lifecycle:
+      //   acquire (ProactiveGate) → chat_history (RPC) → push → commit (ProactiveGate)
+      // The weatherKey is an hourly bucket: deterministic and stable within the same hour,
+      // so dispatching twice within the same hour is idempotent (gate blocks the duplicate).
+      const weatherKey = `weather:alert:${userId}:${new Date().toISOString().slice(0, 13)}`; // e.g. "weather:alert:<uid>:2026-09-07T03"
+      await outboundDispatcherService.dispatch({
+        userId,
+        sourceEngine: 'WEATHER' as OutboundSource,
+        intentType: 'weather_alert',
         logicalKey: weatherKey,
-        logicalKeyWindowMinutes: 12 * 60,
+        idempotencyKey: `weather:alert:${weatherKey}`,   // stable hourly bucket key
+        context: { location, temp, windSpeed, isRaining, isThunderstorm, isExtremeHeat, isExtremeCold },
+        generationStrategy: 'none',
         proposedMessage: cleanAlertMessage,
-        skipMinGapCheck: true, // weather alerts bypass ignored-count escalation
+        skipQuietHoursCheck: false,   // weather alerts respect quiet hours
+        skipMinGapCheck: true,        // weather alerts bypass ignored-count escalation
+        proposedAction: 'MESSAGE',
       });
+      logger.info(`[WeatherWatcher] Fired proactive weather alert via Dispatcher`, { userId, location });
 
-      if (!gateDecision.allowed) {
-        logger.info(`[WeatherWatcher] Gate blocked weather alert`, { userId, blockedBy: gateDecision.blockedBy });
-        return;
-      }
 
-      // Send the alert using the Trigger Engine.
-      const { novaTriggerEngine } = await import('./NovaTriggerEngine');
-      await novaTriggerEngine.scheduleMessage(userId, {
-        userPresence: 'offline',
-        lastUserMessageAt: 0,
-        lastNovaReplyAt: Date.now() - 3600000,
-        conversationIntensity: 'casual',
-        userActivity: null,
-        pendingReminders: 0,
-        emotionalState: {}
-      }, async () => cleanAlertMessage);
 
-      // Commit gate reservation
-      await proactiveGate.commit(gateDecision.outreachId, cleanAlertMessage);
-      logger.info(`[WeatherWatcher] Fired proactive weather alert`, { userId, location });
 
     } catch (e) {
       logger.error('[WeatherWatcher] Failed to run weather check', { error: e });
