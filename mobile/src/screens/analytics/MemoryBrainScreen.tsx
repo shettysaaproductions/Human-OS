@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator,
-  TouchableOpacity, TextInput, ScrollView
+  View, Text, StyleSheet, ActivityIndicator,
+  TouchableOpacity, TextInput, ScrollView, SectionList, Alert, Modal, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../services/api';
@@ -42,6 +42,7 @@ const AUTHORITY_META: Record<string, { label: string; color: string }> = {
 
 // ── Human-readable key label ───────────────────────────────────────────────────
 function toLabel(key: string): string {
+  if (!key) return '';
   return key
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -68,6 +69,13 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
   const [data, setData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+
+  // Edit Modal State
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editMemory, setEditMemory] = useState<any>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => { fetchMemories(); }, []);
 
@@ -83,29 +91,94 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     }
   };
 
-  const filteredMemories = useMemo(() => {
-    let list = data?.recentMemories || [];
-    if (selectedType) list = list.filter((m: any) => m.memory_type === selectedType);
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter((m: any) =>
-        m.key?.toLowerCase().includes(q) || m.value?.toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [data, searchQuery, selectedType]);
+  const sections = useMemo(() => {
+    const list: any[] = [];
+    if (!data) return list;
 
-  // Fix: use updated_at (not created_at) for "This Week" calculation
-  const thisWeekCount = useMemo(() => {
-    return (data?.recentMemories || []).filter((m: any) => {
-      const ts = m.updated_at || m.created_at;
-      return ts && Date.now() - new Date(ts).getTime() < 7 * 86400000;
-    }).length;
-  }, [data]);
+    const filterList = (items: any[]) => {
+      let result = items || [];
+      if (selectedType) {
+        // Working context doesn't have memory_type, so we skip type filtering for it or match 'working'
+        result = result.filter(m => (m.memory_type || 'working') === selectedType);
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        result = result.filter(m =>
+          m.key?.toLowerCase().includes(q) || m.value?.toLowerCase().includes(q)
+        );
+      }
+      return result;
+    };
+
+    const current = filterList(data.currentMemories || []);
+    if (current.length > 0) {
+      list.push({ title: 'Current Memories', data: current, type: 'current' });
+    }
+
+    const working = filterList(data.workingContext || []);
+    if (working.length > 0) {
+      list.push({ title: 'Working Context', data: working, type: 'working' });
+    }
+
+    const archived = filterList(data.archivedMemories || []);
+    if (archived.length > 0) {
+      if (historyExpanded) {
+        list.push({ title: 'History', data: archived, type: 'archived', count: archived.length });
+      } else {
+        list.push({ title: 'History', data: [], type: 'archived_collapsed', count: archived.length });
+      }
+    }
+
+    return list;
+  }, [data, searchQuery, selectedType, historyExpanded]);
 
   const categories = useMemo(() => Object.entries(data?.categories || {}), [data]);
 
-  if (loading) {
+  const handleLongPress = useCallback((item: any) => {
+    Alert.alert(
+      'Manage Memory',
+      `What would you like to do with "${toLabel(item.key)}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Edit', onPress: () => {
+            setEditMemory(item);
+            setEditValue(item.value);
+            setEditModalVisible(true);
+        }},
+        { text: 'Delete', style: 'destructive', onPress: () => confirmDelete(item) }
+      ]
+    );
+  }, []);
+
+  const confirmDelete = useCallback((item: any) => {
+    Alert.alert('Delete Memory?', 'Are you sure you want to archive this memory? It will be moved to History.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+         try {
+           await api.delete(`/memories/${item.id}`);
+           fetchMemories();
+         } catch (err) {
+           Alert.alert('Error', 'Failed to delete memory.');
+         }
+      }}
+    ]);
+  }, []);
+
+  const saveEdit = async () => {
+    if (!editMemory || !editValue.trim()) return;
+    setIsSaving(true);
+    try {
+      await api.patch(`/memories/${editMemory.id}`, { value: editValue });
+      setEditModalVisible(false);
+      fetchMemories();
+    } catch (err) {
+      Alert.alert('Error', 'Failed to update memory.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (loading && !data) {
     return <View style={s.center}><ActivityIndicator size="large" color="#8B5CF6" /></View>;
   }
 
@@ -116,7 +189,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       {/* Stats row */}
       <View style={s.statsRow}>
         <View style={s.statCard}>
-          <Text style={s.statNum}>{data?.totalMemories || 0}</Text>
+          <Text style={s.statNum}>{data?.totalCount || 0}</Text>
           <Text style={s.statLabel}>Total</Text>
         </View>
         <View style={s.statCard}>
@@ -124,7 +197,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
           <Text style={s.statLabel}>Types</Text>
         </View>
         <View style={s.statCard}>
-          <Text style={[s.statNum, { color: '#F59E0B' }]}>{thisWeekCount}</Text>
+          <Text style={[s.statNum, { color: '#F59E0B' }]}>{data?.thisWeekCount || 0}</Text>
           <Text style={s.statLabel}>This Week</Text>
         </View>
       </View>
@@ -187,21 +260,56 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         })}
       </View>
 
-      {/* Memory List */}
-      <FlatList
-        data={filteredMemories}
-        keyExtractor={(item) => item.id}
+      {/* Memory Sections */}
+      <SectionList
+        sections={sections}
+        keyExtractor={(item, index) => item.id || `wm-${index}`}
         removeClippedSubviews
         windowSize={10}
-        renderItem={({ item }) => {
+        contentContainerStyle={s.listContent}
+        ListEmptyComponent={<Text style={s.emptyText}>No memories found.</Text>}
+        renderSectionHeader={({ section }) => (
+          <View style={s.sectionHeader}>
+            {section.type === 'archived' || section.type === 'archived_collapsed' ? (
+              <TouchableOpacity onPress={() => setHistoryExpanded(!historyExpanded)} style={s.historyHeaderRow}>
+                <Text style={s.sectionTitle}>{section.title} ({section.count})</Text>
+                <Text style={s.historyHeaderIcon}>{historyExpanded ? '▼' : '▶'}</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={s.sectionTitle}>{section.title}</Text>
+            )}
+          </View>
+        )}
+        renderItem={({ item, section }) => {
+          if (section.type === 'working') {
+            const timeStr = relativeTime(item.updated_at || item.created_at);
+            return (
+              <View style={[s.card, s.cardWorking]}>
+                <View style={s.cardHeader}>
+                  <View style={[s.badge, { backgroundColor: '#06B6D420', borderColor: '#06B6D4' }]}>
+                    <Text style={[s.badgeText, { color: '#06B6D4' }]}>⚡ Context</Text>
+                  </View>
+                  {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
+                </View>
+                <Text style={s.cardKey}>{toLabel(item.key)}</Text>
+                <Text style={s.cardVal}>{item.value}</Text>
+              </View>
+            );
+          }
+
+          const isArchived = section.type === 'archived';
           const typeMeta = CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
           const typeLabel = MEMORY_TYPE_LABEL[item.memory_type] || item.memory_type || 'memory';
           const authMeta = AUTHORITY_META[item.source_authority] || AUTHORITY_META.subconscious_inference;
           const timeStr = relativeTime(item.updated_at || item.created_at);
 
           return (
-            <View style={s.card}>
-              {/* Header row: type badge + authority badge + timestamp */}
+            <TouchableOpacity 
+              style={[s.card, isArchived && s.cardArchived]}
+              onLongPress={() => !isArchived && handleLongPress(item)}
+              delayLongPress={400}
+              activeOpacity={isArchived ? 1 : 0.7}
+            >
               <View style={s.cardHeader}>
                 <View style={[s.badge, { backgroundColor: `${typeMeta.color}20`, borderColor: typeMeta.color }]}>
                   <Text style={[s.badgeText, { color: typeMeta.color }]}>
@@ -215,18 +323,46 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
                   {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
                 </View>
               </View>
-
-              {/* Human-readable key label */}
               <Text style={s.cardKey}>{toLabel(item.key)}</Text>
-
-              {/* Value */}
               <Text style={s.cardVal}>{item.value}</Text>
-            </View>
+            </TouchableOpacity>
           );
         }}
-        contentContainerStyle={s.listContent}
-        ListEmptyComponent={<Text style={s.emptyText}>No memories found.</Text>}
       />
+
+      {/* Edit Modal */}
+      <Modal visible={editModalVisible} transparent animationType="fade">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <Text style={s.modalTitle}>Edit Memory</Text>
+            <Text style={s.modalSubtitle}>{editMemory ? toLabel(editMemory.key) : ''}</Text>
+            
+            <TextInput
+              style={s.modalInput}
+              value={editValue}
+              onChangeText={setEditValue}
+              multiline
+              autoFocus
+              placeholder="Memory value..."
+              placeholderTextColor="#666"
+            />
+            
+            <View style={s.modalActions}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setEditModalVisible(false)} disabled={isSaving}>
+                <Text style={s.modalBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.modalBtn, s.modalBtnPrimary]} onPress={saveEdit} disabled={isSaving}>
+                {isSaving ? (
+                   <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                   <Text style={[s.modalBtnText, { color: '#fff' }]}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </SafeAreaView>
   );
 });
@@ -266,10 +402,16 @@ const s = StyleSheet.create({
   heatBar: { width: 28, borderRadius: 4, marginBottom: 4 },
   heatLabel: { fontSize: 14 },
   listContent: { paddingHorizontal: 16, paddingBottom: 32 },
+  sectionHeader: { marginTop: 12, marginBottom: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  historyHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  historyHeaderIcon: { color: '#999', fontSize: 14, fontWeight: 'bold' },
   card: {
     backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10
   },
+  cardWorking: { backgroundColor: 'rgba(6,182,212,0.02)', borderColor: 'rgba(6,182,212,0.15)' },
+  cardArchived: { opacity: 0.6, backgroundColor: 'rgba(255,255,255,0.01)' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   badge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
@@ -280,4 +422,18 @@ const s = StyleSheet.create({
   cardKey: { fontSize: 13, fontWeight: '700', color: '#06B6D4', marginBottom: 4 },
   cardVal: { fontSize: 14, color: '#ccc', lineHeight: 20 },
   emptyText: { color: '#555', textAlign: 'center', marginTop: 48, fontSize: 15 },
+  
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#18181B', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
+  modalSubtitle: { fontSize: 13, color: '#06B6D4', marginBottom: 16, fontWeight: '600' },
+  modalInput: { 
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, color: '#fff', 
+    padding: 12, minHeight: 80, fontSize: 15, textAlignVertical: 'top', marginBottom: 20
+  },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  modalBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
+  modalBtnPrimary: { backgroundColor: '#8B5CF6' },
+  modalBtnText: { color: '#ccc', fontSize: 15, fontWeight: '600' }
 });
