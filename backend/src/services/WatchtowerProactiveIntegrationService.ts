@@ -254,12 +254,21 @@ export class WatchtowerProactiveIntegrationService {
           continue;
         }
 
+        // INVARIANT: att.id is required for a stable durable idempotencyKey.
+        // Without it we cannot guarantee exactly-once dispatch across retries.
+        // Skip and warn rather than silently inventing an unstable Date.now() key.
+        if (!att.id) {
+          logger.warn('[WatchtowerIntegration] Skipping dispatch: attentionDecision has no stable id', { userId, targetType: att.targetType, targetId: att.targetId, logicalKey });
+          summary.blockedOpportunitiesCount += 1;
+          continue;
+        }
+
         const dispatchStatus = await outboundDispatcherService.dispatch({
           userId,
           sourceEngine: 'WATCHTOWER' as OutboundSource,
           intentType: 'proactive',
           logicalKey,
-          idempotencyKey: `watchtower:dispatch:${att.id || `fallback-${Date.now()}`}`, // Durable idempotency tied to opportunity
+          idempotencyKey: `watchtower:dispatch:${att.id}`, // Stable: att.id is a DB-assigned UUID, safe across retries
           context: { att, topic },
           generationStrategy: 'watchtower_tier2',
           skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false

@@ -83,6 +83,10 @@ export class NovaConsciousnessEngine {
     });
 
     let usersEvaluated = 0;
+    // usersEligible: users that passed ALL NACE eligibility gates and proceeded to Tier 2 generation.
+    // Distinct from usersEvaluated (all users checked) — a user can be evaluated but suppressed
+    // by cooldown, sleep lock, gap check, no-grounded-reason gate, or Tier 1 LLM returning NO.
+    let usersEligible = 0;
     let intentsDispatched = 0;
     let intentsSuppressed = 0;
 
@@ -114,6 +118,7 @@ export class NovaConsciousnessEngine {
           const result = await this.processUserWithResult(userId);
           intentsDispatched += result.dispatched;
           intentsSuppressed += result.suppressed;
+          if (result.dispatched > 0 || result.eligible > 0) usersEligible++;
         } catch (userErr) {
           logger.warn('[NACE] Error processing user', { userId, error: userErr instanceof Error ? userErr.message : String(userErr) });
         }
@@ -127,11 +132,11 @@ export class NovaConsciousnessEngine {
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - pulseStartMs,
         usersEvaluated,
-        usersEligible: usersEvaluated,
+        usersEligible, // Users that passed ALL eligibility gates (Tier1 YES or override)
         intentsDispatched,
         intentsSuppressed,
         intentsFailed: 0,
-        outcome: intentsDispatched > 0 ? 'healthy' : 'healthy_suppressed',
+        outcome: intentsDispatched > 0 ? 'healthy' : (usersEligible > 0 ? 'partial' : 'healthy_suppressed'),
         suppressionReasons: {},
       });
     } catch (err) {
@@ -148,10 +153,8 @@ export class NovaConsciousnessEngine {
   }
 
   /** Internal: calls processUser and returns a structured dispatch result. */
-  private async processUserWithResult(userId: string): Promise<{ dispatched: number; suppressed: number }> {
-    // We intercept the result by wrapping the existing processUser.
-    // processUser already logs all outcomes — we just need the counts.
-    const result = { dispatched: 0, suppressed: 0 };
+  private async processUserWithResult(userId: string): Promise<{ dispatched: number; suppressed: number; eligible: number }> {
+    const result = { dispatched: 0, suppressed: 0, eligible: 0 };
     await this.processUser(userId, undefined, result);
     return result;
   }
@@ -160,7 +163,7 @@ export class NovaConsciousnessEngine {
     return this.processUser(userId);
   }
 
-  async processUser(userId: string, opts?: { trigger?: string; awayDurationMinutes?: number | null }, _result?: { dispatched: number; suppressed: number }): Promise<void> {
+  async processUser(userId: string, opts?: { trigger?: string; awayDurationMinutes?: number | null }, _result?: { dispatched: number; suppressed: number; eligible: number }): Promise<void> {
     const isSessionStart = opts?.trigger === 'session_start';
     const awayDurationMinutes = opts?.awayDurationMinutes ?? null;
     // Coma awareness: Don't reach out right after server boot to avoid spam
@@ -707,6 +710,12 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
     }
 
     // --- TIER 2: Generation (Full Model) ---
+    // At this point the user passed ALL NACE eligibility gates:
+    //   boot cooldown ✓, profile ✓, suppression lock ✓, gap check ✓,
+    //   grounded reason ✓, shouldReach ✓ (Tier 1 approved or override).
+    // This is the correct point to count as "eligible" — not merely "evaluated".
+    if (_result) _result.eligible += 1;
+
 
     // Build reminder nag escalation hint for Tier 2
     const isReminderNag = agendaItem?.source_message?.startsWith('reminder_ack_check:');
