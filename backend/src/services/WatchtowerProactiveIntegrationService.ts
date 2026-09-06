@@ -18,7 +18,9 @@ import { logger } from '../lib/logger';
 import { qt } from '../lib/queryTracker';
 import { contextualTimingEngine } from './ContextualTimingEngine';
 import { universalBurdenEngine } from './UniversalBurdenEngine';
-import { proactiveGate } from './ProactiveGate';
+import { outboundDispatcherService } from './OutboundDispatcherService';
+import { novaBrain } from './NovaBrainService';
+import { temporalAwarenessService } from './TemporalAwarenessService';
 import {
   TimingState,
   OutreachEligibility,
@@ -229,7 +231,7 @@ export class WatchtowerProactiveIntegrationService {
 
         summary.burdenAllowedCount += 1;
 
-        // ── STEP 5: PROACTIVE GATE ATOMIC ACQUISITION ────────────────────────
+        // ── STEP 5: OUTBOUND DISPATCHER HANDOFF ──────────────────────────────
         if (options?.dryRun) {
           summary.gateAllowedCount += 1;
           summary.handoffs.push({
@@ -251,40 +253,6 @@ export class WatchtowerProactiveIntegrationService {
           continue;
         }
 
-        const gateRes = await proactiveGate.acquire(userId, {
-          outreachType: 'proactive',
-          logicalKey,
-          logicalKeyWindowMinutes: isUrgent ? 60 : 720,
-          isUrgent,
-          proposedMessage: `[Watchtower ${att.targetType}: ${topic}]`,
-          skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false,
-        });
-
-        if (!gateRes.allowed) {
-          summary.blockedOpportunitiesCount += 1;
-          summary.handoffs.push({
-            attentionDecisionId: att.id || 'att_unknown',
-            timingDecisionId: timingDecision.id || null,
-            userId,
-            targetType: att.targetType,
-            targetId: att.targetId,
-            sourceClass: timingDecision.sourceClass,
-            timingState: timingDecision.timingState,
-            outreachEligibility: timingDecision.outreachEligibility,
-            burdenDecision: 'ALLOW',
-            gateAllowed: false,
-            gateBlockedBy: gateRes.blockedBy,
-            dispatched: false,
-            logicalKey,
-            timestamp: new Date().toISOString(),
-          });
-          continue;
-        }
-
-        // ── STEP 6: ATOMIC COMMIT & DISPATCH HANDOFF ─────────────────────────
-        summary.gateAllowedCount += 1;
-        summary.dispatchedOpportunitiesCount += 1;
-
         // Mark attention decision as ACTED to prevent re-evaluation
         if (att.id) {
           await qt.track('integration_mark_acted', 'watchtower_attention_decisions', () =>
@@ -298,11 +266,19 @@ export class WatchtowerProactiveIntegrationService {
           );
         }
 
-        // Commit outreach slot reservation in ProactiveGate
-        await proactiveGate.commit(
-          gateRes.outreachId,
-          `[Watchtower Handoff]: ${att.targetType} -> ${topic}`
-        );
+        await outboundDispatcherService.dispatch({
+          userId,
+          sourceEngine: 'Watchtower',
+          intentType: 'proactive',
+          logicalKey,
+          idempotencyKey: `watchtower:${crypto.randomUUID()}`, // Unique operation
+          context: { att, topic },
+          generationStrategy: 'watchtower_tier2',
+          skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false
+        });
+
+        summary.gateAllowedCount += 1;
+        summary.dispatchedOpportunitiesCount += 1;
 
         summary.handoffs.push({
           attentionDecisionId: att.id || 'att_unknown',
@@ -315,7 +291,7 @@ export class WatchtowerProactiveIntegrationService {
           outreachEligibility: timingDecision.outreachEligibility,
           burdenDecision: 'ALLOW',
           gateAllowed: true,
-          outreachId: gateRes.outreachId,
+          outreachId: 'dispatched',
           dispatched: true,
           logicalKey,
           timestamp: new Date().toISOString(),
@@ -325,7 +301,7 @@ export class WatchtowerProactiveIntegrationService {
           userId,
           targetType: att.targetType,
           logicalKey,
-          outreachId: gateRes.outreachId,
+          outreachId: 'dispatched',
         });
       }
 
@@ -343,3 +319,19 @@ export class WatchtowerProactiveIntegrationService {
 }
 
 export const watchtowerProactiveIntegrationService = new WatchtowerProactiveIntegrationService();
+
+outboundDispatcherService.registerStrategy('watchtower_tier2', async (context: any) => {
+  const { att, topic } = context;
+  const tContext = await temporalAwarenessService.getContext(att.userId || att.user_id, 0);
+  
+  const tier2Context = `Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
+Watchtower Target: ${att.targetType || att.target_type}
+Topic: ${topic}
+Urgency: ${att.scores?.urgency || 0}/100
+
+Generate a short, natural proactive message asking the user about this topic. Be helpful and contextual.`;
+
+  const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
+  return generated.message || `[Watchtower ${att.targetType || att.target_type}: ${topic}]`;
+});
+

@@ -17,10 +17,9 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
-import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
-import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { proactiveGate } from './ProactiveGate';
+import { outboundDispatcherService } from './OutboundDispatcherService';
 
 // NOTE: Global proactive cooldown is now enforced by ProactiveGate (DB-backed).
 // lastProactiveSentAt and GLOBAL_PROACTIVE_COOLDOWN_MS removed — they reset on server restart.
@@ -342,38 +341,17 @@ export class NovaFollowupService {
         }
       }
 
-      // Fetch timezone offset and profile data for ProactiveGate and Push
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('timezone_offset, push_token')
-        .eq('id', followup.user_id)
-        .maybeSingle();
-      const tzOffset = profile?.timezone_offset ?? 0;
+      // P0-2: ALWAYS check quiet hours at FIRE time
+      if (await this._isQuietHours(followup.user_id)) {
+        logger.info('[NovaFollowup] Deferred follow-up at fire time due to quiet hours', { id: followup.id });
+        return; // Leave pending
+      }
 
-      // P0-1: Single Authoritative Proactive Pipeline
-      const gateDecision = await proactiveGate.acquire(followup.user_id, {
-        outreachType: 'proactive', 
-        logicalKey: `followup:fired:${followup.id}`,
-        logicalKeyWindowMinutes: 60, // duplicate suppression
-        skipQuietHoursCheck: false,  // P0-2: ALWAYS check quiet hours at FIRE time
-        skipMinGapCheck: false,      // P0-2: ALWAYS check burden at FIRE time
-        proposedMessage: followup.message,
-        timezoneOffsetMinutes: tzOffset,
-      });
-
-      if (!gateDecision.allowed) {
-        // P0-2: Blocked by timing, presence, or burden at fire time
-        logger.info('[NovaFollowup] Deferred/Blocked follow-up at fire time', { 
-          id: followup.id, 
-          blockedBy: gateDecision.blockedBy,
-          detail: gateDecision.detail
-        });
-        
-        // Cancel if blocked by duplicate logic, else leave pending to retry later
-        if (gateDecision.blockedBy === 'duplicate_logical_key' || gateDecision.blockedBy === 'duplicate_content') {
-           await supabaseAdmin.from('nova_followups').update({ status: 'cancelled' }).eq('id', followup.id);
-        }
-        return; 
+      // P0-2: ALWAYS check duplicate at FIRE time
+      if (await this._hasUnansweredFollowup(followup.user_id)) {
+        logger.info('[NovaFollowup] Cancelled follow-up at fire time due to unanswered follow-up', { id: followup.id });
+        await supabaseAdmin.from('nova_followups').update({ status: 'cancelled' }).eq('id', followup.id);
+        return;
       }
 
       // Atomic claim — only one concurrent poll wins.
@@ -386,44 +364,43 @@ export class NovaFollowupService {
 
       if (updateErr || !locked || locked.length === 0) {
         logger.warn('[NovaFollowup] Could not lock followup for firing (may be racing)', { id: followup.id });
-        await proactiveGate.release(gateDecision.outreachId);
         return;
       }
 
       try {
-        // Deliver FIRST — insert as Nova's message in chat history.
-        const insertErr = await saveAssistantMessage(
-          followup.user_id,
-          followup.conversation_id,
-          followup.message,
-          'NovaFollowupService',
-          undefined,
-          { sourceType: 'followup', outreachLogId: gateDecision.outreachId }   // P0-C: attribution
-        ).then(() => null).catch((e: any) => e);
+        const finalStatus = await outboundDispatcherService.dispatch({
+          userId: followup.user_id,
+          sourceEngine: 'Followup',
+          intentType: 'followup',
+          logicalKey: `followup:fired:${followup.id}`,
+          idempotencyKey: `followup:${followup.id}`,
+          context: {},
+          generationStrategy: 'none',
+          proposedMessage: followup.message,
+          skipQuietHoursCheck: true // Already checked above
+        });
 
-        if (insertErr) throw new Error(`chat_history insert failed: ${insertErr.message}`);
-
-        // Commit the gate reservation
-        await proactiveGate.commit(gateDecision.outreachId, followup.message);
-
-        // Fetch push token and send notification via unified method
-        if (profile?.push_token) {
-          // P0-1: Use the canonical sendNovaReplyNotification instead of manual FCM payload
-          await sendNovaReplyNotification(
-            profile.push_token,
-            followup.message,
-            followup.conversation_id
-          ).catch((e) => {
-             logger.warn('[NovaFollowup] Failed to send push notification (non-critical)', { error: e.message });
-          });
+        if (finalStatus === 'SUPPRESSED') {
+          // Gate blocked it (e.g. burden or duplicate logical key)
+          // Since quiet hours were already checked, it's blocked by duplicate logic
+          logger.info('[NovaFollowup] Cancelled follow-up: gate blocked (duplicate or burden)', { id: followup.id });
+          await supabaseAdmin.from('nova_followups').update({ status: 'cancelled' }).eq('id', followup.id);
+          return;
         }
+
+        if (finalStatus === 'FAILED_TRANSIENT') {
+          throw new Error('Dispatcher returned FAILED_TRANSIENT');
+        }
+
+        logger.info('[NovaFollowup] ✅ Proactive follow-up processed by dispatcher', {
+          id: followup.id, finalStatus
+        });
       } catch (err) {
-        // Delivery failed — revert the claim so the next poll retries, and release gate
+        // Delivery failed — revert the claim so the next poll retries
         logger.error('[NovaFollowup] Delivery failed, reverting followup to pending for retry', {
           id: followup.id,
           error: err instanceof Error ? err.message : String(err)
         });
-        await proactiveGate.release(gateDecision.outreachId);
         await supabaseAdmin
           .from('nova_followups')
           .update({ status: 'pending' })

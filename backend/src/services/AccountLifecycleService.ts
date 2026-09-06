@@ -70,6 +70,7 @@ export class AccountLifecycleService {
     { table: 'life_threads', userColumn: 'user_id' },
 
     // 5. Scheduled Events, Followups & Reminders
+    { table: 'outbound_intents', userColumn: 'user_id' },
     { table: 'nova_followups', userColumn: 'user_id' },
     { table: 'reminders', userColumn: 'user_id' },
     { table: 'nova_agenda', userColumn: 'user_id' },

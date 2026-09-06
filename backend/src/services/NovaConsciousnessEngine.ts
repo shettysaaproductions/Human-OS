@@ -7,11 +7,10 @@
  */
 
 import { supabaseAdmin } from '../lib/supabase';
-import { saveAssistantMessage } from './ChatHistoryHelpers';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
-import { proactiveGate } from './ProactiveGate';
+import { outboundDispatcherService } from './OutboundDispatcherService';
 // Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
 // The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
 const MIN_GAP_MINUTES = 1;
@@ -722,24 +721,7 @@ ${sessionStartContextNote}`;
           ? `nace:session_start:${userId}:${Math.floor(Date.now() / (30 * 60 * 1000))}` // 30-min bucket
           : `nace:engagement:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`; // 1-hour bucket
 
-      const gateDecision = await proactiveGate.acquire(userId, {
-        outreachType: agendaItem ? 'agenda_followup' : (isSessionStart ? 'session_start' : 'engagement_checkin'),
-        logicalKey,
-        logicalKeyWindowMinutes: agendaItem ? 60 : (isSessionStart ? 30 : 60),
-        proposedMessage: message,
-        skipQuietHoursCheck: true, // NACE already checks sleep window above
-        skipMinGapCheck: true,     // NACE already enforces escalation gap above
-        timezoneOffsetMinutes: profile.timezone_offset || 0,
-      });
-
-      if (!gateDecision.allowed) {
-        logger.info('[NACE] 🚫 ProactiveGate blocked', {
-          userId, blockedBy: gateDecision.blockedBy, detail: (gateDecision as any).detail
-        });
-        return;
-      }
-
-      const outreachId = gateDecision.outreachId;
+      const intentType = agendaItem ? 'agenda_followup' : (isSessionStart ? 'session_start' : 'engagement_checkin');
 
       // Update agenda retry state BEFORE delivery so a crash doesn't re-fire it immediately
       if (agendaItem) {
@@ -757,43 +739,28 @@ ${sessionStartContextNote}`;
         }
       }
 
-      // Save to chat_history
-      const { data: latestChat } = await supabaseAdmin
-        .from('chat_history')
-        .select('conversation_id')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const conversationId = latestChat?.conversation_id || crypto.randomUUID();
-
-      try {
-        await saveAssistantMessage(userId, conversationId, message, 'NovaConsciousnessEngine', undefined, {
-          sourceType: 'nace_outreach',
-          outreachLogId: outreachId || undefined,
-        });
-        // Commit actual message to gate log (was written as placeholder on acquire)
-        await proactiveGate.commit(outreachId, message);
-      } catch (saveErr) {
-        // Delivery failed — release reservation so cooldown isn't polluted
-        await proactiveGate.release(outreachId);
-        throw saveErr;
-      }
-
-      // Send push notification
-      if (hasPushToken) {
-        const { sendNovaReplyNotification } = await import('../lib/pushNotifications');
-        await sendNovaReplyNotification(profile.push_token, message, conversationId).catch(err =>
-          logger.warn('[NACE] Push notification failed', { error: err?.message })
-        );
-      } else {
-        logger.info('[NACE] Message saved to DB (no push token — user will see it on app open)', { userId });
-      }
-
-      logger.info('[NACE] ✅ Proactive message sent', {
-        userId, outreachId, messagePreview: message.substring(0, 60),
-        decision: { outreachType: agendaItem ? 'agenda_followup' : 'engagement_checkin', logicalKey }
+      // Dispatch through OutboundDispatcher
+      const finalStatus = await outboundDispatcherService.dispatch({
+        userId,
+        sourceEngine: 'NACE',
+        intentType,
+        logicalKey,
+        idempotencyKey: `nace:${crypto.randomUUID()}`, // Unique operation
+        context: {}, // No additional context needed since we use strategy 'none'
+        generationStrategy: 'none',
+        proposedMessage: message,
+        skipQuietHoursCheck: true // NACE already checked
       });
+
+      if (['DELIVERED', 'DELIVERED_PARTIAL', 'NOTIFICATION_SKIPPED', 'PERSISTED', 'NOTIFICATION_ATTEMPTED'].includes(finalStatus)) {
+        logger.info('[NACE] ✅ Proactive message processed by dispatcher', {
+          userId, messagePreview: message.substring(0, 60),
+          decision: { outreachType: intentType, logicalKey },
+          finalStatus
+        });
+      } else {
+        logger.info('[NACE] 🚫 Intent blocked or failed in dispatcher', { userId, finalStatus });
+      }
     } catch (e) {
       logger.warn('[NACE] Tier 2 generation or send failed', { error: e instanceof Error ? e.message : String(e) });
     }
