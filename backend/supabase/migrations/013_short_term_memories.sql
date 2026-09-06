@@ -21,19 +21,23 @@ CREATE TABLE IF NOT EXISTS public.short_term_memories (
 -- RLS
 ALTER TABLE public.short_term_memories ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can insert their own short_term_memories" ON public.short_term_memories;
 CREATE POLICY "Users can insert their own short_term_memories"
     ON public.short_term_memories FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view their own short_term_memories" ON public.short_term_memories;
 CREATE POLICY "Users can view their own short_term_memories"
     ON public.short_term_memories FOR SELECT
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update their own short_term_memories" ON public.short_term_memories;
 CREATE POLICY "Users can update their own short_term_memories"
     ON public.short_term_memories FOR UPDATE
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete their own short_term_memories" ON public.short_term_memories;
 CREATE POLICY "Users can delete their own short_term_memories"
     ON public.short_term_memories FOR DELETE
     USING (auth.uid() = user_id);

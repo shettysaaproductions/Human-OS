@@ -49,6 +49,10 @@ export interface HeartbeatUserMetrics {
   durationMs: number;
   status: 'completed' | 'partial' | 'skipped' | 'failed';
   error?: string;
+  /** Phase 9: proactive dispatch telemetry from WatchtowerProactiveIntegration */
+  proactiveEligibleCount: number;
+  proactiveDispatched: number;
+  proactiveSuppressed: number;
 }
 
 export interface WatchtowerHeartbeatSummary {
@@ -67,6 +71,10 @@ export interface WatchtowerHeartbeatSummary {
   durationMs: number;
   userMetrics: HeartbeatUserMetrics[];
   error?: string;
+  /** Phase 9: proactive dispatch telemetry (aggregated from all users) */
+  proactiveEligibleCount: number;
+  proactiveDispatched: number;
+  proactiveSuppressed: number;
 }
 
 export interface HeartbeatLeaseAcquireResult {

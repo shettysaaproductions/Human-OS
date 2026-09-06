@@ -28,9 +28,9 @@ describe('AccountLifecycleService - TOCTOU Race Condition (Shoot Dead)', () => {
     const fakeMemoryPayload = { user_id: userA, key: 'mother_name', value: 'Rajeshree', confidence: 0.9, memory_type: 'semantic' };
     const deleteResult = await lifecycleService.deleteAccount(userA);
     expect(deleteResult.success).toBe(true);
-    const { error } = await supabaseAdmin.from('working_memory').insert(fakeMemoryPayload);
+    const { error } = await supabaseAdmin.from('memories').insert(fakeMemoryPayload);
     expect(error?.message).toContain('ACCOUNT_TOMBSTONE_VIOLATION');
-    const { data: residue } = await supabaseAdmin.from('working_memory').select('*').eq('user_id', userA);
+    const { data: residue } = await supabaseAdmin.from('memories').select('*').eq('user_id', userA);
     expect(residue?.length).toBe(0);
   }, 30000);
 
@@ -46,19 +46,19 @@ describe('AccountLifecycleService - TOCTOU Race Condition (Shoot Dead)', () => {
 
   it('CANDIDATE_SYNTHESIS_RACE: Should block candidate promotion', async () => {
     await lifecycleService.deleteAccount(userA);
-    const { error } = await supabaseAdmin.from('working_memory_candidates').insert({ user_id: userA, key: 'test_candidate', value: 'data', status: 'pending' });
+    const { error } = await supabaseAdmin.from('candidate_synthesis_claims').insert({ user_id: userA, topic: 'test_candidate', new_state: {}, confidence: 0.9, reasoning: 'test' });
     expect(error?.message).toContain('ACCOUNT_TOMBSTONE_VIOLATION');
   }, 30000);
 
   it('LIFETHREAD_RACE: Should block life thread updates', async () => {
     await lifecycleService.deleteAccount(userA);
-    const { error } = await supabaseAdmin.from('life_threads').insert({ user_id: userA, thread_topic: 'work' });
+    const { error } = await supabaseAdmin.from('life_threads').insert({ user_id: userA, canonical_key: 'work', state: 'active' });
     expect(error?.message).toContain('ACCOUNT_TOMBSTONE_VIOLATION');
   }, 30000);
 
   it('REMINDER_RACE: Should block reminder insertion', async () => {
     await lifecycleService.deleteAccount(userA);
-    const { error } = await supabaseAdmin.from('reminders').insert({ user_id: userA, reminder_text: 'Buy milk', due_at: new Date().toISOString() });
+    const { error } = await supabaseAdmin.from('reminders').insert({ user_id: userA, content: 'Buy milk', trigger_at: new Date().toISOString() });
     expect(error?.message).toContain('ACCOUNT_TOMBSTONE_VIOLATION');
   }, 30000);
 
@@ -70,7 +70,7 @@ describe('AccountLifecycleService - TOCTOU Race Condition (Shoot Dead)', () => {
 
   it('OUTREACH_RACE: Should block proactive outreach generation', async () => {
     await lifecycleService.deleteAccount(userA);
-    const { error } = await supabaseAdmin.from('nova_proactive_outreach').insert({ user_id: userA, topic: 'check_in', status: 'pending' });
+    const { error } = await supabaseAdmin.from('outbound_intents').insert({ user_id: userA, intent_type: 'proactive', status: 'pending' });
     expect(error?.message).toContain('ACCOUNT_TOMBSTONE_VIOLATION');
   }, 30000);
 
@@ -82,7 +82,7 @@ describe('AccountLifecycleService - TOCTOU Race Condition (Shoot Dead)', () => {
 
   it('NEW_CHAT_RACE: Should block new chat creation for deleted user', async () => {
     await lifecycleService.deleteAccount(userA);
-    const { error } = await supabaseAdmin.from('conversation_sessions').insert({ user_id: userA, conversation_id: uuidv4(), started_at: new Date().toISOString() });
+    const { error } = await supabaseAdmin.from('conversation_sessions').insert({ user_id: userA, id: uuidv4(), created_at: new Date().toISOString() });
     expect(error?.message).toContain('ACCOUNT_TOMBSTONE_VIOLATION');
   }, 30000);
 

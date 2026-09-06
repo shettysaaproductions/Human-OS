@@ -147,6 +147,16 @@ describe('Phase 3C-D: Watchtower -> Contextual Timing -> ProactiveGate Integrati
   const user1 = '00000000-0000-4000-a000-000000000001';
   const user2 = '00000000-0000-4000-a000-000000000002';
 
+  beforeAll(() => {
+    // Lock time to 12 PM UTC to avoid Quiet Hours test flakiness
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
   beforeEach(() => {
     mockAttentionDb = [];
     mockTimingLogsDb = [];

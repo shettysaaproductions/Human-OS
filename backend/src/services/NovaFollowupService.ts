@@ -286,6 +286,15 @@ export class NovaFollowupService {
    * Called by the same 10s interval that fires user reminders.
    */
   async checkAndFireFollowups(): Promise<void> {
+    const startMs = Date.now();
+    // runId is correlation-only — never used as a durable outbound identity
+    const runId = `followup:poll:${startMs}`;
+    logger.info('[NovaFollowup] Engine started', { engine: 'FOLLOWUP', event: 'engine_started', runId });
+
+    let followupsChecked = 0;
+    let intentsDispatched = 0;
+    let intentsSuppressed = 0;
+
     try {
       const now = new Date().toISOString();
       const { data: due, error } = await supabaseAdmin
@@ -296,26 +305,60 @@ export class NovaFollowupService {
 
       if (error) {
         logger.error('[NovaFollowup] Failed to query due followups', { error: error.message });
+        logger.info('[NovaFollowup] Engine completed', {
+          engine: 'FOLLOWUP', event: 'engine_completed', runId,
+          durationMs: Date.now() - startMs, followupsChecked: 0,
+          intentsDispatched: 0, intentsSuppressed: 0, outcome: 'failed',
+        });
         return;
       }
 
-      if (!due || due.length === 0) return;
+      followupsChecked = due?.length ?? 0;
+      if (!due || due.length === 0) {
+        logger.info('[NovaFollowup] Engine completed', {
+          engine: 'FOLLOWUP', event: 'engine_completed', runId,
+          durationMs: Date.now() - startMs, followupsChecked: 0,
+          intentsDispatched: 0, intentsSuppressed: 0,
+          outcome: 'healthy_suppressed', suppressionReasons: { no_due_followups: 1 },
+        });
+        return;
+      }
 
       logger.info(`[NovaFollowup] Firing ${due.length} due follow-up(s)`);
 
       for (const followup of due) {
         try {
           await this._fireFollowup(followup);
+          intentsDispatched++;
         } catch (err) {
+          intentsSuppressed++;
           logger.error('[NovaFollowup] Failed to fire followup', {
             id: followup.id,
             error: err instanceof Error ? err.message : String(err)
           });
         }
       }
+
+      logger.info('[NovaFollowup] Engine completed', {
+        engine: 'FOLLOWUP',
+        event: 'engine_completed',
+        runId,
+        durationMs: Date.now() - startMs,
+        followupsChecked,
+        intentsDispatched,
+        intentsSuppressed,
+        intentsFailed: 0,
+        outcome: intentsDispatched > 0 ? 'healthy' : 'healthy_suppressed',
+        suppressionReasons: {},
+      });
     } catch (err) {
       logger.warn('[NovaFollowup] checkAndFireFollowups error', {
         error: err instanceof Error ? err.message : String(err)
+      });
+      logger.info('[NovaFollowup] Engine completed', {
+        engine: 'FOLLOWUP', event: 'engine_completed', runId,
+        durationMs: Date.now() - startMs, followupsChecked,
+        intentsDispatched, intentsSuppressed, outcome: 'failed',
       });
     }
   }

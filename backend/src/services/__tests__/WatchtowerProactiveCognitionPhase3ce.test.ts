@@ -16,6 +16,13 @@ let mockPresenceDb: any[] = [];
 let mockChatDb: any[] = [];
 let mockSessionsDb: any[] = [];
 
+jest.mock('../OutboundDispatcherService', () => ({
+  outboundDispatcherService: {
+    dispatch: jest.fn().mockResolvedValue('DELIVERED'),
+    registerStrategy: jest.fn(),
+  }
+}));
+
 jest.mock('../../lib/supabase', () => ({
   supabaseAdmin: {
     from: jest.fn().mockImplementation((table: string) => {
@@ -137,6 +144,16 @@ jest.mock('../../lib/supabase', () => ({
 describe('Phase 3C-E: Final Integrated Proactive Cognition Adversarial Validation', () => {
   const user1 = '00000000-0000-4000-a000-000000000001';
   const user2 = '00000000-0000-4000-a000-000000000002';
+
+  beforeAll(() => {
+    // Lock time to 12 PM UTC to avoid Quiet Hours test flakiness
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
 
   beforeEach(() => {
     mockAttentionDb = [];

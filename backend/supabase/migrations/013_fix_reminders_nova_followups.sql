@@ -50,5 +50,6 @@ CREATE INDEX IF NOT EXISTS nova_followups_status_idx  ON public.nova_followups(s
 
 ALTER TABLE public.nova_followups ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own followups" ON public.nova_followups;
 CREATE POLICY "Users can view own followups" ON public.nova_followups
   FOR SELECT USING (auth.uid() = user_id);

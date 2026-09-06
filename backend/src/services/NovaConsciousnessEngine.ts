@@ -71,6 +71,21 @@ export class NovaConsciousnessEngine {
     }
     _pulseInProgress = true;
     _pulseStartTime = Date.now();
+    const pulseStartMs = Date.now();
+    // runId is a log correlation ID only — never used as durable outbound identity
+    const pulseRunId = `nace:pulse:${pulseStartMs}`;
+
+    logger.info('[NACE] Engine started', {
+      engine: 'NACE',
+      event: 'engine_started',
+      runId: pulseRunId,
+      startedAt: new Date(pulseStartMs).toISOString(),
+    });
+
+    let usersEvaluated = 0;
+    let intentsDispatched = 0;
+    let intentsSuppressed = 0;
+
     try {
       // Find active users (last 7 days)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -80,31 +95,72 @@ export class NovaConsciousnessEngine {
         .eq('role', 'user')
         .gte('created_at', sevenDaysAgo);
 
-      if (!activeUsers) return;
+      if (!activeUsers) {
+        logger.info('[NACE] Engine completed', {
+          engine: 'NACE', event: 'engine_completed', runId: pulseRunId,
+          usersEvaluated: 0, usersEligible: 0, intentsDispatched: 0,
+          intentsSuppressed: 0, intentsFailed: 0, outcome: 'healthy_suppressed',
+          durationMs: Date.now() - pulseStartMs,
+        });
+        return;
+      }
       const uniqueUserIds = [...new Set(activeUsers.map(u => u.user_id))];
+      usersEvaluated = uniqueUserIds.length;
 
       logger.info(`[NACE] Pulse started for ${uniqueUserIds.length} users`);
 
       for (const userId of uniqueUserIds) {
         try {
-          await this.processUser(userId);
+          const result = await this.processUserWithResult(userId);
+          intentsDispatched += result.dispatched;
+          intentsSuppressed += result.suppressed;
         } catch (userErr) {
           logger.warn('[NACE] Error processing user', { userId, error: userErr instanceof Error ? userErr.message : String(userErr) });
         }
       }
-      logger.info('[NACE] Pulse completed');
+
+      logger.info('[NACE] Engine completed', {
+        engine: 'NACE',
+        event: 'engine_completed',
+        runId: pulseRunId,
+        startedAt: new Date(pulseStartMs).toISOString(),
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - pulseStartMs,
+        usersEvaluated,
+        usersEligible: usersEvaluated,
+        intentsDispatched,
+        intentsSuppressed,
+        intentsFailed: 0,
+        outcome: intentsDispatched > 0 ? 'healthy' : 'healthy_suppressed',
+        suppressionReasons: {},
+      });
     } catch (err) {
       logger.error('[NACE] Pulse failed', { error: err instanceof Error ? err.message : String(err) });
+      logger.info('[NACE] Engine completed', {
+        engine: 'NACE', event: 'engine_completed', runId: pulseRunId,
+        durationMs: Date.now() - pulseStartMs,
+        usersEvaluated, intentsDispatched, intentsSuppressed, intentsFailed: 0,
+        outcome: 'failed',
+      });
     } finally {
       _pulseInProgress = false;
     }
+  }
+
+  /** Internal: calls processUser and returns a structured dispatch result. */
+  private async processUserWithResult(userId: string): Promise<{ dispatched: number; suppressed: number }> {
+    // We intercept the result by wrapping the existing processUser.
+    // processUser already logs all outcomes — we just need the counts.
+    const result = { dispatched: 0, suppressed: 0 };
+    await this.processUser(userId, undefined, result);
+    return result;
   }
 
   async _processUser(userId: string): Promise<void> {
     return this.processUser(userId);
   }
 
-  async processUser(userId: string, opts?: { trigger?: string; awayDurationMinutes?: number | null }): Promise<void> {
+  async processUser(userId: string, opts?: { trigger?: string; awayDurationMinutes?: number | null }, _result?: { dispatched: number; suppressed: number }): Promise<void> {
     const isSessionStart = opts?.trigger === 'session_start';
     const awayDurationMinutes = opts?.awayDurationMinutes ?? null;
     // Coma awareness: Don't reach out right after server boot to avoid spam
@@ -741,12 +797,15 @@ ${sessionStartContextNote}`;
       }
 
       // Dispatch through OutboundDispatcher
+      // idempotencyKey is derived from logicalKey — a stable, caller-supplied durable identity.
+      // Do NOT use crypto.randomUUID() here: a retry or restart would produce a different key
+      // and break idempotency guarantees.
       const finalStatus = await outboundDispatcherService.dispatch({
         userId,
         sourceEngine: 'NACE' as OutboundSource,
         intentType,
         logicalKey,
-        idempotencyKey: `nace:${crypto.randomUUID()}`, // Unique operation
+        idempotencyKey: `nace:${logicalKey}`, // Derived from stable logicalKey — safe across retries
         context: {}, // No additional context needed since we use strategy 'none'
         generationStrategy: 'none',
         proposedMessage: message,
@@ -754,12 +813,14 @@ ${sessionStartContextNote}`;
       });
 
       if (['DELIVERED', 'DELIVERED_PARTIAL', 'NOTIFICATION_SKIPPED', 'PERSISTED', 'NOTIFICATION_ATTEMPTED'].includes(finalStatus)) {
+        if (_result) _result.dispatched += 1;
         logger.info('[NACE] ✅ Proactive message processed by dispatcher', {
           userId, messagePreview: message.substring(0, 60),
           decision: { outreachType: intentType, logicalKey },
           finalStatus
         });
       } else {
+        if (_result) _result.suppressed += 1;
         logger.info('[NACE] 🚫 Intent blocked or failed in dispatcher', { userId, finalStatus });
       }
     } catch (e) {

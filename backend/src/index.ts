@@ -93,6 +93,14 @@ async function main(): Promise<void> {
       }
     }, 30 * 1000); // 30 seconds
     if (remindersInterval.unref) remindersInterval.unref();
+    logger.info('[Scheduler] Engine registered', {
+      engine: 'REMINDER', event: 'scheduler_registered',
+      intervalMs: 30000, initialDelayMs: 0,
+    });
+    logger.info('[Scheduler] Engine registered', {
+      engine: 'FOLLOWUP', event: 'scheduler_registered',
+      intervalMs: 30000, initialDelayMs: 0,
+    });
 
     // NACE: Nova Autonomous Consciousness Engine (runs every 3 minutes for responsiveness)
     // Initial pulse fires 30s after boot so Nova is active immediately
@@ -115,6 +123,10 @@ async function main(): Promise<void> {
       }
     }, 15 * 60 * 1000); // NACE pulse every 15 minutes (Free tier hard limit)
     if (naceInterval.unref) naceInterval.unref();
+    logger.info('[Scheduler] Engine registered', {
+      engine: 'NACE', event: 'scheduler_registered',
+      initialDelayMs: 30000, intervalMs: 15 * 60 * 1000,
+    });
 
     // Watchtower Heartbeat: Supervisory Cognition Pulse (Runs every 15 minutes, staggered by 2m)
     setTimeout(async () => {
@@ -137,6 +149,10 @@ async function main(): Promise<void> {
       }
     }, 15 * 60 * 1000); // Watchtower heartbeat every 15 minutes
     if (watchtowerInterval.unref) watchtowerInterval.unref();
+    logger.info('[Scheduler] Engine registered', {
+      engine: 'WATCHTOWER', event: 'scheduler_registered',
+      initialDelayMs: 90000, intervalMs: 15 * 60 * 1000,
+    });
 
     // Jarvis Protocol: Proactive Environment Monitoring (Runs every 3 hours)
     const weatherWatcherInterval = setInterval(async () => {
@@ -159,6 +175,14 @@ async function main(): Promise<void> {
       }
     }, 3 * 60 * 60 * 1000); // 3 hours
     if (weatherWatcherInterval.unref) weatherWatcherInterval.unref();
+    logger.info('[Scheduler] Engine registered', {
+      engine: 'WEATHER', event: 'scheduler_registered',
+      initialDelayMs: 0, intervalMs: 3 * 60 * 60 * 1000,
+    });
+    logger.info('[Scheduler] Engine registered (event-driven, no periodic scheduler)', {
+      engine: 'TRIGGER_ENGINE', event: 'scheduler_registered',
+      intervalMs: null, note: 'Invoked from chat route on user presence signals',
+    });
 
     // NACE Habit Trigger Sync (runs every 6 hours — creates agenda items from routines)
     const habitInterval = setInterval(async () => {

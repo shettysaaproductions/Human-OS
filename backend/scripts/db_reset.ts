@@ -30,16 +30,24 @@ function askQuestion(query: string): Promise<string> {
 }
 
 async function performReset(client: Client) {
-  // 1. Drop all tables
-  const dropSqlPath = path.join(__dirname, '../supabase/drop_all_tables.sql');
-  if (fs.existsSync(dropSqlPath)) {
-    console.log('Executing drop_all_tables.sql...');
-    const dropSql = fs.readFileSync(dropSqlPath, 'utf8');
-    await client.query(dropSql);
-    console.log('[PASS] Dropped all tables.');
-  } else {
-    console.log('[Warning] drop_all_tables.sql not found. Skipping drop.');
-  }
+  // 1. Drop all tables and enums in public schema dynamically
+  console.log('Dropping all tables and enums in public schema...');
+  await client.query(`
+    DO $$ DECLARE
+        r RECORD;
+    BEGIN
+        -- Drop all tables
+        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+            EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+        END LOOP;
+        
+        -- Drop all enums
+        FOR r IN (SELECT typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public' AND t.typtype = 'e') LOOP
+            EXECUTE 'DROP TYPE IF EXISTS public.' || quote_ident(r.typname) || ' CASCADE';
+        END LOOP;
+    END $$;
+  `);
+  console.log('[PASS] Dropped all tables and enums.');
 
   // 2. Re-run migrations
   const migrationsDir = path.join(__dirname, '../supabase/migrations');

@@ -11,11 +11,14 @@ CREATE TABLE IF NOT EXISTS user_presence (
 ALTER TABLE user_presence ENABLE ROW LEVEL SECURITY;
 
 -- Allow users to view and update their own presence
+DROP POLICY IF EXISTS "Users can view their own presence" ON user_presence;
 CREATE POLICY "Users can view their own presence" 
 ON user_presence FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update their own presence" ON user_presence;
 CREATE POLICY "Users can update their own presence" 
 ON user_presence FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert their own presence" ON user_presence;
 CREATE POLICY "Users can insert their own presence" 
 ON user_presence FOR INSERT WITH CHECK (auth.uid() = user_id);

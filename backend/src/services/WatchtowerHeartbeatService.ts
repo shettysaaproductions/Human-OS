@@ -223,6 +223,10 @@ export class WatchtowerHeartbeatService {
           durationMs: Date.now() - startedAt,
           userMetrics: [],
           error: leaseRes.reason,
+          // Phase 9: proactive fields
+          proactiveEligibleCount: 0,
+          proactiveDispatched: 0,
+          proactiveSuppressed: 0,
         };
       }
       leaseAcquired = true;
@@ -255,7 +259,19 @@ export class WatchtowerHeartbeatService {
       llmCalls: 0,
       durationMs: 0,
       userMetrics: [],
+      // Phase 9: proactive dispatch telemetry
+      proactiveEligibleCount: 0,
+      proactiveDispatched: 0,
+      proactiveSuppressed: 0,
     };
+
+    logger.info('[Watchtower] Heartbeat started', {
+      engine: 'WATCHTOWER',
+      event: 'engine_started',
+      runId,
+      leaseOwner,
+      startedAt: summary.startedAt,
+    });
 
     try {
       // 1. Fetch bounded batch of active users
@@ -309,6 +325,10 @@ export class WatchtowerHeartbeatService {
         if (userMetric.semanticEscalations > 0) {
           summary.llmCalls += userMetric.semanticEscalations;
         }
+        // Phase 9: accumulate proactive dispatch telemetry
+        summary.proactiveEligibleCount += userMetric.proactiveEligibleCount;
+        summary.proactiveDispatched += userMetric.proactiveDispatched;
+        summary.proactiveSuppressed += userMetric.proactiveSuppressed;
       }
 
       // 3. Expire old cognitive signals
@@ -342,14 +362,21 @@ export class WatchtowerHeartbeatService {
         );
       }
 
-      logger.info('[WatchtowerHeartbeat] Heartbeat completed successfully', {
+      logger.info('[Watchtower] Heartbeat execution result', {
+        engine: 'WATCHTOWER',
+        event: 'engine_completed',
         runId,
-        users: summary.totalUsersScanned,
-        anomalies: summary.anomaliesCount,
-        doubts: summary.doubtsCount,
-        repairs: summary.repairsQueued,
-        semanticEscalations: summary.semanticEscalations,
+        startedAt: summary.startedAt,
+        completedAt: summary.completedAt,
         durationMs: summary.durationMs,
+        usersEvaluated: summary.totalUsersScanned,
+        usersEligible: summary.proactiveEligibleCount,
+        intentsDispatched: summary.proactiveDispatched,
+        intentsSuppressed: summary.proactiveSuppressed,
+        anomaliesCount: summary.anomaliesCount,
+        doubtsCount: summary.doubtsCount,
+        repairsQueued: summary.repairsQueued,
+        outcome: summary.proactiveDispatched > 0 ? 'healthy' : 'healthy_suppressed',
       });
 
       return summary;
@@ -396,6 +423,10 @@ export class WatchtowerHeartbeatService {
       signalsCreated: 0,
       durationMs: 0,
       status: 'completed',
+      // Phase 9: proactive dispatch telemetry
+      proactiveEligibleCount: 0,
+      proactiveDispatched: 0,
+      proactiveSuppressed: 0,
     };
 
     try {
@@ -511,12 +542,17 @@ export class WatchtowerHeartbeatService {
       }
 
       // ── STEP 4.6: PROACTIVE INTEGRATION HANDOFF (Phase 3C-D) ───────────────
-      // Gated handoff from Watchtower Timing to ProactiveGate
+      // Gated handoff from Watchtower Timing to ProactiveGate.
+      // Capture HandoffSummary for Phase 9 liveness telemetry.
       try {
-        await watchtowerProactiveIntegrationService.evaluateAndDispatchProactiveOpportunities(
+        const handoffSummary = await watchtowerProactiveIntegrationService.evaluateAndDispatchProactiveOpportunities(
           userId,
           { dryRun: options?.dryRun }
         );
+        // Populate proactive telemetry from handoff result
+        metrics.proactiveEligibleCount = handoffSummary.eligibleDecisionsCount;
+        metrics.proactiveDispatched = handoffSummary.dispatchedOpportunitiesCount;
+        metrics.proactiveSuppressed = handoffSummary.blockedOpportunitiesCount;
       } catch (proErr: any) {
         logger.warn('[WatchtowerHeartbeat] Proactive integration non-fatal error', { userId, error: proErr?.message });
       }

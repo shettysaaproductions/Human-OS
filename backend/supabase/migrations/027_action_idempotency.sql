@@ -1,6 +1,10 @@
 -- Migration to add action_idempotency and claim_next_background_job RPC
 
-CREATE TYPE idempotency_status AS ENUM ('pending', 'completed', 'failed');
+DO $$ BEGIN
+    CREATE TYPE idempotency_status AS ENUM ('pending', 'completed', 'failed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.action_idempotency (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
