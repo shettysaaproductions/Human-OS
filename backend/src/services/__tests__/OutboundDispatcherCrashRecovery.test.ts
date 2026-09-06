@@ -46,10 +46,12 @@ describe('OutboundDispatcherCrashRecovery', () => {
       eq: jest.fn().mockReturnValue({ 
         maybeSingle: singleMock, 
         single: singleMock, 
+        order: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis() 
       }), 
       maybeSingle: singleMock, 
       single: singleMock, 
+      order: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis() 
     });
     insertMock = jest.fn().mockResolvedValue({ error: null, data: null });

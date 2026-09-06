@@ -253,8 +253,20 @@ export class WatchtowerProactiveIntegrationService {
           continue;
         }
 
-        // Mark attention decision as ACTED to prevent re-evaluation
-        if (att.id) {
+        const dispatchStatus = await outboundDispatcherService.dispatch({
+          userId,
+          sourceEngine: 'Watchtower',
+          intentType: 'proactive',
+          logicalKey,
+          idempotencyKey: `watchtower:dispatch:${att.id || `fallback-${Date.now()}`}`, // Durable idempotency tied to opportunity
+          context: { att, topic },
+          generationStrategy: 'watchtower_tier2',
+          skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false
+        });
+
+        // Mark attention decision as ACTED only after successful handoff to dispatcher
+        // This prevents permanently losing the opportunity if dispatch throws before persistence
+        if (att.id && ['GATED', 'DISPATCHING', 'PERSISTED', 'DELIVERED', 'DELIVERED_PARTIAL', 'SUPPRESSED'].includes(dispatchStatus)) {
           await qt.track('integration_mark_acted', 'watchtower_attention_decisions', () =>
             supabaseAdmin
               .from('watchtower_attention_decisions')
@@ -265,17 +277,6 @@ export class WatchtowerProactiveIntegrationService {
               .eq('id', att.id)
           );
         }
-
-        await outboundDispatcherService.dispatch({
-          userId,
-          sourceEngine: 'Watchtower',
-          intentType: 'proactive',
-          logicalKey,
-          idempotencyKey: `watchtower:${crypto.randomUUID()}`, // Unique operation
-          context: { att, topic },
-          generationStrategy: 'watchtower_tier2',
-          skipQuietHoursCheck: isUrgent && att.scores?.deadlineProximity ? att.scores.deadlineProximity >= 90 : false
-        });
 
         summary.gateAllowedCount += 1;
         summary.dispatchedOpportunitiesCount += 1;

@@ -18,6 +18,13 @@ let mockPresenceDb: any[] = [];
 let mockChatDb: any[] = [];
 let mockSessionsDb: any[] = [];
 
+jest.mock('../OutboundDispatcherService', () => ({
+  outboundDispatcherService: {
+    dispatch: jest.fn().mockResolvedValue('DELIVERED'),
+    registerStrategy: jest.fn(),
+  }
+}));
+
 jest.mock('../../lib/supabase', () => ({
   supabaseAdmin: {
     from: jest.fn().mockImplementation((table: string) => {
