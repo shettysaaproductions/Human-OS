@@ -109,7 +109,8 @@ describe('correctionSemantics validation', () => {
     expect(validated).toEqual({ key: 'favourite_color', value: 'blue' });
   });
 
-  it('fails closed when two distinct valid corrections are proposed', () => {
+  it('persists ALL distinct valid corrections from one turn independently', () => {
+    // THE FIX: two clear corrections → both should be saved, not dropped
     const selected = selectAuthoritativeCorrections(
       [
         { key: 'favourite_color', value: 'green', shouldPersist: true },
@@ -117,7 +118,26 @@ describe('correctionSemantics validation', () => {
       ],
       'My favourite color is green and my brother name is Amit'
     );
-    expect(selected).toEqual([]);
+    // Both corrections are clear, grounded, and attributed — both must persist
+    expect(selected).toHaveLength(2);
+    const keys = selected.map((s: any) => s.key);
+    expect(keys).toContain('favourite_color');
+    expect(keys).toContain('brother_name');
+    expect(selected.every((s: any) => s.correction_intent === true)).toBe(true);
+  });
+
+  it('still rejects corrections where value is not grounded in source', () => {
+    // purple is NOT in the source — should be rejected even in multi-field context
+    const selected = selectAuthoritativeCorrections(
+      [
+        { key: 'favourite_color', value: 'green', shouldPersist: true },
+        { key: 'favourite_color', value: 'purple', shouldPersist: true }, // NOT in source
+      ],
+      productionSentence // contains 'green', not 'purple'
+    );
+    // Only green is grounded — purple rejected, green persists
+    expect(selected).toHaveLength(1);
+    expect(selected[0].value).toBe('green');
   });
 
   it('deduplicates identical valid corrections deterministically', () => {
@@ -145,5 +165,31 @@ describe('correctionSemantics validation', () => {
     expect(selected[0].key).toBe('favourite_color');
     expect(selected[0].value).toBe('green');
     expect(selected[0].correction_intent).toBe(true);
+  });
+
+  it('Hinglish multi-field: wife + son corrections both persist', () => {
+    const source = 'Actually meri wife Sakshi hai nahi Priya, aur my son Shreshth hai not Aryan';
+    const selected = selectAuthoritativeCorrections(
+      [
+        { key: 'wife_name', value: 'Sakshi', shouldPersist: true },
+        { key: 'son_name', value: 'Shreshth', shouldPersist: true },
+      ],
+      source
+    );
+    expect(selected).toHaveLength(2);
+    const keys = selected.map((s: any) => s.key);
+    expect(keys).toContain('wife_name');
+    expect(keys).toContain('son_name');
+  });
+
+  it('returns empty array when NO corrections pass validation', () => {
+    const selected = selectAuthoritativeCorrections(
+      [
+        { key: 'spaceship_model', value: 'green', shouldPersist: true }, // unknown key
+        { key: 'favourite_color', value: 'purple', shouldPersist: true }, // not in source
+      ],
+      productionSentence
+    );
+    expect(selected).toHaveLength(0);
   });
 });

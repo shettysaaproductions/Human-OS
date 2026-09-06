@@ -88,9 +88,24 @@ export function validateSemanticCorrection(
 }
 
 /**
- * Select corrections only when there is exactly one distinct valid semantic
- * correction. Multiple distinct valid candidates are ambiguous and therefore
- * fail closed rather than allowing array order to determine authority.
+ * Select all valid semantic corrections from the LLM-extracted memory array.
+ *
+ * Architecture change (Phase 0 — Step 3):
+ *   BEFORE: required exactly one distinct valid correction (unique.size !== 1 → [])
+ *           This was causing legitimate multi-field corrections to be silently dropped.
+ *           e.g. "Meri wife Sakshi hai aur bhai ka naam Rahul hai" → nothing saved.
+ *
+ *   AFTER:  each correction is validated INDEPENDENTLY.
+ *           Multiple valid corrections from one turn ALL persist.
+ *           Ambiguity = genuinely unclear intent, NOT multiple clear corrections.
+ *
+ * What still fails closed (unchanged):
+ *   - Value not grounded in source message → rejected
+ *   - Key does not resolve to a known canonical key → rejected
+ *   - Value-derived key (e.g. favourite_color_green) → rejected
+ *   - Concept not grounded in source → rejected
+ *   - shouldPersist !== true → rejected
+ *   - Duplicate key+value pairs → deduplicated (first wins, deterministic)
  */
 export function selectAuthoritativeCorrections(
   memories: any[] | null | undefined,
@@ -99,6 +114,7 @@ export function selectAuthoritativeCorrections(
 ): any[] {
   if (!Array.isArray(memories) || memories.length === 0) return [];
 
+  // Validate each candidate independently
   const valid = memories
     .map(mem => {
       const validated = validateSemanticCorrection(mem, sourceMessage, contextText);
@@ -107,23 +123,29 @@ export function selectAuthoritativeCorrections(
     })
     .filter((entry): entry is { mem: any; validated: ValidatedCorrection } => entry !== null);
 
-  const unique = new Map<string, { mem: any; validated: ValidatedCorrection }>();
-  for (const entry of valid) {
-    const identity = `${entry.validated.key}\u0000${entry.validated.value.trim().toLowerCase()}`;
-    if (!unique.has(identity)) unique.set(identity, entry);
+  if (valid.length === 0) return [];
+
+  // Deduplicate: same canonical key + same normalised value → keep first occurrence only.
+  // Different canonical keys or different values are distinct corrections — keep both.
+  const seen = new Map<string, true>();
+  const results: any[] = [];
+
+  for (const { mem, validated } of valid) {
+    const identity = `${validated.key}\u0000${validated.value.trim().toLowerCase()}`;
+    if (seen.has(identity)) continue;
+    seen.set(identity, true);
+
+    results.push({
+      shouldPersist: true,
+      type: mem.type || 'fact',
+      key: validated.key,
+      value: validated.value,
+      importance: 100,
+      confidence: 1.0,
+      emotional_weight: mem.emotional_weight || 0,
+      correction_intent: true,
+    });
   }
 
-  if (unique.size !== 1) return [];
-
-  const { mem, validated } = unique.values().next().value as { mem: any; validated: ValidatedCorrection };
-  return [{
-    shouldPersist: true,
-    type: mem.type || 'fact',
-    key: validated.key,
-    value: validated.value,
-    importance: 100,
-    confidence: 1.0,
-    emotional_weight: mem.emotional_weight || 0,
-    correction_intent: true,
-  }];
+  return results;
 }
