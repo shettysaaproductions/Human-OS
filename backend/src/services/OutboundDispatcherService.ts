@@ -15,6 +15,9 @@ export interface OutboundIntentPayload {
   generationStrategy: string;
   proposedMessage?: string;
   skipQuietHoursCheck?: boolean;
+  /** When true, the gate skips the minimum-gap / ignored-count check.
+   *  Set for user-requested reminders; leave false for system-generated outreach. */
+  skipMinGapCheck?: boolean;
   outreachId?: string;
   /** Optional priority hint (higher = more important). Used for logging and future scheduling. */
   priority?: number;
@@ -138,6 +141,7 @@ export class OutboundDispatcherService {
             outreachType: payload.intentType,
             logicalKey: payload.logicalKey,
             skipQuietHoursCheck: payload.skipQuietHoursCheck || false,
+            skipMinGapCheck: payload.skipMinGapCheck || false,
             isUrgent: payload.intentType === 'reminder' || payload.skipQuietHoursCheck,
           });
 
