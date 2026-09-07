@@ -226,15 +226,164 @@ describe('C. CorrectionPropagator — Supabase { error } inspection contract', (
     expect(r.partiallySucceeded).toBe(false);
   });
 
-  test('C9: rpc structured rejection (success=false) -> memories scope=failure', () => {
+  test('C9: STALE_WRITE structured rejection -> memories scope=failure', () => {
+    // atomic_supersede_memory returns { success: false, reason: 'STALE_WRITE', ... }
+    // when incoming message is older than the existing CURRENT row's source.
     const r = { scopes: [{ scope: 'memories', success: false, error: 'STALE_WRITE' }], fullySucceeded: false, partiallySucceeded: false };
+    expect(r.scopes[0].success).toBe(false);
     expect(r.scopes[0].error).toBe('STALE_WRITE');
   });
 
-  test('C10: memories scope uses rpc_supersede_memory for atomicity (contract)', () => {
-    // rpc_supersede_memory atomically supersedes old row and inserts new row in one PG transaction.
-    // A failed insert rolls back the supersede — no zero-CURRENT window.
-    expect(true).toBe(true);
+  // C10-C16: Tests that exercise the real propagateCorrection() with mocked supabaseAdmin.
+  // These verify the production call contract vs migration 055.
+
+  describe('C10-C16: propagateCorrection() production contract', () => {
+    const userId = 'user-c-prod';
+    const sourceMessageId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'; // valid UUID format
+
+    function makeEvent(overrides: Partial<any> = {}): any {
+      return {
+        family: 'FactCorrected',
+        eventId: 'evt-prod-001',
+        userId,
+        sourceMessageId,
+        authority: 'explicit_user' as const,
+        confidence: 1.0,
+        createdAt: new Date().toISOString(),
+        canonicalKey: 'wife_name',
+        newValue: 'Priya',
+        correctionIntent: 'replace' as const,
+        ...overrides,
+      };
+    }
+
+    function buildMockSupabase(rpcResponse: { data: any; error: any }) {
+      const rpcSpy = jest.fn().mockResolvedValue(rpcResponse);
+      const supabaseMock = {
+        rpc: rpcSpy,
+        from: (table: string) => ({
+          select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }) }),
+          upsert: () => Promise.resolve({ data: null, error: null }),
+          update: () => ({ eq: () => Promise.resolve({ data: null, error: null }) }),
+        }),
+      };
+      return { supabaseMock, rpcSpy };
+    }
+
+    test('C10: calls atomic_supersede_memory NOT rpc_supersede_memory', async () => {
+      const { supabaseMock, rpcSpy } = buildMockSupabase({
+        data: { success: true, new_id: 'new-uuid', superseded_id: 'old-uuid' },
+        error: null,
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      await propagateCorrection(userId, makeEvent());
+      expect(rpcSpy).toHaveBeenCalledTimes(1);
+      const [calledFnName] = rpcSpy.mock.calls[0];
+      expect(calledFnName).toBe('atomic_supersede_memory');
+      expect(calledFnName).not.toBe('rpc_supersede_memory');
+    });
+
+    test('C11: passes exact migration-055 param names (p_new_value, p_memory_type, p_emotional_weight)', async () => {
+      const { supabaseMock, rpcSpy } = buildMockSupabase({
+        data: { success: true, new_id: 'new-uuid', superseded_id: null },
+        error: null,
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      await propagateCorrection(userId, makeEvent());
+      const [, params] = rpcSpy.mock.calls[0];
+      // Correct param names per migration 055
+      expect(params).toHaveProperty('p_new_value', 'Priya');    // NOT p_value
+      expect(params).toHaveProperty('p_memory_type', 'personal'); // NOT p_type
+      expect(params).toHaveProperty('p_emotional_weight', 0);     // Required; was missing
+      // Must NOT include invented params
+      expect(params).not.toHaveProperty('p_value');
+      expect(params).not.toHaveProperty('p_type');
+      expect(params).not.toHaveProperty('p_is_user_confirmed');
+      expect(params).not.toHaveProperty('p_source_event_id');
+    });
+
+    test('C12: sourceMessageId is passed as p_source_message_id', async () => {
+      const { supabaseMock, rpcSpy } = buildMockSupabase({
+        data: { success: true, new_id: 'new-uuid', superseded_id: null },
+        error: null,
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      await propagateCorrection(userId, makeEvent());
+      const [, params] = rpcSpy.mock.calls[0];
+      // event.sourceMessageId must flow to p_source_message_id (chat_history UUID)
+      expect(params).toHaveProperty('p_source_message_id', sourceMessageId);
+      // p_source_message is the free-text label (null is acceptable)
+      expect(params).toHaveProperty('p_source_message');
+    });
+
+    test('C13: { data: { success: false, reason: STALE_WRITE }, error: null } -> memories scope=failure', async () => {
+      const { supabaseMock } = buildMockSupabase({
+        data: { success: false, reason: 'STALE_WRITE', current_id: 'existing-uuid' },
+        error: null,
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      const result = await propagateCorrection(userId, makeEvent());
+      const mem = result.scopes.find(s => s.scope === 'memories');
+      expect(mem?.success).toBe(false);
+      expect(mem?.error).toBe('STALE_WRITE');
+      expect(result.fullySucceeded).toBe(false);
+    });
+
+    test('C14: { data: null, error: { message: DB timeout } } -> memories scope=failure', async () => {
+      const { supabaseMock } = buildMockSupabase({
+        data: null,
+        error: { message: 'DB timeout', code: '57014' },
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      const result = await propagateCorrection(userId, makeEvent());
+      const mem = result.scopes.find(s => s.scope === 'memories');
+      expect(mem?.success).toBe(false);
+      expect(result.fullySucceeded).toBe(false);
+    });
+
+    test('C15: { data: { success: true, new_id, superseded_id }, error: null } -> memories scope=success', async () => {
+      const { supabaseMock } = buildMockSupabase({
+        data: { success: true, new_id: 'new-uuid-123', superseded_id: 'old-uuid-456' },
+        error: null,
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      const result = await propagateCorrection(userId, makeEvent());
+      const mem = result.scopes.find(s => s.scope === 'memories');
+      expect(mem?.success).toBe(true);
+      // supersedesEventId should be populated from superseded_id
+      expect(result.supersedesEventId).toBe('old-uuid-456');
+    });
+
+    test('C16: failed memories scope does NOT produce fullySucceeded=true', async () => {
+      const { supabaseMock } = buildMockSupabase({
+        data: { success: false, reason: 'MISSING_PROVENANCE' },
+        error: null,
+      });
+      jest.resetModules();
+      jest.doMock('../../lib/supabase', () => ({ supabaseAdmin: supabaseMock }));
+      const { propagateCorrection } = await import('../CorrectionPropagator');
+      const result = await propagateCorrection(userId, makeEvent());
+      // Memory scope failed — must not be reported as fully succeeded
+      expect(result.fullySucceeded).toBe(false);
+      expect(result.fullySucceeded).not.toBe(true);
+    });
+
+    afterEach(() => {
+      jest.clearAllMocks();
+      jest.resetModules();
+    });
   });
 });
 // ── Suite D: ScheduleAsserted pipeline ────────────────────────────────────────

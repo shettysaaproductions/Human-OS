@@ -156,15 +156,22 @@ export class LifeThreadAgent {
     // abandoned → thread state = 'abandoned' (terminal; user explicitly quit)
     // resumed   → thread state = 'active'    (reactivates a waiting/paused thread)
     //
-    // These transitions use lifeThreadRepository.createOrUpdateThread() with the
-    // correct target state rather than the negation/provenance-correction path,
-    // which has different semantics (concept supersession ≠ state transition).
+    // ── No-match behavior (fail closed) ────────────────────────────────────────
+    // If no thread matches the GoalCorrected event by key or description:
+    //   → log a telemetry warning
+    //   → perform ZERO mutation
+    //   → do NOT fall back to concept negation (updateThreadProvenanceForCorrection)
+    //
+    // Rationale: "resumed" is a reactivation intent. Converting it to concept
+    // negation would corrupt the provenance of unrelated threads. "paused" and
+    // "abandoned" without a known thread are also ambiguous — better to have a
+    // missed update than an incorrect state transition.
     const goalCorrectedEvents: any[] = turn_context?.goalCorrectedEvents || [];
     if (goalCorrectedEvents.length > 0) {
       const allThreads = await lifeThreadRepository.getActiveThreads(user_id);
       for (const evt of goalCorrectedEvents) {
-        const goalKey = evt.goalKey;
-        const goalDesc = evt.goalDescription;
+        const goalKey: string | undefined = evt.goalKey;
+        const goalDesc: string | undefined = evt.goalDescription;
 
         // Map GoalCorrected status → LifeThreadState
         let targetState: 'waiting' | 'abandoned' | 'active';
@@ -181,10 +188,11 @@ export class LifeThreadAgent {
           continue;
         }
 
-        // Find the matching thread: canonical_key match first, then description fuzzy
+        // Find the matching thread: canonical_key exact match first, then
+        // topic substring match against goalDescription. Both require non-empty input.
         const matchingThread = allThreads.find(
           t => (goalKey && t.canonical_key === goalKey) ||
-               (goalDesc && (t.topic ?? '').toLowerCase().includes(goalDesc.toLowerCase()))
+               (goalDesc && goalDesc.length > 2 && (t.topic ?? '').toLowerCase().includes(goalDesc.toLowerCase()))
         );
 
         if (matchingThread) {
@@ -192,12 +200,17 @@ export class LifeThreadAgent {
             await lifeThreadRepository.createOrUpdateThread(
               user_id,
               {
-                threadId: matchingThread.id,
-                topic: matchingThread.topic,
-                state: targetState,
+                threadId:   matchingThread.id,
+                topic:      matchingThread.topic,
+                state:      targetState,
                 provenance: `GoalCorrected:${evt.status}:turn=${turnId ?? 'unknown'}`,
               },
-              { isExplicitResume: evt.status === 'resumed', sourceAuthority: 'deterministic_turn_analysis', turnId }
+              {
+                isExplicitResume:  evt.status === 'resumed',
+                sourceAuthority:   'deterministic_turn_analysis',
+                turnId,
+                reason: `GoalCorrected: status=${evt.status} from SemanticEvent stream`,
+              }
             );
             logger.info('[LifeThreadAgent][Phase10] GoalCorrectedEvent state transition applied', {
               user_id, goalKey, targetState, threadId: matchingThread.id,
@@ -208,14 +221,12 @@ export class LifeThreadAgent {
             });
           }
         } else {
-          // Thread not found — fall back to negation/provenance path as best-effort
-          const concept = goalKey || goalDesc;
-          if (concept) {
-            await this.updateThreadProvenanceForCorrection(user_id, allThreads, [concept], turnId);
-            logger.info('[LifeThreadAgent][Phase10] GoalCorrectedEvent: no matching thread; applied provenance fallback', {
-              user_id, goalKey, status: evt.status,
-            });
-          }
+          // No matching thread found — fail closed.
+          // Do NOT fall back to concept negation (updateThreadProvenanceForCorrection).
+          // "resumed" especially must never be converted to negation.
+          logger.warn('[LifeThreadAgent][Phase10] GoalCorrectedEvent: no matching thread — zero mutation (fail closed)', {
+            user_id, goalKey, goalDesc, status: evt.status,
+          });
         }
       }
     }
@@ -245,7 +256,7 @@ export class LifeThreadAgent {
     // 4.5. Deterministic Admission Gate (BUG-07 / P1-2)
     if (result.action === 'create') {
       const msgLower = (recentChat[recentChat.length - 1]?.content ?? '').toLowerCase();
-      const hasCommitment = /\b(plan|goal|start|going to|want to|decided|karna hai|karunga|karungi|socha hai|plan hai|target|aim|build|create|launch|shuru|seekhna|learn|prepare)\b/i.test(msgLower);
+      const hasCommitment = /\b(plan|goal|start|going to|want to|decided|karna hai|karna chahta|karna chahti|karunga|karungi|socha hai|plan hai|target|aim|build|create|launch|shuru|seekhna|learn|prepare)\b/i.test(msgLower);
       const hasTimeframe = /\b(this week|this month|this year|next week|next month|next year|in \d+ (days|weeks|months)|by (january|february|march|april|may|june|july|august|september|october|november|december))\b/i.test(msgLower);
       
       if (!hasCommitment && !hasTimeframe) {
