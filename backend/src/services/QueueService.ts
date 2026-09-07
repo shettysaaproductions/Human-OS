@@ -203,7 +203,8 @@ export class QueueService {
 // Global Exported Queues
 export const MEMORY_JOB_TYPES = [
   'extract_all_memories', 'extract_semantic', 'extract_working_memory', 'extract_episodic',
-  'extract_kg', 'extract_emotional', 'extract_milestone', 'extract_short_term', 'extract_deterministic_fact'
+  'extract_kg', 'extract_emotional', 'extract_milestone', 'extract_short_term', 'extract_deterministic_fact',
+  'process_semantic_turn'
 ] as const;
 export const memoryQueue = new QueueService('memoryQueue', [...MEMORY_JOB_TYPES], 'MEMORY');
 export const reflectionQueue = new QueueService('reflectionQueue', ['daily_reflection'], 'USER_DEEP');

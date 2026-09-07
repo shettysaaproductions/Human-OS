@@ -6,7 +6,7 @@ import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
 import { ValidationError, ExternalServiceError } from '../types/errors';
 import { memoryRepository } from '../services/memoryRepository';
-import { memoryQueue, subconsciousQueue } from '../services/QueueService';
+import { memoryQueue } from '../services/QueueService';
 import { extractKeywords } from '../utils/nlp';
 
 import { supabaseAdmin } from '../lib/supabase';
@@ -17,7 +17,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
-import { resolveUserTzOffsetHours } from '../services/ReminderEngine';
+// ReminderEngine imported dynamically where needed
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
@@ -496,11 +496,7 @@ function sanitizeMarkdown(raw: string): string {
   return cleaned.join('\n');
 }
 
-// ── User-level Mutex to prevent race conditions on rapid messages ───────────
-// Each entry carries a unique token so a request only ever removes its OWN lock.
-// Without this, a request that timed out waiting (or finished late after a timeout)
-// would delete a NEWER request's lock entry, letting concurrent replies slip through.
-const userLocks = new Map<string, { promise: Promise<void>; token: string }>();
+// userLocks removed in favor of background queue causal ordering
 const backToBackTimers = new Map<string, NodeJS.Timeout>();
 
 chatRouter.post(
@@ -615,8 +611,7 @@ chatRouter.post(
         res.write(`: connected\n\n`);
       }
 
-      let releaseLock: (() => void) | undefined;
-      // Lock will be acquired after user message is inserted
+      // releaseLock removed
 
       const isDegraded = dbHealthService.isDegraded();
       
@@ -766,63 +761,25 @@ chatRouter.post(
 
       logger.info('[Chat][P0-A] Turn ID assigned', { userId, turnId, userMessageId });
 
-      // ── [PHASE 1 — PRODUCTION MODE] SemanticInterpreter ────────────────────
-      // Runs the semantic interpretation layer.
-      let validatedSemanticTurn: any = null;
-      let semanticClarificationQuestion: string | null = null;
-      // Phase 10: canonical SemanticEvent[] — the ONLY state-authoritative representation
-      let semanticEvents: import('../types/semanticEvent').SemanticEvent[] = [];
-
+      // ── [PHASE 1 — PRODUCTION MODE] Semantic Processing Queue ────────────────
+      let semanticJobId: string | null = null;
+      let semanticJobSequence: number | null = null;
+      let semanticClarificationQuestion: string | null = null; // Preserved for scope compatibility
+      
       if (!is_proactive && primaryMessage.length > 1) {
-        try {
-          const { interpretTurn, getPendingClarification, setPendingClarification, toSemanticEvents } = await import('../lib/SemanticInterpreter');
-          const { validateTurn: validate } = await import('../lib/SemanticValidator');
-          
-          const pending = await getPendingClarification(userId, supabaseAdmin);
-          const semanticTurn = await interpretTurn(
-            primaryMessage,
-            userMessageId,
-            pending ?? null,
-          );
-          
-          if (semanticTurn) {
-            validatedSemanticTurn = validate(semanticTurn, primaryMessage);
+        const { data: job, error: jobErr } = await supabaseAdmin.from('background_jobs').insert({
+          job_type: 'process_semantic_turn',
+          payload: { userId, turnId, userMessageId, primaryMessage, is_proactive },
+          status: 'pending',
+          attempts: 0
+        }).select('id, job_sequence').single();
 
-            // Phase 10: emit canonical SemanticEvent[] from validated turn only
-            // eventId = provenance identifier — NEVER use as idempotencyKey
-            semanticEvents = toSemanticEvents(validatedSemanticTurn, userId, userMessageId || turnId);
-            
-            logger.info('[SemanticInterpreter][PROD] Turn interpreted', {
-              userId,
-              turnId,
-              intent: semanticTurn.intent,
-              facts: semanticTurn.facts.length,
-              corrections: semanticTurn.corrections.length,
-              actions: semanticTurn.actions.length,
-              validatedFacts: validatedSemanticTurn.facts.length,
-              validatedCorrections: validatedSemanticTurn.corrections.length,
-              validatedActions: validatedSemanticTurn.actions.length,
-              requiresClarification: validatedSemanticTurn.requiresClarification,
-              semanticEventCount: semanticEvents.length,
-              semanticEventFamilies: semanticEvents.map((e: any) => e.family),
-            });
-
-            if (validatedSemanticTurn.requiresClarification && validatedSemanticTurn.clarificationQuestion) {
-               semanticClarificationQuestion = validatedSemanticTurn.clarificationQuestion;
-               await setPendingClarification(userId, {
-                 turnId,
-                 type: validatedSemanticTurn.actions?.[0]?.type === 'REMINDER' ? 'REMINDER' : 'CORRECTION',
-                 originalAction: validatedSemanticTurn.actions?.[0] || validatedSemanticTurn.corrections?.[0],
-                 missingFields: validatedSemanticTurn.actions?.[0]?.missingFields || [],
-                 askedQuestion: validatedSemanticTurn.clarificationQuestion
-               }, supabaseAdmin);
-            }
-          }
-        } catch (semErr) {
-          logger.warn('[SemanticInterpreter][PROD] Non-blocking error', {
-            userId,
-            error: semErr instanceof Error ? semErr.message : String(semErr),
-          });
+        if (jobErr) {
+          logger.error('[Chat] Failed to enqueue semantic job', { userId, turnId, error: jobErr.message });
+        } else {
+          semanticJobId = job.id;
+          semanticJobSequence = job.job_sequence;
+          logger.info('[Chat] Enqueued semantic turn job', { userId, turnId, jobId: semanticJobId, jobSequence: semanticJobSequence });
         }
       }
 
@@ -899,42 +856,65 @@ chatRouter.post(
       }
 
 
-      // ── Mutex & Debounce ───────────────────────────────────────────────────
-      // ── Mutex with Timeout ───────────────────────────────────────────────────
-      const MUTEX_TIMEOUT_MS = 15_000;
+      // ── INLINE QUEUE DRAIN & DEBOUNCE ──────────────────────────────────────
+      let semanticEvents: import('../types/semanticEvent').SemanticEvent[] = [];
+      let deterministicReminderNote = '';
+      let deterministicReminderCreated = false;
 
-      const previousEntry = userLocks.get(userId);
-      const lockToken = crypto.randomUUID();
-      const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
+      // 1. Drain the queue sequentially for this user. This replaces the old in-memory mutex!
+      if (!is_proactive) {
+        let myJobCompleted = false;
+        const { semanticTurnAgent } = await import('../agents/SemanticTurnAgent');
+        
+        while (!myJobCompleted) {
+          const { data: claimedJobs, error: claimErr } = await supabaseAdmin.rpc('claim_next_background_job_for_user', { 
+            p_user_id: userId, 
+            p_job_type: 'process_semantic_turn' 
+          });
 
-      if (previousEntry) {
-        // Wait for previous request with timeout
-        let mutexTimeoutId: NodeJS.Timeout | null = null;
-        const timeoutPromise = new Promise<void>((_, reject) => {
-          mutexTimeoutId = setTimeout(() => reject(new Error('MUTEX_TIMEOUT')), MUTEX_TIMEOUT_MS);
-        });
-
-        try {
-          await Promise.race([previousEntry.promise, timeoutPromise]);
-          logger.info('[Chat] Previous lock resolved normally', { userId });
-        } catch (err: any) {
-          if (err.message === 'MUTEX_TIMEOUT') {
-            // Do NOT delete the stale entry here. The previous owner may still be
-            // running; it will only remove its own lock (matching token) when it
-            // finishes. We just stop waiting and proceed — the entry we set below
-            // becomes the active lock, so later requests queue behind THIS one.
-            logger.warn('[Chat] Mutex timeout — previous request hung, continuing', { userId });
-          } else {
-            throw err;
+          if (claimErr) {
+            logger.error('[Chat] Error claiming background job, breaking loop', { error: claimErr.message });
+            break;
           }
-        } finally {
-          if (mutexTimeoutId) clearTimeout(mutexTimeoutId);
+
+          if (!claimedJobs || claimedJobs.length === 0) {
+            // No jobs claimed. EITHER another request is running, OR my job is done.
+            if (semanticJobId) {
+              const { data: myJobCheck } = await supabaseAdmin.from('background_jobs').select('status').eq('id', semanticJobId).single();
+              if (myJobCheck && (myJobCheck.status === 'completed' || myJobCheck.status === 'failed')) {
+                myJobCompleted = true; // Another request processed it!
+                break;
+              }
+            } else {
+              break; // No job to wait for
+            }
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+
+          const currentJob = claimedJobs[0];
+          try {
+            logger.info('[Chat] Processing claimed semantic job inline', { jobId: currentJob.id });
+            const result = await semanticTurnAgent.processJob(currentJob);
+            
+            if (currentJob.id === semanticJobId && result) {
+              semanticEvents = result.semanticEvents || [];
+              deterministicReminderNote = result.reminderNote || '';
+              deterministicReminderCreated = result.reminderCreated || false;
+            }
+
+            await supabaseAdmin.from('background_jobs').update({ status: 'completed' }).eq('id', currentJob.id);
+            
+            if (currentJob.id === semanticJobId) {
+              myJobCompleted = true;
+              break;
+            }
+          } catch (e: any) {
+            await supabaseAdmin.from('background_jobs').update({ status: 'failed', error: e.message }).eq('id', currentJob.id);
+            if (currentJob.id === semanticJobId) break; // Proceed without crashing the HTTP request
+          }
         }
       }
-
-      // Set the new lock ONLY after previous is done or timed out
-      userLocks.set(userId, { promise: newLock, token: lockToken });
-      logger.info('[Chat] Mutex acquired', { userId });
       // Hoisted so the outer-catch emergency FALLBACK_REPLY save can also attach
       // the situation brief to meta (enabling presence/read-state even on failure).
       let situationBrief: string | null = null;
@@ -942,30 +922,24 @@ chatRouter.post(
       try {
 
         // DEBOUNCE CHECK: Are there any NEWER user messages in this conversation?
-        if (!is_proactive) {
-          const { data: latestUserMsg } = await supabaseAdmin
-            .from('chat_history')
+        // Using job_sequence from background_jobs guarantees absolute chronological ordering, 
+        // avoiding race conditions with identical timestamps during massive bursts.
+        if (!is_proactive && semanticJobSequence !== null) {
+          const { data: newerJob } = await supabaseAdmin
+            .from('background_jobs')
             .select('id')
-            .eq('user_id', userId)
-            .eq('conversation_id', activeConversationId)
-            .eq('role', 'user')
-            // Exclude internal/system rows so they can never self-debounce a real reply.
-            // Without this, the [HIDDEN_CONTEXT] row written for an attached image is the
-            // 'newest user row' and wrongly aborts the LLM generation for the image message.
-            .not('content', 'like', '[HIDDEN_CONTEXT]%')
-            .order('created_at', { ascending: false })
+            .eq('job_type', 'process_semantic_turn')
+            .eq('payload->>userId', userId)
+            .gt('job_sequence', semanticJobSequence)
             .limit(1)
             .maybeSingle();
 
-          if (latestUserMsg && latestUserMsg.id !== userMessageId) {
-            logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId });
+          if (newerJob && newerJob.id) {
+            logger.info('[Chat] Debouncing LLM request — a newer user message exists', { userId, userMessageId, semanticJobSequence });
             if (isStreaming) {
               res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
               res.end();
             } else if (!async_mode) {
-              // Only send a body in sync mode. In async mode the 202 was already flushed;
-              // writing again here throws ERR_HTTP_HEADERS_SENT and triggers a spurious
-              // FALLBACK_REPLY save. The newer message's own request will generate the reply.
               res.status(200).json({ skipped: true, reason: 'debounced' });
             }
             if (asyncDeadlineTimer) {
@@ -1248,120 +1222,7 @@ chatRouter.post(
       const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
-      // ── Phase 11: Canonical fact/correction/goal dispatch ────────────────────
-      // Source: semanticEvents[] produced by toSemanticEvents() (canonical authority).
-      // DeterministicFactAgent routes to FactAssertionConsumer, CorrectionPropagator,
-      // and GoalAssertedConsumer based on event family.
-      // REMOVED: payloadFacts re-extraction from validatedSemanticTurn.facts — that was
-      //   an authority bypass re-interpreting the same turn outside the SemanticEvent layer.
-      if (semanticEvents.length > 0 && memoryEnabledForChat) {
-        try {
-          await memoryQueue.add('extract_deterministic_fact', {
-            userId,
-            turnId,
-            messageId: userMessageId,
-            sourceMessage: effectiveMessage,
-            // Phase 11: pass canonical events — adapter routes to correct consumer
-            semanticEvents,
-          });
-          logger.info('[Chat][Phase11] Canonical fact/goal/correction events queued', {
-            userId,
-            turnId,
-            count: semanticEvents.length,
-            families: semanticEvents.map((e: any) => e.family),
-          });
-        } catch (e) {
-          logger.error('[Chat][Phase11] Failed to queue semantic events', {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      }
-
-      // ── Phase 11: Deterministic reminder persistence from ScheduleAssertedEvent ─
-      // Source: ScheduleAssertedEvent[] from the canonical SemanticEvent stream.
-      // REMOVED: raw ValidatedTurn.actions re-read + buildReminderSpecFromIntent().
-      // The ScheduleAssertedEvent.reminderSpec is already fully structured — pass it
-      // directly to ReminderEngine.parse(). No text parsing.
-      let deterministicReminderCreated = false;
-      let deterministicReminderNote = '';
-
-      {
-        const { isScheduleAsserted: isSchedEv } = await import('../types/semanticEvent');
-        const scheduleEvents = semanticEvents.filter((e: any) => isSchedEv(e));
-
-        if (validatedSemanticTurn?.requiresClarification && scheduleEvents.length === 0) {
-          // Clarification required and no concrete ScheduleAssertedEvents — remind the user
-          deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time. Do not guess or assume a time.';
-        }
-
-        for (const schedEvt of scheduleEvents) {
-          try {
-            const userTzHours = resolveUserTzOffsetHours(profile);
-            const { ReminderEngine: RE } = await import('../services/ReminderEngine');
-            const engine = new RE(userTzHours);
-            // Use reminderSpec from the event — NO re-parsing of raw text
-            const parsed = engine.parse((schedEvt as any).reminderSpec);
-            const scheduled = await engine.scheduleAll(userId, parsed);
-            if (scheduled && scheduled.length > 0) {
-              deterministicReminderCreated = true;
-              const isAlreadyActive = scheduled.some((r: any) => r.alreadyExists);
-              if (isAlreadyActive) {
-                deterministicReminderNote += `REMINDER_ALREADY_EXISTS: A reminder for "${engine.formatConfirmation(parsed)}" is ALREADY active. `;
-              } else {
-                deterministicReminderNote += `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. `;
-              }
-              logger.info('[Chat][Phase11] Deterministic reminder from ScheduleAssertedEvent', {
-                userId,
-                eventId: (schedEvt as any).eventId,
-                reminderId: scheduled[0].id,
-                alreadyExists: isAlreadyActive,
-                trigger_at: scheduled[0].trigger_at,
-                userTzHours,
-              });
-            }
-          } catch (e) {
-            logger.error('[Chat][Phase11] ScheduleAsserted reminder failed', {
-              eventId: (schedEvt as any).eventId,
-              error: e instanceof Error ? e.message : String(e),
-            });
-            deterministicReminderNote += 'REMINDER_PERSISTENCE_FAILED: The reminder could not be saved right now. Do NOT confirm a reminder was set. ';
-          }
-        }
-      }
-
-      // ── Phase 11: GoalCorrected suppression dedup ─────────────────────────────
-      // GoalCorrectedEvent is already routed to LifeThreadAgent via brainContext.
-      // Only enqueue suppress_life_thread if NO GoalCorrectedEvent was emitted
-      // (fallback for turns where ValidatedTurn carries GOAL_UPDATE but SemanticInterpreter
-      // didn't emit a GoalCorrectedEvent — e.g. confidence too low for event emission).
-      const hasGoalCorrectedEvents = semanticEvents.some((e: any) => e.family === 'GoalCorrected');
-
-      if (!hasGoalCorrectedEvents && validatedSemanticTurn) {
-        // Only enqueue the old suppression path when the SemanticEvent stream has
-        // no GoalCorrected coverage — prevents dual suppression.
-        const goalActions = validatedSemanticTurn.actions.filter((a: any) => a.type === 'GOAL_UPDATE');
-        for (const action of goalActions) {
-          const data = action.data || {};
-          if (data.status === 'paused' || data.status === 'abandoned') {
-            try {
-              await subconsciousQueue.add('suppress_life_thread', {
-                user_id: userId,
-                negated_concept: data.goal_name || data.target_fact_key || 'unknown',
-                target_fact_key: data.target_fact_key,
-                is_current: data.status === 'paused',
-                reason: `User said: (message length ${effectiveMessage.length})`,
-              });
-              logger.info('[Chat][Phase11] suppress_life_thread queued (no GoalCorrectedEvent coverage)', {
-                userId, concept: data.goal_name, isCurrent: data.status === 'paused',
-              });
-            } catch (suppErr: any) {
-              logger.error('[Chat][Phase11] Failed to queue suppress_life_thread', {
-                userId, error: suppErr?.message,
-              });
-            }
-          }
-        }
-      }
+      // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
 
       // ── Phase 2B: Cognitive Doubt Subsystem ──────────────────────────────────
       // 1. Detect knowledge gaps (e.g. family count gap)
@@ -2222,17 +2083,7 @@ HINGLISH RULES:
       if (asyncDeadlineTimer) {
         clearTimeout(asyncDeadlineTimer);
       }
-      if (releaseLock) {
-        releaseLock();
-        logger.info('[Chat] Mutex released', { userId });
-      }
-      // Remove the lock entry ONLY if this request still owns it. A newer request
-      // may have replaced the entry (e.g., after a mutex timeout) — deleting it
-      // here would drop a live lock and let concurrent replies race.
-      const currentEntry = userLocks.get(userId);
-      if (currentEntry && currentEntry.token === lockToken) {
-        userLocks.delete(userId);
-      }
+      // locks removed
     }
   } catch (outerErr) {
     next(outerErr);
