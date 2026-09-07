@@ -670,16 +670,12 @@ function getMockSemanticTurn(message: string, turnId: string, messageId: string)
   };
 
   const lower = message.toLowerCase();
-  if (lower.includes('meri wife hai')) {
-    turn.facts.push({ concept: 'wife', value: 'yes', confidence: 1.0, groundedInTurn: true });
-  } else if (lower.includes('uska name sakshi hai')) {
-    turn.facts.push({ concept: 'wife_name', value: 'Sakshi', confidence: 1.0, groundedInTurn: true });
-  } else if (lower.includes('mera beta hai 6 months ka')) {
-    turn.facts.push({ concept: 'son_age', value: '6 months', confidence: 1.0, groundedInTurn: true });
-  } else if (lower.includes('uska name shresht hai')) {
-    turn.facts.push({ concept: 'son_name', value: 'Shresht', confidence: 1.0, groundedInTurn: true });
-  } else if (lower.includes('mera full name sagar shetty hai')) {
-    turn.facts.push({ concept: 'full_name', value: 'Sagar Shetty', confidence: 1.0, groundedInTurn: true });
+  if (lower.includes('mera mother name')) {
+    turn.facts.push({ concept: 'mother_name', value: 'Anita', confidence: 1.0, groundedInTurn: true });
+  } else if (lower.includes('mera father name')) {
+    turn.facts.push({ concept: 'father_name', value: 'Anil', confidence: 1.0, groundedInTurn: true });
+  } else if (lower.includes('mera wife name')) {
+    turn.facts.push({ concept: 'wife_name', value: 'Priya', confidence: 1.0, groundedInTurn: true });
   } else {
     // For the 50 message burst
     turn.facts.push({ concept: 'test_burst', value: message, confidence: 1.0, groundedInTurn: true });

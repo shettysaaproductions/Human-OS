@@ -837,6 +837,7 @@ chatRouter.post(
           conversation_id: activeConversationId,
           user_message_id: userMessageId,
         });
+        return;
       }
       
       // NOTE: If the frontend does not poll for async results, switch to sync mode

@@ -283,24 +283,37 @@ export function validateTurn(turn: SemanticTurn, sourceMessage: string): Validat
 
   // ── Validate Facts ──────────────────────────────────────────────────────────
   for (const fact of turn.facts) {
-    if (!fact.groundedInTurn) continue;
+    if (!fact.groundedInTurn) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - not groundedInTurn`);
+      continue;
+    }
     if (!isValueGroundedInSource(fact.value, sourceMessage)) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - value not in source`, { value: fact.value, sourceMessage });
       continue; // Value not literally in source — reject
     }
     if (!isConceptRelationshipSupported(fact.concept, fact.value, sourceMessage, false)) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - concept relationship not supported`);
       continue;
     }
     if (!isAttributionUnambiguous(fact.concept, fact.value, allConceptsInTurn)) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - attribution ambiguous`);
       continue;
     }
     if (isValueReflexive(fact.concept, fact.value)) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - reflexive`);
       continue;
     }
 
     const snake = fact.concept.toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_');
     const resolution = MemorySemanticResolver.resolveProposedKey(snake);
-    if (resolution.action !== 'PERSIST' || !resolution.canonicalKey) continue;
-    if (isValueDerivedKey(resolution.canonicalKey, fact.value)) continue;
+    if (resolution.action !== 'PERSIST' || !resolution.canonicalKey) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - resolution failed`, resolution);
+      continue;
+    }
+    if (isValueDerivedKey(resolution.canonicalKey, fact.value)) {
+      console.log(`[SemanticValidator] Rejected fact ${fact.concept} - derived key`);
+      continue;
+    }
 
     validatedFacts.push({
       canonicalKey: resolution.canonicalKey,

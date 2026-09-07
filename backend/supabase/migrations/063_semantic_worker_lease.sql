@@ -16,7 +16,7 @@ BEGIN
     UPDATE public.background_jobs
     SET 
         status = 'running',
-        started_at = now(),
+        started_at = clock_timestamp(),
         attempts = attempts + 1,
         claim_token = v_claim_token
     WHERE id = (
