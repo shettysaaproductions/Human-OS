@@ -314,15 +314,18 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
     const contextText = typeof recentContext === 'string' ? recentContext : '';
 
     if (hasCanonicalEvents) {
-      // Phase 10: canonical event stream is authoritative for semantic_memories.
-      // Clear any LLM-extracted semantic_memories to enforce single authority.
+      // Phase 11 HARD GATE: canonical event stream is authoritative for semantic_memories.
+      // This is CODE enforcement — NOT LLM prompt enforcement.
+      // The LLM may have extracted semantic_memories despite the prompt suppression instruction.
+      // Regardless of LLM output, we ZERO the array here before persistExtraction() sees it.
+      // persistExtraction() receives an empty array and cannot write canonical semantic memories.
       if (parsed.semantic_memories && parsed.semantic_memories.length > 0) {
-        logger.info('[ConsolidatedMemoryAgent][Phase10] Suppressed LLM semantic_memories — canonical events are authoritative', {
+        logger.info('[ConsolidatedMemoryAgent][Phase11] HARD GATE: zeroed LLM semantic_memories — canonical FactAssertionConsumer is authoritative', {
           userId, messageId, suppressed: parsed.semantic_memories.length,
         });
-        parsed.semantic_memories = [];
+        parsed.semantic_memories = []; // Hard clear — never reaches persistence
       }
-      // Also clear corrections extracted by LLM — corrections come from FactCorrectedEvent only
+      // Also zero working_memory extractions for correction turns — FactCorrectedEvent is authoritative
       parsed.working_memories = [];
     } else if (hasCorrections) {
       const validated = selectAuthoritativeCorrections(parsed.semantic_memories, message, contextText);

@@ -1,6 +1,7 @@
 import { logger } from '../lib/logger';
 import { supabaseAdmin } from '../lib/supabase';
-import { memoryRepository } from './memoryRepository';
+// memoryRepository import removed in Phase 11 — MemoryRepository.save handler is dead code
+// (blocked by PHASE10_BLOCKED guard; canonical memories come from FactAssertionConsumer)
 
 const TIMEZONE_OFFSETS: Record<string, number> = {
   IN: 5.5,
@@ -99,7 +100,7 @@ export class BackgroundActionService {
     }
   }
 
-  async processActions(userId: string, conversationId: string, actions: any[], userCountry: string, messageHash?: string) {
+  async processActions(userId: string, conversationId: string, actions: any[], _userCountry: string, messageHash?: string) {
     if (!actions || actions.length === 0) return;
 
     if (messageHash) {
@@ -156,32 +157,11 @@ export class BackgroundActionService {
       }
 
       try {
-        if (action.tool === 'ReminderEngine' && action.action === 'schedule') {
-          const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
-          const { ReminderEngine } = await import('./ReminderEngine');
-          const engine = new ReminderEngine(userTzOffset);
-
-          // Support array of reminders or single reminder data
-          let specs = action.data.reminders || [action.data];
-          if (!Array.isArray(specs)) specs = [specs];
-
-          // ── Spec normalisation ──────────────────────────────────────────────
-          // Primary path: Nova emits structured JSON (trigger_date, trigger_time,
-          // recurrence_interval/unit, purpose, urgency, event_trigger, ...).
-          // Fallback: older/legacy `time_phrase` (regex bridge) still converts
-          // natural language → structured fields, kept for safety.
-          specs = specs.map((spec: any) => {
-            if (!spec.time_phrase) return this.normalizeStructuredSpec(spec);
-            return this.parseLegacySpec(spec, userTzOffset);
-          });
-
-          const allScheduled: any[] = [];
-          for (const spec of specs) {
-            const parsedList = engine.parse(spec);
-            const inserted = await engine.scheduleAll(userId, parsedList);
-            allScheduled.push(...inserted);
-          }
-          logger.info('[BackgroundAction] Scheduled reminders', { userId, count: allScheduled.length });
+        // PHASE11: ReminderEngine.schedule is BLOCKED by PHASE10_BLOCKED guard above.
+        // This branch is unreachable for canonical reminder creation.
+        // Canonical reminders come from ScheduleAssertedEvent → ScheduleEventConsumer.
+        if (false && action.tool === 'ReminderEngine' && action.action === 'schedule') {
+          // Dead code — kept as tombstone for history. Do not remove the false guard.
         }
         else if (action.tool === 'ReminderEngine' && action.action === 'delete') {
           const id = action.data?.id;
@@ -241,34 +221,11 @@ export class BackgroundActionService {
              confidence: action.data.confidence || 0.8
            });
         }
-        else if (action.tool === 'MemoryRepository' && action.action === 'save') {
-           // Quality gate — reject trash before it pollutes long-term memory
-           const memValue = String(action.data?.value || '').trim();
-           const memKey = String(action.data?.key || '').trim();
-           const MEMORY_TRASH_PATTERNS = [
-             /^(user (?:was|is|said|feeling|feels|mentioned|says))\s+(?:sleepy|tired|ok|fine|good|kaam|busy|bored)/i,
-             /^\d+:\d+/,
-             /^(feeling|feel|mood|state)\s+\w+\s*$/i,
-             /^(kaam|lag|pine|soo|raat|neend|ok|hmm|haan|nahi)/i,
-             /^(user is|user was|currently)\s+\w+\s*$/i,
-           ];
-           const isTrash = !memValue || memValue.length < 12 || memValue.split(' ').length < 3 ||
-             MEMORY_TRASH_PATTERNS.some(p => p.test(memValue));
-           if (isTrash) {
-             logger.info('[BackgroundAction] MemoryRepository quality gate: rejected', { memKey, memValue });
-           } else {
-             logger.info('[BackgroundAction] Saving memory via memoryRepository', { memKey });
-             await memoryRepository.upsertMemory(userId, {
-               key: memKey,
-               value: memValue,
-               type: (action.data.memory_type || 'semantic') as any,
-               shouldPersist: true,
-               source_authority: 'subconscious_inference',
-               importance: 50,
-               confidence: 0.7,
-               emotional_weight: 0,
-             }, action.data.source || 'background_action');
-           }
+        // PHASE11: MemoryRepository.save is BLOCKED by PHASE10_BLOCKED guard above.
+        // This branch is unreachable for canonical long-term memory writes.
+        // Canonical memories come from FactAssertedEvent → FactAssertionConsumer.
+        else if (false && action.tool === 'MemoryRepository' && action.action === 'save') {
+          // Dead code — kept as tombstone for history. Do not remove the false guard.
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
            const { novaFollowupService } = await import('./NovaFollowupService');

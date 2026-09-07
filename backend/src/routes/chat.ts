@@ -17,7 +17,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
-import { ReminderEngine, resolveUserTzOffsetHours, buildReminderSpecFromIntent } from '../services/ReminderEngine';
+import { resolveUserTzOffsetHours } from '../services/ReminderEngine';
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
@@ -1248,93 +1248,59 @@ chatRouter.post(
       const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
-      // Dispatch durable fact persistence immediately for deterministic facts.
-      const payloadFacts: any[] = [];
-      if (validatedSemanticTurn) {
-        // Collect facts
-        for (const f of validatedSemanticTurn.facts) {
-          payloadFacts.push({
-            key: f.canonicalKey,
-            value: f.value,
-            is_protected: f.confidence >= 0.95, // heuristic
-            is_correction: false,
-            isCorrection: false,
-            factClass: 'HIGH_CONFIDENCE_DURABLE_FACT'
-          });
-        }
-        // Collect corrections
-        for (const c of validatedSemanticTurn.corrections) {
-          payloadFacts.push({
-            key: c.canonicalKey,
-            value: c.value,
-            is_protected: c.authority === 'explicit_user',
-            is_correction: c.correctionIntent,
-            isCorrection: c.correctionIntent,
-            factClass: c.authority === 'explicit_user' ? 'PROTECTED_FACT' : 'HIGH_CONFIDENCE_DURABLE_FACT'
-          });
-        }
-      }
-      // REMOVED: TurnAnalyzer fallback for payloadFacts.
-      // If SemanticInterpreter fails, we fail closed for mutation.
-
-      if (payloadFacts.length > 0 && memoryEnabledForChat) {
+      // ── Phase 11: Canonical fact/correction/goal dispatch ────────────────────
+      // Source: semanticEvents[] produced by toSemanticEvents() (canonical authority).
+      // DeterministicFactAgent routes to FactAssertionConsumer, CorrectionPropagator,
+      // and GoalAssertedConsumer based on event family.
+      // REMOVED: payloadFacts re-extraction from validatedSemanticTurn.facts — that was
+      //   an authority bypass re-interpreting the same turn outside the SemanticEvent layer.
+      if (semanticEvents.length > 0 && memoryEnabledForChat) {
         try {
           await memoryQueue.add('extract_deterministic_fact', {
             userId,
-            turnId,                     // P0-A: canonical turn identity
-            messageId: userMessageId,   // Provenance fix
-            facts: payloadFacts,
-            sourceMessage: effectiveMessage
+            turnId,
+            messageId: userMessageId,
+            sourceMessage: effectiveMessage,
+            // Phase 11: pass canonical events — adapter routes to correct consumer
+            semanticEvents,
           });
-          logger.info('[Chat] Durable fact persistence intent queued', { userId, turnId, count: payloadFacts.length, facts: payloadFacts });
+          logger.info('[Chat][Phase11] Canonical fact/goal/correction events queued', {
+            userId,
+            turnId,
+            count: semanticEvents.length,
+            families: semanticEvents.map((e: any) => e.family),
+          });
         } catch (e) {
-          logger.error('[Chat] Failed to queue deterministic facts', { error: e instanceof Error ? e.message : String(e) });
+          logger.error('[Chat][Phase11] Failed to queue semantic events', {
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       }
 
-      // ── BUG-03: Deterministic reminder persistence ─────────────────────────────
+      // ── Phase 11: Deterministic reminder persistence from ScheduleAssertedEvent ─
+      // Source: ScheduleAssertedEvent[] from the canonical SemanticEvent stream.
+      // REMOVED: raw ValidatedTurn.actions re-read + buildReminderSpecFromIntent().
+      // The ScheduleAssertedEvent.reminderSpec is already fully structured — pass it
+      // directly to ReminderEngine.parse(). No text parsing.
       let deterministicReminderCreated = false;
       let deterministicReminderNote = '';
-      let isReminderAmbiguous = false;
-      
-      const reminderSpecsToProcess: any[] = [];
-      
-      if (validatedSemanticTurn) {
-        const reminderActions = validatedSemanticTurn.actions.filter((a: any) => a.type === 'REMINDER');
-        for (const action of reminderActions) {
-          if (validatedSemanticTurn.requiresClarification) {
-            isReminderAmbiguous = true;
-          } else {
-            const d = action.data;
-            let timePhrase = d.time_of_day || '';
-            if (!timePhrase && d.relative_value) {
-               timePhrase = `in ${d.relative_value} ${d.relative_unit}`;
-            }
-            const spec = {
-               text: effectiveMessage,
-               timePhrase: timePhrase,
-               rawTime: d.time_of_day || d.relative_value || '',
-               isAmbiguous: false
-            };
-            if (!spec.rawTime && d.event_trigger) {
-               // event triggered reminder, skip deterministic engine
-               continue;
-            }
-            reminderSpecsToProcess.push(spec);
-          }
-        }
-      }
-      // REMOVED: TurnAnalyzer fallback for reminderIntent.
 
-      for (const finalReminderSpec of reminderSpecsToProcess) {
-        try {
-          const userTzHours = resolveUserTzOffsetHours(profile);
-          const spec = buildReminderSpecFromIntent(finalReminderSpec, userTzHours);
-          if (!spec) {
-            deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time. Do not guess or assume a time.';
-          } else {
-            const engine = new ReminderEngine(userTzHours);
-            const parsed = engine.parse(spec);
+      {
+        const { isScheduleAsserted: isSchedEv } = await import('../types/semanticEvent');
+        const scheduleEvents = semanticEvents.filter((e: any) => isSchedEv(e));
+
+        if (validatedSemanticTurn?.requiresClarification && scheduleEvents.length === 0) {
+          // Clarification required and no concrete ScheduleAssertedEvents — remind the user
+          deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time. Do not guess or assume a time.';
+        }
+
+        for (const schedEvt of scheduleEvents) {
+          try {
+            const userTzHours = resolveUserTzOffsetHours(profile);
+            const { ReminderEngine: RE } = await import('../services/ReminderEngine');
+            const engine = new RE(userTzHours);
+            // Use reminderSpec from the event — NO re-parsing of raw text
+            const parsed = engine.parse((schedEvt as any).reminderSpec);
             const scheduled = await engine.scheduleAll(userId, parsed);
             if (scheduled && scheduled.length > 0) {
               deterministicReminderCreated = true;
@@ -1344,51 +1310,55 @@ chatRouter.post(
               } else {
                 deterministicReminderNote += `REMINDER_ALREADY_PERSISTED: "${engine.formatConfirmation(parsed)}" — confirm this naturally to the user. `;
               }
-              logger.info('[Chat][BUG-03] Deterministic reminder handled', {
-                userId, reminderId: scheduled[0].id, alreadyExists: isAlreadyActive, trigger_at: scheduled[0].trigger_at, userTzHours
+              logger.info('[Chat][Phase11] Deterministic reminder from ScheduleAssertedEvent', {
+                userId,
+                eventId: (schedEvt as any).eventId,
+                reminderId: scheduled[0].id,
+                alreadyExists: isAlreadyActive,
+                trigger_at: scheduled[0].trigger_at,
+                userTzHours,
               });
             }
+          } catch (e) {
+            logger.error('[Chat][Phase11] ScheduleAsserted reminder failed', {
+              eventId: (schedEvt as any).eventId,
+              error: e instanceof Error ? e.message : String(e),
+            });
+            deterministicReminderNote += 'REMINDER_PERSISTENCE_FAILED: The reminder could not be saved right now. Do NOT confirm a reminder was set. ';
           }
-        } catch (e) {
-          logger.error('[Chat][BUG-03] Deterministic reminder failed', { error: e instanceof Error ? e.message : String(e) });
-          deterministicReminderNote += 'REMINDER_PERSISTENCE_FAILED: The reminder could not be saved right now. Do NOT confirm a reminder was set. ';
         }
       }
-      
-      if (isReminderAmbiguous && reminderSpecsToProcess.length === 0) {
-        deterministicReminderNote = 'REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: User wants a reminder but no clear time was found. Ask ONCE for the exact time.';
-      }
 
-      // ── Amendment 3: Deterministic negation propagation ──────────────────────
-      const negatedGoalsToSuppress = [];
-      if (validatedSemanticTurn) {
+      // ── Phase 11: GoalCorrected suppression dedup ─────────────────────────────
+      // GoalCorrectedEvent is already routed to LifeThreadAgent via brainContext.
+      // Only enqueue suppress_life_thread if NO GoalCorrectedEvent was emitted
+      // (fallback for turns where ValidatedTurn carries GOAL_UPDATE but SemanticInterpreter
+      // didn't emit a GoalCorrectedEvent — e.g. confidence too low for event emission).
+      const hasGoalCorrectedEvents = semanticEvents.some((e: any) => e.family === 'GoalCorrected');
+
+      if (!hasGoalCorrectedEvents && validatedSemanticTurn) {
+        // Only enqueue the old suppression path when the SemanticEvent stream has
+        // no GoalCorrected coverage — prevents dual suppression.
         const goalActions = validatedSemanticTurn.actions.filter((a: any) => a.type === 'GOAL_UPDATE');
         for (const action of goalActions) {
           const data = action.data || {};
           if (data.status === 'paused' || data.status === 'abandoned') {
-            negatedGoalsToSuppress.push({
-              concept: data.goal_name || data.target_fact_key || 'unknown',
-              targetFactKey: data.target_fact_key,
-              isCurrent: data.status === 'paused'
-            });
-          }
-        }
-      }
-      // REMOVED: TurnAnalyzer fallback for negated goals.
-
-      if (negatedGoalsToSuppress.length > 0) {
-        for (const neg of negatedGoalsToSuppress) {
-          try {
-            await subconsciousQueue.add('suppress_life_thread', {
-              user_id: userId,
-              negated_concept: neg.concept,
-              target_fact_key: neg.targetFactKey,
-              is_current: neg.isCurrent,   // true → waiting, false → abandoned
-              reason: `User said: (message length ${effectiveMessage.length})`,
-            });
-            logger.info('[Chat][Amendment3] suppress_life_thread queued', { userId, concept: neg.concept, isCurrent: neg.isCurrent });
-          } catch (suppErr: any) {
-            logger.error('[Chat][Amendment3] Failed to queue suppress_life_thread', { userId, concept: neg.concept, error: suppErr?.message });
+            try {
+              await subconsciousQueue.add('suppress_life_thread', {
+                user_id: userId,
+                negated_concept: data.goal_name || data.target_fact_key || 'unknown',
+                target_fact_key: data.target_fact_key,
+                is_current: data.status === 'paused',
+                reason: `User said: (message length ${effectiveMessage.length})`,
+              });
+              logger.info('[Chat][Phase11] suppress_life_thread queued (no GoalCorrectedEvent coverage)', {
+                userId, concept: data.goal_name, isCurrent: data.status === 'paused',
+              });
+            } catch (suppErr: any) {
+              logger.error('[Chat][Phase11] Failed to queue suppress_life_thread', {
+                userId, error: suppErr?.message,
+              });
+            }
           }
         }
       }
