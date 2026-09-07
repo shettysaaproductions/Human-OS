@@ -861,58 +861,34 @@ chatRouter.post(
       let deterministicReminderNote = '';
       let deterministicReminderCreated = false;
 
-      // 1. Drain the queue sequentially for this user. This replaces the old in-memory mutex!
-      if (!is_proactive) {
+      // 1. Wait for the semantic job to complete for this user.
+      if (!is_proactive && !async_mode) {
         let myJobCompleted = false;
-        const { semanticTurnAgent } = await import('../agents/SemanticTurnAgent');
         
-        while (!myJobCompleted) {
-          const { data: claimedJobs, error: claimErr } = await supabaseAdmin.rpc('claim_next_background_job_for_user', { 
-            p_user_id: userId, 
-            p_job_type: 'process_semantic_turn' 
-          });
+        while (!myJobCompleted && semanticJobId) {
+          const { data: jobCheck, error: checkErr } = await supabaseAdmin
+            .from('background_jobs')
+            .select('status, payload')
+            .eq('id', semanticJobId)
+            .single();
 
-          if (claimErr) {
-            logger.error('[Chat] Error claiming background job, breaking loop', { error: claimErr.message });
+          if (checkErr) {
+            logger.error('[Chat] Error checking background job status', { error: checkErr.message });
             break;
           }
 
-          if (!claimedJobs || claimedJobs.length === 0) {
-            // No jobs claimed. EITHER another request is running, OR my job is done.
-            if (semanticJobId) {
-              const { data: myJobCheck } = await supabaseAdmin.from('background_jobs').select('status').eq('id', semanticJobId).single();
-              if (myJobCheck && (myJobCheck.status === 'completed' || myJobCheck.status === 'failed')) {
-                myJobCompleted = true; // Another request processed it!
-                break;
-              }
-            } else {
-              break; // No job to wait for
+          if (jobCheck && (jobCheck.status === 'completed' || jobCheck.status === 'failed')) {
+            myJobCompleted = true;
+            if (jobCheck.status === 'completed' && jobCheck.payload?.output) {
+              const output = jobCheck.payload.output;
+              semanticEvents = output.semanticEvents || [];
+              deterministicReminderNote = output.reminderNote || '';
+              deterministicReminderCreated = output.reminderCreated || false;
             }
-            await new Promise(r => setTimeout(r, 500));
-            continue;
+            break;
           }
-
-          const currentJob = claimedJobs[0];
-          try {
-            logger.info('[Chat] Processing claimed semantic job inline', { jobId: currentJob.id });
-            const result = await semanticTurnAgent.processJob(currentJob);
-            
-            if (currentJob.id === semanticJobId && result) {
-              semanticEvents = result.semanticEvents || [];
-              deterministicReminderNote = result.reminderNote || '';
-              deterministicReminderCreated = result.reminderCreated || false;
-            }
-
-            await supabaseAdmin.from('background_jobs').update({ status: 'completed' }).eq('id', currentJob.id);
-            
-            if (currentJob.id === semanticJobId) {
-              myJobCompleted = true;
-              break;
-            }
-          } catch (e: any) {
-            await supabaseAdmin.from('background_jobs').update({ status: 'failed', error: e.message }).eq('id', currentJob.id);
-            if (currentJob.id === semanticJobId) break; // Proceed without crashing the HTTP request
-          }
+          
+          await new Promise(r => setTimeout(r, 500));
         }
       }
       // Hoisted so the outer-catch emergency FALLBACK_REPLY save can also attach

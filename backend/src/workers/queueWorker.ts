@@ -5,11 +5,12 @@ import { reflectionAgent } from '../agents/ReflectionAgent';
 import { subconsciousAgent } from '../agents/SubconsciousAgent';
 import { lifeThreadAgent } from '../agents/LifeThreadAgent';
 import { deterministicFactAgent } from '../agents/DeterministicFactAgent';
-import { semanticTurnAgent } from '../agents/SemanticTurnAgent';
+
 import { logger } from '../lib/logger';
 import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
 import { cognitiveHealthService } from '../services/CognitiveHealthService';
 import { novaConsciousnessEngine } from '../services/NovaConsciousnessEngine';
+import { semanticTurnWorker } from './semanticTurnWorker';
 
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 5_000; // 5s base backoff
@@ -73,6 +74,7 @@ async function processWithBackoff(job: any, processor: (job: any) => Promise<voi
 
 export function startWorkers() {
   logger.info('Starting Background Queue Workers...');
+  semanticTurnWorker.start();
 
   memoryQueue.process(async (job) => {
     switch (job.job_type) {
@@ -84,9 +86,6 @@ export function startWorkers() {
         break;
       case 'extract_deterministic_fact':
         await processWithBackoff(job, deterministicFactAgent.processJob.bind(deterministicFactAgent), 'extract_deterministic_fact');
-        break;
-      case 'process_semantic_turn':
-        await processWithBackoff(job, async (j) => { await semanticTurnAgent.processJob(j); }, 'process_semantic_turn');
         break;
       // Legacy job types - kept for backward compatibility during transition
       case 'extract_semantic':

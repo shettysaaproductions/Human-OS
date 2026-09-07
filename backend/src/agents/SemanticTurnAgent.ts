@@ -65,7 +65,7 @@ export class SemanticTurnAgent {
               payload: {
                 userId,
                 messageId: userMessageId || turnId,
-                events: semanticEvents
+                semanticEvents: semanticEvents
               }
             });
             logger.info('[SemanticTurnAgent] Phase 11 executed successfully', { userId, turnId });
