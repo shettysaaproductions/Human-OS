@@ -857,7 +857,7 @@ export class MemoryRepository {
       const { data, error } = await qt.track('mem_repo_unarchive', 'memories', () =>
         supabaseAdmin
           .from('memories')
-          .update({ is_archived: false, updated_at: new Date().toISOString() })
+          .update({ key: canonical, is_archived: false, updated_at: new Date().toISOString() })
           .eq('id', memoryId)
           .eq('user_id', userId)
           .select('id')

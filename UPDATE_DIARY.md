@@ -1,4 +1,40 @@
 
+## [2026-09-08] Fix: Shoot Dead / Mark Dead Account Eradication & Concurrency Triggers
+
+### Trigger
+User report: "Shoot mark dead button is not working, please fix this bug" with screenshot showing "Error: Failed to eradicate data."
+
+### Root Cause Analysis
+1. **Missing `account_tombstones` in Production DB (P0 Blocker):** `AccountLifecycleService.deleteAccount()` Step 0 mandates creating an `account_tombstones` row to block concurrent writes during deletion. However, the table and triggers were never applied as a production SQL migration (it only existed in an unapplied script `apply_060_account_tombstones.ts`), causing Supabase PostgREST to return `PGRST205: Could not find table 'public.account_tombstones' in the schema cache`. Step 0 threw an error and bailed out before wiping any user data or deleting the auth record.
+2. **401 Token Refresh Interceptor Blocking Protected Auth Endpoints:** In `mobile/src/services/api.ts`, the response interceptor rejected 401 retries for any URL containing `/auth/`. While intended for public endpoints (`/auth/login`, `/auth/signup`, `/auth/refresh`), this prevented protected routes like `DELETE /auth/mark-dead` from refreshing expired access tokens.
+3. **Early Bail-out in Step 0:** `AccountLifecycleService.ts` immediately returned `success: false` on tombstone failure, completely aborting table cleanup.
+
+### Changes Made
+1. **Canonical Migration (`backend/supabase/migrations/062_account_tombstones_and_triggers.sql`):**
+   - Created `public.account_tombstones (user_id UUID PRIMARY KEY, deleted_at TIMESTAMPTZ)`.
+   - Enabled RLS with explicit `service_role` full access policy and granted permissions to PostgREST roles (`postgres`, `anon`, `authenticated`, `service_role`).
+   - Created `public.enforce_account_tombstone()` trigger function checking for non-null `user_id` against `account_tombstones`.
+   - Attached `tr_enforce_tombstone_<table_name>` triggers across all 34 user-owned tables.
+   - Reloaded PostgREST schema cache via `NOTIFY pgrst, 'reload schema'`. Applied to production DB.
+2. **Account Lifecycle Hardening (`backend/src/services/AccountLifecycleService.ts`):**
+   - Removed premature return on Step 0 tombstone error; records error into audit log and continues with complete table eradication and auth identity deletion.
+3. **Mobile API Interceptor Fix (`mobile/src/services/api.ts`):**
+   - Refined 401 skip check to only skip unauthenticated endpoints (`/auth/login`, `/auth/signup`, `/auth/refresh`), allowing `/auth/mark-dead` to auto-refresh expired tokens.
+4. **Mobile Error Alert Quality (`mobile/src/screens/SettingsScreen.tsx`):**
+   - `confirmShootDead` now extracts and presents the actual backend error message if deletion fails.
+5. **Test Suite Verification & Schema Corrections (`shoot_dead.test.ts`, `shoot_dead_concurrency.test.ts`):**
+   - Added `upsert` mock to `shoot_dead.test.ts`.
+   - Realigned column schemas and auth user creation in `shoot_dead_concurrency.test.ts`.
+
+### Verification
+- `backend`: `npm run build` -> Exit 0 (0 TypeScript errors).
+- `mobile`: `npx tsc --noEmit` -> Exit 0 (0 TypeScript errors).
+- `npx jest src/routes/__tests__/shoot_dead.test.ts`: 4/4 tests passed (100%).
+- `npx jest src/services/__tests__/shoot_dead_concurrency.test.ts`: 10/10 tests passed (100%).
+- End-to-end ephemeral account creation, sample data seeding, `deleteAccount` eradication, zero-residue check, and post-delete write blocking verified against live Supabase.
+
+---
+
 ## [2026-08-31] Phase 3B: Watchtower Attention & Priority Engine
 
 ### Trigger

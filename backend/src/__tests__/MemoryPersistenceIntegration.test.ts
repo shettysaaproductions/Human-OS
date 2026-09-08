@@ -1831,4 +1831,73 @@ describe('Memory Persistence & Concurrency Integration', () => {
       await supabaseAdmin.from('memories').delete().eq('user_id', TEST_USER).eq('key', canonical);
     }
   });
+
+  it('RPB6: concurrent unarchive two archived CURRENT rows (alias vs canonical key) -> exactly one succeeds', async () => {
+    // Arrange: create two archived CURRENT rows for the same user + canonical key concept
+    // Row A stored with raw alias key 'mom_name' (canonical = 'mother_name')
+    // Row B stored with canonical key 'mother_name'
+    const aliasId1 = randomUUID();
+    const aliasId2 = randomUUID();
+    await supabaseAdmin.from('memories').insert([
+      {
+        id: aliasId1,
+        user_id: TEST_USER,
+        key: 'mom_name',
+        value: 'Archived1',
+        memory_type: 'family',
+        is_archived: true,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+      },
+      {
+        id: aliasId2,
+        user_id: TEST_USER,
+        key: 'mother_name',
+        value: 'Archived2',
+        memory_type: 'family',
+        is_archived: true,
+        lifecycle_state: 'CURRENT',
+        importance: 80,
+        confidence: 0.9,
+        source_authority: 'explicit_user',
+      },
+    ]);
+
+    // Act: launch two concurrent unarchive operations
+    const results = await Promise.all([
+      memoryRepository.unarchiveMemory(TEST_USER, aliasId1),
+      memoryRepository.unarchiveMemory(TEST_USER, aliasId2),
+    ]);
+
+    // Assert: exactly one succeeded, one failed with DUPLICATE_CURRENT
+    const successCount = results.filter(r => r.success).length;
+    expect(successCount).toBe(1);
+    const failureCount = results.filter(r => !r.success && r.reason === 'DUPLICATE_CURRENT').length;
+    expect(failureCount).toBe(1);
+
+    // Assert: no duplicate CURRENT rows — exactly one CURRENT for this user + canonical key
+    const { data: currentRows, error: countErr } = await supabaseAdmin.from('memories')
+      .select('*')
+      .eq('user_id', TEST_USER)
+      .eq('key', 'mother_name')
+      .eq('is_archived', false)
+      .eq('lifecycle_state', 'CURRENT');
+
+    if (countErr) throw new Error(`DB error: ${countErr.message}`);
+    expect(currentRows?.length).toBe(1);
+
+    // Assert: no hard delete, both rows still exist (one archived, one CURRENT)
+    const { data: allRows } = await supabaseAdmin.from('memories')
+      .select('*')
+      .eq('user_id', TEST_USER)
+      .eq('key', 'mother_name')
+      .eq('is_archived', true);
+
+    expect(allRows?.length).toBe(1); // the losing row remains archived
+
+    // Cleanup
+    await supabaseAdmin.from('memories').delete().eq('user_id', TEST_USER).eq('key', 'mother_name');
+  });
 });

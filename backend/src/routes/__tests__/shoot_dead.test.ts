@@ -42,11 +42,13 @@ describe('AccountLifecycleService - Shoot Dead Verification', () => {
     });
     
     mockUpdate = jest.fn().mockReturnValue({ eq: mockEq });
+    const mockUpsert = jest.fn().mockResolvedValue({ error: null });
 
     (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => ({
       delete: mockDelete,
       select: mockSelect,
       update: mockUpdate,
+      upsert: mockUpsert,
     }));
     
     (supabaseAdmin.auth.admin.deleteUser as jest.Mock).mockResolvedValue({ error: null });

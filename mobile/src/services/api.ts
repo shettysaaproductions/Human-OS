@@ -96,13 +96,18 @@ api.interceptors.response.use(
     }
 
     // Only attempt token refresh on 401 for protected routes.
-    // NEVER intercept /auth/ endpoints (login, signup, refresh) — they don't
+    // NEVER intercept unauthenticated auth endpoints (login, signup, refresh) — they don't
     // use bearer tokens and intercepting them causes "No refresh token" errors
     // to mask the real failure (bad credentials, cold backend, etc.).
+    const isPublicAuthRoute =
+      originalRequest.url?.includes('/auth/login') ||
+      originalRequest.url?.includes('/auth/signup') ||
+      originalRequest.url?.includes('/auth/refresh');
+
     if (
       error.response?.status !== 401 ||
       originalRequest._retried ||
-      originalRequest.url?.includes('/auth/')
+      isPublicAuthRoute
     ) {
       return Promise.reject(error);
     }

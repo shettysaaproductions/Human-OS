@@ -127,20 +127,14 @@ export class AccountLifecycleService {
         .from('account_tombstones')
         .upsert({ user_id: cleanUserId, deleted_at: new Date().toISOString() });
       if (tombstoneErr) {
-        throw new Error(`Failed to create account tombstone: ${tombstoneErr.message}`);
+        logger.error(`[AccountLifecycle] Failed to create account tombstone: ${tombstoneErr.message}`);
+        errors.push(`Tombstone creation failed: ${tombstoneErr.message}`);
+      } else {
+        logger.info(`[AccountLifecycle] Created tombstone for user: ${cleanUserId}. All concurrent background writes are now blocked.`);
       }
-      logger.info(`[AccountLifecycle] Created tombstone for user: ${cleanUserId}. All concurrent background writes are now blocked.`);
     } catch (e: any) {
       logger.error(`[AccountLifecycle] Fatal Tombstone Error: ${e.message}`);
-      return {
-        success: false,
-        userId: cleanUserId,
-        authDeleted: false,
-        profileDeleted: false,
-        tablesCleaned,
-        errors: [`Tombstone creation failed: ${e.message}`],
-        durationMs: Date.now() - startTime
-      };
+      errors.push(`Tombstone creation failed: ${e.message}`);
     }
 
     // ── STEP 0.5: Cancel pending jobs ────────────────────────────────────────────────
