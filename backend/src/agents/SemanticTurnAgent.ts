@@ -18,6 +18,33 @@ export class SemanticTurnAgent {
       return { semanticEvents: [], reminderNote: '', reminderCreated: false };
     }
 
+    let burstContext = job.payload.burstContext as string | undefined;
+    if (!burstContext && !is_proactive) {
+      try {
+        const { data: priorMsgs } = await supabaseAdmin
+          .from('chat_history')
+          .select('id, content, role, created_at')
+          .eq('user_id', userId)
+          .eq('role', 'user')
+          .neq('id', userMessageId)
+          .order('created_at', { ascending: false })
+          .limit(4);
+
+        if (priorMsgs && priorMsgs.length > 0) {
+          const now = Date.now();
+          const validPrior = priorMsgs
+            .filter(m => !m.content.startsWith('[HIDDEN_CONTEXT]') && (now - new Date(m.created_at).getTime()) < 5 * 60 * 1000)
+            .reverse()
+            .map(m => m.content);
+          if (validPrior.length > 0) {
+            burstContext = validPrior.join('\n');
+          }
+        }
+      } catch (e) {
+        logger.warn('[SemanticTurnAgent] Failed to fetch preceding burst context', { error: e });
+      }
+    }
+
     let resultEvents: any[] = [];
     let reminderNote = '';
     let reminderCreated = false;
@@ -27,11 +54,12 @@ export class SemanticTurnAgent {
       const semanticTurn = await interpretTurn(
         primaryMessage,
         userMessageId,
-        pending ?? null
+        pending ?? null,
+        burstContext
       );
 
       if (semanticTurn) {
-        const validatedSemanticTurn = validate(semanticTurn, primaryMessage);
+        const validatedSemanticTurn = validate(semanticTurn, primaryMessage, burstContext);
 
         const semanticEvents = toSemanticEvents(validatedSemanticTurn, userId, userMessageId || turnId);
 

@@ -59,12 +59,18 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   son_nickname: [
     'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam',
   ],
+  son_age: [
+    'sons_age', 'son_age', 'beta_age', 'bete_ki_umar', 'bete_ki_age', 'child_age',
+  ],
   // ── Family: daughter ────────────────────────────────────────────────────────
   daughter_name: [
     'daughters_name', 'daughter', 'beti', 'beti_name', 'daughter_real_name',
   ],
   daughter_nickname: [
     'daughters_nickname', 'daughter_nick_name', 'beti_ka_nickname', 'beti_ka_pyar_ka_naam',
+  ],
+  daughter_age: [
+    'daughters_age', 'daughter_age', 'beti_age', 'beti_ki_umar', 'beti_ki_age',
   ],
   // ── Family: sister ──────────────────────────────────────────────────────────
   sister_name: [
@@ -100,7 +106,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── User: preferred name ────────────────────────────────────────────────────
   preferred_name: [
-    'name', 'user_name', 'my_name', 'users_name',
+    'name', 'user_name', 'my_name', 'users_name', 'full_name', 'user_full_name', 'my_full_name', 'mera_full_name', 'mera_naam', 'mera_pura_naam',
     // NOTE: bare 'name' is an LLM-common alias that often conflicts with
     // other entities. It's listed here so it's normalized, but the value
     // validation layer will still reject non-name values.

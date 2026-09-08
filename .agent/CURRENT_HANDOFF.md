@@ -1,102 +1,71 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-04 — Restore @react-navigation/bottom-tabs production dependency
+2026-09-09 — Fix burst multi-message comprehension, antecedent pronoun resolution, and async_mode execution
 
 ## Session / Agent
 Agent: MonkeyCode
-Task: Fix only the confirmed OTA Android bundling blocker. Do not publish an OTA.
+Task: Burst multi-message comprehension and sequential fact persistence
 
 ## Current Task
-FIX-OTA-BOTTOM-TABS: restore `@react-navigation/bottom-tabs` to `mobile/package.json` dependencies.
+BURST-MULTIMESSAGE-COMPREHENSION: Resolve issue where only the last message in rapid sequences was addressed and prior messages were debounced without comprehension or fact extraction.
 
 ## Objective
-Make `@react-navigation/bottom-tabs` resolvable for `BrainNavigator.tsx` during production OTA bundling. Do not change navigation architecture, memory, auth, Nova, backend, Settings, EAS config, or credentials. Do not publish an OTA.
+Enable Nova and background workers to comprehend all user messages in rapid sequences/bursts, resolve pronoun antecedents across burst messages, persist facts accurately in memories, and address all user points in a cohesive response.
 
 ## Status
-FIXED locally on `main`; not pushed
+IMPLEMENTED & VERIFIED on `agent-checkpoint/burst-multimessage-comprehension`.
+Backend build `npm run build` exits 0. All unit tests pass.
 
 ## Repository State
-- Current branch: `main`
-- Starting HEAD: `778b6758cdd8cdf9f8ad75abac51a341fecdfec9`
-- Approved application code remains `9d0052192e430d50f007e81efa632a4292dde390`
-- `BrainNavigator.tsx` was not modified
-- yarn.lock was already consistent and was not modified
-- OTA was not published by this session
+- Current branch: `agent-checkpoint/burst-multimessage-comprehension`
+- Base commit: `9358babb37ae967a57a1e05e55e8869b3ee9cf6d`
+- Production changed: NO (checkpoint branch only)
 
-## Confirmed Findings
-- Android OTA bundling failed: Unable to resolve module `@react-navigation/bottom-tabs` from `mobile/src/navigation/BrainNavigator.tsx`.
-- `BrainNavigator.tsx` imports `createBottomTabNavigator` from `@react-navigation/bottom-tabs`.
-- The package was previously in `devDependencies` at `^7.18.3` and was removed in `db83715`.
-- `mobile/yarn.lock` already contains `@react-navigation/bottom-tabs@^7.18.3` resolved to `7.18.14`.
-- Restoring the same range in `dependencies` makes package.json consistent with the existing lockfile.
-
-## Root Cause
-`@react-navigation/bottom-tabs` was missing from `mobile/package.json` dependencies, so Metro/EAS bundling could not resolve the BrainNavigator import.
-
-## Decisions
-- Restore `@react-navigation/bottom-tabs` to `dependencies` at `^7.18.3` (React Navigation 7.x / Expo 56).
-- Do not change yarn.lock because it already has that range at `7.18.14`.
-- Do not change `BrainNavigator.tsx`.
-- Do not publish an OTA from this session.
+## Confirmed Findings & Root Cause
+1. **Early `return;` in `chat.ts` inside `if (async_mode)`**:
+   Line 840 aborted request processing immediately upon returning 202, preventing downstream LLM generation in background mode.
+2. **Debounce amnesia in `chat.ts`**:
+   Debounced messages M1..M4 were discarded from the final turn. When M5 ran, it only analyzed M5 without context from M1..M4.
+3. **Dropped semantic jobs in batch arrays**:
+   `chat.ts` only enqueued `primaryMessage` instead of creating semantic jobs for all messages in the batch.
+4. **Antecedent pronoun amnesia in `SemanticInterpreter.ts` & `SemanticValidator.ts`**:
+   - "Uska name sakshi hai" requires antecedent context "Meri wife hai" to identify "wife_name".
+   - `SemanticValidator.ts` rejected `wife_name` when the token "wife" was not literally in the single bubble.
+   - `SemanticInterpreter.ts` had a 400ms timeout budget and called `geminiComplete` directly without failover.
 
 ## Implementation Completed
-- Added `"@react-navigation/bottom-tabs": "^7.18.3"` to `mobile/package.json` dependencies.
-- Confirmed `mobile/yarn.lock` already lists `@react-navigation/bottom-tabs@^7.18.3` version `7.18.14`.
-- `git diff --check` PASS.
-- Continuity validator run after this handoff update.
-
-## Tests Added
-None. Dependency-only change.
+1. `backend/src/routes/chat.ts`:
+   - Removed early `return;` in `if (async_mode)`.
+   - Enqueued semantic turn jobs for every message in `normalizedMessages` with preceding burst context.
+   - At the debounce check, aggregated preceding unreplied user messages in the burst (within 3 min window) into `normalizedMessages` and `effectiveMessage`.
+   - Tailored `lengthInstruction` when multiple messages are sent in a burst so Nova acknowledges and addresses all points.
+2. `backend/src/lib/SemanticInterpreter.ts`:
+   - Updated `INTERPRETER_BUDGET_MS` to 12000ms.
+   - Dispatched completions via `cognitiveRouter.complete('TURN_ANALYSIS', ...)` with automatic failover across all Gemini and NVIDIA keys.
+   - Injected burst antecedent context and pronoun resolution rules into `INTERPRETER_SYSTEM_PROMPT`.
+   - Expanded `isLikelyActionable` regex with Hinglish family tokens.
+3. `backend/src/lib/SemanticValidator.ts`:
+   - Added `CONCEPT_SYNONYMS` for Hinglish relationship mapping (`wife` -> `biwi`/`patni`, `son` -> `beta`/`bachha`, etc.).
+   - Updated `isConceptRelationshipSupported` and `validateTurn` to accept `contextMessage?: string` (burst context).
+4. `backend/src/lib/memoryKeySchema.ts`:
+   - Added aliases for `son_age`, `daughter_age`, and expanded `preferred_name` with `full_name`.
+5. `backend/src/agents/SemanticTurnAgent.ts`:
+   - Extracted `burstContext` from `job.payload` or recent `chat_history`.
+   - Passed `burstContext` to `interpretTurn` and `validate`.
+6. `backend/src/__tests__/BurstMessageComprehension.test.ts`:
+   - Added unit test suite covering full 5-message burst scenario and synonym support.
 
 ## Test Results
-- yarn.lock contains `@react-navigation/bottom-tabs@^7.18.3` at `7.18.14`: PASS
-- yarn.lock unchanged: PASS (already consistent)
-- `git diff --check`: PASS
-- Continuity validator: run after this handoff update
-- `yarn install --frozen-lockfile` / `yarn tsc --noEmit`: not re-run in this stop/commit pass
-
-## Known Failures
-- This commit is local until it is pushed.
-- Production OTA is still unpublished.
-- Physical Android OTA receipt is still unverified.
-
-## Unresolved Questions
-None for the missing-module blocker.
+- `npm run build`: PASS (exit code 0)
+- `src/__tests__/BurstMessageComprehension.test.ts`: PASS (6/6 tests)
+- `src/lib/__tests__/SemanticValidator.test.ts`: PASS (37/37 tests)
+- `src/__tests__/BurstMessageReliability.test.ts`: PASS (1/1 test)
 
 ## Important Invariants
-- Preserve deterministic correctionTarget authority, user-turn-grounded correction values, semantic filtering, canonical-key enforcement, atomic supersession, exactly-one-CURRENT, provenance/order safety, stale-write protection, history preservation / no hard delete, and forensic/PII hygiene.
-- Do not expose, create, replace, or modify credentials including EXPO_TOKEN.
-- Do not publish an OTA from this session.
-
-## DO NOT REDO
-- Do not remove `@react-navigation/bottom-tabs` from production dependencies.
-- Do not move it back to devDependencies.
-- Do not rewrite BrainNavigator or navigation architecture for this bug.
-- Do not run eas update or publish an OTA from this coding session.
-- Do not modify memory, auth, Nova, backend, Settings, or EAS configuration.
+- Preserved deterministic authority boundary, grounding verification, and no-hard-delete policy.
+- No tight polling loops added.
+- Router-driven failover utilizes credential pools without exposing secrets.
 
 ## NEXT ACTION
-Land this dependency-only commit on origin `main` so the production OTA workflow can bundle Android again. Do not publish OTA from a local agent session. After a successful Actions OTA, NEXT ACTION = physical Android OTA verification.
-
-## Safe To Continue?
-YES
-
-## Checkpoint Information
-CHECKPOINT_BRANCH=main
-BASE_COMMIT=778b6758cdd8cdf9f8ad75abac51a341fecdfec9
-CHECKPOINT_COMMIT=778b6758cdd8cdf9f8ad75abac51a341fecdfec9
-APPROVED_CODE_COMMIT=9d0052192e430d50f007e81efa632a4292dde390
-RELEVANT_FILES=mobile/package.json,.agent/CURRENT_HANDOFF.md
-WORKING_TREE_STATE=dirty until this fix is committed
-CHECKPOINT_PUSHED=no
-MAIN_PUSHED=no
-PRODUCTION_CHANGED=no
-OTA_PUBLISHED=no
-OTA_UPDATE_ID=none
-OTA_BRANCH=production
-OTA_CHANNEL=production
-OTA_RUNTIME=1.1.0
-DEVICE_VERIFIED=no
-CREDENTIALS_STORED_IN_REPO=no
-BOTTOM_TABS_VERSION=^7.18.3 resolved 7.18.14
+Review commit on `agent-checkpoint/burst-multimessage-comprehension` and request user authorization before any merge to `main`.

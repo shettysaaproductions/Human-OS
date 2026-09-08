@@ -767,19 +767,37 @@ chatRouter.post(
       let semanticClarificationQuestion: string | null = null; // Preserved for scope compatibility
       
       if (!is_proactive && primaryMessage.length > 1) {
-        const { data: job, error: jobErr } = await supabaseAdmin.from('background_jobs').insert({
-          job_type: 'process_semantic_turn',
-          payload: { userId, turnId, userMessageId, primaryMessage, is_proactive },
-          status: 'pending',
-          attempts: 0
-        }).select('id, job_sequence').single();
+        for (let idx = 0; idx < normalizedMessages.length; idx++) {
+          const mItem = normalizedMessages[idx];
+          if (!mItem.message || mItem.message.trim().length <= 1) continue;
+          const msgDbId = savedMessages[idx]?.id || userMessageId;
+          const precedingBurstContext = normalizedMessages
+            .slice(0, idx)
+            .map(m => m.message)
+            .filter(Boolean)
+            .join('\n');
 
-        if (jobErr) {
-          logger.error('[Chat] Failed to enqueue semantic job', { userId, turnId, error: jobErr.message });
-        } else {
-          semanticJobId = job.id;
-          semanticJobSequence = job.job_sequence;
-          logger.info('[Chat] Enqueued semantic turn job', { userId, turnId, jobId: semanticJobId, jobSequence: semanticJobSequence });
+          const { data: job, error: jobErr } = await supabaseAdmin.from('background_jobs').insert({
+            job_type: 'process_semantic_turn',
+            payload: {
+              userId,
+              turnId: normalizedMessages.length > 1 ? `${turnId}_${idx}` : turnId,
+              userMessageId: msgDbId,
+              primaryMessage: mItem.message,
+              is_proactive,
+              burstContext: precedingBurstContext || undefined,
+            },
+            status: 'pending',
+            attempts: 0
+          }).select('id, job_sequence').single();
+
+          if (jobErr) {
+            logger.error('[Chat] Failed to enqueue semantic job', { userId, turnId, error: jobErr.message });
+          } else {
+            semanticJobId = job.id;
+            semanticJobSequence = job.job_sequence;
+            logger.info('[Chat] Enqueued semantic turn job', { userId, turnId, jobId: semanticJobId, jobSequence: semanticJobSequence, msgIdx: idx });
+          }
         }
       }
 
@@ -837,7 +855,7 @@ chatRouter.post(
           conversation_id: activeConversationId,
           user_message_id: userMessageId,
         });
-        return;
+        // In async_mode, 202 is returned to client immediately and processing continues in background
       }
       
       // NOTE: If the frontend does not poll for async results, switch to sync mode
@@ -923,6 +941,53 @@ chatRouter.post(
               clearTimeout(asyncDeadlineTimer);
             }
             return; // Abort LLM generation, the newer message's request will handle it
+          }
+        }
+
+        // ── BURST AGGREGATION: Collect any preceding unreplied user messages in this burst ──
+        if (!is_proactive) {
+          try {
+            const { data: recentTurnMsgs } = await supabaseAdmin
+              .from('chat_history')
+              .select('id, role, content, created_at')
+              .eq('conversation_id', activeConversationId)
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(15);
+
+            if (recentTurnMsgs && recentTurnMsgs.length > 1) {
+              const contiguousUserMsgs: typeof recentTurnMsgs = [];
+              const nowMs = Date.now();
+              for (const m of recentTurnMsgs) {
+                if (m.role !== 'user') break;
+                if (m.content.startsWith('[HIDDEN_CONTEXT]')) continue;
+                const msgTime = new Date(m.created_at).getTime();
+                if (nowMs - msgTime > 3 * 60 * 1000) break;
+                contiguousUserMsgs.push(m);
+              }
+
+              if (contiguousUserMsgs.length > 1) {
+                contiguousUserMsgs.reverse();
+                const existingContents = new Set(normalizedMessages.map(nm => nm.message.trim()));
+                const missingMsgs = contiguousUserMsgs.filter(cum => !existingContents.has(cum.content.trim()));
+
+                if (missingMsgs.length > 0) {
+                  const merged = [
+                    ...missingMsgs.map(m => ({ message: m.content, role: 'user' as const })),
+                    ...normalizedMessages,
+                  ];
+                  normalizedMessages = merged;
+                  effectiveMessage = normalizedMessages.map(m => m.message).join('\n\n');
+                  logger.info('[Chat] Burst detected: aggregated preceding unreplied messages into turn', {
+                    userId,
+                    burstCount: normalizedMessages.length,
+                    aggregatedPreview: effectiveMessage.substring(0, 150),
+                  });
+                }
+              }
+            }
+          } catch (burstErr) {
+            logger.warn('[Chat] Failed to aggregate preceding burst messages', { error: burstErr });
           }
         }
       
@@ -1264,7 +1329,9 @@ chatRouter.post(
         goalCorrectedEvents: semanticEvents.filter((e: any) => e.family === 'GoalCorrected'),
         deterministicReminderCreated,
         deterministicReminderNote,
-        lengthInstruction: primaryMessage.length < 20
+        lengthInstruction: normalizedMessages.length > 1
+          ? "The user sent multiple messages in a burst. Address and acknowledge ALL their points warmly and naturally in a cohesive reply without skipping any detail."
+          : primaryMessage.length < 20
           ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
           : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN',

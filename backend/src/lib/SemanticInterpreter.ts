@@ -34,7 +34,7 @@
  *   ❌ Never let missing information become an invented default.
  */
 
-import { geminiComplete } from './gemini';
+import { cognitiveRouter } from './cognitiveRouter';
 import { logger } from './logger';
 import {
   SemanticEvent,
@@ -216,13 +216,14 @@ export function deriveRetrievalMode(turn: SemanticTurn, rawMessage: string): Ret
 // ── Interpreter ───────────────────────────────────────────────────────────────
 
 /** Hard latency budget for actionable turns (ms) */
-const INTERPRETER_BUDGET_MS = 400;
+const INTERPRETER_BUDGET_MS = 12000;
 
 /** Soft pre-check: is this turn likely to need semantic interpretation at all? */
-function isLikelyActionable(message: string): boolean {
+function isLikelyActionable(message: string, recentContext?: string): boolean {
   if (message.length > 100) return true;
+  if (recentContext && recentContext.trim().length > 0) return true;
   const lower = message.toLowerCase();
-  return /remind|yaad|timer|alarm|schedule|correct|nahi|galat|actually|woh nahi|naam|wife|husband|son|daughter|bhai|sis|goal|plan|remember|save|note|favourite|favorite/.test(lower);
+  return /remind|yaad|timer|alarm|schedule|correct|nahi|galat|actually|woh nahi|naam|name|wife|biwi|patni|husband|pati|son|beta|beti|daughter|bachha|baccha|child|kid|bhai|sis|didi|bhaiya|brother|sister|mom|dad|maa|papa|mummy|family|goal|plan|remember|save|note|favourite|favorite|age|umar|mahina|month|months|saal|year|years|work|job|kaam|living|rehta|rehti|city|shehar|birthday|janamdin/.test(lower);
 }
 
 const INTERPRETER_SYSTEM_PROMPT = `You are a semantic understanding engine for a personal AI companion called Nova.
@@ -239,7 +240,7 @@ You MUST return a valid JSON object matching exactly this schema:
   "intent": "CHAT" | "QUESTION" | "MEMORY" | "CORRECTION" | "REMINDER" | "GOAL_UPDATE" | "MIXED",
   "facts": [
     {
-      "concept": "<raw concept name, e.g. wife_name, favourite_colour>",
+      "concept": "<raw concept name, e.g. wife_name, son_name, son_age, preferred_name, favourite_colour>",
       "value": "<exact value from user's message>",
       "confidence": <0.0 to 1.0>,
       "groundedInTurn": <true if value literally appears in user's message, false otherwise>
@@ -289,6 +290,18 @@ CRITICAL RULES:
 6. If the message is pure conversation with no fact, correction, action, or question about stored info — use intent "CHAT" with empty arrays.
 7. Return ONLY the JSON object. No preamble. No explanation. No markdown.
 
+BURST MESSAGES & PRONOUN ANTECEDENT RESOLUTION:
+Users frequently send thoughts in multiple short messages in a sequence (bursts).
+Use the recent context to resolve any pronouns (e.g. "uska", "uski", "unka", "he", "she", "they", "it") or relative references to the proper concept:
+- Example: Preceding: "Meri wife hai" | Current: "Uska name sakshi hai"
+  → Concept: "wife_name", Value: "sakshi", groundedInTurn: true
+- Example: Preceding: "Mera beta hai 6 months ka" | Current: "Uska name shreshth hai"
+  → Concept: "son_name", Value: "shreshth", groundedInTurn: true
+- Example: Current: "Mera beta hai 6 months ka"
+  → Concept: "son_age", Value: "6 months" (or "6 months ka"), groundedInTurn: true
+- Example: Current: "Mera full name Sagar shetty hai"
+  → Concept: "preferred_name", Value: "Sagar shetty", groundedInTurn: true
+
 DAY-OF-WEEK HANDLING (for reminder actions):
 - "Mon to Sat" / "mon se sat" / "Monday se Saturday" / "mom to sat" → active_days: ["monday","tuesday","wednesday","thursday","friday","saturday"]
 - "Mon" / "monday" alone → active_days: ["monday"]
@@ -319,12 +332,12 @@ If a reminder intent is detected but the time is ambiguous or unknown:
 A low-confidence reminder is still a real mutation. Clarify first.`;
 
 /**
- * Interprets a user message semantically using Gemini Flash.
+ * Interprets a user message semantically using CognitiveModelRouter (Gemini / NVIDIA).
  *
  * @param message - The raw user message text
  * @param messageId - ID from chat_history (for traceability)
  * @param pendingClarification - Any pending clarification state from the previous turn
- * @param recentContext - Last 1-2 assistant messages for context (optional)
+ * @param recentContext - Preceding burst / conversation context (optional)
  * @returns SemanticTurn or null if the message is not actionable / timeout occurred
  */
 export async function interpretTurn(
@@ -341,7 +354,7 @@ export async function interpretTurn(
   }
 
   // Fast-path: skip for pure conversational turns
-  if (!isLikelyActionable(message)) {
+  if (!isLikelyActionable(message, recentContext)) {
     logger.debug('[SemanticInterpreter] Skipped (not actionable)', { messageId, length: message.length });
     return null;
   }
@@ -349,7 +362,7 @@ export async function interpretTurn(
   // Build user prompt
   let userPrompt = `User message: "${message}"`;
   if (recentContext) {
-    userPrompt += `\n\nRecent context (last assistant message): ${recentContext}`;
+    userPrompt += `\n\nRecent context / Preceding burst messages: "${recentContext}"\nNOTE: If the user message contains pronouns or references like 'uska', 'unki', 'unka', 'he', 'she', 'they', 'it', or mentions family/age/name continuing from above, resolve the antecedent using the recent context and extract the appropriate concept (e.g. wife_name, son_name, son_age).`;
   }
   if (pendingClarification) {
     userPrompt += `\n\nPENDING CLARIFICATION CONTEXT: Nova previously asked "${pendingClarification.askedQuestion}" about a pending ${pendingClarification.type}. The user's current message may be answering that question. If it is, identify which fields from missingFields=[${pendingClarification.missingFields.join(', ')}] are now resolved. Any OTHER facts or actions in this message are independent and should be extracted normally.`;
@@ -362,14 +375,13 @@ export async function interpretTurn(
 
   try {
     const raw = await Promise.race([
-      geminiComplete(messages, {
-        model: 'gemini-1.5-flash',
+      cognitiveRouter.complete('TURN_ANALYSIS', messages, {
         maxTokens: 512,
         temperature: 0.1,
         jsonMode: true,
         timeoutMs: INTERPRETER_BUDGET_MS,
       }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), INTERPRETER_BUDGET_MS + 50)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), INTERPRETER_BUDGET_MS + 200)),
     ]);
 
     if (!raw) {
@@ -377,7 +389,11 @@ export async function interpretTurn(
       return null;
     }
 
-    const parsed = JSON.parse(typeof raw === 'string' ? raw : JSON.stringify(raw)) as any;
+    let cleanJson = typeof raw === 'string' ? raw.trim() : JSON.stringify(raw);
+    if (cleanJson.startsWith('```')) {
+      cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    }
+    const parsed = JSON.parse(cleanJson) as any;
 
     // Build resolved pending fields if this message answers a clarification
     let resolvesPending: SemanticTurn['resolvesPending'] | undefined;

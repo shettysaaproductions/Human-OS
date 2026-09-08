@@ -111,15 +111,32 @@ export function isValueGroundedInSource(value: string, sourceMessage: string): b
  *
  * For plain facts: at least one non-generic concept token must appear in source.
  */
+const CONCEPT_SYNONYMS: Record<string, string[]> = {
+  wife: ['wife', 'biwi', 'patni', 'bivi', 'mrs', 'partner'],
+  husband: ['husband', 'pati', 'miyan', 'partner'],
+  son: ['son', 'beta', 'ladka', 'bachha', 'baccha', 'child', 'kid', 'bache'],
+  daughter: ['daughter', 'beti', 'ladki', 'bachhi', 'child', 'kid'],
+  child: ['child', 'kid', 'bachha', 'baccha', 'beta', 'beti'],
+  mother: ['mother', 'mom', 'mummy', 'maa', 'mata', 'ammi'],
+  father: ['father', 'dad', 'papa', 'baap', 'pitaji', 'abbu'],
+  brother: ['brother', 'bhai', 'bhaiya', 'bro'],
+  sister: ['sister', 'behen', 'didi', 'sis'],
+  friend: ['friend', 'dost', 'yaar', 'buddy'],
+  user: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne', 'self'],
+  preferred: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne'],
+  age: ['age', 'umar', 'saal', 'month', 'months', 'mahina', 'mahine', 'year', 'years', 'old'],
+};
+
 export function isConceptRelationshipSupported(
   concept: string,
   _value: string,
   sourceMessage: string,
   isCorrectionClaim: boolean,
+  contextMessage?: string,
 ): boolean {
-  const lower = sourceMessage.toLowerCase();
+  const combined = (contextMessage ? `${contextMessage} ${sourceMessage}` : sourceMessage).toLowerCase();
 
-  // For corrections: a correction signal must be present in the source
+  // For corrections: a correction signal must be present in the source or context
   if (isCorrectionClaim) {
     const correctionSignals = [
       'nahi', 'nahin', 'nhi', 'nah ', ' na ', 'not ', ' not',
@@ -128,17 +145,21 @@ export function isConceptRelationshipSupported(
       'actually mera', 'actually meri', 'actually my',
       'actually his', 'actually her', 'actually their',
     ];
-    return correctionSignals.some(sig => lower.includes(sig));
+    return correctionSignals.some(sig => combined.includes(sig));
   }
 
-  // For facts: at least one non-generic concept token must appear in source
+  // For facts: at least one non-generic concept token must appear in source or context (including synonyms)
   const tokens = concept
     .split('_')
     .map(t => t.toLowerCase())
     .filter(t => t && !GENERIC_KEY_TOKENS.has(t));
 
   if (tokens.length === 0) return true; // can’t verify, pass through to canonical check
-  return tokens.some(t => hasWordBoundary(lower, t));
+  return tokens.some(t => {
+    if (hasWordBoundary(combined, t)) return true;
+    const syns = CONCEPT_SYNONYMS[t] || [];
+    return syns.some(syn => hasWordBoundary(combined, syn));
+  });
 }
 
 /**
@@ -270,7 +291,7 @@ export function validateReminderCompleteness(action: SemanticAction): ValidatedA
  * Validates a SemanticTurn produced by SemanticInterpreter.
  * Returns a ValidatedTurn containing only what the state engines may act on.
  */
-export function validateTurn(turn: SemanticTurn, sourceMessage: string): ValidatedTurn {
+export function validateTurn(turn: SemanticTurn, sourceMessage: string, contextMessage?: string): ValidatedTurn {
   const validatedFacts: ValidatedFact[] = [];
   const validatedCorrections: ValidatedCorrection[] = [];
   const validatedActions: ValidatedAction[] = [];
@@ -291,7 +312,7 @@ export function validateTurn(turn: SemanticTurn, sourceMessage: string): Validat
       console.log(`[SemanticValidator] Rejected fact ${fact.concept} - value not in source`, { value: fact.value, sourceMessage });
       continue; // Value not literally in source — reject
     }
-    if (!isConceptRelationshipSupported(fact.concept, fact.value, sourceMessage, false)) {
+    if (!isConceptRelationshipSupported(fact.concept, fact.value, sourceMessage, false, contextMessage)) {
       console.log(`[SemanticValidator] Rejected fact ${fact.concept} - concept relationship not supported`);
       continue;
     }
@@ -331,7 +352,7 @@ export function validateTurn(turn: SemanticTurn, sourceMessage: string): Validat
   for (const correction of turn.corrections) {
     if (!correction.groundedInTurn) continue;
     if (!isValueGroundedInSource(correction.new_value, sourceMessage)) continue;
-    if (!isConceptRelationshipSupported(correction.concept, correction.new_value, sourceMessage, true)) continue;
+    if (!isConceptRelationshipSupported(correction.concept, correction.new_value, sourceMessage, true, contextMessage)) continue;
     if (!isAttributionUnambiguous(correction.concept, correction.new_value, allConceptsInTurn)) continue;
     if (isValueReflexive(correction.concept, correction.new_value)) continue;
 
