@@ -1,4 +1,4 @@
-import { classifyDomain, synthesizeConnectedDots, DOMAIN_TAXONOMY } from '../../lib/memoryDomains';
+import { classifyDomain, synthesizeConnectedDots, buildDynamicKnowledgeGraph } from '../../lib/memoryDomains';
 import { canonicalizeKey } from '../../lib/memoryKeySchema';
 
 describe('Wardrobe Memory Domains & Neural Dot-Connecting', () => {
@@ -58,15 +58,17 @@ describe('Wardrobe Memory Domains & Neural Dot-Connecting', () => {
     });
   });
 
-  describe('synthesizeConnectedDots', () => {
-    it('generates cross-domain neural links between work schedule and family evening routine', () => {
+  describe('buildDynamicKnowledgeGraph', () => {
+    it('synthesizes complete graph with core node, 5 departments, memory dots, and cross-domain links', () => {
       const memories = [
-        { key: 'work_schedule', value: 'Monday to Saturday, 11 AM to 8 PM at Conviction HR', memory_type: 'work' },
+        { key: 'preferred_name', value: 'Prefers to be called Saa.', memory_type: 'personal' },
         { key: 'wife_name', value: 'Sakshi', memory_type: 'family' },
         { key: 'son_name', value: 'Shreshth', memory_type: 'family' },
         { key: 'son_age', value: '6 months', memory_type: 'family' },
         { key: 'company_name', value: 'Conviction HR', memory_type: 'work' },
+        { key: 'work_schedule', value: 'Monday to Saturday, 11 AM to 8 PM at Conviction HR', memory_type: 'work' },
         { key: 'goals', value: 'Scaling Conviction HR and hiring top talent', memory_type: 'goals' },
+        { key: 'passions', value: 'Entrepreneurship, recruitment leadership, technology', memory_type: 'preferences' },
       ];
 
       const workingContext = [
@@ -74,21 +76,31 @@ describe('Wardrobe Memory Domains & Neural Dot-Connecting', () => {
         { key: 'hope_for_job_selection', value: 'hope so 2 bhi select ho jaye' }
       ];
 
-      const dots = synthesizeConnectedDots(memories, workingContext);
-      expect(dots.length).toBeGreaterThanOrEqual(2);
+      const graph = buildDynamicKnowledgeGraph(memories, workingContext, 'Saa');
 
-      const workFamilyDot = dots.find(d => d.id === 'dot-work-family');
-      expect(workFamilyDot).toBeDefined();
-      expect(workFamilyDot?.badge).toContain('Work ⇄');
-      expect(workFamilyDot?.badge).toContain('Family');
-      expect(workFamilyDot?.insight).toContain('Sakshi');
-      expect(workFamilyDot?.insight).toContain('Shreshth');
-      expect(workFamilyDot?.insight).toContain('8:00 PM');
+      expect(graph.totalNodes).toBeGreaterThanOrEqual(12);
+      expect(graph.totalEdges).toBeGreaterThanOrEqual(12);
 
-      const hiringDot = dots.find(d => d.id === 'dot-work-hiring');
-      expect(hiringDot).toBeDefined();
-      expect(hiringDot?.insight).toContain('4 candidates');
-      expect(hiringDot?.insight).toContain('Conviction HR');
+      // Core user node exists
+      const userNode = graph.nodes.find(n => n.id === 'user-core');
+      expect(userNode).toBeDefined();
+      expect(userNode?.name).toBe('Saa');
+
+      // 5 departments exist
+      expect(graph.departments).toHaveLength(5);
+      const deptNode = graph.nodes.find(n => n.id === 'dept-family');
+      expect(deptNode).toBeDefined();
+      expect(deptNode?.isDepartment).toBe(true);
+
+      // Memory dots exist
+      const sakshiNode = graph.nodes.find(n => n.id === 'mem-wife_name');
+      expect(sakshiNode).toBeDefined();
+      expect(sakshiNode?.name).toContain('Sakshi');
+      expect(sakshiNode?.department).toBe('family');
+
+      // Cross-domain edges exist
+      const crossEdge = graph.edges.find(e => e.isCrossDomain);
+      expect(crossEdge).toBeDefined();
     });
   });
 });

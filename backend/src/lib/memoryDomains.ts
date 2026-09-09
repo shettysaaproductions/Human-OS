@@ -223,3 +223,306 @@ export function synthesizeConnectedDots(
 
   return dots;
 }
+
+export interface DynamicKgNode {
+  id: string;
+  name: string;
+  entity_type: string;
+  department: LifeDomainKey;
+  color: string;
+  radius: number;
+  value: string;
+  raw_key?: string;
+  isHub?: boolean;
+  isDepartment?: boolean;
+  isContext?: boolean;
+  emoji?: string;
+}
+
+export interface DynamicKgEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  color: string;
+  isCrossDomain?: boolean;
+  weight?: number;
+}
+
+export interface DynamicKgResult {
+  nodes: DynamicKgNode[];
+  edges: DynamicKgEdge[];
+  departments: Array<{
+    id: LifeDomainKey;
+    name: string;
+    emoji: string;
+    color: string;
+    count: number;
+  }>;
+  totalNodes: number;
+  totalEdges: number;
+}
+
+function toGraphLabel(key: string, value: string): string {
+  const k = key.toLowerCase();
+  const v = (value || '').trim();
+
+  // Family members
+  if (k === 'wife_name') return `${v} (Wife)`;
+  if (k === 'son_name') return `${v} (Son)`;
+  if (k === 'son_age') return `${v} old (Son)`;
+  if (k === 'daughter_name') return `${v} (Daughter)`;
+  if (k === 'father_name') return `${v} (Father)`;
+  if (k === 'mother_name') return `${v} (Mother)`;
+  if (k === 'sister_name') return `${v} (Sister)`;
+  if (k === 'brother_name') return `${v} (Brother)`;
+
+  // Work & Career
+  if (k === 'company_name') return `${v} (Company)`;
+  if (k === 'work_schedule') {
+    if (v.includes('11') && (v.includes('8') || v.includes('8 PM'))) return '11am - 8pm (Work Hours)';
+    return 'Work Schedule';
+  }
+  if (k === 'office_hours') return `${v} (Office Hours)`;
+  if (k === 'current_office_location') return `${v} (Office)`;
+  if (k === 'candidates_for_job') return `${v} (Hiring)`;
+  if (k === 'hope_for_job_selection') return `Hiring Target (${v.length > 20 ? v.slice(0, 18) + '...' : v})`;
+
+  // Goals
+  if (k === 'goals') {
+    return v.length > 25 ? v.slice(0, 22) + '... (Goal)' : `${v} (Goal)`;
+  }
+  if (k === 'passions') {
+    return 'Passions & Leadership';
+  }
+
+  // Identity
+  if (k === 'preferred_name') {
+    const cleanName = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
+    return `${cleanName} (Name)`;
+  }
+  if (k === 'birth_date') return `${v} (Birthday)`;
+  if (k === 'marriage_date') return `${v} (Anniversary)`;
+
+  // Fallback
+  const cleanKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const shortVal = v.length > 18 ? v.slice(0, 15) + '...' : v;
+  return shortVal ? `${shortVal} (${cleanKey})` : cleanKey;
+}
+
+/**
+ * Dynamically synthesizes the complete Knowledge Graph from the user's growing
+ * memories, active context, and Life Domain compartments.
+ */
+export function buildDynamicKnowledgeGraph(
+  memories: Array<{ id?: string; key: string; value: string; memory_type?: string }>,
+  workingContext: Array<{ id?: string; key: string; value: string }>,
+  preferredName?: string
+): DynamicKgResult {
+  const nodes: DynamicKgNode[] = [];
+  const edges: DynamicKgEdge[] = [];
+  const nodeIds = new Set<string>();
+
+  const cleanUserName = (preferredName || 'You')
+    .replace(/^Prefers to be called\s+/i, '')
+    .replace(/\.$/, '')
+    .trim();
+
+  // 1. Central Self Node
+  const coreNode: DynamicKgNode = {
+    id: 'user-core',
+    name: cleanUserName,
+    entity_type: 'self',
+    department: 'identity',
+    color: '#8B5CF6',
+    radius: 30,
+    value: `Central Self & Consciousness: ${cleanUserName}`,
+    isHub: true,
+    emoji: '🧠'
+  };
+  nodes.push(coreNode);
+  nodeIds.add(coreNode.id);
+
+  // 2. Department Hub Nodes
+  const deptCounts: Record<LifeDomainKey, number> = {
+    family: 0,
+    work: 0,
+    goals: 0,
+    lifestyle: 0,
+    identity: 0
+  };
+
+  const DEPT_KEYS: LifeDomainKey[] = ['family', 'work', 'goals', 'lifestyle', 'identity'];
+  for (const d of DEPT_KEYS) {
+    const meta = DOMAIN_TAXONOMY[d];
+    const deptNodeId = `dept-${d}`;
+    const deptNode: DynamicKgNode = {
+      id: deptNodeId,
+      name: meta.title,
+      entity_type: 'department',
+      department: d,
+      color: meta.color,
+      radius: 24,
+      value: meta.description,
+      isDepartment: true,
+      emoji: meta.emoji
+    };
+    nodes.push(deptNode);
+    nodeIds.add(deptNodeId);
+
+    // Link Department to Core Self
+    edges.push({
+      id: `edge-core-${d}`,
+      source: 'user-core',
+      target: deptNodeId,
+      relation: 'HAS_DEPARTMENT',
+      color: 'rgba(255,255,255,0.25)',
+      weight: 3
+    });
+  }
+
+  // 3. Memory Nodes
+  for (const mem of memories) {
+    if (!mem.key || !mem.value) continue;
+    const meta = classifyDomain(mem.key, mem.memory_type);
+    const nodeId = `mem-${mem.key}`;
+    if (nodeIds.has(nodeId)) continue;
+
+    const node: DynamicKgNode = {
+      id: nodeId,
+      name: toGraphLabel(mem.key, mem.value),
+      entity_type: mem.memory_type || 'memory',
+      department: meta.domain,
+      color: meta.color,
+      radius: 16,
+      value: mem.value,
+      raw_key: mem.key,
+      emoji: meta.emoji
+    };
+    nodes.push(node);
+    nodeIds.add(nodeId);
+    deptCounts[meta.domain]++;
+
+    // Link to Department
+    edges.push({
+      id: `edge-dept-${mem.key}`,
+      source: `dept-${meta.domain}`,
+      target: nodeId,
+      relation: 'CONTAINS',
+      color: meta.color,
+      weight: 1
+    });
+  }
+
+  // 4. Working Context Nodes
+  for (const wm of workingContext) {
+    if (!wm.key || !wm.value) continue;
+    const meta = classifyDomain(wm.key);
+    const nodeId = `wm-${wm.key}`;
+    if (nodeIds.has(nodeId)) continue;
+
+    const node: DynamicKgNode = {
+      id: nodeId,
+      name: toGraphLabel(wm.key, wm.value),
+      entity_type: 'active_context',
+      department: meta.domain,
+      color: '#06B6D4',
+      radius: 14,
+      value: wm.value,
+      raw_key: wm.key,
+      isContext: true,
+      emoji: '⚡'
+    };
+    nodes.push(node);
+    nodeIds.add(nodeId);
+    deptCounts[meta.domain]++;
+
+    // Link to Department
+    edges.push({
+      id: `edge-dept-wm-${wm.key}`,
+      source: `dept-${meta.domain}`,
+      target: nodeId,
+      relation: 'ACTIVE_FOCUS',
+      color: '#06B6D4',
+      weight: 1
+    });
+  }
+
+  // 5. Cross-Domain Neural Edges (Connected Dots)
+  // Work Schedule ⇄ Wife / Son
+  if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-wife_name')) {
+    edges.push({
+      id: 'cross-sched-wife',
+      source: 'mem-work_schedule',
+      target: 'mem-wife_name',
+      relation: 'EVENING_ROUTINE',
+      color: '#C084FC',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+  if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-son_name')) {
+    edges.push({
+      id: 'cross-sched-son',
+      source: 'mem-work_schedule',
+      target: 'mem-son_name',
+      relation: 'EVENING_ROUTINE',
+      color: '#C084FC',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+
+  // Hiring ⇄ Company ⇄ Goals
+  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-company_name')) {
+    edges.push({
+      id: 'cross-cand-comp',
+      source: 'wm-candidates_for_job',
+      target: 'mem-company_name',
+      relation: 'HIRING_AT',
+      color: '#34D399',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-goals')) {
+    edges.push({
+      id: 'cross-cand-goal',
+      source: 'wm-candidates_for_job',
+      target: 'mem-goals',
+      relation: 'POWERS_GOAL',
+      color: '#10B981',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+
+  // Passions ⇄ Family
+  if (nodeIds.has('mem-passions') && nodeIds.has('mem-son_name')) {
+    edges.push({
+      id: 'cross-pass-son',
+      source: 'mem-passions',
+      target: 'mem-son_name',
+      relation: 'FAMILY_BOND',
+      color: '#F472B6',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+
+  const departments = DEPT_KEYS.map(d => ({
+    id: d,
+    name: DOMAIN_TAXONOMY[d].title,
+    emoji: DOMAIN_TAXONOMY[d].emoji,
+    color: DOMAIN_TAXONOMY[d].color,
+    count: deptCounts[d]
+  }));
+
+  return {
+    nodes,
+    edges,
+    departments,
+    totalNodes: nodes.length,
+    totalEdges: edges.length
+  };
+}
