@@ -4,18 +4,25 @@ import {
   TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { G, Line, Circle, Text as SvgText, Rect } from 'react-native-svg';
+import Svg, { G, Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
-import * as d3 from 'd3-force';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withSpring, withTiming
+} from 'react-native-reanimated';
 import { api } from '../../services/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const GRAPH_HEIGHT = SCREEN_HEIGHT - 175;
+const GRAPH_HEIGHT = SCREEN_HEIGHT - 170;
 
-interface GraphNode extends d3.SimulationNodeDatum {
+// Generous virtual canvas dimensions so you can zoom in 5x and pan anywhere without clipping
+const WORLD_SIZE = 2600;
+const CENTER = WORLD_SIZE / 2; // 1300
+
+interface GraphNode {
   id: string;
   name: string;
+  shortName: string;
+  subLabel?: string;
   entity_type: string;
   department: string;
   color: string;
@@ -26,51 +33,23 @@ interface GraphNode extends d3.SimulationNodeDatum {
   isDepartment?: boolean;
   isContext?: boolean;
   emoji?: string;
-  x3d?: number;
-  y3d?: number;
-  z3d?: number;
+  x: number;
+  y: number;
 }
 
-interface GraphEdge extends d3.SimulationLinkDatum<GraphNode> {
+interface GraphEdge {
   id: string;
-  source: any;
-  target: any;
+  source: string;
+  target: string;
   relation: string;
   color: string;
   isCrossDomain?: boolean;
   weight?: number;
   sourceNode?: GraphNode;
   targetNode?: GraphNode;
-}
-
-interface ProjectedNode {
-  node: GraphNode;
-  screenX: number;
-  screenY: number;
-  z: number;
-  depthScale: number;
-  depthOpacity: number;
-  visible: boolean;
-  isSelected: boolean;
-  isConnectedToSelected: boolean;
-}
-
-interface ProjectedEdge {
-  edge: GraphEdge;
-  sourceId: string;
-  targetId: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  midX: number;
-  midY: number;
-  avgZ: number;
-  strokeColor: string;
-  strokeWidth: number;
-  strokeOpacity: number;
-  isHighlighted: boolean;
-  visible: boolean;
+  pathD?: string;
+  midX?: number;
+  midY?: number;
 }
 
 interface DepartmentMeta {
@@ -79,29 +58,25 @@ interface DepartmentMeta {
   emoji: string;
   color: string;
   count: number;
+  x: number;
+  y: number;
 }
 
-interface CameraState {
-  rotX: number;
-  rotY: number;
-  zoom: number;
-}
-
-const DOMAIN_COLORS: Record<string, { color: string; emoji: string; name: string }> = {
-  family:    { color: '#EC4899', emoji: '👨‍👩‍👧', name: 'Family & Relationships' },
-  work:      { color: '#3B82F6', emoji: '👔', name: 'Career & Professional' },
-  goals:     { color: '#10B981', emoji: '🎯', name: 'Goals & Ambitions' },
-  lifestyle: { color: '#F59E0B', emoji: '🧘', name: 'Lifestyle & Rhythm' },
-  identity:  { color: '#8B5CF6', emoji: '📌', name: 'Core Identity' },
+const DOMAIN_COLORS: Record<string, { color: string; emoji: string; name: string; short: string }> = {
+  family:    { color: '#EC4899', emoji: '👨‍👩‍👧', name: 'Family & Relationships', short: 'Family' },
+  work:      { color: '#3B82F6', emoji: '👔', name: 'Career & Professional',  short: 'Career' },
+  goals:     { color: '#10B981', emoji: '🎯', name: 'Goals & Ambitions',      short: 'Goals' },
+  lifestyle: { color: '#F59E0B', emoji: '🧘', name: 'Lifestyle & Rhythm',     short: 'Lifestyle' },
+  identity:  { color: '#8B5CF6', emoji: '📌', name: 'Core Identity',          short: 'Identity' },
 };
 
-// 3D Orbital Coordinates for 5 Department Hubs
-const DEPT_3D_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
-  identity:  { x: 0,    y: -15,  z: 135 }, // front center
-  family:    { x: 120,  y: -50,  z: 40  }, // top right front
-  work:      { x: -120, y: -50,  z: -40 }, // top left back
-  goals:     { x: 70,   y: 105,  z: -50 }, // bottom right back
-  lifestyle: { x: -80,  y: 90,   z: 60  }, // bottom left front
+// Department hub angles around the central Core (Sun) at radius 300
+const DEPT_ANGLES: Record<string, number> = {
+  family:    -Math.PI * 0.18, // Top-right (~ -32 deg)
+  work:      -Math.PI * 0.60, // Top-left (~ -108 deg)
+  goals:     -Math.PI * 0.98, // Far-left (~ -176 deg)
+  lifestyle:  Math.PI * 0.62, // Bottom-left (~ 112 deg)
+  identity:   Math.PI * 0.22, // Bottom-right (~ 40 deg)
 };
 
 function inferDomain(rawKey: string, memoryType?: string): string {
@@ -114,568 +89,570 @@ function inferDomain(rawKey: string, memoryType?: string): string {
   return 'identity';
 }
 
-function toGraphLabel(key: string, value: string): string {
+function toDisplayNames(key: string, value: string): { title: string; sub?: string } {
   const k = key.toLowerCase();
   const v = (value || '').trim();
 
-  if (k === 'wife_name') return `${v} (Wife)`;
-  if (k === 'son_name') return `${v} (Son)`;
-  if (k === 'son_age') return `${v} old (Son)`;
-  if (k === 'father_name') return `${v} (Father)`;
-  if (k === 'mother_name') return `${v} (Mother)`;
-  if (k === 'company_name') return `${v} (Company)`;
-  if (k === 'work_schedule') return '11am - 8pm (Work)';
-  if (k === 'office_hours') return `${v} (Hours)`;
-  if (k === 'current_office_location') return `${v} (Office)`;
-  if (k === 'candidates_for_job') return `${v} (Hiring)`;
-  if (k === 'hope_for_job_selection') return 'Target: 2 Selections';
-  if (k === 'goals') return v.length > 20 ? v.slice(0, 18) + '... (Goal)' : `${v} (Goal)`;
-  if (k === 'passions') return 'Passions & Leadership';
+  if (k === 'wife_name') return { title: v, sub: 'Wife' };
+  if (k === 'son_name') return { title: v, sub: 'Son' };
+  if (k === 'son_age') return { title: `${v} old`, sub: 'Son Age' };
+  if (k === 'father_name') return { title: v, sub: 'Father' };
+  if (k === 'mother_name') return { title: v, sub: 'Mother' };
+  if (k === 'company_name') return { title: v, sub: 'Company' };
+  if (k === 'work_schedule') return { title: '11am - 8pm', sub: 'Work Hours' };
+  if (k === 'office_hours') return { title: v, sub: 'Office Hours' };
+  if (k === 'current_office_location') return { title: v, sub: 'Current Location' };
+  if (k === 'candidates_for_job') return { title: v, sub: 'Interviews' };
+  if (k === 'hope_for_job_selection') return { title: 'Target: 2', sub: 'Selections' };
+  if (k === 'goals') return { title: v.length > 20 ? v.slice(0, 18) + '...' : v, sub: 'Ambition' };
+  if (k === 'passions') return { title: 'Passions', sub: 'Leadership' };
   if (k === 'preferred_name') {
-    const cleanName = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
-    return `${cleanName} (Name)`;
+    const clean = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
+    return { title: clean, sub: 'Name' };
   }
   const cleanKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  return v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey);
-}
-
-function assign3DCoordinates(nodes: GraphNode[]): GraphNode[] {
-  const deptMembers: Record<string, GraphNode[]> = {
-    family: [], work: [], goals: [], lifestyle: [], identity: []
+  return {
+    title: v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey),
+    sub: cleanKey
   };
-
-  for (const n of nodes) {
-    if (n.isHub || n.isDepartment) continue;
-    const d = n.department || 'identity';
-    if (!deptMembers[d]) deptMembers[d] = [];
-    deptMembers[d].push(n);
-  }
-
-  return nodes.map((n) => {
-    if (n.isHub) {
-      return { ...n, x3d: 0, y3d: 0, z3d: 0 };
-    }
-
-    if (n.isDepartment) {
-      const p = DEPT_3D_POSITIONS[n.department] || { x: 0, y: 0, z: 120 };
-      return { ...n, x3d: p.x, y3d: p.y, z3d: p.z };
-    }
-
-    const d = n.department || 'identity';
-    const hubPos = DEPT_3D_POSITIONS[d] || { x: 0, y: 0, z: 120 };
-    const members = deptMembers[d] || [];
-    const index = members.findIndex(m => m.id === n.id);
-    const count = Math.max(1, members.length);
-
-    const angle = (index / count) * 2 * Math.PI;
-    const elevation = Math.sin(index * 2.1) * 0.55;
-    const r = 66;
-
-    const dx = r * Math.cos(angle) * Math.cos(elevation);
-    const dy = r * Math.sin(angle) * Math.cos(elevation);
-    const dz = r * Math.sin(elevation);
-
-    return {
-      ...n,
-      x3d: Math.round(hubPos.x + dx),
-      y3d: Math.round(hubPos.y + dy),
-      z3d: Math.round(hubPos.z + dz)
-    };
-  });
 }
 
-function synthesizeGraph(memories: any[], workingContext: any[], preferredName: string = 'Saa') {
-  const rawNodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
-  const nodeIds = new Set<string>();
+// ----------------------------------------------------
+// PLANETARY CONSTELLATION ALGORITHM (ZERO OVERLAPPING)
+// Distributes nodes on wide non-intersecting orbital fans
+// ----------------------------------------------------
+function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
+  const nodes: GraphNode[] = [];
+  const nodeMap = new Map<string, GraphNode>();
 
+  // 1. Central Sun (Core User)
   const coreNode: GraphNode = {
     id: 'user-core',
-    name: preferredName || 'You',
+    name: 'Saa',
+    shortName: 'Saa',
+    subLabel: 'Central Core',
     entity_type: 'self',
     department: 'identity',
     color: '#8B5CF6',
-    radius: 25,
-    value: `Central Self: ${preferredName}`,
+    radius: 36,
+    value: 'Saa · Central Brain & Consciousness',
     isHub: true,
-    emoji: '🧠'
+    emoji: '🧠',
+    x: CENTER,
+    y: CENTER
   };
-  rawNodes.push(coreNode);
-  nodeIds.add(coreNode.id);
+  nodes.push(coreNode);
+  nodeMap.set(coreNode.id, coreNode);
 
-  const deptCounts: Record<string, number> = { family: 0, work: 0, goals: 0, lifestyle: 0, identity: 0 };
+  // Group raw memory nodes by department
+  const deptBuckets: Record<string, any[]> = {
+    family: [], work: [], goals: [], lifestyle: [], identity: []
+  };
+
+  for (const n of rawNodes) {
+    if (n.id === 'user-core' || n.isHub || n.isDepartment) continue;
+    const d = n.department || inferDomain(n.raw_key || n.id, n.entity_type);
+    if (!deptBuckets[d]) deptBuckets[d] = [];
+    deptBuckets[d].push(n);
+  }
+
+  // 2. Department Hubs (Planets) at Radius 310 from Center
+  const DEPT_ORBIT_RADIUS = 310;
+  const deptList: DepartmentMeta[] = [];
+
   const DEPT_KEYS = ['family', 'work', 'goals', 'lifestyle', 'identity'];
 
   for (const d of DEPT_KEYS) {
     const meta = DOMAIN_COLORS[d];
-    const deptNodeId = `dept-${d}`;
-    rawNodes.push({
-      id: deptNodeId,
+    const angle = DEPT_ANGLES[d] ?? 0;
+    const hx = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.cos(angle));
+    const hy = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.sin(angle));
+
+    const hubNode: GraphNode = {
+      id: `dept-${d}`,
       name: meta.name,
+      shortName: meta.short,
+      subLabel: `${deptBuckets[d]?.length || 0} items`,
       entity_type: 'department',
       department: d,
       color: meta.color,
-      radius: 20,
-      value: `Department: ${meta.name}`,
+      radius: 28,
+      value: `${meta.name} Department (${deptBuckets[d]?.length || 0} connected memories)`,
       isDepartment: true,
-      emoji: meta.emoji
+      emoji: meta.emoji,
+      x: hx,
+      y: hy
+    };
+    nodes.push(hubNode);
+    nodeMap.set(hubNode.id, hubNode);
+
+    deptList.push({
+      id: d,
+      name: meta.name,
+      emoji: meta.emoji,
+      color: meta.color,
+      count: deptBuckets[d]?.length || 0,
+      x: hx,
+      y: hy
     });
-    nodeIds.add(deptNodeId);
+
+    // 3. Memory Nodes (Moons) in Two Non-Colliding Staggered Orbital Fans
+    const members = deptBuckets[d] || [];
+    const count = members.length;
+    if (count === 0) continue;
+
+    // Outward pointing direction angle away from center
+    const outwardAngle = angle;
+    // Fan spread: ~120 degrees total spread
+    const spreadSpan = Math.min(Math.PI * 0.75, Math.max(Math.PI * 0.45, (count - 1) * 0.35));
+    const startAngle = outwardAngle - spreadSpan / 2;
+
+    members.forEach((mem, idx) => {
+      const names = toDisplayNames(mem.raw_key || mem.name || mem.id, mem.value || mem.name);
+
+      // Stagger between inner arc (135px) and outer arc (210px) to guarantee ZERO collision
+      const isOuter = count > 3 ? idx % 2 === 1 : false;
+      const moonDist = isOuter ? 220 : 140;
+
+      const frac = count === 1 ? 0.5 : idx / (count - 1);
+      const moonAngle = startAngle + frac * spreadSpan;
+
+      const mx = Math.round(hx + moonDist * Math.cos(moonAngle));
+      const my = Math.round(hy + moonDist * Math.sin(moonAngle));
+
+      const moonNode: GraphNode = {
+        id: mem.id,
+        name: names.title,
+        shortName: names.title,
+        subLabel: names.sub,
+        entity_type: mem.entity_type || 'memory',
+        department: d,
+        color: mem.isContext ? '#06B6D4' : meta.color,
+        radius: mem.isContext ? 16 : 17,
+        value: mem.value || names.title,
+        raw_key: mem.raw_key,
+        isContext: mem.isContext,
+        emoji: mem.isContext ? '⚡' : undefined,
+        x: mx,
+        y: my
+      };
+
+      nodes.push(moonNode);
+      nodeMap.set(moonNode.id, moonNode);
+    });
+  }
+
+  // 4. Edges Construction (Core -> Hubs, Hubs -> Moons, and Cross-Domain Links)
+  const edges: GraphEdge[] = [];
+
+  // Core -> Department Hubs
+  for (const d of DEPT_KEYS) {
+    const hubId = `dept-${d}`;
+    const hub = nodeMap.get(hubId);
+    if (!hub) continue;
 
     edges.push({
       id: `edge-core-${d}`,
       source: 'user-core',
-      target: deptNodeId,
-      relation: 'HAS_DEPARTMENT',
-      color: 'rgba(255,255,255,0.3)',
+      target: hubId,
+      sourceNode: coreNode,
+      targetNode: hub,
+      relation: 'DEPARTMENT_HUB',
+      color: 'rgba(255,255,255,0.22)',
       weight: 3
     });
   }
 
-  for (const mem of memories) {
-    if (!mem.key || !mem.value) continue;
-    const d = inferDomain(mem.key, mem.memory_type);
-    const meta = DOMAIN_COLORS[d] || DOMAIN_COLORS.identity;
-    const nodeId = `mem-${mem.key}`;
-    if (nodeIds.has(nodeId)) continue;
+  // Department Hub -> Memory Nodes
+  for (const d of DEPT_KEYS) {
+    const hubId = `dept-${d}`;
+    const hub = nodeMap.get(hubId);
+    const members = deptBuckets[d] || [];
+    if (!hub) continue;
 
-    rawNodes.push({
-      id: nodeId,
-      name: toGraphLabel(mem.key, mem.value),
-      entity_type: mem.memory_type || 'memory',
-      department: d,
-      color: meta.color,
-      radius: 13,
-      value: mem.value,
-      raw_key: mem.key,
-      emoji: meta.emoji
-    });
-    nodeIds.add(nodeId);
-    deptCounts[d]++;
+    for (const mem of members) {
+      const moon = nodeMap.get(mem.id);
+      if (!moon) continue;
+
+      edges.push({
+        id: `edge-${hubId}-${moon.id}`,
+        source: hubId,
+        target: moon.id,
+        sourceNode: hub,
+        targetNode: moon,
+        relation: 'CONTAINS',
+        color: hub.color,
+        weight: 1.5
+      });
+    }
+  }
+
+  // Cross-Domain Curved Neural Bridges
+  for (const re of rawEdges) {
+    if (!re.isCrossDomain) continue;
+    const sId = typeof re.source === 'string' ? re.source : re.source?.id;
+    const tId = typeof re.target === 'string' ? re.target : re.target?.id;
+
+    const sNode = nodeMap.get(sId);
+    const tNode = nodeMap.get(tId);
+    if (!sNode || !tNode) continue;
+
+    // Calculate curved Bézier path
+    const dx = tNode.x - sNode.x;
+    const dy = tNode.y - sNode.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) continue;
+
+    // Normal vector perpendicular to chord
+    const nx = -dy / dist;
+    const ny = dx / dist;
+    const curveAmount = Math.min(80, Math.max(40, dist * 0.15));
+
+    const midX = (sNode.x + tNode.x) / 2 + nx * curveAmount;
+    const midY = (sNode.y + tNode.y) / 2 + ny * curveAmount;
+
+    const pathD = `M ${sNode.x} ${sNode.y} Q ${midX} ${midY} ${tNode.x} ${tNode.y}`;
 
     edges.push({
-      id: `edge-dept-${mem.key}`,
-      source: `dept-${d}`,
-      target: nodeId,
-      relation: 'CONTAINS',
-      color: meta.color,
-      weight: 1
+      id: re.id || `cross-${sId}-${tId}`,
+      source: sId,
+      target: tId,
+      sourceNode: sNode,
+      targetNode: tNode,
+      relation: re.relation || 'NEURAL_LINK',
+      color: re.color || '#C084FC',
+      isCrossDomain: true,
+      weight: 2.5,
+      pathD,
+      midX,
+      midY
     });
   }
 
-  for (const wm of workingContext) {
-    if (!wm.key || !wm.value) continue;
-    const d = inferDomain(wm.key);
-    const nodeId = `wm-${wm.key}`;
-    if (nodeIds.has(nodeId)) continue;
+  return { nodes, edges, departments: deptList };
+}
+
+// Resilient fallback synthesizer
+function synthesizeGalaxy(memories: any[], workingContext: any[]) {
+  const rawNodes: any[] = [];
+  const rawEdges: any[] = [];
+  const ids = new Set<string>();
+
+  for (const m of memories) {
+    if (!m.key || !m.value) continue;
+    const d = inferDomain(m.key, m.memory_type);
+    const nodeId = `mem-${m.key}`;
+    if (ids.has(nodeId)) continue;
 
     rawNodes.push({
       id: nodeId,
-      name: toGraphLabel(wm.key, wm.value),
+      raw_key: m.key,
+      name: m.key,
+      value: m.value,
+      department: d,
+      entity_type: m.memory_type || 'memory'
+    });
+    ids.add(nodeId);
+  }
+
+  for (const w of workingContext) {
+    if (!w.key || !w.value) continue;
+    const d = inferDomain(w.key);
+    const nodeId = `wm-${w.key}`;
+    if (ids.has(nodeId)) continue;
+
+    rawNodes.push({
+      id: nodeId,
+      raw_key: w.key,
+      name: w.key,
+      value: w.value,
+      department: d,
       entity_type: 'active_context',
-      department: d,
-      color: '#06B6D4',
-      radius: 12,
-      value: wm.value,
-      raw_key: wm.key,
-      isContext: true,
-      emoji: '⚡'
+      isContext: true
     });
-    nodeIds.add(nodeId);
-    deptCounts[d]++;
-
-    edges.push({
-      id: `edge-dept-wm-${wm.key}`,
-      source: `dept-${d}`,
-      target: nodeId,
-      relation: 'ACTIVE_FOCUS',
-      color: '#06B6D4',
-      weight: 1
-    });
+    ids.add(nodeId);
   }
 
-  if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-wife_name')) {
-    edges.push({
+  // Cross-domain links
+  if (ids.has('mem-work_schedule') && ids.has('mem-wife_name')) {
+    rawEdges.push({
       id: 'cross-sched-wife',
       source: 'mem-work_schedule',
       target: 'mem-wife_name',
       relation: 'EVENING_ROUTINE',
       color: '#C084FC',
-      isCrossDomain: true,
-      weight: 2
+      isCrossDomain: true
     });
   }
-  if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-son_name')) {
-    edges.push({
+  if (ids.has('mem-work_schedule') && ids.has('mem-son_name')) {
+    rawEdges.push({
       id: 'cross-sched-son',
       source: 'mem-work_schedule',
       target: 'mem-son_name',
       relation: 'EVENING_ROUTINE',
       color: '#C084FC',
-      isCrossDomain: true,
-      weight: 2
+      isCrossDomain: true
     });
   }
-  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-company_name')) {
-    edges.push({
+  if (ids.has('wm-candidates_for_job') && ids.has('mem-company_name')) {
+    rawEdges.push({
       id: 'cross-cand-comp',
       source: 'wm-candidates_for_job',
       target: 'mem-company_name',
       relation: 'HIRING_AT',
       color: '#34D399',
-      isCrossDomain: true,
-      weight: 2
+      isCrossDomain: true
     });
   }
-  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-goals')) {
-    edges.push({
+  if (ids.has('wm-candidates_for_job') && ids.has('mem-goals')) {
+    rawEdges.push({
       id: 'cross-cand-goal',
       source: 'wm-candidates_for_job',
       target: 'mem-goals',
       relation: 'POWERS_GOAL',
       color: '#10B981',
-      isCrossDomain: true,
-      weight: 2
+      isCrossDomain: true
     });
   }
-  if (nodeIds.has('mem-passions') && nodeIds.has('mem-son_name')) {
-    edges.push({
+  if (ids.has('mem-passions') && ids.has('mem-son_name')) {
+    rawEdges.push({
       id: 'cross-pass-son',
       source: 'mem-passions',
       target: 'mem-son_name',
       relation: 'FAMILY_BOND',
       color: '#F472B6',
-      isCrossDomain: true,
-      weight: 2
+      isCrossDomain: true
     });
   }
 
-  const nodes = assign3DCoordinates(rawNodes);
-
-  const departments: DepartmentMeta[] = DEPT_KEYS.map(d => ({
-    id: d,
-    name: DOMAIN_COLORS[d].name,
-    emoji: DOMAIN_COLORS[d].emoji,
-    color: DOMAIN_COLORS[d].color,
-    count: deptCounts[d]
-  }));
-
-  return { nodes, edges, departments };
+  return buildPlanetaryGalaxy(rawNodes, rawEdges);
 }
 
 export function KgExplorerScreen() {
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
+  const [gestureMode, setGestureMode] = useState<'pan' | 'orbit'>('orbit');
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [departments, setDepartments] = useState<DepartmentMeta[]>([]);
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
-  const [autoRotate, setAutoRotate] = useState(false); // Default off to keep CPU 100% idle
+  const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
 
-  // 3D Camera State
-  const [camera, setCamera] = useState<CameraState>({ rotX: 0.28, rotY: 0.45, zoom: 1.0 });
+  // ----------------------------------------------------
+  // NATIVE GPU REANIMATED SHARED VALUES (60-120 FPS NATIVELY)
+  // Center of world (1300, 1300) placed dead-center on phone screen
+  // ----------------------------------------------------
+  const defaultTranslateX = (SCREEN_WIDTH - WORLD_SIZE) / 2;
+  const defaultTranslateY = (GRAPH_HEIGHT - WORLD_SIZE) / 2;
+  const defaultScale = 0.72; // Perfect overview fitting all 5 departments comfortably
 
-  const cameraRef = useRef<CameraState>({ rotX: 0.28, rotY: 0.45, zoom: 1.0 });
-  const isDraggingRef = useRef(false);
-  const rafPendingRef = useRef(false);
+  const translateX = useSharedValue(defaultTranslateX);
+  const translateY = useSharedValue(defaultTranslateY);
+  const savedTranslateX = useSharedValue(defaultTranslateX);
+  const savedTranslateY = useSharedValue(defaultTranslateY);
 
-  const dragStartRotX = useRef(0.28);
-  const dragStartRotY = useRef(0.45);
-  const dragStartZoom = useRef(1.0);
+  const scale = useSharedValue(defaultScale);
+  const savedScale = useSharedValue(defaultScale);
 
-  // 2D Pan/Zoom
-  const scale2D = useSharedValue(1);
-  const savedScale2D = useSharedValue(1);
-  const translateX2D = useSharedValue(0);
-  const translateY2D = useSharedValue(0);
-  const savedTranslateX2D = useSharedValue(0);
-  const savedTranslateY2D = useSharedValue(0);
+  const pitch = useSharedValue(0.24); // ~14 deg tilt
+  const yaw = useSharedValue(0.35);   // ~20 deg angle
+  const savedPitch = useSharedValue(0.24);
+  const savedYaw = useSharedValue(0.35);
 
   useEffect(() => {
     fetchGraph();
+
+    // Auto-sync polling every 20 seconds while on screen
+    const interval = setInterval(() => {
+      fetchGraph(true);
+    }, 20000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Battery-friendly calm auto-spin interval (only runs when explicitly toggled on)
-  useEffect(() => {
-    if (!autoRotate || viewMode !== '3d') return;
-
-    const timer = setInterval(() => {
-      if (isDraggingRef.current) return;
-      cameraRef.current.rotY = (cameraRef.current.rotY + 0.018) % (2 * Math.PI);
-      setCamera({
-        rotX: cameraRef.current.rotX,
-        rotY: cameraRef.current.rotY,
-        zoom: cameraRef.current.zoom
-      });
-    }, 40); // 25 FPS smooth spin with ~95% idle CPU window
-
-    return () => clearInterval(timer);
-  }, [autoRotate, viewMode]);
-
-  const fetchGraph = async () => {
+  const fetchGraph = async (isBackground = false) => {
     try {
-      setLoading(true);
-      let apiNodes: any[] = [];
-      let apiEdges: any[] = [];
-      let apiDepts: any[] = [];
+      if (!isBackground) setLoading(true);
+      else setSyncing(true);
+
+      let rawNodes: any[] = [];
+      let rawEdges: any[] = [];
 
       try {
         const res = await api.get('/analytics/kg');
         if (res.data?.data?.nodes && res.data.data.nodes.length > 0) {
-          apiNodes = res.data.data.nodes;
-          apiEdges = res.data.data.edges || [];
-          apiDepts = res.data.data.departments || [];
+          rawNodes = res.data.data.nodes;
+          rawEdges = res.data.data.edges || [];
         }
       } catch (e) {
         // Fallback
       }
 
-      if (!apiNodes || apiNodes.length === 0) {
+      if (!rawNodes || rawNodes.length === 0) {
         const memRes = await api.get('/analytics/memories');
         const memData = memRes.data?.data;
         if (memData) {
-          const synthesized = synthesizeGraph(
+          const galaxy = synthesizeGalaxy(
             memData.currentMemories || [],
-            memData.workingContext || [],
-            'Saa'
+            memData.workingContext || []
           );
-          apiNodes = synthesized.nodes;
-          apiEdges = synthesized.edges;
-          apiDepts = synthesized.departments;
+          setNodes(galaxy.nodes);
+          setEdges(galaxy.edges);
+          setDepartments(galaxy.departments);
+          setLastSyncTime('just now');
+          return;
         }
       }
 
-      const nodesWith3D = assign3DCoordinates(apiNodes);
-
-      const centerX = SCREEN_WIDTH / 2;
-      const centerY = GRAPH_HEIGHT / 2;
-
-      const d3Nodes: GraphNode[] = nodesWith3D.map((n: any, idx: number) => {
-        let initX = centerX;
-        let initY = centerY;
-
-        if (n.isHub) {
-          initX = centerX;
-          initY = centerY;
-        } else if (n.isDepartment) {
-          const angle = (idx * 2 * Math.PI) / 5;
-          initX = centerX + Math.cos(angle) * 110;
-          initY = centerY + Math.sin(angle) * 110;
-        } else {
-          const angle = Math.random() * 2 * Math.PI;
-          const dist = 140 + Math.random() * 70;
-          initX = centerX + Math.cos(angle) * dist;
-          initY = centerY + Math.sin(angle) * dist;
-        }
-
-        return { ...n, x: initX, y: initY };
-      });
-
-      const nodeMap = new Map<string, GraphNode>(d3Nodes.map(n => [n.id, n]));
-
-      const processedEdges: GraphEdge[] = (apiEdges || [])
-        .map((e: any) => {
-          const sId = typeof e.source === 'string' ? e.source : e.source?.id;
-          const tId = typeof e.target === 'string' ? e.target : e.target?.id;
-          const sourceNode = nodeMap.get(sId);
-          const targetNode = nodeMap.get(tId);
-          return {
-            ...e,
-            source: sId,
-            target: tId,
-            sourceNode,
-            targetNode,
-          };
-        })
-        .filter((e: any) => e.sourceNode && e.targetNode);
-
-      // Pre-calculate 2D layout synchronously once in 3ms
-      const sim = d3.forceSimulation<GraphNode>(d3Nodes)
-        .force('link', d3.forceLink<GraphNode, GraphEdge>(processedEdges).id(d => d.id).distance(80))
-        .force('charge', d3.forceManyBody<GraphNode>().strength(-200))
-        .force('center', d3.forceCenter(centerX, centerY))
-        .stop();
-      for (let i = 0; i < 40; ++i) sim.tick();
-
-      setDepartments(apiDepts || []);
-      setNodes(d3Nodes);
-      setEdges(processedEdges);
+      const galaxy = buildPlanetaryGalaxy(rawNodes, rawEdges);
+      setNodes(galaxy.nodes);
+      setEdges(galaxy.edges);
+      setDepartments(galaxy.departments);
+      setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } catch (err) {
-      console.error('Failed to load knowledge graph', err);
+      console.error('Failed to load knowledge galaxy', err);
     } finally {
       setLoading(false);
+      setSyncing(false);
     }
   };
 
   // ----------------------------------------------------
-  // MEMOIZED GESTURES (CRITICAL: Never recreated on render!)
-  // Prevents gesture cancellation & eliminates touch stutter!
+  // FLUID GESTURE SYSTEM (GPU-DRIVEN ON NATIVE UI THREAD)
+  // Pinch to Zoom (0.35x to 4.5x)
+  // Pan to Move Universe OR Orbit 360 in 3D
   // ----------------------------------------------------
-  const pan3DGesture = useMemo(() => {
-    return Gesture.Pan()
-      .runOnJS(true)
-      .minDistance(2)
-      .onBegin(() => {
-        isDraggingRef.current = true;
-        setAutoRotate(false);
-        dragStartRotX.current = cameraRef.current.rotX;
-        dragStartRotY.current = cameraRef.current.rotY;
-      })
-      .onUpdate((e) => {
-        const nextY = dragStartRotY.current + (e.translationX * 0.007);
-        const nextX = Math.max(-1.35, Math.min(1.35, dragStartRotX.current - (e.translationY * 0.007)));
-        cameraRef.current.rotX = nextX;
-        cameraRef.current.rotY = nextY;
-
-        // Throttled RAF: Only 1 render per refresh cycle
-        if (!rafPendingRef.current) {
-          rafPendingRef.current = true;
-          requestAnimationFrame(() => {
-            rafPendingRef.current = false;
-            setCamera({
-              rotX: cameraRef.current.rotX,
-              rotY: cameraRef.current.rotY,
-              zoom: cameraRef.current.zoom,
-            });
-          });
-        }
-      })
-      .onEnd(() => {
-        isDraggingRef.current = false;
-        setCamera({
-          rotX: cameraRef.current.rotX,
-          rotY: cameraRef.current.rotY,
-          zoom: cameraRef.current.zoom,
-        });
-      });
-  }, []);
-
-  const pinch3DGesture = useMemo(() => {
-    return Gesture.Pinch()
-      .runOnJS(true)
-      .onBegin(() => {
-        isDraggingRef.current = true;
-        setAutoRotate(false);
-        dragStartZoom.current = cameraRef.current.zoom;
-      })
-      .onUpdate((e) => {
-        const nextZoom = Math.max(0.45, Math.min(2.8, dragStartZoom.current * e.scale));
-        cameraRef.current.zoom = nextZoom;
-
-        if (!rafPendingRef.current) {
-          rafPendingRef.current = true;
-          requestAnimationFrame(() => {
-            rafPendingRef.current = false;
-            setCamera({
-              rotX: cameraRef.current.rotX,
-              rotY: cameraRef.current.rotY,
-              zoom: cameraRef.current.zoom,
-            });
-          });
-        }
-      })
-      .onEnd(() => {
-        isDraggingRef.current = false;
-        setCamera({
-          rotX: cameraRef.current.rotX,
-          rotY: cameraRef.current.rotY,
-          zoom: cameraRef.current.zoom,
-        });
-      });
-  }, []);
-
-  // Memoize composed gesture so it never gets destroyed/re-attached!
-  const composed3DGesture = useMemo(() => {
-    return Gesture.Simultaneous(pan3DGesture, pinch3DGesture);
-  }, [pan3DGesture, pinch3DGesture]);
-
-  // 2D Gesture Handlers
-  const pinch2DGesture = useMemo(() => {
+  const pinchGesture = useMemo(() => {
     return Gesture.Pinch()
       .onUpdate((e) => {
         'worklet';
-        scale2D.value = Math.max(0.35, Math.min(savedScale2D.value * e.scale, 3.2));
+        const next = Math.max(0.35, Math.min(4.5, savedScale.value * e.scale));
+        scale.value = next;
       })
       .onEnd(() => {
         'worklet';
-        savedScale2D.value = scale2D.value;
+        savedScale.value = scale.value;
       });
   }, []);
 
-  const pan2DGesture = useMemo(() => {
+  const panGesture = useMemo(() => {
     return Gesture.Pan()
+      .minDistance(3)
       .onUpdate((e) => {
         'worklet';
-        translateX2D.value = savedTranslateX2D.value + e.translationX;
-        translateY2D.value = savedTranslateY2D.value + e.translationY;
+        if (viewMode === '3d' && gestureMode === 'orbit') {
+          // Continuous 360 degree rotation without any clamping on Yaw!
+          yaw.value = savedYaw.value + (e.translationX * 0.007);
+          // Clamp Pitch between -65 deg and +65 deg to prevent gimbal inversion
+          pitch.value = Math.max(-1.15, Math.min(1.15, savedPitch.value - (e.translationY * 0.007)));
+        } else {
+          // Free Pan across the entire universe
+          translateX.value = savedTranslateX.value + e.translationX;
+          translateY.value = savedTranslateY.value + e.translationY;
+        }
       })
       .onEnd(() => {
         'worklet';
-        savedTranslateX2D.value = translateX2D.value;
-        savedTranslateY2D.value = translateY2D.value;
+        if (viewMode === '3d' && gestureMode === 'orbit') {
+          savedYaw.value = yaw.value;
+          savedPitch.value = pitch.value;
+        } else {
+          savedTranslateX.value = translateX.value;
+          savedTranslateY.value = translateY.value;
+        }
       });
+  }, [viewMode, gestureMode]);
+
+  const composedGesture = useMemo(() => {
+    return Gesture.Simultaneous(pinchGesture, panGesture);
+  }, [pinchGesture, panGesture]);
+
+  // Native GPU Animated Style for 3D Perspective vs 2D Canvas
+  const animatedUniverseStyle = useAnimatedStyle(() => {
+    if (viewMode === '3d') {
+      return {
+        transform: [
+          { perspective: 1200 },
+          { translateX: translateX.value },
+          { translateY: translateY.value },
+          { rotateX: `${pitch.value}rad` },
+          { rotateY: `${yaw.value}rad` },
+          { scale: scale.value }
+        ]
+      };
+    }
+
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { scale: scale.value }
+      ]
+    };
+  });
+
+  // ----------------------------------------------------
+  // CAMERA QUICK SNAPS: Glides camera straight to any cluster!
+  // ----------------------------------------------------
+  const glideCameraTo = useCallback((targetX: number, targetY: number, targetScale: number = 1.4) => {
+    const destX = SCREEN_WIDTH / 2 - targetX * targetScale;
+    const destY = GRAPH_HEIGHT / 2 - targetY * targetScale;
+
+    translateX.value = withSpring(destX, { damping: 18 });
+    translateY.value = withSpring(destY, { damping: 18 });
+    savedTranslateX.value = destX;
+    savedTranslateY.value = destY;
+
+    scale.value = withSpring(targetScale, { damping: 18 });
+    savedScale.value = targetScale;
   }, []);
 
-  const composed2DGesture = useMemo(() => {
-    return Gesture.Simultaneous(pinch2DGesture, pan2DGesture);
-  }, [pinch2DGesture, pan2DGesture]);
+  const handleResetView = useCallback(() => {
+    translateX.value = withSpring(defaultTranslateX, { damping: 18 });
+    translateY.value = withSpring(defaultTranslateY, { damping: 18 });
+    savedTranslateX.value = defaultTranslateX;
+    savedTranslateY.value = defaultTranslateY;
 
-  const animated2DStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX2D.value },
-      { translateY: translateY2D.value },
-      { scale: scale2D.value }
-    ]
-  }));
+    scale.value = withSpring(defaultScale, { damping: 18 });
+    savedScale.value = defaultScale;
 
-  // Quick 3D Perspective Preset Snaps
-  const applyCameraPreset = useCallback((rx: number, ry: number, zm: number = 1.0) => {
-    cameraRef.current = { rotX: rx, rotY: ry, zoom: zm };
-    setAutoRotate(false);
-    setCamera({ rotX: rx, rotY: ry, zoom: zm });
-  }, []);
+    pitch.value = withSpring(0.24, { damping: 18 });
+    yaw.value = withSpring(0.35, { damping: 18 });
+    savedPitch.value = 0.24;
+    savedYaw.value = 0.35;
+  }, [defaultTranslateX, defaultTranslateY, defaultScale]);
 
-  const handleReset3D = useCallback(() => {
-    applyCameraPreset(0.28, 0.45, 1.0);
-  }, [applyCameraPreset]);
+  const handleFocusDept = useCallback((deptId: string) => {
+    const dept = departments.find(d => d.id === deptId);
+    if (!dept) return;
 
-  const handleFamilyFocus = useCallback(() => {
-    // Focus camera directly towards Family & Work transition lines
-    applyCameraPreset(0.12, 0.85, 1.15);
-  }, [applyCameraPreset]);
-
-  const handleWorkFocus = useCallback(() => {
-    // Focus camera towards Career, Hiring, and Goal lines
-    applyCameraPreset(0.15, -0.65, 1.15);
-  }, [applyCameraPreset]);
-
-  const handleTopView = useCallback(() => {
-    applyCameraPreset(1.35, 0, 1.0);
-  }, [applyCameraPreset]);
-
-  const handleRotate45 = useCallback(() => {
-    const nextY = (cameraRef.current.rotY + Math.PI / 4) % (2 * Math.PI);
-    applyCameraPreset(cameraRef.current.rotX, nextY, cameraRef.current.zoom);
-  }, [applyCameraPreset]);
+    setSelectedDept(deptId);
+    // Smoothly glide camera straight to that department cluster at 1.45x zoom!
+    glideCameraTo(dept.x, dept.y, 1.45);
+  }, [departments, glideCameraTo]);
 
   const handleZoomIn = useCallback(() => {
-    const nextZ = Math.min(cameraRef.current.zoom + 0.3, 2.8);
-    applyCameraPreset(cameraRef.current.rotX, cameraRef.current.rotY, nextZ);
-  }, [applyCameraPreset]);
+    const next = Math.min(scale.value + 0.45, 4.5);
+    scale.value = withSpring(next);
+    savedScale.value = next;
+  }, []);
 
   const handleZoomOut = useCallback(() => {
-    const nextZ = Math.max(cameraRef.current.zoom - 0.3, 0.45);
-    applyCameraPreset(cameraRef.current.rotX, cameraRef.current.rotY, nextZ);
-  }, [applyCameraPreset]);
+    const next = Math.max(scale.value - 0.45, 0.35);
+    scale.value = withSpring(next);
+    savedScale.value = next;
+  }, []);
 
   const handleNodePress = (node: GraphNode) => {
     if (selectedNode?.id === node.id) {
       setSelectedNode(null);
     } else {
       setSelectedNode(node);
-      setAutoRotate(false);
+      // Smoothly zoom in to focus on this node and its immediate connections
+      glideCameraTo(node.x, node.y, Math.max(scale.value, 1.35));
     }
   };
 
@@ -694,142 +671,11 @@ export function KgExplorerScreen() {
     return set;
   }, [selectedNode, selectedNodeEdges]);
 
-  // ----------------------------------------------------
-  // ULTRA-FAST 3D MATHEMATICAL PROJECTION (<0.05ms)
-  // ----------------------------------------------------
-  const centerX = SCREEN_WIDTH / 2;
-  const centerY = GRAPH_HEIGHT / 2;
-
-  const { projectedNodes, projectedEdges } = useMemo(() => {
-    const { rotX, rotY, zoom } = camera;
-    const cosY = Math.cos(rotY);
-    const sinY = Math.sin(rotY);
-    const cosX = Math.cos(rotX);
-    const sinX = Math.sin(rotX);
-
-    const cameraDist = 520;
-    const focalLen = 520;
-
-    const projectedNodeLookup = new Map<string, ProjectedNode>();
-
-    // 1. Project nodes
-    const pNodes: ProjectedNode[] = nodes.map(n => {
-      const x = n.x3d || 0;
-      const y = n.y3d || 0;
-      const z = n.z3d || 0;
-
-      // Yaw
-      const x1 = x * cosY - z * sinY;
-      const y1 = y;
-      const z1 = x * sinY + z * cosY;
-
-      // Pitch
-      const x2 = x1;
-      const y2 = y1 * cosX - z1 * sinX;
-      const z2 = y1 * sinX + z1 * cosX;
-
-      const effectiveZ = z2 * zoom;
-      const perspective = focalLen / Math.max(90, cameraDist + focalLen - effectiveZ);
-
-      const screenX = centerX + x2 * zoom * perspective * 1.5;
-      const screenY = centerY + y2 * zoom * perspective * 1.5;
-
-      const depthScale = Math.max(0.45, Math.min(1.4, perspective * 2.0));
-      const normalizedZ = (z2 + 200) / 400;
-      const depthOpacity = Math.max(0.32, Math.min(1.0, 0.32 + normalizedZ * 0.68));
-
-      const isVisible = !selectedDept || n.isHub || n.department === selectedDept;
-      const isSelected = selectedNode?.id === n.id;
-      const isConnected = connectedNodeIds.has(n.id);
-
-      const pNode: ProjectedNode = {
-        node: n,
-        screenX,
-        screenY,
-        z: z2,
-        depthScale,
-        depthOpacity,
-        visible: isVisible,
-        isSelected,
-        isConnectedToSelected: isConnected
-      };
-
-      projectedNodeLookup.set(n.id, pNode);
-      return pNode;
-    });
-
-    // 2. Project edges
-    const pEdges: ProjectedEdge[] = edges.map(e => {
-      const pS = projectedNodeLookup.get(e.source);
-      const pT = projectedNodeLookup.get(e.target);
-      if (!pS || !pT) return null;
-
-      const avgZ = (pS.z + pT.z) / 2;
-      const avgOpacity = (pS.depthOpacity + pT.depthOpacity) / 2;
-      const midX = (pS.screenX + pT.screenX) / 2;
-      const midY = (pS.screenY + pT.screenY) / 2;
-
-      const isConnectedToSelected = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
-      const isCross = !!e.isCrossDomain;
-
-      let visible = true;
-      if (selectedDept) {
-        visible = pS.node.department === selectedDept || pT.node.department === selectedDept;
-      }
-      if (lineFilter === 'cross' && !isCross) {
-        visible = false;
-      }
-
-      let strokeColor = e.color || 'rgba(255,255,255,0.2)';
-      let strokeWidth = 1.2;
-      let strokeOpacity = avgOpacity * 0.8;
-
-      if (selectedNode) {
-        if (isConnectedToSelected) {
-          strokeColor = isCross ? '#38BDF8' : '#FFFFFF';
-          strokeWidth = 3.2;
-          strokeOpacity = 1.0;
-        } else {
-          strokeOpacity = 0.05; // Dim background
-          strokeWidth = 0.8;
-        }
-      } else if (isCross) {
-        strokeColor = e.color || '#C084FC';
-        strokeWidth = 2.0;
-        strokeOpacity = Math.max(0.75, avgOpacity);
-      }
-
-      return {
-        edge: e,
-        sourceId: e.source,
-        targetId: e.target,
-        x1: pS.screenX,
-        y1: pS.screenY,
-        x2: pT.screenX,
-        y2: pT.screenY,
-        midX,
-        midY,
-        avgZ,
-        strokeColor,
-        strokeWidth,
-        strokeOpacity,
-        isHighlighted: !!isConnectedToSelected,
-        visible
-      };
-    }).filter(Boolean) as ProjectedEdge[];
-
-    // 3. Depth Sort
-    pNodes.sort((a, b) => a.z - b.z);
-    pEdges.sort((a, b) => a.avgZ - b.avgZ);
-
-    return { projectedNodes: pNodes, projectedEdges: pEdges };
-  }, [nodes, edges, camera, selectedDept, selectedNode, connectedNodeIds, lineFilter, centerX, centerY]);
-
   if (loading) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#06B6D4" />
-        <Text style={styles.loadingText}>Synthesizing 3D Knowledge Galaxy...</Text>
+        <Text style={styles.loadingText}>Synthesizing Infinite Knowledge Galaxy...</Text>
       </View>
     );
   }
@@ -838,14 +684,16 @@ export function KgExplorerScreen() {
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaView style={styles.container} edges={['top']}>
 
-        {/* Header & Mode Switcher */}
+        {/* Top Header & View Switcher */}
         <View style={styles.header}>
           <View>
             <View style={styles.titleRow}>
               <Text style={styles.headerTitle}>Neural Galaxy</Text>
-              <View style={styles.live3DBadge}>
-                <Text style={styles.live3DBadgeText}>3D SPHERE</Text>
-              </View>
+              <TouchableOpacity style={styles.syncBadge} onPress={() => fetchGraph(false)}>
+                <Text style={styles.syncBadgeText}>
+                  {syncing ? '↻ Syncing...' : `● LIVE · ${lastSyncTime}`}
+                </Text>
+              </TouchableOpacity>
             </View>
             <Text style={styles.headerSubtitle}>
               {nodes.length} nodes · {edges.length} connections across 5 departments
@@ -872,15 +720,18 @@ export function KgExplorerScreen() {
           </View>
         </View>
 
-        {/* Department Filter Chips */}
-        <View style={styles.filterBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+        {/* Department Glider Navigation Bar */}
+        <View style={styles.deptBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.deptScroll}>
             <TouchableOpacity
-              style={[styles.filterChip, !selectedDept && styles.filterChipActive]}
-              onPress={() => setSelectedDept(null)}
+              style={[styles.deptChip, !selectedDept && styles.deptChipActive]}
+              onPress={() => {
+                setSelectedDept(null);
+                handleResetView();
+              }}
             >
-              <Text style={[styles.filterChipText, !selectedDept && styles.filterChipTextActive]}>
-                All Galaxy ({nodes.length})
+              <Text style={[styles.deptChipText, !selectedDept && styles.deptChipTextActive]}>
+                ✨ All Galaxy ({nodes.length})
               </Text>
             </TouchableOpacity>
 
@@ -890,12 +741,12 @@ export function KgExplorerScreen() {
                 <TouchableOpacity
                   key={dept.id}
                   style={[
-                    styles.filterChip,
+                    styles.deptChip,
                     isActive && { borderColor: dept.color, backgroundColor: `${dept.color}25` }
                   ]}
-                  onPress={() => setSelectedDept(isActive ? null : dept.id)}
+                  onPress={() => handleFocusDept(dept.id)}
                 >
-                  <Text style={[styles.filterChipText, isActive && { color: dept.color }]}>
+                  <Text style={[styles.deptChipText, isActive && { color: dept.color, fontWeight: 'bold' }]}>
                     {dept.emoji} {dept.name} ({dept.count})
                   </Text>
                 </TouchableOpacity>
@@ -904,279 +755,267 @@ export function KgExplorerScreen() {
           </ScrollView>
         </View>
 
-        {/* Connecting Lines Filter & Presets */}
-        <View style={styles.subFilterBar}>
-          <Text style={styles.subFilterLabel}>LINES:</Text>
-          <TouchableOpacity
-            style={[styles.subFilterChip, lineFilter === 'all' && styles.subFilterChipActive]}
-            onPress={() => setLineFilter('all')}
-          >
-            <Text style={[styles.subFilterChipText, lineFilter === 'all' && styles.subFilterChipTextActive]}>
-              All ({edges.length})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.subFilterChip, lineFilter === 'cross' && styles.subFilterChipActive]}
-            onPress={() => setLineFilter('cross')}
-          >
-            <Text style={[styles.subFilterChipText, lineFilter === 'cross' && styles.subFilterChipTextActive]}>
-              ⚡ Cross-Domain Only
-            </Text>
-          </TouchableOpacity>
-          {selectedNode && (
+        {/* Sub-Bar: Line Filters & 3D Orbit/Pan Switch */}
+        <View style={styles.subBar}>
+          <View style={styles.lineFilterRow}>
+            <Text style={styles.subBarLabel}>LINES:</Text>
             <TouchableOpacity
-              style={[styles.subFilterChip, { borderColor: '#38BDF8', backgroundColor: 'rgba(56,189,248,0.15)' }]}
-              onPress={() => setSelectedNode(null)}
+              style={[styles.subPill, lineFilter === 'all' && styles.subPillActive]}
+              onPress={() => setLineFilter('all')}
             >
-              <Text style={[styles.subFilterChipText, { color: '#38BDF8', fontWeight: 'bold' }]}>
-                ✕ Clear
+              <Text style={[styles.subPillText, lineFilter === 'all' && styles.subPillTextActive]}>
+                All ({edges.length})
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.subPill, lineFilter === 'cross' && styles.subPillActive]}
+              onPress={() => setLineFilter('cross')}
+            >
+              <Text style={[styles.subPillText, lineFilter === 'cross' && styles.subPillTextActive]}>
+                ⚡ Cross-Domain Only
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {viewMode === '3d' && (
+            <View style={styles.gestureModeGroup}>
+              <TouchableOpacity
+                style={[styles.gestureModeBtn, gestureMode === 'orbit' && styles.gestureModeBtnActive]}
+                onPress={() => setGestureMode('orbit')}
+              >
+                <Text style={[styles.gestureModeText, gestureMode === 'orbit' && styles.gestureModeTextActive]}>
+                  🔄 Orbit
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.gestureModeBtn, gestureMode === 'pan' && styles.gestureModeBtnActive]}
+                onPress={() => setGestureMode('pan')}
+              >
+                <Text style={[styles.gestureModeText, gestureMode === 'pan' && styles.gestureModeTextActive]}>
+                  ✋ Pan
+                </Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
-        {/* MAIN CANVAS */}
-        <View style={styles.canvasWrapper}>
-          {viewMode === '3d' ? (
-            <GestureDetector gesture={composed3DGesture}>
-              <View style={styles.canvas3DContainer}>
-                <Svg width={SCREEN_WIDTH} height={GRAPH_HEIGHT} style={styles.svg}>
-                  {/* 1. Flat 3D Connecting Lines */}
-                  {projectedEdges.map((pe) => {
-                    if (!pe.visible) return null;
+        {/* INFINITE GALAXY CANVAS */}
+        <View style={styles.canvasContainer}>
+          <GestureDetector gesture={composedGesture}>
+            <Animated.View style={[styles.universe, animatedUniverseStyle]}>
+              <Svg width={WORLD_SIZE} height={WORLD_SIZE} viewBox={`0 0 ${WORLD_SIZE} ${WORLD_SIZE}`}>
 
-                    const isCross = pe.edge.isCrossDomain;
-                    const dashArray = isCross ? '4, 4' : undefined;
+                {/* 1. Draw Connecting Lines */}
+                <G>
+                  {edges.map((e) => {
+                    const isCross = !!e.isCrossDomain;
+                    if (lineFilter === 'cross' && !isCross) return null;
 
+                    const isSelectedEdge = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+
+                    let strokeColor = e.color || 'rgba(255,255,255,0.2)';
+                    let strokeWidth = isCross ? 2.5 : 1.5;
+                    let strokeOpacity = 0.55;
+
+                    if (selectedNode) {
+                      if (isSelectedEdge) {
+                        strokeColor = isCross ? '#38BDF8' : '#FFFFFF';
+                        strokeWidth = 4;
+                        strokeOpacity = 1.0;
+                      } else {
+                        strokeOpacity = 0.06;
+                        strokeWidth = 0.8;
+                      }
+                    } else if (isCross) {
+                      strokeColor = e.color || '#C084FC';
+                      strokeWidth = 2.8;
+                      strokeOpacity = 0.85;
+                    }
+
+                    if (isCross && e.pathD) {
+                      // Curved Bézier Arch for Cross-Domain Connections
+                      return (
+                        <G key={`edge-${e.id}`}>
+                          {/* Glow backdrop for selected lines */}
+                          {isSelectedEdge && (
+                            <Path
+                              d={e.pathD}
+                              stroke="#38BDF8"
+                              strokeWidth={9}
+                              strokeLinecap="round"
+                              fill="none"
+                              opacity={0.3}
+                            />
+                          )}
+                          <Path
+                            d={e.pathD}
+                            stroke={strokeColor}
+                            strokeWidth={strokeWidth}
+                            strokeDasharray={isSelectedEdge ? undefined : '6, 6'}
+                            strokeLinecap="round"
+                            fill="none"
+                            opacity={strokeOpacity}
+                          />
+                        </G>
+                      );
+                    }
+
+                    // Straight radial spokes
+                    if (!e.sourceNode || !e.targetNode) return null;
                     return (
                       <Line
-                        key={`edge-${pe.edge.id}`}
-                        x1={pe.x1}
-                        y1={pe.y1}
-                        x2={pe.x2}
-                        y2={pe.y2}
-                        stroke={pe.strokeColor}
-                        strokeWidth={pe.strokeWidth}
-                        strokeDasharray={dashArray}
-                        opacity={pe.strokeOpacity}
+                        key={`edge-${e.id}`}
+                        x1={e.sourceNode.x}
+                        y1={e.sourceNode.y}
+                        x2={e.targetNode.x}
+                        y2={e.targetNode.y}
+                        stroke={strokeColor}
+                        strokeWidth={strokeWidth}
+                        opacity={strokeOpacity}
                       />
                     );
                   })}
+                </G>
 
-                  {/* 2. Highlighted Midpoint Badges */}
-                  {projectedEdges.map((pe) => {
-                    if (!pe.visible || !pe.isHighlighted || !pe.edge.relation) return null;
+                {/* 2. Highlighted Midpoint Relationship Badges */}
+                <G>
+                  {edges.map((e) => {
+                    if (!selectedNode || !e.relation || (e.source !== selectedNode.id && e.target !== selectedNode.id)) {
+                      return null;
+                    }
+                    if (!e.midX || !e.midY) return null;
+
+                    const label = e.relation.replace(/_/g, ' ');
+                    const pillWidth = Math.max(70, label.length * 7 + 16);
 
                     return (
-                      <G key={`badge-${pe.edge.id}`}>
+                      <G key={`badge-${e.id}`}>
                         <Rect
-                          x={pe.midX - 42}
-                          y={pe.midY - 8.5}
-                          width={84}
-                          height={17}
-                          rx={8.5}
-                          fill="rgba(15,23,42,0.92)"
+                          x={e.midX - pillWidth / 2}
+                          y={e.midY - 11}
+                          width={pillWidth}
+                          height={22}
+                          rx={11}
+                          fill="rgba(15,23,42,0.96)"
                           stroke="#38BDF8"
-                          strokeWidth={1}
+                          strokeWidth={1.5}
                         />
                         <SvgText
-                          x={pe.midX}
-                          y={pe.midY + 3}
-                          fontSize={8}
+                          x={e.midX}
+                          y={e.midY + 4}
+                          fontSize={9.5}
                           fontWeight="bold"
                           fill="#38BDF8"
                           textAnchor="middle"
                         >
-                          {pe.edge.relation.replace(/_/g, ' ')}
+                          {label}
                         </SvgText>
                       </G>
                     );
                   })}
+                </G>
 
-                  {/* 3. 3D Nodes */}
-                  {projectedNodes.map((pn) => {
-                    if (!pn.visible) return null;
+                {/* 3. Draw Nodes (Central Sun, Department Planets, and Memory Moons) */}
+                <G>
+                  {nodes.map((n) => {
+                    const isSelected = selectedNode?.id === n.id;
+                    const isConnected = connectedNodeIds.has(n.id);
+                    const isFocus = isSelected || isConnected;
 
-                    const n = pn.node;
-                    const rad = n.radius * pn.depthScale;
-                    const isSelected = pn.isSelected;
-                    const isConnected = pn.isConnectedToSelected;
-
-                    const nodeOpacity = selectedNode
-                      ? (isSelected || isConnected ? 1.0 : 0.2)
-                      : pn.depthOpacity;
+                    const opacity = selectedNode
+                      ? (isFocus ? 1.0 : 0.22)
+                      : 1.0;
 
                     return (
                       <G
                         key={`node-${n.id}`}
                         onPress={() => handleNodePress(n)}
-                        opacity={nodeOpacity}
+                        opacity={opacity}
                       >
-                        {/* Glow halo only on Hubs or Selected nodes */}
+                        {/* Outer Glow Aura */}
                         {(n.isHub || n.isDepartment || isSelected) && (
                           <Circle
-                            cx={pn.screenX}
-                            cy={pn.screenY}
-                            r={rad + (isSelected ? 7 : 4)}
+                            cx={n.x}
+                            cy={n.y}
+                            r={n.radius + (isSelected ? 11 : n.isHub ? 12 : 7)}
                             fill={isSelected ? '#38BDF8' : n.color}
-                            opacity={isSelected ? 0.4 : 0.15}
+                            opacity={isSelected ? 0.45 : 0.2}
                           />
                         )}
 
+                        {/* Core Circle */}
                         <Circle
-                          cx={pn.screenX}
-                          cy={pn.screenY}
-                          r={rad}
+                          cx={n.x}
+                          cy={n.y}
+                          r={n.radius}
                           fill={n.color}
-                          stroke={isSelected ? '#FFFFFF' : isConnected ? '#38BDF8' : n.isDepartment ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)'}
-                          strokeWidth={isSelected ? 2.5 : isConnected ? 2 : n.isDepartment ? 1.5 : 1}
+                          stroke={isSelected ? '#FFFFFF' : isConnected ? '#38BDF8' : n.isDepartment ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)'}
+                          strokeWidth={isSelected ? 3.5 : isConnected ? 2.5 : n.isDepartment ? 2 : 1.2}
                         />
 
+                        {/* Emoji Icon inside Node */}
                         {n.emoji && (
                           <SvgText
-                            x={pn.screenX}
-                            y={pn.screenY + (rad * 0.35)}
-                            fontSize={rad * 0.9}
+                            x={n.x}
+                            y={n.y + (n.radius * 0.35)}
+                            fontSize={n.radius * 0.9}
                             textAnchor="middle"
                           >
                             {n.emoji}
                           </SvgText>
                         )}
 
-                        <SvgText
-                          x={pn.screenX}
-                          y={pn.screenY + rad + 11}
-                          fontSize={Math.max(8.5, (n.isHub ? 11 : n.isDepartment ? 9.5 : 8.5) * pn.depthScale)}
-                          fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '500'}
-                          fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#E4E4E7'}
-                          textAnchor="middle"
-                        >
-                          {n.name}
-                        </SvgText>
-                      </G>
-                    );
-                  })}
-                </Svg>
-              </View>
-            </GestureDetector>
-          ) : (
-            /* 2D Canvas View */
-            <GestureDetector gesture={composed2DGesture}>
-              <Animated.View style={[styles.canvas2DContainer, animated2DStyle]}>
-                <Svg width={SCREEN_WIDTH} height={GRAPH_HEIGHT} style={styles.svg}>
-                  {edges.map((e, i) => {
-                    const source = (typeof e.source === 'object' ? e.source : nodes.find(n => n.id === e.source)) as GraphNode;
-                    const target = (typeof e.target === 'object' ? e.target : nodes.find(n => n.id === e.target)) as GraphNode;
-                    if (!source?.x || !target?.x) return null;
-
-                    const isSelectedEdge = selectedNode && (source.id === selectedNode.id || target.id === selectedNode.id);
-                    const strokeColor = isSelectedEdge ? '#FFFFFF' : e.isCrossDomain ? '#C084FC' : e.color || 'rgba(255,255,255,0.2)';
-                    const strokeWidth = isSelectedEdge ? 2.8 : e.isCrossDomain ? 1.8 : 1.2;
-
-                    return (
-                      <Line
-                        key={`edge-2d-${e.id || i}`}
-                        x1={source.x}
-                        y1={source.y}
-                        x2={target.x}
-                        y2={target.y}
-                        stroke={strokeColor}
-                        strokeWidth={strokeWidth}
-                        strokeDasharray={e.isCrossDomain ? '4, 4' : undefined}
-                        opacity={selectedNode ? (isSelectedEdge ? 1.0 : 0.1) : 0.8}
-                      />
-                    );
-                  })}
-
-                  {nodes.map((n) => {
-                    if (n.x === undefined || n.y === undefined) return null;
-                    const isSelected = selectedNode?.id === n.id;
-                    const opacity = selectedNode ? (isSelected || connectedNodeIds.has(n.id) ? 1.0 : 0.2) : 1.0;
-
-                    return (
-                      <G
-                        key={`node-2d-${n.id}`}
-                        onPress={() => handleNodePress(n)}
-                        opacity={opacity}
-                      >
-                        <Circle
-                          cx={n.x}
-                          cy={n.y}
-                          r={n.radius}
-                          fill={n.color}
-                          stroke={isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.3)'}
-                          strokeWidth={isSelected ? 3 : 1}
-                        />
-                        {n.emoji && (
-                          <SvgText x={n.x} y={n.y + 5} fontSize={n.radius * 0.85} textAnchor="middle">
-                            {n.emoji}
-                          </SvgText>
-                        )}
+                        {/* Node Title */}
                         <SvgText
                           x={n.x}
-                          y={n.y + n.radius + 12}
-                          fontSize={10}
-                          fill="#E4E4E7"
+                          y={n.y + n.radius + 13}
+                          fontSize={n.isHub ? 13 : n.isDepartment ? 11.5 : 10}
+                          fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '600'}
+                          fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#FFFFFF'}
                           textAnchor="middle"
                         >
                           {n.name}
                         </SvgText>
+
+                        {/* Subtitle / Role Tag */}
+                        {n.subLabel && (
+                          <SvgText
+                            x={n.x}
+                            y={n.y + n.radius + 24}
+                            fontSize={8.5}
+                            fontWeight="500"
+                            fill="#A1A1AA"
+                            textAnchor="middle"
+                          >
+                            {n.subLabel}
+                          </SvgText>
+                        )}
                       </G>
                     );
                   })}
-                </Svg>
-              </Animated.View>
-            </GestureDetector>
-          )}
+                </G>
 
-          {/* Floating 3D Navigation HUD & Angle Snaps */}
-          {viewMode === '3d' && (
-            <View style={styles.hud3D}>
-              <TouchableOpacity
-                style={[styles.hudBtn, autoRotate && styles.hudBtnActive]}
-                onPress={() => setAutoRotate(!autoRotate)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.hudBtnText}>{autoRotate ? '⏸' : '▶'}</Text>
-                <Text style={styles.hudBtnSub}>{autoRotate ? 'Pause' : 'Spin'}</Text>
-              </TouchableOpacity>
+              </Svg>
+            </Animated.View>
+          </GestureDetector>
 
-              <TouchableOpacity style={styles.hudBtn} onPress={handleZoomIn} activeOpacity={0.7}>
-                <Text style={styles.hudBtnText}>＋</Text>
-              </TouchableOpacity>
+          {/* Floating Compact HUD Zoom & Center Controls */}
+          <View style={styles.compactHud}>
+            <TouchableOpacity style={styles.hudCircleBtn} onPress={handleZoomIn} activeOpacity={0.7}>
+              <Text style={styles.hudCircleText}>＋</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.hudBtn} onPress={handleZoomOut} activeOpacity={0.7}>
-                <Text style={styles.hudBtnText}>－</Text>
-              </TouchableOpacity>
+            <TouchableOpacity style={styles.hudCircleBtn} onPress={handleZoomOut} activeOpacity={0.7}>
+              <Text style={styles.hudCircleText}>－</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.hudBtn} onPress={handleRotate45} activeOpacity={0.7}>
-                <Text style={[styles.hudBtnText, { fontSize: 12 }]}>🔄</Text>
-                <Text style={styles.hudBtnSub}>+45°</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.hudBtn} onPress={handleFamilyFocus} activeOpacity={0.7}>
-                <Text style={[styles.hudBtnText, { fontSize: 13 }]}>👨‍👩‍👧</Text>
-                <Text style={styles.hudBtnSub}>Family</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.hudBtn} onPress={handleWorkFocus} activeOpacity={0.7}>
-                <Text style={[styles.hudBtnText, { fontSize: 13 }]}>👔</Text>
-                <Text style={styles.hudBtnSub}>Work</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.hudBtn} onPress={handleTopView} activeOpacity={0.7}>
-                <Text style={[styles.hudBtnText, { fontSize: 10 }]}>TOP</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.hudBtn} onPress={handleReset3D} activeOpacity={0.7}>
-                <Text style={styles.hudBtnText}>⟲</Text>
-                <Text style={styles.hudBtnSub}>Reset</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+            <TouchableOpacity style={styles.hudCircleBtn} onPress={handleResetView} activeOpacity={0.7}>
+              <Text style={[styles.hudCircleText, { fontSize: 13 }]}>⟲</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Selected Node Details & Exact Connecting Lines Sheet */}
+        {/* Selected Node Details & Connection Inspector Sheet */}
         {selectedNode && (
           <View style={styles.detailCard}>
             <View style={styles.detailHeader}>
@@ -1200,7 +1039,7 @@ export function KgExplorerScreen() {
             {selectedNodeEdges.length > 0 ? (
               <View style={styles.linesSection}>
                 <Text style={styles.linesSectionTitle}>
-                  ⚡ EXACT CONNECTING LINES ({selectedNodeEdges.length}):
+                  ⚡ EXACT CONNECTIONS ({selectedNodeEdges.length}):
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.linksScroll}>
                   {selectedNodeEdges.map((e, idx) => {
@@ -1213,20 +1052,24 @@ export function KgExplorerScreen() {
                     if (!otherNode) return null;
 
                     return (
-                      <View key={idx} style={[styles.linkChip, { borderColor: otherNode.color }]}>
+                      <TouchableOpacity
+                        key={idx}
+                        style={[styles.linkChip, { borderColor: otherNode.color }]}
+                        onPress={() => handleNodePress(otherNode)}
+                      >
                         <Text style={[styles.linkChipRelation, { color: otherNode.color }]}>
                           [{e.relation.replace(/_/g, ' ')}]
                         </Text>
                         <Text style={styles.linkChipTarget}>
                           ➔ {otherNode.name}
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
               </View>
             ) : (
-              <Text style={styles.noLinksText}>No external connections for this dot</Text>
+              <Text style={styles.noLinksText}>Central hub node</Text>
             )}
           </View>
         )}
@@ -1243,16 +1086,16 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6
+    paddingHorizontal: 16, paddingTop: 6, paddingBottom: 4
   },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
-  live3DBadge: {
-    backgroundColor: 'rgba(6,182,212,0.2)', borderWidth: 1, borderColor: '#06B6D4',
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6
+  syncBadge: {
+    backgroundColor: 'rgba(16,185,129,0.15)', borderWidth: 1, borderColor: '#10B981',
+    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6
   },
-  live3DBadgeText: { color: '#06B6D4', fontSize: 10, fontWeight: '800' },
-  headerSubtitle: { fontSize: 11, color: '#71717A', marginTop: 2 },
+  syncBadgeText: { color: '#10B981', fontSize: 9.5, fontWeight: '700' },
+  headerSubtitle: { fontSize: 11, color: '#71717A', marginTop: 1 },
 
   viewToggleGroup: {
     flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.06)',
@@ -1263,49 +1106,54 @@ const styles = StyleSheet.create({
   viewToggleText: { color: '#A1A1AA', fontSize: 12, fontWeight: '600' },
   viewToggleTextActive: { color: '#FFFFFF', fontWeight: 'bold' },
 
-  filterBar: { marginBottom: 2 },
-  filterScroll: { paddingHorizontal: 16, paddingVertical: 4 },
-  filterChip: {
+  deptBar: { marginVertical: 2 },
+  deptScroll: { paddingHorizontal: 16, paddingVertical: 3 },
+  deptChip: {
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 20,
     paddingHorizontal: 11, paddingVertical: 4, marginRight: 8, backgroundColor: 'rgba(255,255,255,0.03)'
   },
-  filterChipActive: { borderColor: '#06B6D4', backgroundColor: 'rgba(6,182,212,0.15)' },
-  filterChipText: { color: '#A1A1AA', fontSize: 11, fontWeight: '500' },
-  filterChipTextActive: { color: '#06B6D4', fontWeight: 'bold' },
+  deptChipActive: { borderColor: '#06B6D4', backgroundColor: 'rgba(6,182,212,0.15)' },
+  deptChipText: { color: '#A1A1AA', fontSize: 11, fontWeight: '500' },
+  deptChipTextActive: { color: '#06B6D4', fontWeight: 'bold' },
 
-  subFilterBar: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 4, gap: 8
+  subBar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 3
   },
-  subFilterLabel: { color: '#52525B', fontSize: 10, fontWeight: '700' },
-  subFilterChip: {
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 12,
-    paddingHorizontal: 9, paddingVertical: 3, backgroundColor: 'rgba(255,255,255,0.02)'
+  lineFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  subBarLabel: { color: '#52525B', fontSize: 9.5, fontWeight: '800' },
+  subPill: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 2.5, backgroundColor: 'rgba(255,255,255,0.02)'
   },
-  subFilterChipActive: { borderColor: '#38BDF8', backgroundColor: 'rgba(56,189,248,0.12)' },
-  subFilterChipText: { color: '#71717A', fontSize: 10, fontWeight: '500' },
-  subFilterChipTextActive: { color: '#38BDF8', fontWeight: '700' },
+  subPillActive: { borderColor: '#38BDF8', backgroundColor: 'rgba(56,189,248,0.12)' },
+  subPillText: { color: '#71717A', fontSize: 10, fontWeight: '500' },
+  subPillTextActive: { color: '#38BDF8', fontWeight: '700' },
 
-  canvasWrapper: { flex: 1, overflow: 'hidden', backgroundColor: '#09090B' },
-  canvas3DContainer: { width: SCREEN_WIDTH, height: GRAPH_HEIGHT },
-  canvas2DContainer: { width: SCREEN_WIDTH, height: GRAPH_HEIGHT },
-  svg: { width: SCREEN_WIDTH, height: GRAPH_HEIGHT },
+  gestureModeGroup: {
+    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8, padding: 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'
+  },
+  gestureModeBtn: { paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 6 },
+  gestureModeBtnActive: { backgroundColor: 'rgba(255,255,255,0.15)' },
+  gestureModeText: { color: '#71717A', fontSize: 9.5, fontWeight: '600' },
+  gestureModeTextActive: { color: '#FFFFFF', fontWeight: 'bold' },
 
-  // Floating 3D Navigation HUD
-  hud3D: {
-    position: 'absolute', right: 12, top: 12,
-    backgroundColor: 'rgba(24,24,27,0.88)', borderRadius: 14,
+  canvasContainer: { flex: 1, overflow: 'hidden', backgroundColor: '#09090B' },
+  universe: { width: WORLD_SIZE, height: WORLD_SIZE },
+
+  // Compact floating HUD on the bottom-right
+  compactHud: {
+    position: 'absolute', right: 16, bottom: 24,
+    backgroundColor: 'rgba(24,24,27,0.85)', borderRadius: 24,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    padding: 5, alignItems: 'center', gap: 5
+    padding: 4, gap: 6, elevation: 8
   },
-  hudBtn: {
-    width: 38, height: 38, borderRadius: 10,
+  hudCircleBtn: {
+    width: 38, height: 38, borderRadius: 19,
     backgroundColor: 'rgba(255,255,255,0.06)', justifyContent: 'center', alignItems: 'center'
   },
-  hudBtnActive: {
-    backgroundColor: 'rgba(6,182,212,0.25)', borderWidth: 1, borderColor: '#06B6D4'
-  },
-  hudBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
-  hudBtnSub: { color: '#71717A', fontSize: 7.5, fontWeight: '700', marginTop: -2 },
+  hudCircleText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
 
   // Detail Sheet Card
   detailCard: {
@@ -1321,7 +1169,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start', borderWidth: 1, borderRadius: 6,
     paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4
   },
-  deptBadgeText: { fontSize: 10, fontWeight: '700' },
+  deptBadgeText: { fontSize: 9.5, fontWeight: '700' },
   detailName: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
   closeBtn: { padding: 4 },
   closeBtnText: { color: '#71717A', fontSize: 16, fontWeight: 'bold' },
