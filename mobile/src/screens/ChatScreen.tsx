@@ -3,7 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
-  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions, Image, Alert
+  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions, Image, Alert, Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
@@ -450,10 +450,11 @@ function SwipeableBubble({ item, children, onReply }: { item: Message, children:
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo, updateMessageReaction } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo, updateMessageReaction, switchMessageVersion, regenerateBranch } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
+  const [versionModalMessage, setVersionModalMessage] = useState<Message | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
@@ -771,6 +772,8 @@ export function ChatScreen() {
                 onPress={() => {
                   if (isSelectionMode) {
                     toggleSelectMessage(item.id);
+                  } else if (item.meta?.is_corrected || (item.meta?.versions && item.meta.versions.length > 1)) {
+                    setVersionModalMessage(item);
                   }
                 }}
                 mdStyle={{
@@ -853,6 +856,17 @@ export function ChatScreen() {
               </Pressable>
             )}
             <View style={s.timestampContainer}>
+              {!isUser && (item.meta?.is_corrected || (item.meta?.versions && item.meta.versions.length > 1)) && (
+                <TouchableOpacity
+                  onPress={() => setVersionModalMessage(item)}
+                  style={s.versionBadge}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.versionBadgeText}>
+                    ✨ Refined {item.meta?.versions && item.meta.versions.length > 1 ? `(v${item.meta.versions.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
+              )}
               {item.chunkIndex && item.chunkTotal && (
                 <Text style={[
                   s.chunkIndicatorText,
@@ -1232,6 +1246,140 @@ export function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* ── Message Version History & Branching Modal ── */}
+      <Modal
+        visible={!!versionModalMessage}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setVersionModalMessage(null)}
+      >
+        <View style={s.versionModalOverlay}>
+          <View style={[s.versionModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {/* Header */}
+            <View style={s.versionModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={{ fontSize: 18 }}>✨</Text>
+                <Text style={[s.versionModalTitle, { color: colors.textPrimary }]}>
+                  Reply Version History
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setVersionModalMessage(null)}
+                style={s.versionModalCloseBtn}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 16, fontWeight: 'bold' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Watchtower Critique / Flaw Notice */}
+            {versionModalMessage?.meta?.reflection_flaw_detected && (
+              <View style={s.versionAlertBox}>
+                <Text style={s.versionAlertTitle}>
+                  🛡️ Watchtower Self-Correction: {versionModalMessage.meta.reflection_flaw_detected.replace(/_/g, ' ').toUpperCase()}
+                </Text>
+                {versionModalMessage.meta.reflection_explanation ? (
+                  <Text style={s.versionAlertDesc}>
+                    {versionModalMessage.meta.reflection_explanation}
+                  </Text>
+                ) : null}
+              </View>
+            )}
+
+            {/* Versions List */}
+            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+              {(versionModalMessage?.meta?.versions || [
+                {
+                  version: 1,
+                  content: versionModalMessage?.content || '',
+                  timestamp: versionModalMessage?.timestamp || '',
+                  reason: 'Current Reply'
+                }
+              ]).map((v, idx) => {
+                const totalVersions = versionModalMessage?.meta?.versions?.length || 1;
+                const activeIndex = versionModalMessage?.meta?.active_version_index ?? (totalVersions - 1);
+                const isActive = activeIndex === idx;
+                return (
+                  <View
+                    key={idx}
+                    style={[
+                      s.versionItemCard,
+                      { borderColor: isActive ? '#8B5CF6' : colors.border },
+                      isActive && { backgroundColor: 'rgba(139, 92, 246, 0.08)' }
+                    ]}
+                  >
+                    <View style={s.versionItemHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={[s.versionBadgeChip, isActive ? { backgroundColor: '#8B5CF6', color: '#fff' } : { backgroundColor: colors.border, color: colors.textSecondary }]}>
+                          v{v.version || idx + 1}
+                        </Text>
+                        <Text style={[s.versionItemLabel, { color: colors.textPrimary }]}>
+                          {idx === 0 ? 'Original Draft' : 'Refined Version'}
+                        </Text>
+                      </View>
+                      {isActive && (
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#8B5CF6' }}>
+                          ACTIVE
+                        </Text>
+                      )}
+                    </View>
+
+                    <Text style={[s.versionItemContent, { color: colors.textPrimary }]}>
+                      {v.content}
+                    </Text>
+
+                    {v.flaw && (
+                      <Text style={s.versionFlawText}>
+                        ⚠️ Flaw caught: {v.flaw}
+                      </Text>
+                    )}
+
+                    {v.reason && !v.flaw && (
+                      <Text style={[s.versionReasonText, { color: colors.textSecondary }]}>
+                        ℹ️ {v.reason}
+                      </Text>
+                    )}
+
+                    {!isActive && (
+                      <TouchableOpacity
+                        style={[s.versionSwitchBtn, { borderColor: '#8B5CF6' }]}
+                        onPress={async () => {
+                          if (versionModalMessage) {
+                            await switchMessageVersion(versionModalMessage.id, idx);
+                            setVersionModalMessage(null);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#8B5CF6', fontSize: 13, fontWeight: '600' }}>
+                          Switch to this version
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            {/* Branching & Regenerate Footer */}
+            <View style={s.versionModalFooter}>
+              <TouchableOpacity
+                style={[s.regenerateBranchBtn, { backgroundColor: '#8B5CF6' }]}
+                onPress={async () => {
+                  if (versionModalMessage) {
+                    const targetId = versionModalMessage.id;
+                    setVersionModalMessage(null);
+                    await regenerateBranch(targetId);
+                  }
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                  🌱 Try Another Branch (Regenerate)
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1411,5 +1559,131 @@ const s = StyleSheet.create({
   },
   reactionText: {
     fontSize: 12,
-  }
+  },
+  // Version history & Refined badge styles
+  versionBadge: {
+    backgroundColor: 'rgba(139, 92, 246, 0.18)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginRight: 6,
+    borderWidth: 0.5,
+    borderColor: 'rgba(139, 92, 246, 0.4)',
+  },
+  versionBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  versionModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  versionModalCard: {
+    width: '100%',
+    maxWidth: 440,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 18,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+  },
+  versionModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  versionModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  versionModalCloseBtn: {
+    padding: 6,
+  },
+  versionAlertBox: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  versionAlertTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#EF4444',
+    marginBottom: 2,
+  },
+  versionAlertDesc: {
+    fontSize: 12,
+    color: '#FCA5A5',
+    lineHeight: 16,
+  },
+  versionItemCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 10,
+  },
+  versionItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  versionBadgeChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    fontSize: 11,
+    fontWeight: 'bold',
+    overflow: 'hidden',
+  },
+  versionItemLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  versionItemContent: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  versionFlawText: {
+    fontSize: 12,
+    color: '#F59E0B',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  versionReasonText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  versionSwitchBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  versionModalFooter: {
+    marginTop: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  regenerateBranchBtn: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

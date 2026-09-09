@@ -99,8 +99,7 @@ export function sanitizeReply(reply: string): string {
     .replace(/^Note:\s*Since[^\n]*\n?/gi, '')
     .replace(/^Note:\s*[^\n]*\n?/gi, '')
     .replace(/^(?:I(?:'ve| have|'m| am)|Since the|Per the|Following the|Based on the)\s+(?:combined|updated|new|given)\s*(?:the )?(?:instructions?|guidelines?|rules?|format)[^\n]*\n?/gi, '')
-    .replace(/^(?:As per|According to) the updated instructions?[^\n]*/gi, '')
-    .replace(/^\[Replying to:[^\]]*\]\s*/gm, '')
+    .replace(/\[\s*Replying to\s*:[^\]]*\]\s*/gi, '')
     .trim();
 
   // --- Nuke entire reply if it is clearly a structured menu/report ---------------
@@ -145,7 +144,7 @@ export function sanitizeReply(reply: string): string {
     .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ')
     .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ')
     // Strip [Replying to: "..."] prefixes echoed into reply text
-    .replace(/^\[Replying to:[^\]]*\]\s*/gm, '')
+    .replace(/\[\s*Replying to\s*:[^\]]*\]\s*/gi, '')
     // Strip system-text leaks
     .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ')
     .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')

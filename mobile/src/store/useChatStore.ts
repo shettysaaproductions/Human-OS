@@ -7,6 +7,24 @@ import * as Crypto from 'expo-crypto';
 
 console.log('USECHATSTORE_LOADED');
 
+export interface MessageVersion {
+  version: number;
+  content: string;
+  timestamp: string;
+  flaw?: string;
+  flaw_type?: string;
+  reason?: string;
+}
+
+export interface MessageMeta {
+  is_corrected?: boolean;
+  active_version_index?: number;
+  versions?: MessageVersion[];
+  reflection_flaw_detected?: string;
+  reflection_explanation?: string;
+  [key: string]: any;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant'; // Switched from 'nova' to 'assistant' to match DB
@@ -25,6 +43,7 @@ export interface Message {
   thoughts?: Array<{ engine: string; type: string; detail: string; data?: any }>;
   isSystemMessage?: boolean; // soft-error or system-generated messages (not from LLM or user)
   created_at?: string;
+  meta?: MessageMeta;
 }
 
 export interface ChatDiagnostics {
@@ -62,6 +81,8 @@ interface ChatState {
   set_isTyping: (v: boolean) => void;
   updateMessageReaction: (messageId: string, reaction: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null) => Promise<void>;
   injectPendingMessage: (message: Message) => void;
+  switchMessageVersion: (messageId: string, versionIndex: number) => Promise<void>;
+  regenerateBranch: (messageId: string) => Promise<void>;
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
@@ -588,6 +609,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                   user_reaction: msg.user_reaction,
                   reply_to_content: msg.reply_to_content,
                   hasThoughts: msg.meta?.hasThoughts,
+                  meta: msg.meta,
                 });
               });
             } else {
@@ -601,6 +623,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 user_reaction: msg.user_reaction,
                 reply_to_content: msg.reply_to_content,
                 hasThoughts: msg.meta?.hasThoughts,
+                meta: msg.meta,
               });
             }
           }
@@ -752,10 +775,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
                 hasThoughts: msg.meta?.hasThoughts,
+                meta: msg.meta,
               });
             });
           } else {
-            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp, options: msg.meta?.options, user_reaction: msg.user_reaction, hasThoughts: msg.meta?.hasThoughts });
+            formattedOlder.push({ id: msg.id, role, content: msg.content, status: 'sent', timestamp, options: msg.meta?.options, user_reaction: msg.user_reaction, hasThoughts: msg.meta?.hasThoughts, meta: msg.meta });
           }
         }
 
@@ -1114,6 +1138,67 @@ export const useChatStore = create<ChatState>((set, get) => {
         await chatService.setReaction(messageId, reaction);
       } catch (e) {
         console.warn('Failed to save reaction:', e);
+      }
+    },
+
+    switchMessageVersion: async (messageId: string, versionIndex: number) => {
+      try {
+        const cleanId = messageId.replace(/_part_\d+$/, '');
+        const res = await chatService.switchVersion(cleanId, versionIndex);
+        if (res?.success && res?.active_content) {
+          set(state => ({
+            messages: state.messages.map(m => {
+              if (m.id.startsWith(cleanId)) {
+                const versions = m.meta?.versions || [];
+                return {
+                  ...m,
+                  content: res.active_content,
+                  meta: {
+                    ...m.meta,
+                    active_version_index: versionIndex,
+                    versions
+                  }
+                };
+              }
+              return m;
+            })
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to switch version:', err);
+      }
+    },
+
+    regenerateBranch: async (messageId: string) => {
+      try {
+        const cleanId = messageId.replace(/_part_\d+$/, '');
+        set({ isTyping: true });
+        const res = await chatService.regenerateBranch(cleanId);
+        if (res?.success && res?.active_content) {
+          set(state => ({
+            isTyping: false,
+            messages: state.messages.map(m => {
+              if (m.id.startsWith(cleanId)) {
+                return {
+                  ...m,
+                  content: res.active_content,
+                  meta: {
+                    ...m.meta,
+                    is_corrected: true,
+                    active_version_index: res.version_index,
+                    versions: res.versions
+                  }
+                };
+              }
+              return m;
+            })
+          }));
+        } else {
+          set({ isTyping: false });
+        }
+      } catch (err) {
+        set({ isTyping: false });
+        console.error('Failed to regenerate branch:', err);
       }
     },
     

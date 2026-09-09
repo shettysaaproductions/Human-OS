@@ -26,6 +26,7 @@ import { cognitiveContextService } from '../services/CognitiveContextService';
 import { cognitiveDoubtService } from '../services/CognitiveDoubtService';
 import { doubtEligibilityEngine } from '../services/DoubtEligibilityEngine';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
+import { watchtowerReflectionService } from '../services/WatchtowerReflectionService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -144,9 +145,36 @@ function isExcessiveRequest(message: string): boolean {
 import { MessageFormatter } from '../services/MessageFormatter';
 
 
+function splitIntoSentences(text: string): string[] {
+  // Matches sentence ends (. ! ? followed by space or end), avoiding splitting decimals
+  const matches = text.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g);
+  if (!matches) return [text];
+  return matches.map(m => m.trim()).filter(Boolean);
+}
+
 function chunkResponse(text: string): string[] {
-  // Trust the LLM. If it wants to send multiple bubbles, it will use <NOVA_MSG>.
-  // Do not artificially chop strings, which destroys lists, articles, and formatting.
+  // If text is within normal bubble length, keep intact
+  if (text.length <= MAX_CHARS_PER_CHUNK) {
+    return [text];
+  }
+
+  // For very long text without structured blocks, split cleanly along sentence boundaries
+  if (!text.includes('```') && !text.includes('<NOVA_TABLE>')) {
+    const sentences = splitIntoSentences(text);
+    const chunks: string[] = [];
+    let current = '';
+    for (const s of sentences) {
+      if ((current + ' ' + s).length > MAX_CHARS_PER_CHUNK && current.length > 0) {
+        chunks.push(current.trim());
+        current = s;
+      } else {
+        current = current ? `${current} ${s}` : s;
+      }
+    }
+    if (current.trim()) chunks.push(current.trim());
+    return chunks.length > 0 ? chunks : [text];
+  }
+
   return [text];
 }
 
@@ -387,8 +415,58 @@ function parseLLMResponse(rawReply: string): string[] {
     if (segments.length > 0) return segments;
   }
 
-  // If no explicit tags are used, do not aggressively chop the message!
-  // The LLM knows what it's doing. If it generated a long list or article, keep it intact.
+  // Preserve structured content intact: code fences, tables, or itemized lists
+  const hasStructuredContent =
+    rawReply.includes('```') ||
+    rawReply.includes('<NOVA_TABLE>') ||
+    /^[\s]*(?:[-*•]|\d+\.)\s+/m.test(rawReply);
+
+  if (hasStructuredContent) {
+    return [rawReply];
+  }
+
+  // Level 2: Paragraph splitting (double newlines)
+  if (rawReply.includes('\n\n')) {
+    const paragraphs = rawReply
+      .split(/\n{2,}/)
+      .map(p => p.trim())
+      .filter(Boolean);
+    if (paragraphs.length > 1) {
+      return paragraphs;
+    }
+  }
+
+  // Level 3: Natural WhatsApp sentence-group chunking for long single-paragraph casual replies (>140 chars)
+  if (rawReply.length > 140) {
+    const sentences = splitIntoSentences(rawReply);
+    if (sentences.length > 1) {
+      const bubbles: string[] = [];
+      let current = '';
+      for (const s of sentences) {
+        if (!current) {
+          current = s;
+        } else if ((current + ' ' + s).length <= 160) {
+          current += ' ' + s;
+        } else {
+          bubbles.push(current.trim());
+          current = s;
+        }
+      }
+      if (current.trim()) {
+        bubbles.push(current.trim());
+      }
+      if (bubbles.length > 1) {
+        // Cap at 3 bubbles max per turn to feel like a real person texting
+        if (bubbles.length > 3) {
+          const firstTwo = bubbles.slice(0, 2);
+          const rest = bubbles.slice(2).join(' ');
+          return [...firstTwo, rest];
+        }
+        return bubbles;
+      }
+    }
+  }
+
   return [rawReply];
 }
 
@@ -511,6 +589,11 @@ chatRouter.post(
       const { message, messages, conversation_id, is_proactive, async_mode, reply_to_content, image_base64, language } = parseResult.data;
       let { reply_to_id, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
+
+      // Rule: Once a user drops a new message, Nova stops auto-checking previous replies
+      if (!is_proactive) {
+        watchtowerReflectionService.cancelPendingReflection(userId, conversation_id);
+      }
       
       const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1977,6 +2060,17 @@ Use natural conversational Hinglish like "Arre waah!", "Sahi hai yaar", "Mast". 
               sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)
                 .catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
             }
+
+            // Watchtower Post-Reply Reflection & Self-Correction (only on latest assistant reply)
+            if (idx === finalBubbles.length - 1 && !is_proactive) {
+              watchtowerReflectionService.scheduleReflection({
+                userId,
+                conversationId: activeConversationId,
+                messageId: savedMsg.id,
+                content: reply,
+                userMessage: primaryMessage,
+              });
+            }
           } else {
             logger.warn('[Chat] AI response save returned no data and no error', { requestId, userId });
           }
@@ -2295,3 +2389,116 @@ chatRouter.post(
     }
   }
 );
+
+// ── SWITCH Message Version ───────────────────────────────────────────────────
+chatRouter.post(
+  '/:messageId/version',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user!.id;
+      const { messageId } = req.params;
+      const { version_index } = req.body;
+
+      if (typeof version_index !== 'number') {
+        throw new ValidationError('version_index must be a number');
+      }
+
+      const result = await watchtowerReflectionService.switchMessageVersion(userId, messageId, version_index);
+      if (!result.success) {
+        res.status(400).json({ error: result.error || 'Failed to switch version' });
+        return;
+      }
+
+      res.status(200).json({ success: true, active_content: result.activeContent, version_index });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── REGENERATE / BRANCH Message ──────────────────────────────────────────────
+chatRouter.post(
+  '/:messageId/branch',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user!.id;
+      const { messageId } = req.params;
+
+      const { data: targetMsg, error: fetchErr } = await supabaseAdmin
+        .from('chat_history')
+        .select('*')
+        .eq('id', messageId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (fetchErr || !targetMsg) {
+        throw new ValidationError('Target message not found');
+      }
+
+      const { data: prevUserMsg } = await supabaseAdmin
+        .from('chat_history')
+        .select('content')
+        .eq('user_id', userId)
+        .eq('conversation_id', targetMsg.conversation_id)
+        .eq('role', 'user')
+        .lt('created_at', targetMsg.created_at)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const userPrompt = prevUserMsg?.content || 'Continue the conversation';
+
+      const rawAlternative = await complete(
+        'USER_FAST',
+        [
+          { role: 'system', content: 'You are Nova, texting on WhatsApp. Give a fresh, warm, natural Hinglish alternative reply in 1-2 short sentences. No robot headers or lists.' },
+          { role: 'user', content: userPrompt }
+        ],
+        { temperature: 0.7, maxTokens: 300 }
+      );
+
+      const alternativeClean = rawAlternative.trim();
+      const meta = (targetMsg.meta as any) || {};
+      const versions: any[] = meta.versions || [
+        {
+          version: 1,
+          content: targetMsg.content,
+          timestamp: targetMsg.created_at,
+          reason: 'Initial reply'
+        }
+      ];
+
+      versions.push({
+        version: versions.length + 1,
+        content: alternativeClean,
+        timestamp: new Date().toISOString(),
+        reason: 'User regenerated branch'
+      });
+
+      const updatedMeta = {
+        ...meta,
+        is_corrected: true,
+        active_version_index: versions.length - 1,
+        versions
+      };
+
+      await supabaseAdmin
+        .from('chat_history')
+        .update({
+          content: alternativeClean,
+          meta: updatedMeta
+        })
+        .eq('id', messageId);
+
+      res.status(200).json({
+        success: true,
+        active_content: alternativeClean,
+        version_index: versions.length - 1,
+        versions
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+

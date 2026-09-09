@@ -243,4 +243,17 @@ export const chatService = {
       // Non-fatal: presence heartbeat failure should never block chat
     }
   },
+
+  // Message Versioning & Branching
+  switchVersion: async (messageId: string, versionIndex: number) => {
+    const cleanId = messageId.replace(/_part_\d+$/, '');
+    const response = await api.post(`/chat/${cleanId}/version`, { version_index: versionIndex });
+    return response.data;
+  },
+
+  regenerateBranch: async (messageId: string) => {
+    const cleanId = messageId.replace(/_part_\d+$/, '');
+    const response = await api.post(`/chat/${cleanId}/branch`, {});
+    return response.data;
+  },
 };
