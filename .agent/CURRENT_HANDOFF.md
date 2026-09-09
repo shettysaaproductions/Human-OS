@@ -54,6 +54,14 @@ IMPLEMENTED & COMMITTED on `main` (commit `9bde1de`).
 - Single-codepoint, non-ZWJ Unicode emojis safe across all Android Skia/HarfBuzz font engines.
 - No nested `GestureHandlerRootView` wrapping screen (prevents Android crash).
 
+## Production Deployment Verification
+- Render Backend: Deployed via GitHub Actions push to `main` (Run 34398317211).
+- EAS Android OTA Update: Published to `production` channel:
+  * Update Group ID: `477e045e-ab2b-4317-9295-29fe93b17111`
+  * Android Update ID: `01a087c2-51fb-79ef-977f-4721e84bfb82`
+  * Runtime Version: `1.1.0`
+  * Commit: `ac55c6ae54ed1863a1091488357ed2d797e0ee9f`
+
 ## NEXT ACTION
-Push `main` to `origin main` to trigger backend Render deployment and publish mobile OTA update if authorized.
+On the physical Android production device, close and reopen the Human-OS mobile app once or twice to apply the OTA update, then navigate to the Knowledge Galaxy to experience the new Tree & Stems hierarchy and interactive connection inspector.
 
