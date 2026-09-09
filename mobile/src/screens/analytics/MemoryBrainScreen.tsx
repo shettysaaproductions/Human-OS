@@ -6,18 +6,48 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../services/api';
 
-// ── Human-readable memory type labels ─────────────────────────────────────────
-const MEMORY_TYPE_LABEL: Record<string, string> = {
-  semantic:  'Fact',
-  episodic:  'Memory',
-  working:   'Context',
-  procedural:'Skill',
+// ── Wardrobe Life Domain Definitions ──────────────────────────────────────────
+const DOMAINS: Array<{ key: string; label: string; emoji: string; color: string }> = [
+  { key: 'family',    label: 'Family',    emoji: '👨‍👩‍👧', color: '#EC4899' },
+  { key: 'work',      label: 'Career',    emoji: '👔', color: '#3B82F6' },
+  { key: 'goals',     label: 'Goals',     emoji: '🎯', color: '#10B981' },
+  { key: 'lifestyle', label: 'Lifestyle', emoji: '🧘', color: '#F59E0B' },
+  { key: 'identity',  label: 'Identity',  emoji: '📌', color: '#8B5CF6' },
+];
+
+const DOMAIN_META_MAP: Record<string, { label: string; emoji: string; color: string }> = {
+  family:    { label: 'Family & Relationships', emoji: '👨‍👩‍👧', color: '#EC4899' },
+  work:      { label: 'Career & Professional',  emoji: '👔', color: '#3B82F6' },
+  goals:     { label: 'Goals & Ambitions',      emoji: '🎯', color: '#10B981' },
+  lifestyle: { label: 'Lifestyle & Rhythm',     emoji: '🧘', color: '#F59E0B' },
+  identity:  { label: 'Core Identity',          emoji: '📌', color: '#8B5CF6' },
 };
 
-// ── Category meta for the filter chips & heatmap ──────────────────────────────
+// ── Human-readable memory type labels ─────────────────────────────────────────
+const MEMORY_TYPE_LABEL: Record<string, string> = {
+  family:      'Family',
+  work:        'Career',
+  goals:       'Goal',
+  lifestyle:   'Lifestyle',
+  preferences: 'Preference',
+  personal:    'Identity',
+  identity:    'Identity',
+  semantic:    'Fact',
+  episodic:    'Memory',
+  working:     'Active Context',
+  procedural:  'Skill',
+};
+
+// ── Category meta with custom styling — ZERO fallback cardboard box ───────────
 const CATEGORY_META: Record<string, { color: string; emoji: string }> = {
-  memories:      { color: '#8B5CF6', emoji: '🧠' },
+  family:        { color: '#EC4899', emoji: '👨‍👩‍👧' },
+  work:          { color: '#3B82F6', emoji: '👔' },
   goals:         { color: '#10B981', emoji: '🎯' },
+  lifestyle:     { color: '#F59E0B', emoji: '🧘' },
+  preferences:   { color: '#F59E0B', emoji: '✨' },
+  personal:      { color: '#8B5CF6', emoji: '📌' },
+  identity:      { color: '#8B5CF6', emoji: '📌' },
+  memories:      { color: '#8B5CF6', emoji: '🧠' },
   wishes:        { color: '#F59E0B', emoji: '✨' },
   skills:        { color: '#3B82F6', emoji: '⚡' },
   people:        { color: '#EC4899', emoji: '👥' },
@@ -28,7 +58,7 @@ const CATEGORY_META: Record<string, { color: string; emoji: string }> = {
   episodic:      { color: '#EC4899', emoji: '💬' },
   working:       { color: '#06B6D4', emoji: '⚡' },
   procedural:    { color: '#10B981', emoji: '🔧' },
-  uncategorized: { color: '#6B7280', emoji: '📦' },
+  uncategorized: { color: '#8B5CF6', emoji: '💡' }, // Sleek lightbulb fallback
 };
 
 // ── Authority badge ────────────────────────────────────────────────────────────
@@ -64,6 +94,17 @@ function relativeTime(iso: string | undefined): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
+function inferDomain(item: any): string {
+  if (item.domain && DOMAIN_META_MAP[item.domain]) return item.domain;
+  const k = (item.key || '').toLowerCase();
+  const mt = (item.memory_type || '').toLowerCase();
+  if (mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family/.test(k)) return 'family';
+  if (mt === 'work' || /company|office|schedule|hours|days|timing|candidate|job|work/.test(k)) return 'work';
+  if (mt === 'goals' || /goal|target|passion|vision|ambition/.test(k)) return 'goals';
+  if (mt === 'preferences' || mt === 'lifestyle' || /favourite|food|drink|beverage|color|routine/.test(k)) return 'lifestyle';
+  return 'identity';
+}
+
 export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
@@ -95,46 +136,61 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     const list: any[] = [];
     if (!data) return list;
 
-    const filterList = (items: any[]) => {
-      let result = items || [];
-      if (selectedType) {
-        // Working context doesn't have memory_type, so we skip type filtering for it or match 'working'
-        result = result.filter(m => (m.memory_type || 'working') === selectedType);
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        result = result.filter(m =>
-          m.key?.toLowerCase().includes(q) || m.value?.toLowerCase().includes(q)
-        );
-      }
-      return result;
+    const matchesSearch = (item: any) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return item.key?.toLowerCase().includes(q) || item.value?.toLowerCase().includes(q);
     };
 
-    const current = filterList(data.currentMemories || []);
-    if (current.length > 0) {
-      list.push({ title: 'Current Memories', data: current, type: 'current' });
-    }
+    const compartments = data.domainCompartments || {};
 
-    const working = filterList(data.workingContext || []);
-    if (working.length > 0) {
-      list.push({ title: 'Working Context', data: working, type: 'working' });
-    }
+    DOMAINS.forEach(({ key: dKey, label, emoji, color }) => {
+      if (selectedType && selectedType !== 'all' && selectedType !== dKey) {
+        return;
+      }
 
-    const archived = filterList(data.archivedMemories || []);
+      const domainData = compartments[dKey];
+      let memories = domainData
+        ? (domainData.memories || [])
+        : (data.currentMemories || []).filter((m: any) => inferDomain(m) === dKey);
+      let context = domainData
+        ? (domainData.workingContext || [])
+        : (data.workingContext || []).filter((w: any) => inferDomain(w) === dKey);
+
+      memories = (memories || []).filter(matchesSearch);
+      context = (context || [])
+        .filter(matchesSearch)
+        .map((c: any) => ({ ...c, isWorkingContext: true }));
+
+      const allItems = [...memories, ...context];
+      if (allItems.length > 0) {
+        list.push({
+          title: DOMAIN_META_MAP[dKey]?.label || label,
+          emoji,
+          color,
+          domain: dKey,
+          data: allItems,
+          count: allItems.length,
+          type: 'domain'
+        });
+      }
+    });
+
+    // History section
+    const archived = (data.archivedMemories || []).filter(matchesSearch);
     if (archived.length > 0) {
       if (historyExpanded) {
-        list.push({ title: 'History', data: archived, type: 'archived', count: archived.length });
+        list.push({ title: 'History & Provenance', data: archived, type: 'archived', count: archived.length });
       } else {
-        list.push({ title: 'History', data: [], type: 'archived_collapsed', count: archived.length });
+        list.push({ title: 'History & Provenance', data: [], type: 'archived_collapsed', count: archived.length });
       }
     }
 
     return list;
   }, [data, searchQuery, selectedType, historyExpanded]);
 
-  const categories = useMemo(() => Object.entries(data?.categories || {}), [data]);
-
   const handleLongPress = useCallback((item: any) => {
+    if (item.isWorkingContext) return; // Working context managed ephemerally
     Alert.alert(
       'Manage Memory',
       `What would you like to do with "${toLabel(item.key)}"?`,
@@ -182,6 +238,8 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     return <View style={s.center}><ActivityIndicator size="large" color="#8B5CF6" /></View>;
   }
 
+  const connectedDots = data?.connectedDots || [];
+
   return (
     <SafeAreaView style={s.container} edges={['top']}>
       <Text style={s.title}>Brain</Text>
@@ -190,11 +248,13 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       <View style={s.statsRow}>
         <View style={s.statCard}>
           <Text style={s.statNum}>{data?.totalCount || 0}</Text>
-          <Text style={s.statLabel}>Total</Text>
+          <Text style={s.statLabel}>Total Facts</Text>
         </View>
         <View style={s.statCard}>
-          <Text style={[s.statNum, { color: '#10B981' }]}>{categories.length}</Text>
-          <Text style={s.statLabel}>Types</Text>
+          <Text style={[s.statNum, { color: '#10B981' }]}>
+            {Object.keys(data?.domainCompartments || {}).length || 5}
+          </Text>
+          <Text style={s.statLabel}>Domains</Text>
         </View>
         <View style={s.statCard}>
           <Text style={[s.statNum, { color: '#F59E0B' }]}>{data?.thisWeekCount || 0}</Text>
@@ -209,8 +269,8 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
           style={s.searchInput}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="Search memories..."
-          placeholderTextColor="#555"
+          placeholder="Search memories across wardrobe..."
+          placeholderTextColor="#666"
         />
         {searchQuery ? (
           <TouchableOpacity onPress={() => setSearchQuery('')}>
@@ -219,87 +279,103 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         ) : null}
       </View>
 
-      {/* Category Filters */}
+      {/* Wardrobe Domain Filter Chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterScroll}>
         <TouchableOpacity
           style={[s.filterChip, !selectedType && s.filterChipActive]}
           onPress={() => setSelectedType(null)}
         >
-          <Text style={[s.filterText, !selectedType && s.filterTextActive]}>All</Text>
+          <Text style={[s.filterText, !selectedType && s.filterTextActive]}>All Wardrobe</Text>
         </TouchableOpacity>
-        {categories.map(([type, count]) => {
-          const meta = CATEGORY_META[type] || CATEGORY_META.uncategorized;
-          const isActive = selectedType === type;
-          const typeLabel = MEMORY_TYPE_LABEL[type] || type;
+        {DOMAINS.map(d => {
+          const isActive = selectedType === d.key;
+          const count = data?.domainCompartments?.[d.key]?.count ?? 0;
           return (
             <TouchableOpacity
-              key={type}
-              style={[s.filterChip, isActive && { borderColor: meta.color, backgroundColor: `${meta.color}20` }]}
-              onPress={() => setSelectedType(isActive ? null : type)}
+              key={d.key}
+              style={[s.filterChip, isActive && { borderColor: d.color, backgroundColor: `${d.color}20` }]}
+              onPress={() => setSelectedType(isActive ? null : d.key)}
             >
-              <Text style={[s.filterText, isActive && { color: meta.color }]}>
-                {meta.emoji} {typeLabel} ({String(count)})
+              <Text style={[s.filterText, isActive && { color: d.color }]}>
+                {d.emoji} {d.label} {count > 0 ? `(${count})` : ''}
               </Text>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
 
-      {/* Heatmap */}
-      <View style={s.heatmapRow}>
-        {categories.slice(0, 7).map(([type, count]) => {
-          const meta = CATEGORY_META[type] || CATEGORY_META.uncategorized;
-          const max = Math.max(...categories.map(([, c]) => Number(c)), 1);
-          const pct = Number(count) / max;
-          return (
-            <View key={type} style={s.heatCell}>
-              <View style={[s.heatBar, { height: Math.max(4, pct * 40), backgroundColor: meta.color }]} />
-              <Text style={s.heatLabel}>{meta.emoji}</Text>
-            </View>
-          );
-        })}
-      </View>
+      {/* Neural Connected Dots (Cross-Domain Links) */}
+      {connectedDots.length > 0 && !selectedType ? (
+        <View style={s.dotsContainer}>
+          <View style={s.dotsHeader}>
+            <Text style={s.dotsTitle}>🕸️ Neural Connected Dots</Text>
+            <Text style={s.dotsSubtitle}>Nova bridges context across your life domains</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.dotsScroll}>
+            {connectedDots.map((dot: any) => (
+              <View key={dot.id} style={s.dotCard}>
+                <View style={s.dotBadge}>
+                  <Text style={s.dotBadgeText}>{dot.badge}</Text>
+                </View>
+                <Text style={s.dotTitle}>{dot.title}</Text>
+                <Text style={s.dotInsight} numberOfLines={3}>{dot.insight}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
 
-      {/* Memory Sections */}
+      {/* Memory Compartment Sections */}
       <SectionList
         sections={sections}
-        keyExtractor={(item, index) => item.id || `wm-${index}`}
+        keyExtractor={(item, index) => item.id || `item-${index}`}
         removeClippedSubviews
         windowSize={10}
         contentContainerStyle={s.listContent}
-        ListEmptyComponent={<Text style={s.emptyText}>No memories found.</Text>}
-        renderSectionHeader={({ section }) => (
-          <View style={s.sectionHeader}>
-            {section.type === 'archived' || section.type === 'archived_collapsed' ? (
-              <TouchableOpacity onPress={() => setHistoryExpanded(!historyExpanded)} style={s.historyHeaderRow}>
-                <Text style={s.sectionTitle}>{section.title} ({section.count})</Text>
-                <Text style={s.historyHeaderIcon}>{historyExpanded ? '▼' : '▶'}</Text>
-              </TouchableOpacity>
-            ) : (
-              <Text style={s.sectionTitle}>{section.title}</Text>
-            )}
-          </View>
-        )}
-        renderItem={({ item, section }) => {
-          if (section.type === 'working') {
+        ListEmptyComponent={<Text style={s.emptyText}>No memories found in this compartment.</Text>}
+        renderSectionHeader={({ section }: any) => {
+          if (section.type === 'archived' || section.type === 'archived_collapsed') {
+            return (
+              <View style={s.sectionHeader}>
+                <TouchableOpacity onPress={() => setHistoryExpanded(!historyExpanded)} style={s.historyHeaderRow}>
+                  <Text style={s.sectionTitle}>{section.title} ({section.count})</Text>
+                  <Text style={s.historyHeaderIcon}>{historyExpanded ? '▼' : '▶'}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }
+
+          return (
+            <View style={[s.sectionHeader, { borderLeftColor: section.color, borderLeftWidth: 4, paddingLeft: 8 }]}>
+              <Text style={s.sectionTitle}>
+                {section.emoji} {section.title} <Text style={[s.sectionCount, { color: section.color }]}>({section.count})</Text>
+              </Text>
+            </View>
+          );
+        }}
+        renderItem={({ item, section }: any) => {
+          const isArchived = section.type === 'archived';
+
+          if (item.isWorkingContext) {
             const timeStr = relativeTime(item.updated_at || item.created_at);
             return (
               <View style={[s.card, s.cardWorking]}>
                 <View style={s.cardHeader}>
                   <View style={[s.badge, { backgroundColor: '#06B6D420', borderColor: '#06B6D4' }]}>
-                    <Text style={[s.badgeText, { color: '#06B6D4' }]}>⚡ Context</Text>
+                    <Text style={[s.badgeText, { color: '#06B6D4' }]}>⚡ Active Context</Text>
                   </View>
                   {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
                 </View>
-                <Text style={s.cardKey}>{toLabel(item.key)}</Text>
+                <Text style={[s.cardKey, { color: '#06B6D4' }]}>{toLabel(item.key)}</Text>
                 <Text style={s.cardVal}>{item.value}</Text>
               </View>
             );
           }
 
-          const isArchived = section.type === 'archived';
-          const typeMeta = CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
-          const typeLabel = MEMORY_TYPE_LABEL[item.memory_type] || item.memory_type || 'memory';
+          const domainKey = inferDomain(item);
+          const domainMeta = DOMAIN_META_MAP[domainKey] || CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
+          const typeMeta = CATEGORY_META[item.memory_type] || domainMeta;
+          const typeLabel = MEMORY_TYPE_LABEL[item.memory_type] || domainMeta.label || 'Fact';
           const authMeta = AUTHORITY_META[item.source_authority] || AUTHORITY_META.subconscious_inference;
           const timeStr = relativeTime(item.updated_at || item.created_at);
 
@@ -323,7 +399,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
                   {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
                 </View>
               </View>
-              <Text style={s.cardKey}>{toLabel(item.key)}</Text>
+              <Text style={[s.cardKey, { color: domainMeta.color }]}>{toLabel(item.key)}</Text>
               <Text style={s.cardVal}>{item.value}</Text>
             </TouchableOpacity>
           );
@@ -386,7 +462,7 @@ const s = StyleSheet.create({
   searchIcon: { fontSize: 16, marginRight: 8 },
   searchInput: { flex: 1, color: '#fff', paddingVertical: 10, fontSize: 15 },
   clearBtn: { color: '#666', fontSize: 18, paddingLeft: 8 },
-  filterScroll: { marginBottom: 12, paddingLeft: 16 },
+  filterScroll: { marginBottom: 14, paddingLeft: 16 },
   filterChip: {
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 20,
     paddingHorizontal: 14, paddingVertical: 6, marginRight: 8, backgroundColor: 'rgba(255,255,255,0.03)'
@@ -394,23 +470,36 @@ const s = StyleSheet.create({
   filterChipActive: { borderColor: '#8B5CF6', backgroundColor: 'rgba(139,92,246,0.15)' },
   filterText: { color: '#999', fontSize: 13 },
   filterTextActive: { color: '#8B5CF6' },
-  heatmapRow: {
-    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end',
-    marginHorizontal: 16, marginBottom: 16, height: 52
+
+  // Dots Carousel
+  dotsContainer: { marginHorizontal: 16, marginBottom: 16 },
+  dotsHeader: { marginBottom: 8 },
+  dotsTitle: { fontSize: 15, fontWeight: '700', color: '#E4E4E7' },
+  dotsSubtitle: { fontSize: 11, color: '#71717A', marginTop: 2 },
+  dotsScroll: { marginTop: 6 },
+  dotCard: {
+    width: 250, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.25)', borderRadius: 12, padding: 12, marginRight: 10
   },
-  heatCell: { alignItems: 'center', flex: 1 },
-  heatBar: { width: 28, borderRadius: 4, marginBottom: 4 },
-  heatLabel: { fontSize: 14 },
+  dotBadge: {
+    alignSelf: 'flex-start', backgroundColor: 'rgba(139,92,246,0.15)',
+    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 6
+  },
+  dotBadgeText: { fontSize: 10, fontWeight: '700', color: '#A78BFA' },
+  dotTitle: { fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
+  dotInsight: { fontSize: 12, color: '#A1A1AA', lineHeight: 16 },
+
   listContent: { paddingHorizontal: 16, paddingBottom: 32 },
-  sectionHeader: { marginTop: 12, marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  sectionHeader: { marginTop: 14, marginBottom: 10 },
+  sectionTitle: { fontSize: 17, fontWeight: 'bold', color: '#fff' },
+  sectionCount: { fontSize: 14, fontWeight: '600' },
   historyHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
   historyHeaderIcon: { color: '#999', fontSize: 14, fontWeight: 'bold' },
   card: {
     backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10
   },
-  cardWorking: { backgroundColor: 'rgba(6,182,212,0.02)', borderColor: 'rgba(6,182,212,0.15)' },
+  cardWorking: { backgroundColor: 'rgba(6,182,212,0.03)', borderColor: 'rgba(6,182,212,0.2)' },
   cardArchived: { opacity: 0.6, backgroundColor: 'rgba(255,255,255,0.01)' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -419,7 +508,7 @@ const s = StyleSheet.create({
   authBadge: { borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 },
   authBadgeText: { fontSize: 10, fontWeight: '500' },
   timeText: { fontSize: 10, color: '#555' },
-  cardKey: { fontSize: 13, fontWeight: '700', color: '#06B6D4', marginBottom: 4 },
+  cardKey: { fontSize: 13, fontWeight: '700', marginBottom: 4 },
   cardVal: { fontSize: 14, color: '#ccc', lineHeight: 20 },
   emptyText: { color: '#555', textAlign: 'center', marginTop: 48, fontSize: 15 },
   

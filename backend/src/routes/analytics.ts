@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { SourceAuthority } from '../types/memory';
+import { classifyDomain, synthesizeConnectedDots, DOMAIN_TAXONOMY, LifeDomainKey } from '../lib/memoryDomains';
 
 export const analyticsRouter = Router();
 
@@ -20,8 +21,10 @@ function authorityRank(a?: string | null): number {
 
 // GET /analytics/memories — three-layer Brain view:
 //   currentMemories  = canonical CURRENT, not archived/superseded
-//   workingContext   = ephemeral working_memory rows still in scope
+//   workingContext   = ephemeral working_memory rows still in scope (deduplicated against canonical)
 //   archivedMemories = superseded/archived history (provenance display)
+//   domainCompartments = Wardrobe Life Domain compartments (family, work, goals, lifestyle, identity)
+//   connectedDots    = Neural Network associative links between compartments
 analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -51,7 +54,13 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       if (mem.lifecycle_state === 'SUPERSEDED' || mem.lifecycle_state === 'INVALIDATED') continue;
 
       const { canonical } = canonicalizeKey(mem.key || '');
-      const normalizedMem = { ...mem, key: canonical };
+      const domainMeta = classifyDomain(canonical, mem.memory_type);
+      const normalizedMem = {
+        ...mem,
+        key: canonical,
+        domain: domainMeta.domain,
+        domainMeta
+      };
 
       if (!canonicalMap.has(canonical)) {
         canonicalMap.set(canonical, normalizedMem);
@@ -85,12 +94,14 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       return ts && new Date(ts).getTime() >= oneWeekAgo;
     }).length;
 
-    // ── 4. Categories — from canonical current set ────────────────────────────
-    const categories = currentMemories.reduce((acc: Record<string, number>, mem) => {
+    // ── 4. Categories & Domains — from canonical current set ──────────────────
+    const categories: Record<string, number> = {};
+    for (const mem of currentMemories) {
       const type = mem.memory_type || 'uncategorized';
-      acc[type] = (acc[type] || 0) + 1;
-      return acc;
-    }, {});
+      categories[type] = (categories[type] || 0) + 1;
+      const domain = mem.domain || 'identity';
+      categories[domain] = (categories[domain] || 0) + 1;
+    }
 
     // ── 5. Working context — ephemeral working_memory rows still in scope ─────
     // Convention (canonical from CognitiveContextService):
@@ -118,7 +129,7 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       'last_curiosity_topic',
     ]);
 
-    const workingContext = (wmRows || []).filter((wm: any) =>
+    const workingContextRaw = (wmRows || []).filter((wm: any) =>
       wm.promotion_status !== 'SUPERSEDED' &&
       wm.promotion_status !== 'INVALIDATED' &&
       (!wm.expires_at || wm.expires_at > now) && // NULL = never expires
@@ -131,7 +142,71 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       wm.key !== 'birth_date' // birth_date belongs strictly in semantic memories, not ephemeral working context
     );
 
-    // ── 6. Archived/history layer — superseded + archived for provenance ──────
+    // ── Context Deduplication Engine ──────────────────────────────────────────
+    // Suppress working memory items whose facts are already durable in canonical memories.
+    const workingContext = workingContextRaw.filter((wm: any) => {
+      const { canonical } = canonicalizeKey(wm.key || '');
+      const existingCanonicalMem = canonicalMap.get(canonical);
+      if (existingCanonicalMem) {
+        return false;
+      }
+      // Check if this working memory is a fragment of known schedule or company
+      const valLower = (wm.value || '').toLowerCase();
+      const schedMem = canonicalMap.get('work_schedule');
+      if (schedMem && (wm.key.includes('schedule') || wm.key.includes('office') || wm.key.includes('timing'))) {
+        const schedValLower = (schedMem.value || '').toLowerCase();
+        if (schedValLower.includes(valLower) || valLower.includes('11') || valLower.includes('8pm') || valLower.includes('8 pm')) {
+          return false;
+        }
+      }
+      const compMem = canonicalMap.get('company_name');
+      if (compMem && (wm.key === 'current_company' || wm.key === 'company')) {
+        return false;
+      }
+      return true;
+    }).map((wm: any) => {
+      const domainMeta = classifyDomain(wm.key);
+      return {
+        ...wm,
+        domain: domainMeta.domain,
+        domainMeta
+      };
+    });
+
+    // ── 6. Group into Wardrobe Domain Compartments ─────────────────────────────
+    const domainCompartments: Record<LifeDomainKey, {
+      meta: any;
+      memories: any[];
+      workingContext: any[];
+      count: number;
+    }> = {
+      family: { meta: DOMAIN_TAXONOMY.family, memories: [], workingContext: [], count: 0 },
+      work: { meta: DOMAIN_TAXONOMY.work, memories: [], workingContext: [], count: 0 },
+      goals: { meta: DOMAIN_TAXONOMY.goals, memories: [], workingContext: [], count: 0 },
+      lifestyle: { meta: DOMAIN_TAXONOMY.lifestyle, memories: [], workingContext: [], count: 0 },
+      identity: { meta: DOMAIN_TAXONOMY.identity, memories: [], workingContext: [], count: 0 },
+    };
+
+    for (const mem of currentMemories) {
+      const d = (mem.domain || 'identity') as LifeDomainKey;
+      if (domainCompartments[d]) {
+        domainCompartments[d].memories.push(mem);
+        domainCompartments[d].count++;
+      }
+    }
+
+    for (const wm of workingContext) {
+      const d = (wm.domain || 'identity') as LifeDomainKey;
+      if (domainCompartments[d]) {
+        domainCompartments[d].workingContext.push(wm);
+        domainCompartments[d].count++;
+      }
+    }
+
+    // ── 7. Synthesize Neural Connected Dots ────────────────────────────────────
+    const connectedDots = synthesizeConnectedDots(currentMemories, workingContext);
+
+    // ── 8. Archived/history layer — superseded + archived for provenance ──────
     const { data: archivedRows, error: archErr } = await supabaseAdmin
       .from('memories')
       .select('id, memory_type, created_at, updated_at, key, value, importance, is_archived, source_authority, lifecycle_state')
@@ -155,6 +230,8 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       data: {
         currentMemories,
         workingContext,
+        domainCompartments,
+        connectedDots,
         archivedMemories,
         totalCount: currentMemories.length,
         categories,

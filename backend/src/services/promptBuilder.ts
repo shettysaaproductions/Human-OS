@@ -1,6 +1,7 @@
 import { Memory } from '../types/memory';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { classifyDomain, synthesizeConnectedDots, DOMAIN_TAXONOMY, LifeDomainKey } from '../lib/memoryDomains';
 
 /**
  * Computes dynamic age based on recorded date and elapsed time.
@@ -422,32 +423,13 @@ Examples of good follow-ups:
       }
     }
 
-    // Pipeline Step 3: Long-Term Memory
-    finalPrompt += `\n\n--- LONG-TERM MEMORY (FACTS & CONTEXT) ---`;
+    // Pipeline Step 3: Long-Term Memory — Wardrobe Domain Compartments
+    finalPrompt += `\n\n--- 🗄️ LONG-TERM MEMORY: THE WARDROBE COMPARTMENTS ---`;
     const isBrandNewUser = (!memories || memories.length === 0) && (!shortTermMemories || shortTermMemories.length === 0);
     if (!memories || memories.length === 0) {
       finalPrompt += `\nNo specific memories retrieved for this context.
 ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories about the user. If they ask what you know about them, ADMIT you don't know much yet because you just started chatting. NEVER invent or hallucinate a fake backstory (e.g. do not invent parties, friends, or hobbies).`;
     } else {
-      // FIRST: Render GOALS as their own first-class block (highest salience for goal-tracking)
-      const goalMemories = memories.filter(m => m.memory_type === 'goals');
-      if (goalMemories.length > 0) {
-        finalPrompt += `\n\n## 🎯 USER'S ACTIVE GOALS (Nova tracks these personally — reference naturally when relevant)`;
-        for (const mem of goalMemories) {
-          const text = (mem.value || (mem as any).content || '').trim();
-          finalPrompt += `\n- ${mem.key.replace(/_/g, ' ')}: ${text}`;
-        }
-        finalPrompt += `\nGoal-tracking rule: When conversation touches on a goal area, acknowledge it naturally. Once a week, casually ask about ONE goal's progress.`;
-      }
-
-      // CRITICAL LIFE FACTS are listed FIRST with zero-tolerance emphasis. Family,
-      // work, health, important dates, and goals are the non-negotiable anchors of
-      // the user's life — forgetting that the user has a child, is married, or has
-      // a job is unacceptable (see MEMORY ACCOUNTABILITY rule).
-      const CRITICAL_TYPES = ['family', 'work', 'health', 'important_dates', 'goals'];
-      const critical = memories.filter(m => CRITICAL_TYPES.includes(m.memory_type));
-      const others = memories.filter(m => !CRITICAL_TYPES.includes(m.memory_type));
-
       // Group relationship name + nickname pairs for family members
       const handledFamilyKeys = new Set<string>();
       const familyEntityLines: string[] = [];
@@ -476,30 +458,47 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
         }
         const body = text ? `: ${text}` : '';
         const importance = (mem.importance || 0) >= 7 ? ' (IMPORTANT)' : '';
-        const memType = (mem.memory_type || 'FACT').toUpperCase();
-        return `- [${memType}] ${(mem.key || 'fact').replace(/_/g, ' ')}${body}${importance}`;
+        return `- ${(mem.key || 'fact').replace(/_/g, ' ')}${body}${importance}`;
       };
 
-      if (critical.length > 0 || familyEntityLines.length > 0) {
-        finalPrompt += `\n\n### 🔴 CRITICAL LIFE FACTS — ZERO TOLERANCE FOR FORGETTING
-These are non-negotiable facts about the user's real life. You MUST remember them in EVERY reply where they are relevant, and NEVER contradict or forget them:`;
-        for (const line of familyEntityLines) {
-          finalPrompt += `\n${line}`;
-        }
-        for (const mem of critical) {
-          if (!handledFamilyKeys.has(mem.key)) {
-            finalPrompt += `\n${formatMemory(mem)}`;
-          }
+      // Group into 5 Wardrobe Domain Compartments
+      const domainBuckets: Record<LifeDomainKey, Memory[]> = {
+        family: [],
+        work: [],
+        goals: [],
+        lifestyle: [],
+        identity: []
+      };
+
+      for (const mem of memories) {
+        if (handledFamilyKeys.has(mem.key)) continue;
+        const meta = classifyDomain(mem.key, mem.memory_type);
+        domainBuckets[meta.domain].push(mem);
+      }
+
+      const DOMAIN_ORDER: LifeDomainKey[] = ['family', 'work', 'goals', 'lifestyle', 'identity'];
+      for (const d of DOMAIN_ORDER) {
+        const meta = DOMAIN_TAXONOMY[d];
+        const items = domainBuckets[d];
+        if (d === 'family' && (familyEntityLines.length > 0 || items.length > 0)) {
+          finalPrompt += `\n\n### [COMPARTMENT: ${meta.emoji} ${meta.title.toUpperCase()}]`;
+          for (const line of familyEntityLines) finalPrompt += `\n${line}`;
+          for (const mem of items) finalPrompt += `\n${formatMemory(mem)}`;
+        } else if (items.length > 0) {
+          finalPrompt += `\n\n### [COMPARTMENT: ${meta.emoji} ${meta.title.toUpperCase()}]`;
+          for (const mem of items) finalPrompt += `\n${formatMemory(mem)}`;
         }
       }
 
-      if (others.length > 0) {
-        if (critical.length > 0 || familyEntityLines.length > 0) finalPrompt += `\n\nOther long-term memories:`;
-        for (const mem of others) {
-          if (!handledFamilyKeys.has(mem.key)) {
-            finalPrompt += `\n${formatMemory(mem)}`;
-          }
+      // Synthesize Neural Connected Dots across compartments
+      const connectedDots = synthesizeConnectedDots(memories, workingMemories || []);
+      if (connectedDots.length > 0) {
+        finalPrompt += `\n\n## 🕸️ NEURAL MEMORY WEB & CONNECTED DOTS (CROSS-DOMAIN SYNTHESIS)
+Nova connects dots across compartments like a living human companion:`;
+        for (const dot of connectedDots) {
+          finalPrompt += `\n- [${dot.badge}]: ${dot.insight}`;
         }
+        finalPrompt += `\n*The Wardrobe Principle:* Do NOT view memories as isolated, disconnected facts in a single cupboard. Pull the matching pieces from different compartments to fit the moment (e.g. office hours wrap-up connects to family evening time; work candidates connect to company scaling goals).`;
       }
     }
 

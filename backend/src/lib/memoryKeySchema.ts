@@ -92,7 +92,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Work: company ───────────────────────────────────────────────────────────
   company_name: [
     'business_name', 'company', 'business', 'startup_name', 'firm_name',
-    'office_name', 'workplace_name',
+    'office_name', 'workplace_name', 'current_company',
   ],
   // ── Dates: birthday ─────────────────────────────────────────────────────────
   birth_date: [
@@ -140,7 +140,8 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'important_life_facts', 'life_facts', 'key_facts', 'health_facts', 'critical_facts'
   ],
   work_schedule: [
-    'office_hours', 'office_days', 'working_schedule', 'work_timing', 'work_hours'
+    'office_hours', 'office_days', 'working_schedule', 'work_timing', 'work_hours',
+    'nai_morning_schedule', 'office_timing', 'office_timings', 'work_timings'
   ],
 };
 
