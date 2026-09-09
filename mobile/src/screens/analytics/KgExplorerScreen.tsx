@@ -4,7 +4,7 @@ import {
   TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { G, Line, Circle, Text as SvgText, Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
+import Svg, { G, Line, Circle, Text as SvgText, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
 import * as d3 from 'd3-force';
@@ -139,7 +139,6 @@ function toGraphLabel(key: string, value: string): string {
   return v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey);
 }
 
-// Deterministic 3D Constellation Generator
 function assign3DCoordinates(nodes: GraphNode[]): GraphNode[] {
   const deptMembers: Record<string, GraphNode[]> = {
     family: [], work: [], goals: [], lifestyle: [], identity: []
@@ -373,20 +372,20 @@ export function KgExplorerScreen() {
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
-  const [autoRotate, setAutoRotate] = useState(true);
+  const [autoRotate, setAutoRotate] = useState(false); // Default off to keep CPU 100% idle
 
-  // 60FPS Camera State with Single Master RAF Loop
+  // 3D Camera State
   const [camera, setCamera] = useState<CameraState>({ rotX: 0.28, rotY: 0.45, zoom: 1.0 });
 
   const cameraRef = useRef<CameraState>({ rotX: 0.28, rotY: 0.45, zoom: 1.0 });
-  const isDirtyRef = useRef(false);
-  const autoRotateRef = useRef(true);
+  const isDraggingRef = useRef(false);
+  const rafPendingRef = useRef(false);
 
   const dragStartRotX = useRef(0.28);
   const dragStartRotY = useRef(0.45);
   const dragStartZoom = useRef(1.0);
 
-  // 2D Pan and Zoom Shared Values (fallback 2D mode)
+  // 2D Pan/Zoom
   const scale2D = useSharedValue(1);
   const savedScale2D = useSharedValue(1);
   const translateX2D = useSharedValue(0);
@@ -395,51 +394,25 @@ export function KgExplorerScreen() {
   const savedTranslateY2D = useSharedValue(0);
 
   useEffect(() => {
-    autoRotateRef.current = autoRotate;
-  }, [autoRotate]);
-
-  useEffect(() => {
     fetchGraph();
   }, []);
 
-  // ----------------------------------------------------
-  // SINGLE MASTER ANIMATION LOOP (SILKY SMOOTH 60 FPS)
-  // Decoupled from touch events: touch events only set refs,
-  // this RAF loop syncs with screen refresh rate without state flooding!
-  // ----------------------------------------------------
+  // Battery-friendly calm auto-spin interval (only runs when explicitly toggled on)
   useEffect(() => {
-    let animId: number;
-    let lastTime = performance.now();
+    if (!autoRotate || viewMode !== '3d') return;
 
-    const loop = (now: number) => {
-      const dt = Math.min(0.06, (now - lastTime) / 1000);
-      lastTime = now;
+    const timer = setInterval(() => {
+      if (isDraggingRef.current) return;
+      cameraRef.current.rotY = (cameraRef.current.rotY + 0.018) % (2 * Math.PI);
+      setCamera({
+        rotX: cameraRef.current.rotX,
+        rotY: cameraRef.current.rotY,
+        zoom: cameraRef.current.zoom
+      });
+    }, 40); // 25 FPS smooth spin with ~95% idle CPU window
 
-      let needsUpdate = false;
-
-      if (autoRotateRef.current && viewMode === '3d') {
-        // Gentle smooth rotation ~14 deg/sec
-        cameraRef.current.rotY = (cameraRef.current.rotY + dt * 0.22) % (2 * Math.PI);
-        needsUpdate = true;
-      } else if (isDirtyRef.current) {
-        isDirtyRef.current = false;
-        needsUpdate = true;
-      }
-
-      if (needsUpdate) {
-        setCamera({
-          rotX: cameraRef.current.rotX,
-          rotY: cameraRef.current.rotY,
-          zoom: cameraRef.current.zoom,
-        });
-      }
-
-      animId = requestAnimationFrame(loop);
-    };
-
-    animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
-  }, [viewMode]);
+    return () => clearInterval(timer);
+  }, [autoRotate, viewMode]);
 
   const fetchGraph = async () => {
     try {
@@ -456,7 +429,7 @@ export function KgExplorerScreen() {
           apiDepts = res.data.data.departments || [];
         }
       } catch (e) {
-        // Fallback to /analytics/memories
+        // Fallback
       }
 
       if (!apiNodes || apiNodes.length === 0) {
@@ -479,7 +452,6 @@ export function KgExplorerScreen() {
       const centerX = SCREEN_WIDTH / 2;
       const centerY = GRAPH_HEIGHT / 2;
 
-      // Pre-position for 2D mode
       const d3Nodes: GraphNode[] = nodesWith3D.map((n: any, idx: number) => {
         let initX = centerX;
         let initY = centerY;
@@ -503,7 +475,6 @@ export function KgExplorerScreen() {
 
       const nodeMap = new Map<string, GraphNode>(d3Nodes.map(n => [n.id, n]));
 
-      // Pre-link direct node references onto edges for O(1) projection (NO map lookups per frame!)
       const processedEdges: GraphEdge[] = (apiEdges || [])
         .map((e: any) => {
           const sId = typeof e.source === 'string' ? e.source : e.source?.id;
@@ -520,7 +491,7 @@ export function KgExplorerScreen() {
         })
         .filter((e: any) => e.sourceNode && e.targetNode);
 
-      // Pre-calculate 2D layout synchronously in 3ms without background tick loops!
+      // Pre-calculate 2D layout synchronously once in 3ms
       const sim = d3.forceSimulation<GraphNode>(d3Nodes)
         .force('link', d3.forceLink<GraphNode, GraphEdge>(processedEdges).id(d => d.id).distance(80))
         .force('charge', d3.forceManyBody<GraphNode>().strength(-200))
@@ -539,25 +510,45 @@ export function KgExplorerScreen() {
   };
 
   // ----------------------------------------------------
-  // ULTRA-FAST 3D TOUCH GESTURE
-  // ZERO setState calls during drag -> silky smooth 60fps!
+  // MEMOIZED GESTURES (CRITICAL: Never recreated on render!)
+  // Prevents gesture cancellation & eliminates touch stutter!
   // ----------------------------------------------------
   const pan3DGesture = useMemo(() => {
     return Gesture.Pan()
       .runOnJS(true)
+      .minDistance(2)
       .onBegin(() => {
-        autoRotateRef.current = false;
+        isDraggingRef.current = true;
         setAutoRotate(false);
         dragStartRotX.current = cameraRef.current.rotX;
         dragStartRotY.current = cameraRef.current.rotY;
       })
       .onUpdate((e) => {
-        // High-precision smooth sensitivity
-        const nextY = dragStartRotY.current + (e.translationX * 0.0065);
-        const nextX = Math.max(-1.35, Math.min(1.35, dragStartRotX.current - (e.translationY * 0.0065)));
+        const nextY = dragStartRotY.current + (e.translationX * 0.007);
+        const nextX = Math.max(-1.35, Math.min(1.35, dragStartRotX.current - (e.translationY * 0.007)));
         cameraRef.current.rotX = nextX;
         cameraRef.current.rotY = nextY;
-        isDirtyRef.current = true;
+
+        // Throttled RAF: Only 1 render per refresh cycle
+        if (!rafPendingRef.current) {
+          rafPendingRef.current = true;
+          requestAnimationFrame(() => {
+            rafPendingRef.current = false;
+            setCamera({
+              rotX: cameraRef.current.rotX,
+              rotY: cameraRef.current.rotY,
+              zoom: cameraRef.current.zoom,
+            });
+          });
+        }
+      })
+      .onEnd(() => {
+        isDraggingRef.current = false;
+        setCamera({
+          rotX: cameraRef.current.rotX,
+          rotY: cameraRef.current.rotY,
+          zoom: cameraRef.current.zoom,
+        });
       });
   }, []);
 
@@ -565,43 +556,71 @@ export function KgExplorerScreen() {
     return Gesture.Pinch()
       .runOnJS(true)
       .onBegin(() => {
-        autoRotateRef.current = false;
+        isDraggingRef.current = true;
         setAutoRotate(false);
         dragStartZoom.current = cameraRef.current.zoom;
       })
       .onUpdate((e) => {
         const nextZoom = Math.max(0.45, Math.min(2.8, dragStartZoom.current * e.scale));
         cameraRef.current.zoom = nextZoom;
-        isDirtyRef.current = true;
+
+        if (!rafPendingRef.current) {
+          rafPendingRef.current = true;
+          requestAnimationFrame(() => {
+            rafPendingRef.current = false;
+            setCamera({
+              rotX: cameraRef.current.rotX,
+              rotY: cameraRef.current.rotY,
+              zoom: cameraRef.current.zoom,
+            });
+          });
+        }
+      })
+      .onEnd(() => {
+        isDraggingRef.current = false;
+        setCamera({
+          rotX: cameraRef.current.rotX,
+          rotY: cameraRef.current.rotY,
+          zoom: cameraRef.current.zoom,
+        });
       });
   }, []);
 
-  const composed3DGesture = Gesture.Simultaneous(pan3DGesture, pinch3DGesture);
+  // Memoize composed gesture so it never gets destroyed/re-attached!
+  const composed3DGesture = useMemo(() => {
+    return Gesture.Simultaneous(pan3DGesture, pinch3DGesture);
+  }, [pan3DGesture, pinch3DGesture]);
 
   // 2D Gesture Handlers
-  const pinch2DGesture = Gesture.Pinch()
-    .onUpdate((e) => {
-      'worklet';
-      scale2D.value = Math.max(0.35, Math.min(savedScale2D.value * e.scale, 3.2));
-    })
-    .onEnd(() => {
-      'worklet';
-      savedScale2D.value = scale2D.value;
-    });
+  const pinch2DGesture = useMemo(() => {
+    return Gesture.Pinch()
+      .onUpdate((e) => {
+        'worklet';
+        scale2D.value = Math.max(0.35, Math.min(savedScale2D.value * e.scale, 3.2));
+      })
+      .onEnd(() => {
+        'worklet';
+        savedScale2D.value = scale2D.value;
+      });
+  }, []);
 
-  const pan2DGesture = Gesture.Pan()
-    .onUpdate((e) => {
-      'worklet';
-      translateX2D.value = savedTranslateX2D.value + e.translationX;
-      translateY2D.value = savedTranslateY2D.value + e.translationY;
-    })
-    .onEnd(() => {
-      'worklet';
-      savedTranslateX2D.value = translateX2D.value;
-      savedTranslateY2D.value = translateY2D.value;
-    });
+  const pan2DGesture = useMemo(() => {
+    return Gesture.Pan()
+      .onUpdate((e) => {
+        'worklet';
+        translateX2D.value = savedTranslateX2D.value + e.translationX;
+        translateY2D.value = savedTranslateY2D.value + e.translationY;
+      })
+      .onEnd(() => {
+        'worklet';
+        savedTranslateX2D.value = translateX2D.value;
+        savedTranslateY2D.value = translateY2D.value;
+      });
+  }, []);
 
-  const composed2DGesture = Gesture.Simultaneous(pinch2DGesture, pan2DGesture);
+  const composed2DGesture = useMemo(() => {
+    return Gesture.Simultaneous(pinch2DGesture, pan2DGesture);
+  }, [pinch2DGesture, pan2DGesture]);
 
   const animated2DStyle = useAnimatedStyle(() => ({
     transform: [
@@ -611,46 +630,51 @@ export function KgExplorerScreen() {
     ]
   }));
 
-  // Quick 3D Perspective Presets
-  const handleReset3D = useCallback(() => {
-    cameraRef.current = { rotX: 0.28, rotY: 0.45, zoom: 1.0 };
-    isDirtyRef.current = true;
-    autoRotateRef.current = true;
-    setAutoRotate(true);
+  // Quick 3D Perspective Preset Snaps
+  const applyCameraPreset = useCallback((rx: number, ry: number, zm: number = 1.0) => {
+    cameraRef.current = { rotX: rx, rotY: ry, zoom: zm };
+    setAutoRotate(false);
+    setCamera({ rotX: rx, rotY: ry, zoom: zm });
   }, []);
+
+  const handleReset3D = useCallback(() => {
+    applyCameraPreset(0.28, 0.45, 1.0);
+  }, [applyCameraPreset]);
+
+  const handleFamilyFocus = useCallback(() => {
+    // Focus camera directly towards Family & Work transition lines
+    applyCameraPreset(0.12, 0.85, 1.15);
+  }, [applyCameraPreset]);
+
+  const handleWorkFocus = useCallback(() => {
+    // Focus camera towards Career, Hiring, and Goal lines
+    applyCameraPreset(0.15, -0.65, 1.15);
+  }, [applyCameraPreset]);
 
   const handleTopView = useCallback(() => {
-    cameraRef.current.rotX = 1.35;
-    cameraRef.current.rotY = 0;
-    isDirtyRef.current = true;
-    autoRotateRef.current = false;
-    setAutoRotate(false);
-  }, []);
+    applyCameraPreset(1.35, 0, 1.0);
+  }, [applyCameraPreset]);
 
-  const handleFrontView = useCallback(() => {
-    cameraRef.current.rotX = 0;
-    cameraRef.current.rotY = 0;
-    isDirtyRef.current = true;
-    autoRotateRef.current = false;
-    setAutoRotate(false);
-  }, []);
+  const handleRotate45 = useCallback(() => {
+    const nextY = (cameraRef.current.rotY + Math.PI / 4) % (2 * Math.PI);
+    applyCameraPreset(cameraRef.current.rotX, nextY, cameraRef.current.zoom);
+  }, [applyCameraPreset]);
 
   const handleZoomIn = useCallback(() => {
-    cameraRef.current.zoom = Math.min(cameraRef.current.zoom + 0.3, 2.8);
-    isDirtyRef.current = true;
-  }, []);
+    const nextZ = Math.min(cameraRef.current.zoom + 0.3, 2.8);
+    applyCameraPreset(cameraRef.current.rotX, cameraRef.current.rotY, nextZ);
+  }, [applyCameraPreset]);
 
   const handleZoomOut = useCallback(() => {
-    cameraRef.current.zoom = Math.max(cameraRef.current.zoom - 0.3, 0.45);
-    isDirtyRef.current = true;
-  }, []);
+    const nextZ = Math.max(cameraRef.current.zoom - 0.3, 0.45);
+    applyCameraPreset(cameraRef.current.rotX, cameraRef.current.rotY, nextZ);
+  }, [applyCameraPreset]);
 
   const handleNodePress = (node: GraphNode) => {
     if (selectedNode?.id === node.id) {
       setSelectedNode(null);
     } else {
       setSelectedNode(node);
-      autoRotateRef.current = false;
       setAutoRotate(false);
     }
   };
@@ -671,7 +695,7 @@ export function KgExplorerScreen() {
   }, [selectedNode, selectedNodeEdges]);
 
   // ----------------------------------------------------
-  // ULTRA-OPTIMIZED 3D MATHEMATICAL PROJECTION (<0.05ms)
+  // ULTRA-FAST 3D MATHEMATICAL PROJECTION (<0.05ms)
   // ----------------------------------------------------
   const centerX = SCREEN_WIDTH / 2;
   const centerY = GRAPH_HEIGHT / 2;
@@ -704,7 +728,6 @@ export function KgExplorerScreen() {
       const y2 = y1 * cosX - z1 * sinX;
       const z2 = y1 * sinX + z1 * cosX;
 
-      // Perspective factor
       const effectiveZ = z2 * zoom;
       const perspective = focalLen / Math.max(90, cameraDist + focalLen - effectiveZ);
 
@@ -735,7 +758,7 @@ export function KgExplorerScreen() {
       return pNode;
     });
 
-    // 2. Project edges directly with pre-linked node references
+    // 2. Project edges
     const pEdges: ProjectedEdge[] = edges.map(e => {
       const pS = projectedNodeLookup.get(e.source);
       const pT = projectedNodeLookup.get(e.target);
@@ -767,7 +790,7 @@ export function KgExplorerScreen() {
           strokeWidth = 3.2;
           strokeOpacity = 1.0;
         } else {
-          strokeOpacity = 0.05; // Dim background lines
+          strokeOpacity = 0.05; // Dim background
           strokeWidth = 0.8;
         }
       } else if (isCross) {
@@ -815,21 +838,20 @@ export function KgExplorerScreen() {
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaView style={styles.container} edges={['top']}>
 
-        {/* Top Header & 3D/2D View Mode Toggle */}
+        {/* Header & Mode Switcher */}
         <View style={styles.header}>
           <View>
             <View style={styles.titleRow}>
               <Text style={styles.headerTitle}>Neural Galaxy</Text>
               <View style={styles.live3DBadge}>
-                <Text style={styles.live3DBadgeText}>60 FPS 3D</Text>
+                <Text style={styles.live3DBadgeText}>3D SPHERE</Text>
               </View>
             </View>
             <Text style={styles.headerSubtitle}>
-              {nodes.length} nodes · {edges.length} connecting lines
+              {nodes.length} nodes · {edges.length} connections across 5 departments
             </Text>
           </View>
 
-          {/* Mode Switcher: 3D Galaxy vs 2D Map */}
           <View style={styles.viewToggleGroup}>
             <TouchableOpacity
               style={[styles.viewToggleBtn, viewMode === '3d' && styles.viewToggleBtnActive]}
@@ -882,7 +904,7 @@ export function KgExplorerScreen() {
           </ScrollView>
         </View>
 
-        {/* Connecting Lines Filter Bar */}
+        {/* Connecting Lines Filter & Presets */}
         <View style={styles.subFilterBar}>
           <Text style={styles.subFilterLabel}>LINES:</Text>
           <TouchableOpacity
@@ -913,141 +935,127 @@ export function KgExplorerScreen() {
           )}
         </View>
 
-        {/* MAIN CANVAS: 3D GALAXY OR 2D MAP */}
+        {/* MAIN CANVAS */}
         <View style={styles.canvasWrapper}>
           {viewMode === '3d' ? (
             <GestureDetector gesture={composed3DGesture}>
               <View style={styles.canvas3DContainer}>
                 <Svg width={SCREEN_WIDTH} height={GRAPH_HEIGHT} style={styles.svg}>
-                  {/* 1. Draw 3D Connecting Lines */}
-                  <G>
-                    {projectedEdges.map((pe) => {
-                      if (!pe.visible) return null;
+                  {/* 1. Flat 3D Connecting Lines */}
+                  {projectedEdges.map((pe) => {
+                    if (!pe.visible) return null;
 
-                      const isCross = pe.edge.isCrossDomain;
-                      const dashArray = isCross ? '4, 4' : undefined;
+                    const isCross = pe.edge.isCrossDomain;
+                    const dashArray = isCross ? '4, 4' : undefined;
 
-                      return (
-                        <G key={`edge-${pe.edge.id}`}>
-                          {/* Glow backing only for highlighted lines to keep rasterization blazing fast */}
-                          {pe.isHighlighted && (
-                            <Line
-                              x1={pe.x1}
-                              y1={pe.y1}
-                              x2={pe.x2}
-                              y2={pe.y2}
-                              stroke="#38BDF8"
-                              strokeWidth={6}
-                              opacity={0.35}
-                            />
-                          )}
+                    return (
+                      <Line
+                        key={`edge-${pe.edge.id}`}
+                        x1={pe.x1}
+                        y1={pe.y1}
+                        x2={pe.x2}
+                        y2={pe.y2}
+                        stroke={pe.strokeColor}
+                        strokeWidth={pe.strokeWidth}
+                        strokeDasharray={dashArray}
+                        opacity={pe.strokeOpacity}
+                      />
+                    );
+                  })}
 
-                          <Line
-                            x1={pe.x1}
-                            y1={pe.y1}
-                            x2={pe.x2}
-                            y2={pe.y2}
-                            stroke={pe.strokeColor}
-                            strokeWidth={pe.strokeWidth}
-                            strokeDasharray={dashArray}
-                            opacity={pe.strokeOpacity}
-                          />
+                  {/* 2. Highlighted Midpoint Badges */}
+                  {projectedEdges.map((pe) => {
+                    if (!pe.visible || !pe.isHighlighted || !pe.edge.relation) return null;
 
-                          {/* Midpoint relation badge only for highlighted lines */}
-                          {pe.isHighlighted && pe.edge.relation && (
-                            <G>
-                              <Rect
-                                x={pe.midX - 42}
-                                y={pe.midY - 8.5}
-                                width={84}
-                                height={17}
-                                rx={8.5}
-                                fill="rgba(15,23,42,0.92)"
-                                stroke="#38BDF8"
-                                strokeWidth={1}
-                              />
-                              <SvgText
-                                x={pe.midX}
-                                y={pe.midY + 3}
-                                fontSize={8}
-                                fontWeight="bold"
-                                fill="#38BDF8"
-                                textAnchor="middle"
-                              >
-                                {pe.edge.relation.replace(/_/g, ' ')}
-                              </SvgText>
-                            </G>
-                          )}
-                        </G>
-                      );
-                    })}
-                  </G>
-
-                  {/* 2. Draw 3D Nodes */}
-                  <G>
-                    {projectedNodes.map((pn) => {
-                      if (!pn.visible) return null;
-
-                      const n = pn.node;
-                      const rad = n.radius * pn.depthScale;
-                      const isSelected = pn.isSelected;
-                      const isConnected = pn.isConnectedToSelected;
-
-                      const nodeOpacity = selectedNode
-                        ? (isSelected || isConnected ? 1.0 : 0.2)
-                        : pn.depthOpacity;
-
-                      return (
-                        <G
-                          key={`node-${n.id}`}
-                          onPress={() => handleNodePress(n)}
-                          opacity={nodeOpacity}
+                    return (
+                      <G key={`badge-${pe.edge.id}`}>
+                        <Rect
+                          x={pe.midX - 42}
+                          y={pe.midY - 8.5}
+                          width={84}
+                          height={17}
+                          rx={8.5}
+                          fill="rgba(15,23,42,0.92)"
+                          stroke="#38BDF8"
+                          strokeWidth={1}
+                        />
+                        <SvgText
+                          x={pe.midX}
+                          y={pe.midY + 3}
+                          fontSize={8}
+                          fontWeight="bold"
+                          fill="#38BDF8"
+                          textAnchor="middle"
                         >
-                          {/* Glow halo only on Hubs or Selected/Connected nodes */}
-                          {(n.isHub || n.isDepartment || isSelected) && (
-                            <Circle
-                              cx={pn.screenX}
-                              cy={pn.screenY}
-                              r={rad + (isSelected ? 8 : 5)}
-                              fill={isSelected ? '#38BDF8' : n.color}
-                              opacity={isSelected ? 0.45 : 0.18}
-                            />
-                          )}
+                          {pe.edge.relation.replace(/_/g, ' ')}
+                        </SvgText>
+                      </G>
+                    );
+                  })}
 
+                  {/* 3. 3D Nodes */}
+                  {projectedNodes.map((pn) => {
+                    if (!pn.visible) return null;
+
+                    const n = pn.node;
+                    const rad = n.radius * pn.depthScale;
+                    const isSelected = pn.isSelected;
+                    const isConnected = pn.isConnectedToSelected;
+
+                    const nodeOpacity = selectedNode
+                      ? (isSelected || isConnected ? 1.0 : 0.2)
+                      : pn.depthOpacity;
+
+                    return (
+                      <G
+                        key={`node-${n.id}`}
+                        onPress={() => handleNodePress(n)}
+                        opacity={nodeOpacity}
+                      >
+                        {/* Glow halo only on Hubs or Selected nodes */}
+                        {(n.isHub || n.isDepartment || isSelected) && (
                           <Circle
                             cx={pn.screenX}
                             cy={pn.screenY}
-                            r={rad}
-                            fill={n.color}
-                            stroke={isSelected ? '#FFFFFF' : isConnected ? '#38BDF8' : n.isDepartment ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)'}
-                            strokeWidth={isSelected ? 2.8 : isConnected ? 2 : n.isDepartment ? 1.8 : 1}
+                            r={rad + (isSelected ? 7 : 4)}
+                            fill={isSelected ? '#38BDF8' : n.color}
+                            opacity={isSelected ? 0.4 : 0.15}
                           />
+                        )}
 
-                          {n.emoji && (
-                            <SvgText
-                              x={pn.screenX}
-                              y={pn.screenY + (rad * 0.35)}
-                              fontSize={rad * 0.9}
-                              textAnchor="middle"
-                            >
-                              {n.emoji}
-                            </SvgText>
-                          )}
+                        <Circle
+                          cx={pn.screenX}
+                          cy={pn.screenY}
+                          r={rad}
+                          fill={n.color}
+                          stroke={isSelected ? '#FFFFFF' : isConnected ? '#38BDF8' : n.isDepartment ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)'}
+                          strokeWidth={isSelected ? 2.5 : isConnected ? 2 : n.isDepartment ? 1.5 : 1}
+                        />
 
+                        {n.emoji && (
                           <SvgText
                             x={pn.screenX}
-                            y={pn.screenY + rad + 11}
-                            fontSize={Math.max(8.5, (n.isHub ? 11.5 : n.isDepartment ? 10 : 8.5) * pn.depthScale)}
-                            fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '500'}
-                            fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#E4E4E7'}
+                            y={pn.screenY + (rad * 0.35)}
+                            fontSize={rad * 0.9}
                             textAnchor="middle"
                           >
-                            {n.name}
+                            {n.emoji}
                           </SvgText>
-                        </G>
-                      );
-                    })}
-                  </G>
+                        )}
+
+                        <SvgText
+                          x={pn.screenX}
+                          y={pn.screenY + rad + 11}
+                          fontSize={Math.max(8.5, (n.isHub ? 11 : n.isDepartment ? 9.5 : 8.5) * pn.depthScale)}
+                          fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '500'}
+                          fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#E4E4E7'}
+                          textAnchor="middle"
+                        >
+                          {n.name}
+                        </SvgText>
+                      </G>
+                    );
+                  })}
                 </Svg>
               </View>
             </GestureDetector>
@@ -1056,76 +1064,72 @@ export function KgExplorerScreen() {
             <GestureDetector gesture={composed2DGesture}>
               <Animated.View style={[styles.canvas2DContainer, animated2DStyle]}>
                 <Svg width={SCREEN_WIDTH} height={GRAPH_HEIGHT} style={styles.svg}>
-                  <G>
-                    {edges.map((e, i) => {
-                      const source = (typeof e.source === 'object' ? e.source : nodes.find(n => n.id === e.source)) as GraphNode;
-                      const target = (typeof e.target === 'object' ? e.target : nodes.find(n => n.id === e.target)) as GraphNode;
-                      if (!source?.x || !target?.x) return null;
+                  {edges.map((e, i) => {
+                    const source = (typeof e.source === 'object' ? e.source : nodes.find(n => n.id === e.source)) as GraphNode;
+                    const target = (typeof e.target === 'object' ? e.target : nodes.find(n => n.id === e.target)) as GraphNode;
+                    if (!source?.x || !target?.x) return null;
 
-                      const isSelectedEdge = selectedNode && (source.id === selectedNode.id || target.id === selectedNode.id);
-                      const strokeColor = isSelectedEdge ? '#FFFFFF' : e.isCrossDomain ? '#C084FC' : e.color || 'rgba(255,255,255,0.2)';
-                      const strokeWidth = isSelectedEdge ? 2.8 : e.isCrossDomain ? 1.8 : 1.2;
+                    const isSelectedEdge = selectedNode && (source.id === selectedNode.id || target.id === selectedNode.id);
+                    const strokeColor = isSelectedEdge ? '#FFFFFF' : e.isCrossDomain ? '#C084FC' : e.color || 'rgba(255,255,255,0.2)';
+                    const strokeWidth = isSelectedEdge ? 2.8 : e.isCrossDomain ? 1.8 : 1.2;
 
-                      return (
-                        <Line
-                          key={`edge-2d-${e.id || i}`}
-                          x1={source.x}
-                          y1={source.y}
-                          x2={target.x}
-                          y2={target.y}
-                          stroke={strokeColor}
-                          strokeWidth={strokeWidth}
-                          strokeDasharray={e.isCrossDomain ? '4, 4' : undefined}
-                          opacity={selectedNode ? (isSelectedEdge ? 1.0 : 0.1) : 0.8}
+                    return (
+                      <Line
+                        key={`edge-2d-${e.id || i}`}
+                        x1={source.x}
+                        y1={source.y}
+                        x2={target.x}
+                        y2={target.y}
+                        stroke={strokeColor}
+                        strokeWidth={strokeWidth}
+                        strokeDasharray={e.isCrossDomain ? '4, 4' : undefined}
+                        opacity={selectedNode ? (isSelectedEdge ? 1.0 : 0.1) : 0.8}
+                      />
+                    );
+                  })}
+
+                  {nodes.map((n) => {
+                    if (n.x === undefined || n.y === undefined) return null;
+                    const isSelected = selectedNode?.id === n.id;
+                    const opacity = selectedNode ? (isSelected || connectedNodeIds.has(n.id) ? 1.0 : 0.2) : 1.0;
+
+                    return (
+                      <G
+                        key={`node-2d-${n.id}`}
+                        onPress={() => handleNodePress(n)}
+                        opacity={opacity}
+                      >
+                        <Circle
+                          cx={n.x}
+                          cy={n.y}
+                          r={n.radius}
+                          fill={n.color}
+                          stroke={isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.3)'}
+                          strokeWidth={isSelected ? 3 : 1}
                         />
-                      );
-                    })}
-                  </G>
-
-                  <G>
-                    {nodes.map((n) => {
-                      if (n.x === undefined || n.y === undefined) return null;
-                      const isSelected = selectedNode?.id === n.id;
-                      const opacity = selectedNode ? (isSelected || connectedNodeIds.has(n.id) ? 1.0 : 0.2) : 1.0;
-
-                      return (
-                        <G
-                          key={`node-2d-${n.id}`}
-                          onPress={() => handleNodePress(n)}
-                          opacity={opacity}
-                        >
-                          <Circle
-                            cx={n.x}
-                            cy={n.y}
-                            r={n.radius}
-                            fill={n.color}
-                            stroke={isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.3)'}
-                            strokeWidth={isSelected ? 3 : 1}
-                          />
-                          {n.emoji && (
-                            <SvgText x={n.x} y={n.y + 5} fontSize={n.radius * 0.85} textAnchor="middle">
-                              {n.emoji}
-                            </SvgText>
-                          )}
-                          <SvgText
-                            x={n.x}
-                            y={n.y + n.radius + 12}
-                            fontSize={10}
-                            fill="#E4E4E7"
-                            textAnchor="middle"
-                          >
-                            {n.name}
+                        {n.emoji && (
+                          <SvgText x={n.x} y={n.y + 5} fontSize={n.radius * 0.85} textAnchor="middle">
+                            {n.emoji}
                           </SvgText>
-                        </G>
-                      );
-                    })}
-                  </G>
+                        )}
+                        <SvgText
+                          x={n.x}
+                          y={n.y + n.radius + 12}
+                          fontSize={10}
+                          fill="#E4E4E7"
+                          textAnchor="middle"
+                        >
+                          {n.name}
+                        </SvgText>
+                      </G>
+                    );
+                  })}
                 </Svg>
               </Animated.View>
             </GestureDetector>
           )}
 
-          {/* Floating 3D Navigation HUD */}
+          {/* Floating 3D Navigation HUD & Angle Snaps */}
           {viewMode === '3d' && (
             <View style={styles.hud3D}>
               <TouchableOpacity
@@ -1145,17 +1149,28 @@ export function KgExplorerScreen() {
                 <Text style={styles.hudBtnText}>－</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.hudBtn} onPress={handleReset3D} activeOpacity={0.7}>
-                <Text style={styles.hudBtnText}>⟲</Text>
-                <Text style={styles.hudBtnSub}>Reset</Text>
+              <TouchableOpacity style={styles.hudBtn} onPress={handleRotate45} activeOpacity={0.7}>
+                <Text style={[styles.hudBtnText, { fontSize: 12 }]}>🔄</Text>
+                <Text style={styles.hudBtnSub}>+45°</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.hudBtn} onPress={handleFamilyFocus} activeOpacity={0.7}>
+                <Text style={[styles.hudBtnText, { fontSize: 13 }]}>👨‍👩‍👧</Text>
+                <Text style={styles.hudBtnSub}>Family</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.hudBtn} onPress={handleWorkFocus} activeOpacity={0.7}>
+                <Text style={[styles.hudBtnText, { fontSize: 13 }]}>👔</Text>
+                <Text style={styles.hudBtnSub}>Work</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.hudBtn} onPress={handleTopView} activeOpacity={0.7}>
-                <Text style={[styles.hudBtnText, { fontSize: 11 }]}>TOP</Text>
+                <Text style={[styles.hudBtnText, { fontSize: 10 }]}>TOP</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.hudBtn} onPress={handleFrontView} activeOpacity={0.7}>
-                <Text style={[styles.hudBtnText, { fontSize: 11 }]}>FRONT</Text>
+              <TouchableOpacity style={styles.hudBtn} onPress={handleReset3D} activeOpacity={0.7}>
+                <Text style={styles.hudBtnText}>⟲</Text>
+                <Text style={styles.hudBtnSub}>Reset</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1181,7 +1196,7 @@ export function KgExplorerScreen() {
 
             <Text style={styles.detailValue}>{selectedNode.value}</Text>
 
-            {/* Exact Connected Dots & Lines Breakdown */}
+            {/* Exact Connected Dots Breakdown */}
             {selectedNodeEdges.length > 0 ? (
               <View style={styles.linesSection}>
                 <Text style={styles.linesSectionTitle}>
@@ -1277,10 +1292,10 @@ const styles = StyleSheet.create({
 
   // Floating 3D Navigation HUD
   hud3D: {
-    position: 'absolute', right: 14, top: 16,
-    backgroundColor: 'rgba(24,24,27,0.85)', borderRadius: 14,
+    position: 'absolute', right: 12, top: 12,
+    backgroundColor: 'rgba(24,24,27,0.88)', borderRadius: 14,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    padding: 6, alignItems: 'center', gap: 6
+    padding: 5, alignItems: 'center', gap: 5
   },
   hudBtn: {
     width: 38, height: 38, borderRadius: 10,
@@ -1289,8 +1304,8 @@ const styles = StyleSheet.create({
   hudBtnActive: {
     backgroundColor: 'rgba(6,182,212,0.25)', borderWidth: 1, borderColor: '#06B6D4'
   },
-  hudBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
-  hudBtnSub: { color: '#71717A', fontSize: 8, fontWeight: '700', marginTop: -2 },
+  hudBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
+  hudBtnSub: { color: '#71717A', fontSize: 7.5, fontWeight: '700', marginTop: -2 },
 
   // Detail Sheet Card
   detailCard: {
