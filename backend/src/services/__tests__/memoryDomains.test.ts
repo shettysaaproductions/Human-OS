@@ -1,4 +1,4 @@
-import { classifyDomain, synthesizeConnectedDots, buildDynamicKnowledgeGraph } from '../../lib/memoryDomains';
+import { classifyDomain, synthesizeConnectedDots, buildDynamicKnowledgeGraph, formatHierarchicalMemoryPrompt } from '../../lib/memoryDomains';
 import { canonicalizeKey } from '../../lib/memoryKeySchema';
 
 describe('Wardrobe Memory Domains & Neural Dot-Connecting', () => {
@@ -101,6 +101,41 @@ describe('Wardrobe Memory Domains & Neural Dot-Connecting', () => {
       // Cross-domain edges exist
       const crossEdge = graph.edges.find(e => e.isCrossDomain);
       expect(crossEdge).toBeDefined();
+    });
+
+    it('formats hierarchical tree & stems prompt for Nova with clear branch-stem attribution and cross-domain bridges', () => {
+      const memories = [
+        { key: 'wife_name', value: 'Sakshi', memory_type: 'family' },
+        { key: 'likes_wifes_cooking', value: 'User loves her traditional recipes', memory_type: 'family' },
+        { key: 'son_name', value: 'Shreshth', memory_type: 'family' },
+        { key: 'son_age', value: '6 months', memory_type: 'family' },
+        { key: 'company_name', value: 'Acme Cloud Kitchen', memory_type: 'work' },
+        { key: 'work_schedule', value: '11am to 8pm', memory_type: 'work' },
+        { key: 'goals', value: 'Scale cloud kitchen to 5 cities', memory_type: 'goals' }
+      ];
+      const workingContext = [
+        { key: 'candidates_for_job', value: 'Interviewing 4 chefs' }
+      ];
+
+      const promptText = formatHierarchicalMemoryPrompt(memories, workingContext, 'Saa');
+
+      // Trunk & Branches exist
+      expect(promptText).toContain('HIERARCHICAL KNOWLEDGE TREE & STEMS');
+      expect(promptText).toContain('FAMILY & RELATIONSHIPS');
+      expect(promptText).toContain('Sakshi');
+      expect(promptText).toContain('Shreshth');
+      expect(promptText).toContain('[STEM:');
+      expect(promptText).toContain('6 months old');
+
+      // Career & Work Branch/Stems
+      expect(promptText).toContain('CAREER & PROFESSIONAL');
+      expect(promptText).toContain('Acme Cloud Kitchen');
+      expect(promptText).toContain('11am - 8pm');
+
+      // Neural Bridges
+      expect(promptText).toContain('NEURAL CROSS-DOMAIN BRIDGES');
+      expect(promptText).toContain('EVENING_ROUTINE');
+      expect(promptText).toContain('COLLABORATION');
     });
   });
 });

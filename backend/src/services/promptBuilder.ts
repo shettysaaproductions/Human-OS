@@ -1,7 +1,7 @@
 import { Memory } from '../types/memory';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { classifyDomain, synthesizeConnectedDots, DOMAIN_TAXONOMY, LifeDomainKey } from '../lib/memoryDomains';
+import { classifyDomain, synthesizeConnectedDots, formatHierarchicalMemoryPrompt, DOMAIN_TAXONOMY, LifeDomainKey } from '../lib/memoryDomains';
 
 /**
  * Computes dynamic age based on recorded date and elapsed time.
@@ -512,6 +512,12 @@ Nova connects dots across compartments like a living human companion:`;
           finalPrompt += `\n- [${dot.badge}]: ${dot.insight}`;
         }
         finalPrompt += `\n*The Wardrobe Principle:* Do NOT view memories as isolated, disconnected facts in a single cupboard. Pull the matching pieces from different compartments to fit the moment (e.g. office hours wrap-up connects to family evening time; work candidates connect to company scaling goals).`;
+      }
+
+      // Synthesize Hierarchical Knowledge Tree & Stems for Nova Reasoning
+      const treeBlock = formatHierarchicalMemoryPrompt(memories, workingMemories || [], preferredName);
+      if (treeBlock) {
+        finalPrompt += treeBlock;
       }
     }
 

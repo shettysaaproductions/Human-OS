@@ -33,6 +33,9 @@ interface GraphNode {
   isDepartment?: boolean;
   isContext?: boolean;
   emoji?: string;
+  parentEntityId?: string;
+  hierarchyLevel?: 1 | 2 | 3; // 1 = Dept Trunk, 2 = Entity Branch, 3 = Attribute Stem
+  treePath?: string[];
   x: number;
   y: number;
 }
@@ -45,6 +48,8 @@ interface GraphEdge {
   color: string;
   isCrossDomain?: boolean;
   weight?: number;
+  edgeType?: 'DEPARTMENT_BRANCH' | 'ENTITY_BRANCH' | 'ATTRIBUTE_STEM' | 'NEURAL_BRIDGE';
+  explanation?: string;
   sourceNode?: GraphNode;
   targetNode?: GraphNode;
   pathD?: string;
@@ -71,7 +76,7 @@ const DOMAIN_COLORS: Record<string, { color: string; emoji: string; name: string
   identity:  { color: '#8B5CF6', emoji: '🧠', name: 'Core Identity',          short: 'Identity' },
 };
 
-// Department hub angles around the central Core (Sun) at radius 200
+// Department hub angles around the central Core (Sun) at radius 175
 const DEPT_ANGLES: Record<string, number> = {
   family:    -Math.PI * 0.18, // Top-right (~ -32 deg)
   work:      -Math.PI * 0.60, // Top-left (~ -108 deg)
@@ -83,83 +88,109 @@ const DEPT_ANGLES: Record<string, number> = {
 function inferDomain(rawKey?: string, memoryType?: string): string {
   const k = (rawKey || '').toLowerCase();
   const mt = (memoryType || '').toLowerCase();
-  if (k.includes('son_age') || k.includes('child_age') || mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family/.test(k)) return 'family';
-  if (mt === 'work' || /company|office|schedule|hours|days|timing|candidate|job|work/.test(k)) return 'work';
+  if (k.includes('son_age') || k.includes('child_age') || k.includes('baby') || mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family|cook/.test(k)) return 'family';
+  if (mt === 'work' || /company|office|schedule|hours|days|timing|candidate|job|work|business|kitchen/.test(k)) return 'work';
   if (mt === 'goals' || /goal|target|passion|vision|ambition/.test(k)) return 'goals';
   if (mt === 'preferences' || mt === 'lifestyle' || /favourite|food|drink|beverage|color|routine/.test(k)) return 'lifestyle';
   return 'identity';
 }
 
-function toDisplayNames(key: string = '', value: string = ''): { title: string; sub?: string } {
+function toDisplayNames(key: string = '', value: string = '', fallbackName: string = ''): { title: string; sub?: string } {
   const k = (key || '').toLowerCase();
   const v = (value || '').trim();
 
-  if (k === 'wife_name') return { title: v, sub: 'Wife' };
-  if (k === 'son_name') return { title: v, sub: 'Son' };
-  if (k === 'son_age') return { title: `${v} old`, sub: 'Son Age' };
-  if (k === 'father_name') return { title: v, sub: 'Father' };
-  if (k === 'mother_name') return { title: v, sub: 'Mother' };
-  if (k === 'company_name') return { title: v, sub: 'Company' };
+  // If fallbackName already has (Role) format e.g. "Sakshi (Wife)"
+  if (!k && fallbackName) {
+    const match = fallbackName.match(/^(.*?)\s*\((.*?)\)$/);
+    if (match) {
+      return { title: match[1].trim(), sub: match[2].trim() };
+    }
+  }
+
+  if (k === 'wife_name') return { title: v || 'Wife', sub: 'Wife' };
+  if (k === 'son_name') return { title: v || 'Son', sub: 'Son' };
+  if (k === 'son_age' || k === 'child_age' || k === 'baby_age') return { title: `${v} old`, sub: 'Age' };
+  if (k === 'likes_wifes_cooking') return { title: "Wife's Cooking", sub: 'Hobby / Food' };
+  if (k === 'cloud_kitchen_business') return { title: 'Cloud Kitchen', sub: 'Business Plan' };
+  if (k === 'father_name') return { title: v || 'Father', sub: 'Father' };
+  if (k === 'mother_name') return { title: v || 'Mother', sub: 'Mother' };
+  if (k === 'daughter_name') return { title: v || 'Daughter', sub: 'Daughter' };
+  if (k === 'sister_name') return { title: v || 'Sister', sub: 'Sister' };
+  if (k === 'brother_name') return { title: v || 'Brother', sub: 'Brother' };
+  if (k === 'company_name' || k === 'current_company') return { title: v || 'Company', sub: 'Company' };
   if (k === 'work_schedule') return { title: '11am - 8pm', sub: 'Work Hours' };
-  if (k === 'office_hours') return { title: v, sub: 'Office Hours' };
-  if (k === 'current_office_location') return { title: v, sub: 'Current Location' };
-  if (k === 'candidates_for_job') return { title: v, sub: 'Interviews' };
+  if (k === 'office_hours') return { title: v || 'Office Hours', sub: 'Office Hours' };
+  if (k === 'current_office_location') return { title: v || 'Location', sub: 'Office Location' };
+  if (k === 'candidates_for_job') return { title: v || 'Interviews', sub: 'Candidate Pipeline' };
   if (k === 'hope_for_job_selection') return { title: 'Target: 2', sub: 'Selections' };
-  if (k === 'goals') return { title: v.length > 20 ? v.slice(0, 18) + '...' : v, sub: 'Ambition' };
-  if (k === 'passions') return { title: 'Passions', sub: 'Leadership' };
+  if (k === 'goals' || k === 'primary_goal') return { title: v.length > 20 ? v.slice(0, 18) + '...' : (v || 'Ambition'), sub: 'Primary Goal' };
+  if (k === 'passions') return { title: 'Passions', sub: 'Core Driver' };
   if (k === 'preferred_name') {
     const clean = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
     return { title: clean, sub: 'Name' };
   }
+
+  // Generic fallback: check if fallbackName has (Role)
+  if (fallbackName) {
+    const match = fallbackName.match(/^(.*?)\s*\((.*?)\)$/);
+    if (match) {
+      return { title: match[1].trim(), sub: match[2].trim() };
+    }
+  }
+
   const cleanKey = (key || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   return {
     title: v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey || 'Memory'),
-    sub: cleanKey || 'Fact'
+    sub: cleanKey || 'Attribute'
   };
 }
 
 // ----------------------------------------------------
-// PLANETARY CONSTELLATION ALGORITHM (ZERO OVERLAPPING)
-// Distributes nodes on wide non-intersecting orbital fans
-// Safe coordinate bounds: [125, 875] within 1000x1000 universe
+// TREE & STEMS HIERARCHICAL GALAXY ALGORITHM
+// Central Sun -> Department Trunks -> Entity Branches -> Attribute Stems
+// Safe coordinate bounds: [120, 880] within 1000x1000 universe
 // ----------------------------------------------------
 function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
   const nodes: GraphNode[] = [];
   const nodeMap = new Map<string, GraphNode>();
 
   // 1. Central Sun (Core User)
+  const rawCore = rawNodes.find(n => n && (n.id === 'user-core' || n.entity_type === 'self'));
+  const coreName = rawCore?.name || 'Saa';
   const coreNode: GraphNode = {
     id: 'user-core',
-    name: 'Saa',
-    shortName: 'Saa',
+    name: coreName,
+    shortName: coreName,
     subLabel: 'Central Core',
     entity_type: 'self',
     department: 'identity',
     color: '#8B5CF6',
     radius: 30,
-    value: 'Saa · Central Brain & Consciousness',
+    value: rawCore?.value || `${coreName} · Central Brain & Consciousness`,
     isHub: true,
     emoji: '🧠',
+    hierarchyLevel: 1,
+    treePath: [coreName],
     x: CENTER,
     y: CENTER
   };
   nodes.push(coreNode);
   nodeMap.set(coreNode.id, coreNode);
 
-  // Group raw memory nodes by department
+  // Group items by department (excluding core and dept hubs)
   const deptBuckets: Record<string, any[]> = {
     family: [], work: [], goals: [], lifestyle: [], identity: []
   };
 
   for (const n of rawNodes) {
-    if (!n || n.id === 'user-core' || n.isHub || n.isDepartment) continue;
+    if (!n || n.id === 'user-core' || n.isHub || n.isDepartment || n.id?.startsWith('dept-')) continue;
     const d = n.department || inferDomain(n.raw_key || n.id, n.entity_type);
     if (!deptBuckets[d]) deptBuckets[d] = [];
     deptBuckets[d].push(n);
   }
 
-  // 2. Department Hubs (Planets) at Radius 200 from Center
-  const DEPT_ORBIT_RADIUS = 200;
+  // 2. Department Hubs (Level 1 Trunks) at Radius 175
+  const DEPT_ORBIT_RADIUS = 175;
   const deptList: DepartmentMeta[] = [];
   const DEPT_KEYS = ['family', 'work', 'goals', 'lifestyle', 'identity'];
 
@@ -169,18 +200,22 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     const hx = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.cos(angle));
     const hy = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.sin(angle));
 
+    const hubId = `dept-${d}`;
     const hubNode: GraphNode = {
-      id: `dept-${d}`,
+      id: hubId,
       name: meta.name,
       shortName: meta.short,
-      subLabel: `${deptBuckets[d]?.length || 0} items`,
+      subLabel: `${deptBuckets[d]?.length || 0} stems`,
       entity_type: 'department',
       department: d,
       color: meta.color,
       radius: 22,
-      value: `${meta.name} Department (${deptBuckets[d]?.length || 0} connected memories)`,
+      value: `${meta.name} Trunk (${deptBuckets[d]?.length || 0} connected memories & stems)`,
       isDepartment: true,
       emoji: meta.emoji,
+      parentEntityId: 'user-core',
+      hierarchyLevel: 1,
+      treePath: [coreName, meta.short],
       x: hx,
       y: hy
     };
@@ -197,136 +232,228 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       y: hy
     });
 
-    // 3. Memory Nodes (Moons) in Two Non-Colliding Staggered Orbital Fans
+    // 3. Tree Hierarchy: Separate Level 2 Branches vs Level 3 Stems
     const members = deptBuckets[d] || [];
-    const count = members.length;
-    if (count === 0) continue;
+    if (members.length === 0) continue;
 
-    // Outward pointing direction angle away from center
-    const outwardAngle = angle;
-    // Fan spread: ~120 degrees total spread
-    const spreadSpan = Math.min(Math.PI * 0.75, Math.max(Math.PI * 0.45, (count - 1) * 0.35));
-    const startAngle = outwardAngle - spreadSpan / 2;
+    // Identify Entity Branches (Level 2) and Stems (Level 3)
+    const branchItems: any[] = [];
+    const stemItems: any[] = [];
 
-    members.forEach((mem, idx) => {
-      const names = toDisplayNames(mem.raw_key || mem.name || mem.id, mem.value || mem.name);
+    // Check if raw node already has hierarchyLevel or parentEntityId
+    for (const mem of members) {
+      if (mem.hierarchyLevel === 3 || (mem.parentEntityId && mem.parentEntityId !== hubId && mem.parentEntityId !== 'user-core')) {
+        stemItems.push(mem);
+      } else {
+        branchItems.push(mem);
+      }
+    }
 
-      // Stagger between inner arc (100px) and outer arc (160px)
-      const isOuter = count > 3 ? idx % 2 === 1 : false;
-      const moonDist = isOuter ? 160 : 105;
+    // If all items ended up in stemItems but no branches (edge case), promote the primary parent
+    if (branchItems.length === 0 && stemItems.length > 0) {
+      branchItems.push(stemItems.shift()!);
+    }
 
-      const frac = count === 1 ? 0.5 : idx / (count - 1);
-      const moonAngle = startAngle + frac * spreadSpan;
+    // Position Level 2 Branches: Fanning outward from Department Hub (hx, hy)
+    const branchCount = branchItems.length;
+    const branchDist = 95;
+    const branchSpread = Math.min(Math.PI * 0.65, Math.max(0.35, (branchCount - 1) * 0.32));
 
-      const mx = Math.round(hx + moonDist * Math.cos(moonAngle));
-      const my = Math.round(hy + moonDist * Math.sin(moonAngle));
+    branchItems.forEach((bMem, bIdx) => {
+      const names = toDisplayNames(bMem.raw_key, bMem.value, bMem.name);
+      const frac = branchCount === 1 ? 0 : (bIdx / (branchCount - 1) - 0.5);
+      const bAngle = angle + frac * branchSpread;
 
-      const moonNode: GraphNode = {
-        id: mem.id || `node-${d}-${idx}`,
+      const bx = Math.round(hx + branchDist * Math.cos(bAngle));
+      const by = Math.round(hy + branchDist * Math.sin(bAngle));
+
+      const treePath = bMem.treePath || [coreName, meta.short, names.title];
+
+      const branchNode: GraphNode = {
+        id: bMem.id || `node-${d}-branch-${bIdx}`,
         name: names.title,
         shortName: names.title,
         subLabel: names.sub,
-        entity_type: mem.entity_type || 'memory',
+        entity_type: bMem.entity_type || 'entity_branch',
         department: d,
-        color: mem.isContext ? '#06B6D4' : meta.color,
-        radius: mem.isContext ? 14 : 15,
-        value: mem.value || names.title,
-        raw_key: mem.raw_key,
-        isContext: mem.isContext,
-        emoji: mem.isContext ? '⚡' : undefined,
-        x: mx,
-        y: my
+        color: bMem.isContext ? '#06B6D4' : meta.color,
+        radius: 18,
+        value: bMem.value || names.title,
+        raw_key: bMem.raw_key,
+        isContext: bMem.isContext,
+        emoji: bMem.isContext ? '⚡' : undefined,
+        parentEntityId: hubId,
+        hierarchyLevel: 2,
+        treePath,
+        x: bx,
+        y: by
       };
 
-      nodes.push(moonNode);
-      nodeMap.set(moonNode.id, moonNode);
+      nodes.push(branchNode);
+      nodeMap.set(branchNode.id, branchNode);
+    });
+
+    // Position Level 3 Stems: Fanning outward from their respective Parent Branch
+    const stemsByParent = new Map<string, any[]>();
+    for (const stem of stemItems) {
+      const pId = stem.parentEntityId || branchItems[0]?.id;
+      if (!stemsByParent.has(pId)) stemsByParent.set(pId, []);
+      stemsByParent.get(pId)!.push(stem);
+    }
+
+    stemsByParent.forEach((stems, parentId) => {
+      const parentNode = nodeMap.get(parentId) || nodeMap.get(branchItems[0]?.id);
+      const px = parentNode ? parentNode.x : hx;
+      const py = parentNode ? parentNode.y : hy;
+
+      // Base angle pointing away from dept hub (or center)
+      const baseStemAngle = parentNode
+        ? Math.atan2(parentNode.y - hy, parentNode.x - hx)
+        : angle;
+
+      const sCount = stems.length;
+      const stemDist = 72;
+      const stemSpread = Math.min(Math.PI * 0.65, Math.max(0.4, (sCount - 1) * 0.38));
+
+      stems.forEach((sMem, sIdx) => {
+        const names = toDisplayNames(sMem.raw_key, sMem.value, sMem.name);
+        const sFrac = sCount === 1 ? 0 : (sIdx / (sCount - 1) - 0.5);
+        const sAngle = baseStemAngle + sFrac * stemSpread;
+
+        const sx = Math.round(px + stemDist * Math.cos(sAngle));
+        const sy = Math.round(py + stemDist * Math.sin(sAngle));
+
+        const treePath = sMem.treePath || (parentNode ? [...(parentNode.treePath || []), names.title] : [coreName, meta.short, names.title]);
+
+        const stemNode: GraphNode = {
+          id: sMem.id || `node-${d}-stem-${sIdx}`,
+          name: names.title,
+          shortName: names.title,
+          subLabel: names.sub,
+          entity_type: sMem.entity_type || 'attribute_stem',
+          department: d,
+          color: sMem.isContext ? '#06B6D4' : meta.color,
+          radius: 14,
+          value: sMem.value || names.title,
+          raw_key: sMem.raw_key,
+          isContext: sMem.isContext,
+          emoji: sMem.isContext ? '⚡' : undefined,
+          parentEntityId: parentNode?.id || hubId,
+          hierarchyLevel: 3,
+          treePath,
+          x: sx,
+          y: sy
+        };
+
+        nodes.push(stemNode);
+        nodeMap.set(stemNode.id, stemNode);
+      });
     });
   }
 
-  // 4. Edges Construction (Core -> Hubs, Hubs -> Moons, and Cross-Domain Links)
+  // 4. Edges Construction (Preserve raw edges or synthesize tree lines + cross bridges)
   const edges: GraphEdge[] = [];
+  const edgeSet = new Set<string>();
 
-  // Core -> Department Hubs
-  for (const d of DEPT_KEYS) {
-    const hubId = `dept-${d}`;
-    const hub = nodeMap.get(hubId);
-    if (!hub) continue;
+  if (rawEdges && rawEdges.length > 0) {
+    for (const re of rawEdges) {
+      if (!re) continue;
+      const sId = typeof re.source === 'string' ? re.source : re.source?.id;
+      const tId = typeof re.target === 'string' ? re.target : re.target?.id;
+      if (!sId || !tId || sId === tId) continue;
 
-    edges.push({
-      id: `edge-core-${d}`,
-      source: 'user-core',
-      target: hubId,
-      sourceNode: coreNode,
-      targetNode: hub,
-      relation: 'DEPARTMENT_HUB',
-      color: 'rgba(255,255,255,0.25)',
-      weight: 3
-    });
-  }
+      const sNode = nodeMap.get(sId);
+      const tNode = nodeMap.get(tId);
+      if (!sNode || !tNode) continue;
 
-  // Department Hub -> Memory Nodes
-  for (const d of DEPT_KEYS) {
-    const hubId = `dept-${d}`;
-    const hub = nodeMap.get(hubId);
-    const members = deptBuckets[d] || [];
-    if (!hub) continue;
+      const edgeKey = `${sId}-->${tId}`;
+      if (edgeSet.has(edgeKey)) continue;
+      edgeSet.add(edgeKey);
 
-    for (const mem of members) {
-      const moon = nodeMap.get(mem.id);
-      if (!moon) continue;
+      const isCross = !!re.isCrossDomain;
+      let pathD: string | undefined;
+      let midX = Math.round((sNode.x + tNode.x) / 2);
+      let midY = Math.round((sNode.y + tNode.y) / 2);
+
+      if (isCross) {
+        const dx = tNode.x - sNode.x;
+        const dy = tNode.y - sNode.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 1) {
+          const nx = -dy / dist;
+          const ny = dx / dist;
+          const curveAmount = Math.min(65, Math.max(30, dist * 0.18));
+          const ctrlX = Math.round((sNode.x + tNode.x) / 2 + nx * curveAmount);
+          const ctrlY = Math.round((sNode.y + tNode.y) / 2 + ny * curveAmount);
+          pathD = `M ${sNode.x} ${sNode.y} Q ${ctrlX} ${ctrlY} ${tNode.x} ${tNode.y}`;
+          // Midpoint of quadratic Bézier at t=0.5
+          midX = Math.round(0.25 * sNode.x + 0.5 * ctrlX + 0.25 * tNode.x);
+          midY = Math.round(0.25 * sNode.y + 0.5 * ctrlY + 0.25 * tNode.y);
+        }
+      }
 
       edges.push({
-        id: `edge-${hubId}-${moon.id}`,
-        source: hubId,
-        target: moon.id,
-        sourceNode: hub,
-        targetNode: moon,
-        relation: 'CONTAINS',
-        color: hub.color,
-        weight: 1.5
+        id: re.id || `edge-${sId}-${tId}`,
+        source: sId,
+        target: tId,
+        sourceNode: sNode,
+        targetNode: tNode,
+        relation: re.relation || (isCross ? 'NEURAL_BRIDGE' : 'CONNECTED'),
+        color: re.color || (isCross ? '#C084FC' : sNode.color),
+        isCrossDomain: isCross,
+        weight: re.weight || (isCross ? 2.5 : 1.5),
+        edgeType: re.edgeType || (isCross ? 'NEURAL_BRIDGE' : 'ATTRIBUTE_STEM'),
+        explanation: re.explanation,
+        pathD,
+        midX,
+        midY
       });
     }
-  }
+  } else {
+    // Fallback edge creation if rawEdges was empty
+    for (const d of DEPT_KEYS) {
+      const hubId = `dept-${d}`;
+      const hub = nodeMap.get(hubId);
+      if (!hub) continue;
 
-  // Cross-Domain Curved Neural Bridges
-  for (const re of rawEdges) {
-    if (!re || !re.isCrossDomain) continue;
-    const sId = typeof re.source === 'string' ? re.source : re.source?.id;
-    const tId = typeof re.target === 'string' ? re.target : re.target?.id;
-    if (!sId || !tId) continue;
+      // Core -> Dept Hub
+      edges.push({
+        id: `edge-core-${d}`,
+        source: 'user-core',
+        target: hubId,
+        sourceNode: coreNode,
+        targetNode: hub,
+        relation: 'DEPARTMENT_TRUNK',
+        color: 'rgba(255,255,255,0.25)',
+        weight: 3,
+        edgeType: 'DEPARTMENT_BRANCH',
+        explanation: `Main trunk connecting core to ${hub.name}`,
+        midX: Math.round((coreNode.x + hub.x) / 2),
+        midY: Math.round((coreNode.y + hub.y) / 2)
+      });
+    }
 
-    const sNode = nodeMap.get(sId);
-    const tNode = nodeMap.get(tId);
-    if (!sNode || !tNode) continue;
+    // Connect child nodes to their parentEntityId
+    for (const n of nodes) {
+      if (!n.parentEntityId || n.id === 'user-core' || n.id.startsWith('dept-')) continue;
+      const parent = nodeMap.get(n.parentEntityId);
+      if (!parent) continue;
 
-    const dx = tNode.x - sNode.x;
-    const dy = tNode.y - sNode.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 1) continue;
-
-    const nx = -dy / dist;
-    const ny = dx / dist;
-    const curveAmount = Math.min(60, Math.max(30, dist * 0.15));
-
-    const midX = Math.round((sNode.x + tNode.x) / 2 + nx * curveAmount);
-    const midY = Math.round((sNode.y + tNode.y) / 2 + ny * curveAmount);
-
-    const pathD = `M ${sNode.x} ${sNode.y} Q ${midX} ${midY} ${tNode.x} ${tNode.y}`;
-
-    edges.push({
-      id: re.id || `cross-${sId}-${tId}`,
-      source: sId,
-      target: tId,
-      sourceNode: sNode,
-      targetNode: tNode,
-      relation: re.relation || 'NEURAL_LINK',
-      color: re.color || '#C084FC',
-      isCrossDomain: true,
-      weight: 2.5,
-      pathD,
-      midX,
-      midY
-    });
+      edges.push({
+        id: `edge-${parent.id}-${n.id}`,
+        source: parent.id,
+        target: n.id,
+        sourceNode: parent,
+        targetNode: n,
+        relation: n.hierarchyLevel === 2 ? 'ENTITY_BRANCH' : 'ATTRIBUTE_STEM',
+        color: parent.color,
+        weight: n.hierarchyLevel === 2 ? 2 : 1.2,
+        edgeType: n.hierarchyLevel === 2 ? 'ENTITY_BRANCH' : 'ATTRIBUTE_STEM',
+        explanation: `${n.name} branch under ${parent.name}`,
+        midX: Math.round((parent.x + n.x) / 2),
+        midY: Math.round((parent.y + n.y) / 2)
+      });
+    }
   }
 
   return { nodes, edges, departments: deptList };
@@ -338,42 +465,101 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
   const rawEdges: any[] = [];
   const ids = new Set<string>();
 
+  const allItems: Array<{ id: string; key: string; value: string; isContext?: boolean }> = [];
   for (const m of (memories || [])) {
     if (!m || !m.key || !m.value) continue;
-    const d = inferDomain(m.key, m.memory_type);
-    const nodeId = `mem-${m.key}`;
-    if (ids.has(nodeId)) continue;
-
-    rawNodes.push({
-      id: nodeId,
-      raw_key: m.key,
-      name: m.key,
-      value: m.value,
-      department: d,
-      entity_type: m.memory_type || 'memory'
-    });
-    ids.add(nodeId);
+    allItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value });
   }
-
   for (const w of (workingContext || [])) {
     if (!w || !w.key || !w.value) continue;
-    const d = inferDomain(w.key);
-    const nodeId = `wm-${w.key}`;
-    if (ids.has(nodeId)) continue;
-
-    rawNodes.push({
-      id: nodeId,
-      raw_key: w.key,
-      name: w.key,
-      value: w.value,
-      department: d,
-      entity_type: 'active_context',
-      isContext: true
-    });
-    ids.add(nodeId);
+    allItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
   }
 
-  // Cross-domain links
+  const allKeys = new Set(allItems.map(i => i.key.toLowerCase()));
+
+  for (const item of allItems) {
+    if (ids.has(item.id)) continue;
+    const d = inferDomain(item.key);
+    const k = item.key.toLowerCase();
+
+    let parentId = `dept-${d}`;
+    let hierarchyLevel: 2 | 3 = 2;
+    let relation = item.isContext ? 'ACTIVE_FOCUS' : 'CONTAINS';
+    let edgeType: 'ENTITY_BRANCH' | 'ATTRIBUTE_STEM' = 'ENTITY_BRANCH';
+    let explanation = `Belongs to ${d}`;
+
+    // Family Stems
+    if (d === 'family') {
+      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name'].includes(k)) {
+        hierarchyLevel = 2;
+        relation = 'FAMILY_MEMBER';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = 'Family member branch';
+      } else if ((k.startsWith('wife_') || k === 'likes_wifes_cooking') && allKeys.has('wife_name')) {
+        parentId = 'mem-wife_name';
+        hierarchyLevel = 3;
+        relation = k.includes('cook') ? 'COOKING_HOBBY' : 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Wife";
+      } else if ((k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_')) && allKeys.has('son_name')) {
+        parentId = 'mem-son_name';
+        hierarchyLevel = 3;
+        relation = k.includes('age') ? 'AGE' : 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Son";
+      }
+    }
+
+    // Work Stems
+    if (d === 'work') {
+      if (['company_name', 'business_name', 'cloud_kitchen_business'].includes(k)) {
+        hierarchyLevel = 2;
+        relation = 'ORGANIZATION';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = 'Organization / Business in Career Tree';
+      } else if (allKeys.has('company_name')) {
+        parentId = 'mem-company_name';
+        hierarchyLevel = 3;
+        relation = k.includes('schedule') ? 'WORK_SCHEDULE' : k.includes('candidate') ? 'HIRING_TARGET' : 'WORK_DETAIL';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Company";
+      }
+    }
+
+    // Goals Stems
+    if (d === 'goals') {
+      if (k === 'goals' || k === 'primary_goal') {
+        hierarchyLevel = 2;
+        relation = 'PRIMARY_GOAL';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = 'Primary Goal branch';
+      }
+    }
+
+    rawNodes.push({
+      id: item.id,
+      raw_key: item.key,
+      name: item.key,
+      value: item.value,
+      department: d,
+      entity_type: item.isContext ? 'active_context' : 'memory',
+      isContext: item.isContext,
+      parentEntityId: parentId,
+      hierarchyLevel
+    });
+    ids.add(item.id);
+
+    rawEdges.push({
+      id: `edge-${parentId}-${item.id}`,
+      source: parentId,
+      target: item.id,
+      relation,
+      edgeType,
+      explanation
+    });
+  }
+
+  // Cross-domain neural bridges
   if (ids.has('mem-work_schedule') && ids.has('mem-wife_name')) {
     rawEdges.push({
       id: 'cross-sched-wife',
@@ -381,7 +567,9 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
       target: 'mem-wife_name',
       relation: 'EVENING_ROUTINE',
       color: '#C084FC',
-      isCrossDomain: true
+      isCrossDomain: true,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Evening transition: Work hours wrap up into family time with wife'
     });
   }
   if (ids.has('mem-work_schedule') && ids.has('mem-son_name')) {
@@ -391,17 +579,9 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
       target: 'mem-son_name',
       relation: 'EVENING_ROUTINE',
       color: '#C084FC',
-      isCrossDomain: true
-    });
-  }
-  if (ids.has('wm-candidates_for_job') && ids.has('mem-company_name')) {
-    rawEdges.push({
-      id: 'cross-cand-comp',
-      source: 'wm-candidates_for_job',
-      target: 'mem-company_name',
-      relation: 'HIRING_AT',
-      color: '#34D399',
-      isCrossDomain: true
+      isCrossDomain: true,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Evening transition: Daily routine connects work hours to time with son'
     });
   }
   if (ids.has('wm-candidates_for_job') && ids.has('mem-goals')) {
@@ -411,7 +591,21 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
       target: 'mem-goals',
       relation: 'POWERS_GOAL',
       color: '#10B981',
-      isCrossDomain: true
+      isCrossDomain: true,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Recruitment drive directly powers long-term company scaling goal'
+    });
+  }
+  if (ids.has('wm-candidates_for_job') && ids.has('mem-company_name')) {
+    rawEdges.push({
+      id: 'cross-cand-comp',
+      source: 'wm-candidates_for_job',
+      target: 'mem-company_name',
+      relation: 'HIRING_AT',
+      color: '#34D399',
+      isCrossDomain: true,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Active interviews building the core team at the company'
     });
   }
   if (ids.has('mem-passions') && ids.has('mem-son_name')) {
@@ -421,7 +615,9 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
       target: 'mem-son_name',
       relation: 'FAMILY_BOND',
       color: '#F472B6',
-      isCrossDomain: true
+      isCrossDomain: true,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Core life passions anchor nurturing family time with son'
     });
   }
 
@@ -469,6 +665,7 @@ function KgExplorerContent() {
   const [departments, setDepartments] = useState<DepartmentMeta[]>([]);
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
 
@@ -550,8 +747,6 @@ function KgExplorerContent() {
 
   // ----------------------------------------------------
   // FLUID GESTURE SYSTEM (GPU-DRIVEN ON NATIVE UI THREAD)
-  // Pinch to Zoom (0.35x to 4.5x)
-  // Pan to Move Universe OR Orbit 360 in 3D
   // ----------------------------------------------------
   const pinchGesture = useMemo(() => {
     return Gesture.Pinch()
@@ -572,12 +767,9 @@ function KgExplorerContent() {
       .onUpdate((e) => {
         'worklet';
         if (viewMode === '3d' && gestureMode === 'orbit') {
-          // Continuous 360 degree rotation on Yaw
           yaw.value = savedYaw.value + (e.translationX * 0.006);
-          // Clamp Pitch between -60 deg and +60 deg to prevent gimbal inversion
           pitch.value = Math.max(-1.05, Math.min(1.05, savedPitch.value - (e.translationY * 0.006)));
         } else {
-          // Free Pan across universe
           translateX.value = savedTranslateX.value + e.translationX;
           translateY.value = savedTranslateY.value + e.translationY;
         }
@@ -598,7 +790,6 @@ function KgExplorerContent() {
     return Gesture.Simultaneous(pinchGesture, panGesture);
   }, [pinchGesture, panGesture]);
 
-  // Native GPU Animated Style with Safe Angle Formatting
   const animatedUniverseStyle = useAnimatedStyle(() => {
     'worklet';
     const tx = isNaN(translateX.value) ? defaultTranslateX : translateX.value;
@@ -632,11 +823,7 @@ function KgExplorerContent() {
     };
   });
 
-  // ----------------------------------------------------
-  // CAMERA QUICK SNAPS: Glides camera straight to any node/dept
-  // ----------------------------------------------------
   const glideCameraTo = useCallback((targetX: number, targetY: number, targetScale: number = 1.35) => {
-    // Relative displacement from canvas center
     const destX = (SCREEN_WIDTH - WORLD_SIZE) / 2 - (targetX - CENTER) * targetScale;
     const destY = (GRAPH_HEIGHT - WORLD_SIZE) / 2 - (targetY - CENTER) * targetScale;
 
@@ -669,6 +856,8 @@ function KgExplorerContent() {
     if (!dept) return;
 
     setSelectedDept(deptId);
+    setSelectedNode(null);
+    setSelectedEdge(null);
     glideCameraTo(dept.x, dept.y, 1.4);
   }, [departments, glideCameraTo]);
 
@@ -685,6 +874,7 @@ function KgExplorerContent() {
   }, [scale, savedScale]);
 
   const handleNodePress = (node: GraphNode) => {
+    setSelectedEdge(null);
     if (selectedNode?.id === node.id) {
       setSelectedNode(null);
     } else {
@@ -693,12 +883,37 @@ function KgExplorerContent() {
     }
   };
 
+  const handleEdgePress = (edge: GraphEdge) => {
+    setSelectedNode(null);
+    if (selectedEdge?.id === edge.id) {
+      setSelectedEdge(null);
+    } else {
+      setSelectedEdge(edge);
+      if (edge.midX && edge.midY) {
+        glideCameraTo(edge.midX, edge.midY, Math.max(scale.value, 1.4));
+      }
+    }
+  };
+
+  const parentNode = useMemo(() => {
+    if (!selectedNode?.parentEntityId) return null;
+    return nodes.find(n => n.id === selectedNode.parentEntityId) || null;
+  }, [selectedNode, nodes]);
+
+  const childStems = useMemo(() => {
+    if (!selectedNode) return [];
+    return nodes.filter(n => n.parentEntityId === selectedNode.id);
+  }, [selectedNode, nodes]);
+
   const selectedNodeEdges = useMemo(() => {
     if (!selectedNode) return [];
     return edges.filter(e => e.source === selectedNode.id || e.target === selectedNode.id);
   }, [selectedNode, edges]);
 
   const connectedNodeIds = useMemo(() => {
+    if (selectedEdge) {
+      return new Set<string>([selectedEdge.source, selectedEdge.target]);
+    }
     if (!selectedNode) return new Set<string>();
     const set = new Set<string>([selectedNode.id]);
     for (const e of selectedNodeEdges) {
@@ -706,7 +921,7 @@ function KgExplorerContent() {
       set.add(e.target);
     }
     return set;
-  }, [selectedNode, selectedNodeEdges]);
+  }, [selectedNode, selectedNodeEdges, selectedEdge]);
 
   if (loading) {
     return (
@@ -764,6 +979,8 @@ function KgExplorerContent() {
               style={[styles.deptChip, !selectedDept && styles.deptChipActive]}
               onPress={() => {
                 setSelectedDept(null);
+                setSelectedNode(null);
+                setSelectedEdge(null);
                 handleResetView();
               }}
             >
@@ -842,20 +1059,31 @@ function KgExplorerContent() {
             <Animated.View style={[styles.universe, animatedUniverseStyle]}>
               <Svg width={WORLD_SIZE} height={WORLD_SIZE} viewBox={`0 0 ${WORLD_SIZE} ${WORLD_SIZE}`}>
 
-                {/* 1. Draw Connecting Lines */}
+                {/* 1. Draw Connecting Lines with Interactive Hitboxes */}
                 <G>
                   {edges.map((e) => {
                     const isCross = !!e.isCrossDomain;
                     if (lineFilter === 'cross' && !isCross) return null;
 
-                    const isSelectedEdge = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+                    const isDirectlySelected = selectedEdge?.id === e.id;
+                    const isNodeConnected = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+                    const isHighlight = isDirectlySelected || isNodeConnected;
 
                     let strokeColor = e.color || 'rgba(255,255,255,0.2)';
                     let strokeWidth = isCross ? 2.5 : 1.5;
                     let strokeOpacity = 0.55;
 
-                    if (selectedNode) {
-                      if (isSelectedEdge) {
+                    if (selectedEdge) {
+                      if (isDirectlySelected) {
+                        strokeColor = '#38BDF8';
+                        strokeWidth = 4.5;
+                        strokeOpacity = 1.0;
+                      } else {
+                        strokeOpacity = 0.06;
+                        strokeWidth = 0.8;
+                      }
+                    } else if (selectedNode) {
+                      if (isNodeConnected) {
                         strokeColor = isCross ? '#38BDF8' : '#FFFFFF';
                         strokeWidth = 4;
                         strokeOpacity = 1.0;
@@ -873,42 +1101,75 @@ function KgExplorerContent() {
                       // Curved Bézier Arch for Cross-Domain Connections
                       return (
                         <G key={`edge-${e.id}`}>
-                          {isSelectedEdge && (
+                          {isHighlight && (
                             <Path
                               d={e.pathD}
                               stroke="#38BDF8"
-                              strokeWidth={8}
+                              strokeWidth={10}
                               strokeLinecap="round"
                               fill="none"
-                              opacity={0.3}
+                              opacity={0.35}
                             />
                           )}
                           <Path
                             d={e.pathD}
                             stroke={strokeColor}
                             strokeWidth={strokeWidth}
-                            strokeDasharray={isSelectedEdge ? undefined : '5, 5'}
+                            strokeDasharray={isHighlight ? undefined : '5, 5'}
                             strokeLinecap="round"
                             fill="none"
                             opacity={strokeOpacity}
+                          />
+                          {/* Invisible 28px hit-box for easy tap */}
+                          <Path
+                            d={e.pathD}
+                            stroke="transparent"
+                            strokeWidth={28}
+                            fill="none"
+                            onPress={() => handleEdgePress(e)}
                           />
                         </G>
                       );
                     }
 
-                    // Straight radial spokes
+                    // Straight radial tree spokes & stem lines
                     if (!e.sourceNode || !e.targetNode) return null;
                     return (
-                      <Line
-                        key={`edge-${e.id}`}
-                        x1={e.sourceNode.x}
-                        y1={e.sourceNode.y}
-                        x2={e.targetNode.x}
-                        y2={e.targetNode.y}
-                        stroke={strokeColor}
-                        strokeWidth={strokeWidth}
-                        opacity={strokeOpacity}
-                      />
+                      <G key={`edge-${e.id}`}>
+                        {isHighlight && (
+                          <Line
+                            x1={e.sourceNode.x}
+                            y1={e.sourceNode.y}
+                            x2={e.targetNode.x}
+                            y2={e.targetNode.y}
+                            stroke="#38BDF8"
+                            strokeWidth={10}
+                            strokeLinecap="round"
+                            opacity={0.35}
+                          />
+                        )}
+                        <Line
+                          x1={e.sourceNode.x}
+                          y1={e.sourceNode.y}
+                          x2={e.targetNode.x}
+                          y2={e.targetNode.y}
+                          stroke={strokeColor}
+                          strokeWidth={strokeWidth}
+                          opacity={strokeOpacity}
+                          strokeLinecap="round"
+                        />
+                        {/* Invisible 28px hit-box for easy tap */}
+                        <Line
+                          x1={e.sourceNode.x}
+                          y1={e.sourceNode.y}
+                          x2={e.targetNode.x}
+                          y2={e.targetNode.y}
+                          stroke="transparent"
+                          strokeWidth={28}
+                          strokeLinecap="round"
+                          onPress={() => handleEdgePress(e)}
+                        />
+                      </G>
                     );
                   })}
                 </G>
@@ -916,16 +1177,20 @@ function KgExplorerContent() {
                 {/* 2. Highlighted Midpoint Relationship Badges */}
                 <G>
                   {edges.map((e) => {
-                    if (!selectedNode || !e.relation || (e.source !== selectedNode.id && e.target !== selectedNode.id)) {
+                    const isDirectlySelected = selectedEdge?.id === e.id;
+                    const isNodeConnected = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+                    const shouldShowBadge = isDirectlySelected || isNodeConnected || (e.isCrossDomain && !selectedNode && !selectedEdge);
+
+                    if (!shouldShowBadge || !e.relation || !e.midX || !e.midY) {
                       return null;
                     }
-                    if (!e.midX || !e.midY) return null;
 
                     const label = (e.relation || '').replace(/_/g, ' ');
                     const pillWidth = Math.max(68, label.length * 6.5 + 16);
+                    const badgeColor = isDirectlySelected ? '#38BDF8' : (e.isCrossDomain ? '#C084FC' : '#38BDF8');
 
                     return (
-                      <G key={`badge-${e.id}`}>
+                      <G key={`badge-${e.id}`} onPress={() => handleEdgePress(e)}>
                         <Rect
                           x={e.midX - pillWidth / 2}
                           y={e.midY - 11}
@@ -933,15 +1198,15 @@ function KgExplorerContent() {
                           height={22}
                           rx={11}
                           fill="rgba(15,23,42,0.96)"
-                          stroke="#38BDF8"
-                          strokeWidth={1.5}
+                          stroke={badgeColor}
+                          strokeWidth={isDirectlySelected ? 2 : 1.2}
                         />
                         <SvgText
                           x={e.midX}
                           y={e.midY + 4}
                           fontSize={9.5}
                           fontWeight="bold"
-                          fill="#38BDF8"
+                          fill={badgeColor}
                           textAnchor="middle"
                         >
                           {label}
@@ -958,7 +1223,7 @@ function KgExplorerContent() {
                     const isConnected = connectedNodeIds.has(n.id);
                     const isFocus = isSelected || isConnected;
 
-                    const opacity = selectedNode
+                    const opacity = (selectedNode || selectedEdge)
                       ? (isFocus ? 1.0 : 0.22)
                       : 1.0;
 
@@ -969,7 +1234,7 @@ function KgExplorerContent() {
                         opacity={opacity}
                       >
                         {/* Outer Glow Aura */}
-                        {(n.isHub || n.isDepartment || isSelected) && (
+                        {(n.isHub || n.isDepartment || isSelected || (selectedEdge && isConnected)) && (
                           <Circle
                             cx={n.x}
                             cy={n.y}
@@ -1005,7 +1270,7 @@ function KgExplorerContent() {
                         <SvgText
                           x={n.x}
                           y={n.y + n.radius + 12}
-                          fontSize={n.isHub ? 13 : n.isDepartment ? 11.5 : 10}
+                          fontSize={n.isHub ? 13 : n.isDepartment ? 11.5 : (n.hierarchyLevel === 2 ? 10.5 : 9.5)}
                           fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '600'}
                           fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#FFFFFF'}
                           textAnchor="middle"
@@ -1051,15 +1316,116 @@ function KgExplorerContent() {
           </View>
         </View>
 
-        {/* Selected Node Details & Connection Inspector Sheet */}
-        {selectedNode && (
+        {/* 1. Connection Inspector Sheet (when an Edge/Line is tapped) */}
+        {selectedEdge && (
           <View style={styles.detailCard}>
             <View style={styles.detailHeader}>
               <View style={styles.detailTitleRow}>
-                <View style={[styles.deptBadge, { backgroundColor: `${selectedNode.color}25`, borderColor: selectedNode.color }]}>
-                  <Text style={[styles.deptBadgeText, { color: selectedNode.color }]}>
-                    {selectedNode.emoji || '●'} {selectedNode.department.toUpperCase()}
+                <View style={styles.badgesRow}>
+                  <View style={[styles.deptBadge, {
+                    backgroundColor: selectedEdge.isCrossDomain ? 'rgba(192,132,252,0.2)' : 'rgba(56,189,248,0.2)',
+                    borderColor: selectedEdge.isCrossDomain ? '#C084FC' : '#38BDF8'
+                  }]}>
+                    <Text style={[styles.deptBadgeText, {
+                      color: selectedEdge.isCrossDomain ? '#C084FC' : '#38BDF8'
+                    }]}>
+                      {selectedEdge.edgeType ? selectedEdge.edgeType.replace(/_/g, ' ') : (selectedEdge.isCrossDomain ? 'NEURAL BRIDGE' : 'TREE CONNECTION')}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.detailName}>
+                  {(selectedEdge.relation || 'Connected').replace(/_/g, ' ')}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setSelectedEdge(null)} style={styles.closeBtn}>
+                <Text style={styles.closeBtnText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {selectedEdge.explanation && (
+              <Text style={styles.edgeExplanationText}>
+                💡 {selectedEdge.explanation}
+              </Text>
+            )}
+
+            {/* Connected Nodes Interactive Chips */}
+            <View style={styles.edgeNodesRow}>
+              {selectedEdge.sourceNode && (
+                <TouchableOpacity
+                  style={[styles.edgeNodeChip, { borderColor: selectedEdge.sourceNode.color }]}
+                  onPress={() => {
+                    handleNodePress(selectedEdge.sourceNode!);
+                    setSelectedEdge(null);
+                  }}
+                >
+                  <Text style={styles.edgeNodeRole}>SOURCE</Text>
+                  <Text style={[styles.edgeNodeName, { color: selectedEdge.sourceNode.color }]}>
+                    {selectedEdge.sourceNode.emoji || '●'} {selectedEdge.sourceNode.name}
                   </Text>
+                  {selectedEdge.sourceNode.subLabel && (
+                    <Text style={styles.edgeNodeSub}>{selectedEdge.sourceNode.subLabel}</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              <Text style={styles.edgeArrow}>➔</Text>
+
+              {selectedEdge.targetNode && (
+                <TouchableOpacity
+                  style={[styles.edgeNodeChip, { borderColor: selectedEdge.targetNode.color }]}
+                  onPress={() => {
+                    handleNodePress(selectedEdge.targetNode!);
+                    setSelectedEdge(null);
+                  }}
+                >
+                  <Text style={styles.edgeNodeRole}>TARGET</Text>
+                  <Text style={[styles.edgeNodeName, { color: selectedEdge.targetNode.color }]}>
+                    {selectedEdge.targetNode.emoji || '●'} {selectedEdge.targetNode.name}
+                  </Text>
+                  {selectedEdge.targetNode.subLabel && (
+                    <Text style={styles.edgeNodeSub}>{selectedEdge.targetNode.subLabel}</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Tree Context */}
+            {(selectedEdge.sourceNode?.treePath || selectedEdge.targetNode?.treePath) && (
+              <View style={styles.treePathSection}>
+                <Text style={styles.treePathLabel}>🌳 TREE HIERARCHY:</Text>
+                {selectedEdge.sourceNode?.treePath && (
+                  <Text style={styles.treePathText}>
+                    Source: {selectedEdge.sourceNode.treePath.join(' › ')}
+                  </Text>
+                )}
+                {selectedEdge.targetNode?.treePath && (
+                  <Text style={styles.treePathText}>
+                    Target: {selectedEdge.targetNode.treePath.join(' › ')}
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* 2. Hierarchical Node Inspector Sheet (when a Node is tapped) */}
+        {selectedNode && !selectedEdge && (
+          <View style={styles.detailCard}>
+            <View style={styles.detailHeader}>
+              <View style={styles.detailTitleRow}>
+                <View style={styles.badgesRow}>
+                  <View style={[styles.deptBadge, { backgroundColor: `${selectedNode.color}25`, borderColor: selectedNode.color }]}>
+                    <Text style={[styles.deptBadgeText, { color: selectedNode.color }]}>
+                      {selectedNode.emoji || '●'} {selectedNode.department.toUpperCase()}
+                    </Text>
+                  </View>
+                  {selectedNode.hierarchyLevel && (
+                    <View style={[styles.levelBadge, { borderColor: selectedNode.color }]}>
+                      <Text style={styles.levelBadgeText}>
+                        {selectedNode.hierarchyLevel === 1 ? 'TRUNK' : selectedNode.hierarchyLevel === 2 ? 'BRANCH' : 'STEM'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={styles.detailName}>{selectedNode.name}</Text>
               </View>
@@ -1069,13 +1435,62 @@ function KgExplorerContent() {
               </TouchableOpacity>
             </View>
 
+            {/* Tree Breadcrumbs */}
+            {selectedNode.treePath && selectedNode.treePath.length > 1 && (
+              <View style={styles.breadcrumbContainer}>
+                <Text style={styles.breadcrumbText}>
+                  🌳 {selectedNode.treePath.join(' › ')}
+                </Text>
+              </View>
+            )}
+
             <Text style={styles.detailValue}>{selectedNode.value}</Text>
 
-            {/* Exact Connected Dots Breakdown */}
+            {/* Parent Entity Quick Jump */}
+            {parentNode && (
+              <View style={styles.parentSection}>
+                <Text style={styles.parentLabel}>ROOT BRANCH:</Text>
+                <TouchableOpacity
+                  style={[styles.parentChip, { borderColor: parentNode.color }]}
+                  onPress={() => handleNodePress(parentNode)}
+                >
+                  <Text style={[styles.parentChipText, { color: parentNode.color }]}>
+                    ↖ {parentNode.emoji || '●'} {parentNode.name} ({parentNode.subLabel || 'Branch'})
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Child Stems */}
+            {childStems.length > 0 && (
+              <View style={styles.stemsSection}>
+                <Text style={styles.stemsSectionTitle}>
+                  🌱 ATTRIBUTE STEMS ({childStems.length}):
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.linksScroll}>
+                  {childStems.map((stem) => (
+                    <TouchableOpacity
+                      key={stem.id}
+                      style={[styles.stemChip, { borderColor: stem.color }]}
+                      onPress={() => handleNodePress(stem)}
+                    >
+                      <Text style={[styles.stemChipName, { color: stem.color }]}>
+                        {stem.name}
+                      </Text>
+                      {stem.subLabel && (
+                        <Text style={styles.stemChipSub}>{stem.subLabel}</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Exact Connections Breakdown */}
             {selectedNodeEdges.length > 0 ? (
               <View style={styles.linesSection}>
                 <Text style={styles.linesSectionTitle}>
-                  ⚡ EXACT CONNECTIONS ({selectedNodeEdges.length}):
+                  ⚡ CONNECTIONS & NEURAL BRIDGES ({selectedNodeEdges.length}):
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.linksScroll}>
                   {selectedNodeEdges.map((e, idx) => {
@@ -1091,7 +1506,7 @@ function KgExplorerContent() {
                       <TouchableOpacity
                         key={idx}
                         style={[styles.linkChip, { borderColor: otherNode.color }]}
-                        onPress={() => handleNodePress(otherNode)}
+                        onPress={() => handleEdgePress(e)}
                       >
                         <Text style={[styles.linkChipRelation, { color: otherNode.color }]}>
                           [{(e.relation || '').replace(/_/g, ' ')}]
@@ -1099,6 +1514,11 @@ function KgExplorerContent() {
                         <Text style={styles.linkChipTarget}>
                           ➔ {otherNode.name}
                         </Text>
+                        {e.explanation && (
+                          <Text style={styles.linkChipExplanation} numberOfLines={1}>
+                            {e.explanation}
+                          </Text>
+                        )}
                       </TouchableOpacity>
                     );
                   })}
@@ -1213,15 +1633,62 @@ const styles = StyleSheet.create({
   },
   detailHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 },
   detailTitleRow: { flex: 1, marginRight: 8 },
+  badgesRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   deptBadge: {
-    alignSelf: 'flex-start', borderWidth: 1, borderRadius: 6,
-    paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4
+    borderWidth: 1, borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 2
   },
   deptBadgeText: { fontSize: 9.5, fontWeight: '700' },
+  levelBadge: {
+    borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
+    backgroundColor: 'rgba(255,255,255,0.06)'
+  },
+  levelBadgeText: { fontSize: 8.5, fontWeight: '800', color: '#E4E4E7', letterSpacing: 0.5 },
   detailName: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
   closeBtn: { padding: 4 },
   closeBtnText: { color: '#71717A', fontSize: 16, fontWeight: 'bold' },
   detailValue: { fontSize: 12.5, color: '#D4D4D8', lineHeight: 17, marginBottom: 8 },
+
+  breadcrumbContainer: {
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'
+  },
+  breadcrumbText: { fontSize: 11, color: '#A1A1AA', fontWeight: '500' },
+
+  parentSection: { marginBottom: 8 },
+  parentLabel: { fontSize: 9.5, fontWeight: '800', color: '#71717A', marginBottom: 3 },
+  parentChip: {
+    borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.04)', alignSelf: 'flex-start'
+  },
+  parentChipText: { fontSize: 11.5, fontWeight: '600' },
+
+  stemsSection: { marginBottom: 8 },
+  stemsSectionTitle: { fontSize: 10, fontWeight: '800', color: '#10B981', marginBottom: 4 },
+  stemChip: {
+    borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+    marginRight: 6, backgroundColor: 'rgba(255,255,255,0.04)'
+  },
+  stemChipName: { fontSize: 11, fontWeight: '600' },
+  stemChipSub: { fontSize: 9, color: '#A1A1AA', marginTop: 1 },
+
+  edgeExplanationText: { fontSize: 12.5, color: '#E4E4E7', lineHeight: 18, marginBottom: 10 },
+  edgeNodesRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  edgeNodeChip: {
+    flex: 1, borderWidth: 1, borderRadius: 10, padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)'
+  },
+  edgeNodeRole: { fontSize: 8.5, fontWeight: '800', color: '#71717A', marginBottom: 2 },
+  edgeNodeName: { fontSize: 12, fontWeight: '700' },
+  edgeNodeSub: { fontSize: 9.5, color: '#A1A1AA', marginTop: 1 },
+  edgeArrow: { fontSize: 16, color: '#38BDF8', fontWeight: 'bold', marginHorizontal: 8 },
+  treePathSection: {
+    backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8,
+    padding: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)'
+  },
+  treePathLabel: { fontSize: 9, fontWeight: '800', color: '#71717A', marginBottom: 4 },
+  treePathText: { fontSize: 10.5, color: '#D4D4D8', lineHeight: 15 },
 
   linesSection: { marginTop: 4 },
   linesSectionTitle: { fontSize: 10, fontWeight: '800', color: '#38BDF8', marginBottom: 6 },
@@ -1232,5 +1699,6 @@ const styles = StyleSheet.create({
   },
   linkChipRelation: { fontSize: 9.5, fontWeight: '700' },
   linkChipTarget: { fontSize: 11, fontWeight: '500', color: '#FFFFFF', marginTop: 1 },
+  linkChipExplanation: { fontSize: 9, color: '#71717A', marginTop: 2, maxWidth: 160 },
   noLinksText: { fontSize: 11, color: '#71717A', fontStyle: 'italic' }
 });

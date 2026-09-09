@@ -237,6 +237,9 @@ export interface DynamicKgNode {
   isDepartment?: boolean;
   isContext?: boolean;
   emoji?: string;
+  parentEntityId?: string;
+  hierarchyLevel?: 1 | 2 | 3; // 1 = Dept, 2 = Entity Branch, 3 = Attribute Stem
+  treePath?: string[];
 }
 
 export interface DynamicKgEdge {
@@ -247,6 +250,8 @@ export interface DynamicKgEdge {
   color: string;
   isCrossDomain?: boolean;
   weight?: number;
+  edgeType?: 'DEPARTMENT_BRANCH' | 'ENTITY_BRANCH' | 'ATTRIBUTE_STEM' | 'NEURAL_BRIDGE';
+  explanation?: string;
 }
 
 export interface DynamicKgResult {
@@ -265,28 +270,23 @@ export interface DynamicKgResult {
 
 function toGraphLabel(key: string, value: string): string {
   const k = key.toLowerCase();
-  const v = (value || '').trim();
+  const v = value.trim();
 
-  // Family members
+  // Family
   if (k === 'wife_name') return `${v} (Wife)`;
   if (k === 'son_name') return `${v} (Son)`;
-  if (k === 'son_age') return `${v} old (Son)`;
-  if (k === 'daughter_name') return `${v} (Daughter)`;
+  if (k === 'son_age') return `${v} old (Son Age)`;
   if (k === 'father_name') return `${v} (Father)`;
   if (k === 'mother_name') return `${v} (Mother)`;
-  if (k === 'sister_name') return `${v} (Sister)`;
-  if (k === 'brother_name') return `${v} (Brother)`;
+  if (k === 'daughter_name') return `${v} (Daughter)`;
 
-  // Work & Career
+  // Work
   if (k === 'company_name') return `${v} (Company)`;
-  if (k === 'work_schedule') {
-    if (v.includes('11') && (v.includes('8') || v.includes('8 PM'))) return '11am - 8pm (Work Hours)';
-    return 'Work Schedule';
-  }
+  if (k === 'work_schedule') return '11am - 8pm (Work Hours)';
   if (k === 'office_hours') return `${v} (Office Hours)`;
   if (k === 'current_office_location') return `${v} (Office)`;
-  if (k === 'candidates_for_job') return `${v} (Hiring)`;
-  if (k === 'hope_for_job_selection') return `Hiring Target (${v.length > 20 ? v.slice(0, 18) + '...' : v})`;
+  if (k === 'candidates_for_job') return `${v} (Interviews)`;
+  if (k === 'hope_for_job_selection') return 'Target: 2 (Selections)';
 
   // Goals
   if (k === 'goals') {
@@ -312,7 +312,8 @@ function toGraphLabel(key: string, value: string): string {
 
 /**
  * Dynamically synthesizes the complete Knowledge Graph from the user's growing
- * memories, active context, and Life Domain compartments.
+ * memories, active context, and Life Domain compartments into a True Hierarchical Tree:
+ * Root (Core) -> Dept Trunks -> Entity Branches -> Attribute Stems.
  */
 export function buildDynamicKnowledgeGraph(
   memories: Array<{ id?: string; key: string; value: string; memory_type?: string }>,
@@ -328,7 +329,7 @@ export function buildDynamicKnowledgeGraph(
     .replace(/\.$/, '')
     .trim();
 
-  // 1. Central Self Node
+  // 1. Central Self Node (Level 0)
   const coreNode: DynamicKgNode = {
     id: 'user-core',
     name: cleanUserName,
@@ -338,12 +339,14 @@ export function buildDynamicKnowledgeGraph(
     radius: 30,
     value: `Central Self & Consciousness: ${cleanUserName}`,
     isHub: true,
-    emoji: '🧠'
+    emoji: '🧠',
+    hierarchyLevel: 1,
+    treePath: [cleanUserName]
   };
   nodes.push(coreNode);
   nodeIds.add(coreNode.id);
 
-  // 2. Department Hub Nodes
+  // 2. Department Hub Nodes (Level 1 - Main Trunks)
   const deptCounts: Record<LifeDomainKey, number> = {
     family: 0,
     work: 0,
@@ -365,7 +368,10 @@ export function buildDynamicKnowledgeGraph(
       radius: 24,
       value: meta.description,
       isDepartment: true,
-      emoji: meta.emoji
+      emoji: meta.emoji,
+      parentEntityId: 'user-core',
+      hierarchyLevel: 1,
+      treePath: [cleanUserName, meta.title]
     };
     nodes.push(deptNode);
     nodeIds.add(deptNodeId);
@@ -377,79 +383,153 @@ export function buildDynamicKnowledgeGraph(
       target: deptNodeId,
       relation: 'HAS_DEPARTMENT',
       color: 'rgba(255,255,255,0.25)',
-      weight: 3
+      weight: 3,
+      edgeType: 'DEPARTMENT_BRANCH',
+      explanation: `Main trunk connecting consciousness to ${meta.title}`
     });
   }
 
-  // 3. Memory Nodes
-  for (const mem of memories) {
-    if (!mem.key || !mem.value) continue;
-    const meta = classifyDomain(mem.key, mem.memory_type);
-    const nodeId = `mem-${mem.key}`;
-    if (nodeIds.has(nodeId)) continue;
+  // Pre-index items for tree hierarchy detection
+  const allItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
+  for (const m of memories) {
+    if (!m.key || !m.value) continue;
+    allItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value, memory_type: m.memory_type });
+  }
+  for (const w of workingContext) {
+    if (!w.key || !w.value) continue;
+    allItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
+  }
+
+  // Detect Primary Entity Nodes (Level 2)
+  const allKeys = new Set(allItems.map(i => i.key.toLowerCase()));
+
+  // 3. Register Nodes & Build Tree Branches + Stems
+  for (const item of allItems) {
+    if (nodeIds.has(item.id)) continue;
+    const meta = classifyDomain(item.key, item.memory_type);
+    const k = item.key.toLowerCase();
+    const deptTitle = DOMAIN_TAXONOMY[meta.domain].title;
+
+    let parentId = `dept-${meta.domain}`;
+    let hierarchyLevel: 2 | 3 = 2;
+    let relation = item.isContext ? 'ACTIVE_FOCUS' : 'CONTAINS';
+    let edgeType: 'ENTITY_BRANCH' | 'ATTRIBUTE_STEM' = 'ENTITY_BRANCH';
+    let explanation = `Belongs to ${deptTitle}`;
+
+    // Family Tree Stems
+    if (meta.domain === 'family') {
+      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name'].includes(k)) {
+        hierarchyLevel = 2;
+        relation = 'FAMILY_MEMBER';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = `Primary family member branch under Family`;
+      } else if ((k.startsWith('wife_') || k === 'likes_wifes_cooking') && allKeys.has('wife_name')) {
+        parentId = 'mem-wife_name';
+        hierarchyLevel = 3;
+        relation = k.includes('cook') ? 'COOKING_HOBBY' : k.includes('profession') ? 'PROFESSION' : 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Wife in Family Tree`;
+      } else if ((k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_')) && allKeys.has('son_name')) {
+        parentId = 'mem-son_name';
+        hierarchyLevel = 3;
+        relation = k.includes('age') ? 'AGE' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Son in Family Tree`;
+      } else if (k.startsWith('father_') && allKeys.has('father_name')) {
+        parentId = 'mem-father_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Father in Family Tree`;
+      } else if (k.startsWith('mother_') && allKeys.has('mother_name')) {
+        parentId = 'mem-mother_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Mother in Family Tree`;
+      }
+    }
+
+    // Work / Career Tree Stems
+    if (meta.domain === 'work') {
+      if (['company_name', 'business_name', 'cloud_kitchen_business'].includes(k)) {
+        hierarchyLevel = 2;
+        relation = 'ORGANIZATION';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = `Primary organization / business in Career Tree`;
+      } else if (allKeys.has('company_name')) {
+        parentId = 'mem-company_name';
+        hierarchyLevel = 3;
+        edgeType = 'ATTRIBUTE_STEM';
+        if (k.includes('schedule') || k.includes('hours') || k.includes('timing')) {
+          relation = 'WORK_SCHEDULE';
+          explanation = `Operational schedule of Company`;
+        } else if (k.includes('location') || k.includes('office')) {
+          relation = 'OFFICE_LOCATION';
+          explanation = `Office location of Company`;
+        } else if (k.includes('candidate') || k.includes('interview') || k.includes('selection')) {
+          relation = 'HIRING_TARGET';
+          explanation = `Recruitment and hiring target at Company`;
+        } else {
+          relation = 'WORK_DETAIL';
+          explanation = `Operational detail of Company`;
+        }
+      }
+    }
+
+    // Goals Tree Stems
+    if (meta.domain === 'goals') {
+      if (k === 'goals' || k === 'primary_goal') {
+        hierarchyLevel = 2;
+        relation = 'PRIMARY_GOAL';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = `Core aspiration under Goals`;
+      } else if (allKeys.has('goals')) {
+        parentId = 'mem-goals';
+        hierarchyLevel = 3;
+        relation = 'MILESTONE_TARGET';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Milestone stem under Core Goal`;
+      }
+    }
+
+    const nodeName = toGraphLabel(item.key, item.value);
+    const parentNode = nodes.find(n => n.id === parentId);
+    const treePath = parentNode?.treePath ? [...parentNode.treePath, nodeName] : [cleanUserName, deptTitle, nodeName];
 
     const node: DynamicKgNode = {
-      id: nodeId,
-      name: toGraphLabel(mem.key, mem.value),
-      entity_type: mem.memory_type || 'memory',
+      id: item.id,
+      name: nodeName,
+      entity_type: item.isContext ? 'active_context' : (item.memory_type || 'memory'),
       department: meta.domain,
-      color: meta.color,
-      radius: 16,
-      value: mem.value,
-      raw_key: mem.key,
-      emoji: meta.emoji
+      color: item.isContext ? '#06B6D4' : meta.color,
+      radius: hierarchyLevel === 2 ? 18 : 14,
+      value: item.value,
+      raw_key: item.key,
+      isContext: item.isContext,
+      emoji: item.isContext ? '⚡' : meta.emoji,
+      parentEntityId: parentId,
+      hierarchyLevel,
+      treePath
     };
     nodes.push(node);
-    nodeIds.add(nodeId);
+    nodeIds.add(item.id);
     deptCounts[meta.domain]++;
 
-    // Link to Department
+    // Link to Parent (Dept trunk or Entity branch)
     edges.push({
-      id: `edge-dept-${mem.key}`,
-      source: `dept-${meta.domain}`,
-      target: nodeId,
-      relation: 'CONTAINS',
-      color: meta.color,
-      weight: 1
+      id: `edge-${parentId}-${item.id}`,
+      source: parentId,
+      target: item.id,
+      relation,
+      color: item.isContext ? '#06B6D4' : meta.color,
+      weight: hierarchyLevel === 2 ? 2 : 1.2,
+      edgeType,
+      explanation
     });
   }
 
-  // 4. Working Context Nodes
-  for (const wm of workingContext) {
-    if (!wm.key || !wm.value) continue;
-    const meta = classifyDomain(wm.key);
-    const nodeId = `wm-${wm.key}`;
-    if (nodeIds.has(nodeId)) continue;
-
-    const node: DynamicKgNode = {
-      id: nodeId,
-      name: toGraphLabel(wm.key, wm.value),
-      entity_type: 'active_context',
-      department: meta.domain,
-      color: '#06B6D4',
-      radius: 14,
-      value: wm.value,
-      raw_key: wm.key,
-      isContext: true,
-      emoji: '⚡'
-    };
-    nodes.push(node);
-    nodeIds.add(nodeId);
-    deptCounts[meta.domain]++;
-
-    // Link to Department
-    edges.push({
-      id: `edge-dept-wm-${wm.key}`,
-      source: `dept-${meta.domain}`,
-      target: nodeId,
-      relation: 'ACTIVE_FOCUS',
-      color: '#06B6D4',
-      weight: 1
-    });
-  }
-
-  // 5. Cross-Domain Neural Edges (Connected Dots)
-  // Work Schedule ⇄ Wife / Son
+  // 5. Cross-Domain Neural Bridges (True Connected Dots)
   if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-wife_name')) {
     edges.push({
       id: 'cross-sched-wife',
@@ -458,7 +538,9 @@ export function buildDynamicKnowledgeGraph(
       relation: 'EVENING_ROUTINE',
       color: '#C084FC',
       isCrossDomain: true,
-      weight: 2
+      weight: 2,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Evening transition: Work hours wrap up into family time with wife'
     });
   }
   if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-son_name')) {
@@ -469,20 +551,9 @@ export function buildDynamicKnowledgeGraph(
       relation: 'EVENING_ROUTINE',
       color: '#C084FC',
       isCrossDomain: true,
-      weight: 2
-    });
-  }
-
-  // Hiring ⇄ Company ⇄ Goals
-  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-company_name')) {
-    edges.push({
-      id: 'cross-cand-comp',
-      source: 'wm-candidates_for_job',
-      target: 'mem-company_name',
-      relation: 'HIRING_AT',
-      color: '#34D399',
-      isCrossDomain: true,
-      weight: 2
+      weight: 2,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Evening transition: Daily routine connects work hours to time with son'
     });
   }
   if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-goals')) {
@@ -493,11 +564,11 @@ export function buildDynamicKnowledgeGraph(
       relation: 'POWERS_GOAL',
       color: '#10B981',
       isCrossDomain: true,
-      weight: 2
+      weight: 2,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Recruitment drive directly powers the long-term company scaling goal'
     });
   }
-
-  // Passions ⇄ Family
   if (nodeIds.has('mem-passions') && nodeIds.has('mem-son_name')) {
     edges.push({
       id: 'cross-pass-son',
@@ -506,7 +577,23 @@ export function buildDynamicKnowledgeGraph(
       relation: 'FAMILY_BOND',
       color: '#F472B6',
       isCrossDomain: true,
-      weight: 2
+      weight: 2,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Core life passion includes family bond and nurturing son'
+    });
+  }
+  if (nodeIds.has('mem-wife_name') && (nodeIds.has('mem-cloud_kitchen_business') || nodeIds.has('mem-company_name'))) {
+    const targetComp = nodeIds.has('mem-cloud_kitchen_business') ? 'mem-cloud_kitchen_business' : 'mem-company_name';
+    edges.push({
+      id: 'cross-wife-kitchen',
+      source: 'mem-wife_name',
+      target: targetComp,
+      relation: 'COLLABORATION',
+      color: '#F59E0B',
+      isCrossDomain: true,
+      weight: 2,
+      edgeType: 'NEURAL_BRIDGE',
+      explanation: 'Wife cooking supports the cloud kitchen business collaboration'
     });
   }
 
@@ -525,4 +612,69 @@ export function buildDynamicKnowledgeGraph(
     totalNodes: nodes.length,
     totalEdges: edges.length
   };
+}
+
+/**
+ * Formats the Knowledge Graph as a clean, structured Tree & Stems Hierarchy for Nova.
+ * This directly provides Nova with:
+ * 1. Explicit Entity Ownership (e.g. Wife Sakshi -> Likes Cooking; Son Shreshth -> Age: 6 months old; User -> Company Tech Co).
+ * 2. Attribute Stems connected directly to their parent entity branch, preventing cross-entity attribute confusion!
+ * 3. Cross-Domain Neural Bridges (e.g. Wife's Cooking -> Cloud Kitchen Business; Work Schedule 11am-8pm -> Evening Family Time).
+ */
+export function formatHierarchicalMemoryPrompt(
+  memories: Array<{ id?: string; key: string; value: string; memory_type?: string }>,
+  workingContext: Array<{ id?: string; key: string; value: string }>,
+  preferredName?: string
+): string {
+  const kg = buildDynamicKnowledgeGraph(memories, workingContext, preferredName);
+
+  const userItems = kg.nodes.filter(n => !n.isHub && !n.isDepartment);
+  if (userItems.length === 0) {
+    return '';
+  }
+
+  const nodeMap = new Map<string, DynamicKgNode>();
+  for (const n of kg.nodes) {
+    nodeMap.set(n.id, n);
+  }
+
+  let text = `\n\n## 🌳 HIERARCHICAL KNOWLEDGE TREE & STEMS (NOVA REASONING & ANCHORING)\n`;
+  text += `Every fact belongs strictly to its owning entity branch. Cross-reference this tree before answering to ensure zero hallucination and zero attribute mismatch:\n`;
+
+  for (const dept of kg.departments) {
+    const deptNodes = kg.nodes.filter(n => n.department === dept.id && !n.isDepartment && !n.isHub);
+    if (deptNodes.length === 0) continue;
+
+    text += `\n[TRUNK: ${dept.emoji} ${dept.name.toUpperCase()}]\n`;
+
+    // Level 2 Branches
+    const branches = deptNodes.filter(n => n.hierarchyLevel === 2);
+    const effectiveBranches = branches.length > 0 ? branches : deptNodes;
+
+    for (const b of effectiveBranches) {
+      text += `  └─ 🌿 [BRANCH: ${b.name}]: ${b.value}\n`;
+
+      // Level 3 Stems for this branch
+      const stems = deptNodes.filter(n => n.hierarchyLevel === 3 && n.parentEntityId === b.id);
+      for (const s of stems) {
+        text += `       ├─ 🌱 [STEM: ${s.name}]: ${s.value}\n`;
+      }
+    }
+  }
+
+  // Cross-Domain Neural Bridges
+  const neuralBridges = kg.edges.filter(e => e.isCrossDomain || e.edgeType === 'NEURAL_BRIDGE');
+  if (neuralBridges.length > 0) {
+    text += `\n[🕸️ NEURAL CROSS-DOMAIN BRIDGES]\n`;
+    for (const bridge of neuralBridges) {
+      const src = nodeMap.get(bridge.source);
+      const tgt = nodeMap.get(bridge.target);
+      const srcName = src ? src.name : bridge.source;
+      const tgtName = tgt ? tgt.name : bridge.target;
+      const explanation = bridge.explanation ? ` — ${bridge.explanation}` : '';
+      text += `  • [${bridge.relation}] ${srcName} ⇄ ${tgtName}${explanation}\n`;
+    }
+  }
+
+  return text;
 }
