@@ -1994,7 +1994,7 @@ HINGLISH RULES:
           const payload = {
             userId,
             messageId: userMessageId,
-            message: primaryMessage,
+            message: (effectiveMessage && effectiveMessage.trim().length > primaryMessage.length) ? effectiveMessage : primaryMessage,
             turnId,                           // P0-A
             questionClauses: brainContext.questionClauses,  // P0-B
             hasExplicitRemember: turnAnalysis.hasExplicitRemember,

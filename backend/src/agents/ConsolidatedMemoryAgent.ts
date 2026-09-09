@@ -402,18 +402,29 @@ ${contextBlock}`;
           continue;
         }
         
-        if (opts?.isExplicitAuthority) {
+        const isFamilyRelationship = [
+          'wife_name', 'wife_nickname',
+          'husband_name', 'husband_nickname',
+          'son_name', 'son_nickname',
+          'daughter_name', 'daughter_nickname',
+          'mother_name', 'mother_nickname',
+          'father_name', 'father_nickname',
+          'sister_name', 'sister_nickname',
+          'brother_name', 'brother_nickname'
+        ].includes(mem.key ?? '');
+
+        if (opts?.isExplicitAuthority || isFamilyRelationship) {
           // P0-1: Bypass candidate pool and directly insert into durable memory
           await memoryRepository.upsertMemory(userId, {
             key: mem.key,
             value: mem.value,
-            type: (mem.type || 'semantic') as any,
+            type: (mem.type || (isFamilyRelationship ? 'family' : 'semantic')) as any,
             shouldPersist: true,
             source_authority: 'explicit_user',
-            importance: mem.importance || 100,
+            importance: mem.importance || 90,
             confidence: 1.0,
             emotional_weight: mem.emotional_weight || 0,
-            correction_intent: opts.hasCorrections === true || mem.correction_intent === true,
+            correction_intent: opts?.hasCorrections === true || mem.correction_intent === true,
             source_message_id: messageId,
             source_references: [{ type: 'turn', id: messageId }]
           }, messageText);

@@ -215,18 +215,18 @@ export function deriveRetrievalMode(turn: SemanticTurn, rawMessage: string): Ret
 
 // ── Interpreter ───────────────────────────────────────────────────────────────
 
-/** Hard latency budget for actionable turns (ms) */
-const INTERPRETER_BUDGET_MS = 12000;
+/** Hard latency budget for actionable turns (ms) — allows NVIDIA/Gemini burst queuing headroom */
+export const INTERPRETER_BUDGET_MS = 35000;
 
 /** Soft pre-check: is this turn likely to need semantic interpretation at all? */
-function isLikelyActionable(message: string, recentContext?: string): boolean {
+export function isLikelyActionable(message: string, recentContext?: string): boolean {
   if (message.length > 100) return true;
   if (recentContext && recentContext.trim().length > 0) return true;
   const lower = message.toLowerCase();
   return /remind|yaad|timer|alarm|schedule|correct|nahi|galat|actually|woh nahi|naam|name|wife|biwi|patni|husband|pati|son|beta|beti|daughter|bachha|baccha|child|kid|bhai|sis|didi|bhaiya|brother|sister|mom|dad|maa|papa|mummy|family|goal|plan|remember|save|note|favourite|favorite|age|umar|mahina|month|months|saal|year|years|work|job|kaam|living|rehta|rehti|city|shehar|birthday|janamdin/.test(lower);
 }
 
-const INTERPRETER_SYSTEM_PROMPT = `You are a semantic understanding engine for a personal AI companion called Nova.
+export const INTERPRETER_SYSTEM_PROMPT = `You are a semantic understanding engine for a personal AI companion called Nova.
 Your ONLY job is to analyze a user message and return a strict JSON object describing its meaning.
 You do NOT generate replies. You do NOT make decisions. You do NOT write to any database.
 You extract meaning. Nothing else.

@@ -34,9 +34,27 @@ describe('Burst Multi-Message Comprehension & Antecedent Resolution', () => {
       expect(isSupported).toBe(true);
     });
 
-    it('supports preferred_name for "Mera full name Sagar shetty hai"', () => {
-      const source = 'Mera full name Sagar shetty hai';
-      const isSupported = isConceptRelationshipSupported('preferred_name', 'Sagar shetty', source, false);
+    it('supports son_name directly when "bete" is in the message', () => {
+      const source = 'Mere bete ka naam shreshth hai';
+      const isSupported = isConceptRelationshipSupported('son_name', 'shreshth', source, false);
+      expect(isSupported).toBe(true);
+    });
+
+    it('supports wife_name directly for "Meri wife ka naam sakshi hai"', () => {
+      const source = 'Meri wife ka naam sakshi hai';
+      const isSupported = isConceptRelationshipSupported('wife_name', 'sakshi', source, false);
+      expect(isSupported).toBe(true);
+    });
+
+    it('supports father_name directly for "Mere papa ka name suresh hai"', () => {
+      const source = 'Mere papa ka name suresh hai';
+      const isSupported = isConceptRelationshipSupported('father_name', 'suresh', source, false);
+      expect(isSupported).toBe(true);
+    });
+
+    it('supports mother_name directly for "Meri mom ka naam rajeshree hai"', () => {
+      const source = 'Meri mom ka naam rajeshree hai';
+      const isSupported = isConceptRelationshipSupported('mother_name', 'rajeshree', source, false);
       expect(isSupported).toBe(true);
     });
   });

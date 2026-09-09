@@ -112,18 +112,19 @@ export function isValueGroundedInSource(value: string, sourceMessage: string): b
  * For plain facts: at least one non-generic concept token must appear in source.
  */
 const CONCEPT_SYNONYMS: Record<string, string[]> = {
-  wife: ['wife', 'biwi', 'patni', 'bivi', 'mrs', 'partner'],
-  husband: ['husband', 'pati', 'miyan', 'partner'],
-  son: ['son', 'beta', 'ladka', 'bachha', 'baccha', 'child', 'kid', 'bache'],
-  daughter: ['daughter', 'beti', 'ladki', 'bachhi', 'child', 'kid'],
-  child: ['child', 'kid', 'bachha', 'baccha', 'beta', 'beti'],
-  mother: ['mother', 'mom', 'mummy', 'maa', 'mata', 'ammi'],
-  father: ['father', 'dad', 'papa', 'baap', 'pitaji', 'abbu'],
-  brother: ['brother', 'bhai', 'bhaiya', 'bro'],
-  sister: ['sister', 'behen', 'didi', 'sis'],
-  friend: ['friend', 'dost', 'yaar', 'buddy'],
-  user: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne', 'self'],
-  preferred: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne'],
+  wife: ['wife', 'biwi', 'patni', 'bivi', 'mrs', 'partner', 'dharampatni', 'bahu', 'begum', 'aurat'],
+  husband: ['husband', 'pati', 'miyan', 'partner', 'shauhar', 'mister', 'mr'],
+  son: ['son', 'beta', 'bete', 'ladka', 'ladke', 'bachha', 'baccha', 'child', 'kid', 'bache', 'lalla', 'munna', 'putra'],
+  daughter: ['daughter', 'beti', 'betiyan', 'ladki', 'ladkiyan', 'bachhi', 'child', 'kid', 'putri', 'gudiya', 'munni', 'kanya'],
+  child: ['child', 'kid', 'bachha', 'baccha', 'bache', 'beta', 'bete', 'beti', 'betiyan'],
+  mother: ['mother', 'mom', 'mummy', 'maa', 'mata', 'ammi', 'mataji', 'maaji', 'aai'],
+  father: ['father', 'dad', 'papa', 'baap', 'pitaji', 'abbu', 'pita', 'bapuji', 'pappa'],
+  brother: ['brother', 'bhai', 'bhaiya', 'bro', 'veer', 'bhrata', 'bhaiyon'],
+  sister: ['sister', 'behen', 'didi', 'sis', 'bahin', 'behna', 'didiya'],
+  friend: ['friend', 'dost', 'yaar', 'buddy', 'dostan'],
+  user: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne', 'self', 'full', 'pura'],
+  preferred: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne', 'full', 'pura'],
+  full: ['mera', 'meri', 'mere', 'my', 'mine', 'naam', 'name', 'apna', 'apni', 'apne', 'full', 'pura'],
   age: ['age', 'umar', 'saal', 'month', 'months', 'mahina', 'mahine', 'year', 'years', 'old'],
 };
 

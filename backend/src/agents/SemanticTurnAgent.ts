@@ -1,7 +1,7 @@
 import { Job } from '../services/QueueService';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { interpretTurn, getPendingClarification, setPendingClarification, toSemanticEvents } from '../lib/SemanticInterpreter';
+import { interpretTurn, getPendingClarification, setPendingClarification, toSemanticEvents, isLikelyActionable } from '../lib/SemanticInterpreter';
 import { validateTurn as validate } from '../lib/SemanticValidator';
 import { deterministicFactAgent } from './DeterministicFactAgent';
 import { subconsciousQueue } from '../services/QueueService';
@@ -172,6 +172,15 @@ export class SemanticTurnAgent {
         }
         
         resultEvents = semanticEvents;
+      } else {
+        // If the turn was likely actionable (contained name, family, reminder, etc.)
+        // but interpretTurn returned null (e.g. LLM timeout or transient provider failure),
+        // throw an error so SemanticTurnWorker retries the job rather than completing with 0 facts!
+        if (isLikelyActionable(primaryMessage, burstContext)) {
+          const timeoutErr = new Error(`[SemanticTurnAgent] Transient semantic interpretation failure for turn ${turnId} (returned null for likely actionable input)`);
+          logger.warn(timeoutErr.message, { userId, turnId, primaryMessage });
+          throw timeoutErr;
+        }
       }
       
       return { semanticEvents: resultEvents, reminderNote, reminderCreated };
