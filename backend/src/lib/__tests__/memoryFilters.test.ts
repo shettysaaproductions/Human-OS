@@ -25,14 +25,35 @@ describe('memoryFilters', () => {
     expect(isGarbageMemoryValue('workplace', 'Google')).toBe(false);
   });
 
-  it('should filter working memory arrays correctly', () => {
+  it('should block relative age durations for birth_date keys', () => {
+    expect(isGarbageMemoryValue('birth_date', '6 months')).toBe(true);
+    expect(isGarbageMemoryValue('birthday', '6 months ka hai')).toBe(true);
+    expect(isGarbageMemoryValue('date_of_birth', '2 years')).toBe(true);
+    expect(isGarbageMemoryValue('birth_date', '1 year old')).toBe(true);
+    expect(isGarbageMemoryValue('birth_date', 'abhi sirf 6 months ka hai')).toBe(true);
+
+    // Legitimate dates should be allowed
+    expect(isGarbageMemoryValue('birth_date', '1995-08-15')).toBe(false);
+    expect(isGarbageMemoryValue('birth_date', '15 August 1995')).toBe(false);
+    expect(isGarbageMemoryValue('birth_date', 'March 2026')).toBe(false);
+
+    // son_age should accept age durations
+    expect(isGarbageMemoryValue('son_age', '6 months')).toBe(false);
+    expect(isGarbageMemoryValue('daughter_age', '2 years')).toBe(false);
+  });
+
+  it('should block system counter and internal tracking keys', () => {
     const list = [
-      { key: 'pending_kam', value: 'Main wapas aa gaya' },
-      { key: 'schedule', value: 'Meeting at 4pm with client' },
-      { key: 'active_goals', value: "User's active goals" }
+      { key: '__sys_nova_ignored_count', value: '1' },
+      { key: 'nova_ignored_deferred_count', value: '1' },
+      { key: 'ignore_escalation_count', value: '2' },
+      { key: 'followup_suppressed_until', value: '2026-09-09' },
+      { key: 'son_age', value: '6 months' },
+      { key: 'company_name', value: 'conviction hr' },
     ];
     const filtered = filterGarbageWorkingMemories(list);
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].key).toBe('schedule');
+    expect(filtered).toHaveLength(2);
+    expect(filtered.map(m => m.key)).toEqual(['son_age', 'company_name']);
   });
 });
+

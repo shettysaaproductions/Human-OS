@@ -48,6 +48,12 @@ const GARBAGE_KEY_PATTERNS: RegExp[] = [
   /^(recent_)?conversation$/i,
   /^last_message(_content)?$/i,
   /^(current_)?utterance$/i,
+  /^__sys_/i,
+  /^nova_ignored_/i,
+  /^_internal_/i,
+  /^ignore_escalation/i,
+  /^followup_suppressed/i,
+  /^(silent_)?visit_count$/i,
 ];
 
 // ── Minimum value length ─────────────────────────────────────────────────────
@@ -75,6 +81,13 @@ export function isGarbageMemoryValue(key: string, value: string, source?: string
       logger.info('[MemoryFilter] BLOCKED garbage key', { key, value: v, source });
       return true;
     }
+  }
+
+  // Reject relative age durations stored as birth_date (birth_date must be a calendar date)
+  if ((k === 'birth_date' || k === 'birthday' || k === 'date_of_birth') &&
+      /\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:months?|mahine|years?|saal|yo|days?|din|weeks?|hafte)\b/i.test(v)) {
+    logger.info('[MemoryFilter] BLOCKED relative age duration as birth_date', { key, value: v, source });
+    return true;
   }
 
   for (const pattern of GARBAGE_VALUE_PATTERNS) {

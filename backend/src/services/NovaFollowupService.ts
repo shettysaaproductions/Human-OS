@@ -54,7 +54,7 @@ const BUSY_LOCK_HOURS = 2;
 // (app killed) or a backgrounded 'away' must NOT trigger the quick nudge.
 const SEEN_RECENCY_MS = 5 * 60 * 1000;  // heartbeat must be within 5 min
 const UNSEEN_MAX_CHECK_INS = 5;          // up to 5 offline check-ins with exponential backoff
-const UNSEEN_COUNTER_KEY = 'nova_ignored_deferred_count';
+const UNSEEN_COUNTER_KEY = '__sys_nova_ignored_count';
 
 // Exponential backoff schedule for OFFLINE users (hours):
 // Attempt 1 → 1 min, 2 → 2 min, 3 → 4 min, 4 → 8 min, 5 → 16 min, then 3-4h cap
@@ -822,13 +822,13 @@ export class NovaFollowupService {
           // User is ONLINE — Nova must keep the conversation going!
           // Escalation: nudge 1 (warm), nudge 2 (different angle), nudge 3 → give space
           if (activelyInApp) {
-            const { data: escData } = await supabaseAdmin.from('working_memory').select('value').eq('user_id', userId).eq('key', 'ignore_escalation_count').maybeSingle();
+            const { data: escData } = await supabaseAdmin.from('working_memory').select('value').eq('user_id', userId).eq('key', '__sys_ignore_escalation_count').maybeSingle();
             const escalation = parseInt(escData?.value || '0', 10) + 1;
-            await supabaseAdmin.from('working_memory').upsert({ user_id: userId, key: 'ignore_escalation_count', value: String(escalation), expires_at: new Date(Date.now() + 2 * 3600e3).toISOString() }, { onConflict: 'user_id,key' });
+            await supabaseAdmin.from('working_memory').upsert({ user_id: userId, key: '__sys_ignore_escalation_count', value: String(escalation), expires_at: new Date(Date.now() + 2 * 3600e3).toISOString() }, { onConflict: 'user_id,key' });
 
             // Hard cap: after 3 online nudges with no reply, give space (don't harass)
             if (escalation > 3) {
-              await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', 'ignore_escalation_count');
+              await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('key', '__sys_ignore_escalation_count');
               await this._writeSuppression(userId, 1); // 1h cooldown, not 24h
               logger.info('[NovaFollowup] Online escalation cap — brief cooldown', { userId, escalation });
               continue;

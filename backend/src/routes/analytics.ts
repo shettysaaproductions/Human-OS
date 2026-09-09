@@ -108,10 +108,27 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       logger.warn('[Analytics/memories] Working memory fetch failed — returning empty', { error: wmErr.message });
     }
 
+    const SYSTEM_WM_KEYS = new Set([
+      'nova_ignored_deferred_count',
+      'ignore_escalation_count',
+      'followup_suppressed_until',
+      'silent_visit_count',
+      'last_proactive_content',
+      'user_busy_until',
+      'last_curiosity_topic',
+    ]);
+
     const workingContext = (wmRows || []).filter((wm: any) =>
       wm.promotion_status !== 'SUPERSEDED' &&
       wm.promotion_status !== 'INVALIDATED' &&
-      (!wm.expires_at || wm.expires_at > now)  // NULL = never expires
+      (!wm.expires_at || wm.expires_at > now) && // NULL = never expires
+      !wm.key.startsWith('__sys_') &&
+      !wm.key.startsWith('_') &&
+      !SYSTEM_WM_KEYS.has(wm.key) &&
+      !wm.key.includes('counter') &&
+      !wm.key.includes('count') &&
+      !wm.key.includes('suppressed') &&
+      wm.key !== 'birth_date' // birth_date belongs strictly in semantic memories, not ephemeral working context
     );
 
     // ── 6. Archived/history layer — superseded + archived for provenance ──────

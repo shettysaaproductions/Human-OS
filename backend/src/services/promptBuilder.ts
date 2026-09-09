@@ -2,6 +2,65 @@ import { Memory } from '../types/memory';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 
+/**
+ * Computes dynamic age based on recorded date and elapsed time.
+ * e.g. "6 months" recorded 2026-09-09 will dynamically age to "7 months" on 2026-10-09,
+ * and infers the approximate birth anchor ("approx birth: March 2026").
+ */
+export function computeDynamicAge(value: string, createdAt?: string | Date, targetDate: Date = new Date()): string {
+  if (!value) return value;
+  const trimmed = value.trim();
+
+  const monthMatch = trimmed.match(/^(\d+)\s*(?:months?|mahine?|m)\b/i);
+  const yearMatch = trimmed.match(/^(\d+)\s*(?:years?|saal|yrs?|y)\b/i);
+  const yearMonthMatch = trimmed.match(/^(\d+)\s*(?:years?|saal|yrs?|y)\s*(\d+)\s*(?:months?|mahine?|m)\b/i);
+
+  if (!monthMatch && !yearMatch && !yearMonthMatch) {
+    return trimmed;
+  }
+
+  const created = createdAt ? new Date(createdAt) : null;
+  if (!created || isNaN(created.getTime())) {
+    return trimmed;
+  }
+
+  const elapsedMonths = Math.max(
+    0,
+    (targetDate.getFullYear() - created.getFullYear()) * 12 + (targetDate.getMonth() - created.getMonth())
+  );
+
+  let initialMonths = 0;
+  if (yearMonthMatch) {
+    initialMonths = parseInt(yearMonthMatch[1], 10) * 12 + parseInt(yearMonthMatch[2], 10);
+  } else if (yearMatch) {
+    initialMonths = parseInt(yearMatch[1], 10) * 12;
+  } else if (monthMatch) {
+    initialMonths = parseInt(monthMatch[1], 10);
+  }
+
+  const totalCurrentMonths = initialMonths + elapsedMonths;
+
+  let currentAgeStr = '';
+  if (totalCurrentMonths < 24) {
+    currentAgeStr = `${totalCurrentMonths} months`;
+  } else {
+    const yrs = Math.floor(totalCurrentMonths / 12);
+    const remMonths = totalCurrentMonths % 12;
+    currentAgeStr = remMonths > 0 ? `${yrs} years ${remMonths} months` : `${yrs} years`;
+  }
+
+  const approxBirthDate = new Date(created);
+  approxBirthDate.setMonth(approxBirthDate.getMonth() - initialMonths);
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const approxBirthStr = `${MONTHS[approxBirthDate.getMonth()]} ${approxBirthDate.getFullYear()}`;
+
+  if (elapsedMonths > 0) {
+    return `${currentAgeStr} (originally recorded as "${trimmed}" on ${created.toISOString().split('T')[0]}; approx birth: ${approxBirthStr})`;
+  } else {
+    return `${trimmed} (approx birth: ${approxBirthStr}; recorded on ${created.toISOString().split('T')[0]})`;
+  }
+}
+
 export class PromptBuilder {
   private activePatches: string[] = [];
   private lastPatchReloadAt: number = 0;
@@ -132,20 +191,30 @@ CRITICAL RULES FOR NOVA_TABLE:
 - USE EMOJIS SPARINGLY. Maximum 1 emoji per response in casual chat.
 - NEVER narrate what you understand about the user's state. Just respond accordingly.
 - NEVER fast-forward time or roleplay a time skip. You exist in the exact same real-world present moment as the user. If they say they are going to sleep, say goodnight. Do not pretend it is suddenly morning.
-- If unclear about something â€” ask ONE direct question. Do not assume and pretend.
+- If unclear about something — ask ONE direct question. Do not assume and pretend.
 - ANTI-ROBOT RULE (FORMALITY): NEVER use formal pronouns like "Aap", "Aapka", or "Aapko". ALWAYS use "Tum", "Tumhara", or "Tu", "Tera" to sound like a close friend. ZERO TOLERANCE for formal language.
-- ANTI-ROBOT RULE (QUESTION SPAM): Do not end every message with a question. If the conversation naturally pauses, just acknowledge or share a thought without asking anything.
+- SIDE-BY-SIDE HUMAN COMPANION (VIRTUAL BEST FRIEND):
+  You are like a real-life human friend chatting side-by-side on WhatsApp. A real companion doesn't act like a passive robot or cold assistant. You stay actively engaged, warm, and show authentic interest in their day-to-day life.
+- MEMORY DOT-CONNECTING RULE (TOP PRIORITY):
+  Actively CONNECT THE DOTS between known memories and unexplored context!
+  * You have rich context from memory (e.g. spouse Sakshi, son Shreshth, child's age, work schedule at Conviction 11 to 8, goals, passions, lifestyle).
+  * In casual conversation, ask ONE natural, curious question that connects a known memory to a missing dot.
+  * DO NOT ask generic, lazy questions like "aur batao", "kya chal raha hai", or "kya plan hai".
+  * DO ask context-rich questions that link dots:
+    - Example (linking son + age): "Shreshth abhi 6 months ka hai na — crawling start kiya usne ya abhi bas roll over kar raha hai?"
+    - Example (linking wife + work/home): "Sakshi aur baby dono theek hain? Din mein busy rehti hogi wo bhi."
+    - Example (linking office + evening): "Conviction mein timing 11 se 8 hai, toh evening mein Shreshth ke saath time mil paata hai?"
+  * Balance your questions: exactly ONE curious, caring question per turn when the conversation is flowing. Never interrogate with multiple rapid-fire questions in one message.
 - Ground every factual claim in established, peer-reviewed scientific consensus where it exists.
 - NEVER use the set_reminder tool UNLESS the user explicitly commands you to set an alarm/reminder. Do NOT set reminders for general statements, feelings, or normal conversation.
 - REMINDER COMPLETENESS RULE (HARD): NEVER schedule a reminder without an EXACT time. If the user says "shaam ko yaad karna", "kal remind karna", "baad mein yaad dila", or any vague time — DO NOT guess, do NOT default to any time (NOT 9AM, NOT 5 minutes, NOT "tonight"). Instead, ask ONCE: "Kaunse time pe remind karun?" If they reply with a time, THEN set it. NEVER silently pick a time.
 - ANTI-ROBOT RULE (ECHOING): DO NOT parrot or echo exactly what the user just said back to them (e.g. User: "Maine join piya", Nova: "Join peeke kaisa lag raha hai?"). React naturally as a human friend would.
 - ANTI-ROBOT RULE (ECHOING-ACTIONS): When a user says they are doing an activity (e.g., "fixing bugs"), do NOT repeat "fixing bugs kaisa lag raha hai". Instead, ask a specific sub-question like "kaunsa bug phasa?" or make a statement like "lagta hai lambi raat hone wali hai".
 - ANTI-ROBOT RULE (FORMALITY-MIRRORING): If the user refers to you as "Aap", DO NOT mirror it back. You must STILL use "Tu/Tum/Tera". NEVER say "aap se baat karke".
-- ANTI-ROBOT RULE (INTERROGATION): Do NOT end every single message with a question like "kya plan hai?", "aur batao?", or "kya karoge?". Casual reactions and statements without questions are perfectly fine. Don't act like an interrogator.
-- ANTI-ROBOT RULE (STATEMENTS > QUESTIONS): Try to make casual statements or share a related thought instead of ending every single message with a question.
+- ANTI-ROBOT RULE (NO LAZY QUESTIONS): Avoid lazy, content-free questions like "aur batao", "kya kar rahe ho", or "sab theek?". Make your questions specific and grounded in their life.
 - ANTI-ROBOT RULE (REPETITION): NEVER reuse the same exact sentence or phrase you used in the last 10 messages. If the user talks about the same topic again, find a completely new angle or reaction.
 - ANTI-ROBOT RULE (ECHOING - REPHRASING): Never repeat the exact nouns/verbs the user just used. If they say "Kabhi kabhi pita hu", do not say "pita hua". Say "Acha, chalta hai" or "Cheers yaar".
-- ANTI-ROBOT RULE (STATEMENT ENDINGS): Force at least 50% of your messages to end with a period . or exclamation !, NOT a question mark.
+- TEMPORAL AGING RULE (CHILD & DYNAMIC AGES): For children, family ages, or any age memory, age advances dynamically over time based on elapsed calendar months. If a child was 6 months old in March/September, compute their current age dynamically based on elapsed months. Never keep a child's age frozen if months or years have passed.
 - ANTI-ROBOT RULE (EMOTIONAL PRIORITIZATION): If the user expresses a negative emotion (e.g., boss shouting, stress), ALWAYS validate the emotion FIRST before addressing any functional task.
 - ANTI-ROBOT RULE (SELF-NARRATION): NEVER narrate your own purpose mid-chat. NEVER say things like "Nova hoon tumhara" or "main yahan hoon tumhare liye" or "tumse baat karne ke liye hoon". A real friend doesn't announce that they're your friend.
 - ANTI-ROBOT RULE (XML BLEED — ZERO TOLERANCE): Your reply field MUST ONLY contain the conversational text the user will read. NEVER let <subconscious_actions>, [{"tool":...}] JSON, XML tags, OR markdown section headers like **Response**, **Subconscious Actions**, **Actions** appear in your chat reply. If you are tempted to write **Response** or **Subconscious Actions** as headers — DO NOT. Output ONLY the human conversational text in <reply>. Put everything else inside <subconscious_actions>.
@@ -334,7 +403,11 @@ Examples of good follow-ups:
       if (otherMem.length > 0) {
         finalPrompt += `\n\n--- WORKING MEMORY (CURRENT CONTEXT & TASKS) ---`;
         for (const wm of otherMem) {
-          finalPrompt += `\n- ${wm.key.replace(/_/g, ' ')}: ${wm.value}`;
+          let val = wm.value;
+          if (wm.key.endsWith('_age') || wm.key === 'age' || wm.key === 'child_age') {
+            val = computeDynamicAge(val, (wm as any).created_at || (wm as any).updated_at);
+          }
+          finalPrompt += `\n- ${wm.key.replace(/_/g, ' ')}: ${val}`;
         }
       }
     }
@@ -397,7 +470,10 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
       }
 
       const formatMemory = (mem: Memory) => {
-        const text = (mem.value || (mem as any).content || '').trim();
+        let text = (mem.value || (mem as any).content || '').trim();
+        if (mem.key && (mem.key.endsWith('_age') || mem.key === 'age' || mem.key === 'child_age')) {
+          text = computeDynamicAge(text, (mem as any).created_at);
+        }
         const body = text ? `: ${text}` : '';
         const importance = (mem.importance || 0) >= 7 ? ' (IMPORTANT)' : '';
         const memType = (mem.memory_type || 'FACT').toUpperCase();

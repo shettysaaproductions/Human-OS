@@ -45,14 +45,14 @@ describe('Family Name Semantics & Analytics Memory Filter Bug Fixes', () => {
 
   // ── 2. Fact Extraction: Real Name vs Nickname ────────────────────────────────
   test('4. Son real name is extracted as son_name from initial statement', () => {
-    const analysis = TurnAnalyzer.analyze([{ message: 'Mere bete ka naam Shreshth hai' }]);
+    const analysis = TurnAnalyzer.analyze([{ role: 'user', message: 'Mere bete ka naam Shreshth hai' }]);
     const fact = analysis.units.find(u => u.factKey === 'son_name');
     expect(fact).toBeDefined();
     expect(fact?.factValue).toBe('Shreshth');
   });
 
   test('5. Direct son nickname statement is extracted as son_nickname', () => {
-    const analysis = TurnAnalyzer.analyze([{ message: 'Bete ka nickname Tiku hai' }]);
+    const analysis = TurnAnalyzer.analyze([{ role: 'user', message: 'Bete ka nickname Tiku hai' }]);
     const fact = analysis.units.find(u => u.factKey === 'son_nickname');
     expect(fact).toBeDefined();
     expect(fact?.factValue).toBe('Tiku');
@@ -63,9 +63,10 @@ describe('Family Name Semantics & Analytics Memory Filter Bug Fixes', () => {
       recentMessages: [
         { role: 'user', content: 'Mere bete ka naam Shreshth hai' },
         { role: 'assistant', content: 'Acha, Shreshth! Pyara naam hai' }
-      ]
+      ],
+      memories: []
     };
-    const analysis = TurnAnalyzer.analyze([{ message: 'Uska nickname Tiku hai' }], context);
+    const analysis = TurnAnalyzer.analyze([{ role: 'user', message: 'Uska nickname Tiku hai' }], context);
     const fact = analysis.units.find(u => u.factKey === 'son_nickname');
     expect(fact).toBeDefined();
     expect(fact?.factValue).toBe('Tiku');
@@ -76,12 +77,15 @@ describe('Family Name Semantics & Analytics Memory Filter Bug Fixes', () => {
   test('7. Clarification "I mean real name Shreshth hai, pyar se nickname Tiku rakha hai" extracts son_name and son_nickname with correction', () => {
     const context = {
       recentMessages: [
-        { role: 'user', content: 'Ha actually mere bete ka naam tiku hai' },
-        { role: 'assistant', content: 'Got it — Tiku, your son.' }
+        { role: 'user', content: 'Bete ka naam Tiku hai' },
+        { role: 'assistant', content: 'Acha, Tiku!' }
+      ],
+      memories: [
+        { id: '1', key: 'son_name', value: 'Tiku', memory_type: 'family', is_archived: false }
       ]
     };
     const analysis = TurnAnalyzer.analyze(
-      [{ message: 'I mean real name shreshth hai pyar se nick name tiku rakha hai' }],
+      [{ role: 'user', message: 'I mean real name Shreshth hai, pyar se nickname Tiku rakha hai' }],
       context
     );
 
@@ -198,7 +202,7 @@ describe('Family Name Semantics & Analytics Memory Filter Bug Fixes', () => {
 
   // ── 6. Unrelated Memories Integrity ─────────────────────────────────────────
   test('12. Existing unrelated memories (work, goals, dates) remain unaffected', () => {
-    const analysis = TurnAnalyzer.analyze([{ message: 'I started a company called Acme' }]);
+    const analysis = TurnAnalyzer.analyze([{ role: 'user', message: 'I started a company called Acme' }]);
     expect(analysis.units.some(u => u.factKey === 'company_name')).toBe(true);
 
     const prompt = promptBuilder.buildSystemPrompt(

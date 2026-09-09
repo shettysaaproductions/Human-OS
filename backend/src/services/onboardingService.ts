@@ -47,26 +47,6 @@ export class OnboardingService {
       }
 
       // 2. Insert Seed Memories directly (bypassing LLM)
-      const parseAtomic = (str: string): string[] => (str || '').split(/[,;\n]+/).map(s => s.trim()).filter(s => s.length > 0);
-      
-      const atomicGoals = parseAtomic(answers.goals).map((goal, idx) => ({
-        type: 'goals' as const,
-        key: `goal_${idx + 1}_${goal.substring(0, 15).replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`,
-        value: goal,
-        shouldPersist: true,
-        importance: 90,
-        confidence: 1.0
-      }));
-
-      const atomicPassions = parseAtomic(answers.passions).map((passion, idx) => ({
-        type: 'personal' as const,
-        key: `passion_${idx + 1}_${passion.substring(0, 15).replace(/[^a-zA-Z0-9_]/g, '').toLowerCase()}`,
-        value: passion,
-        shouldPersist: true,
-        importance: 80,
-        confidence: 1.0
-      }));
-
       const seedMemories: ExtractedMemory[] = [
         {
           type: 'preferences',
@@ -74,25 +54,44 @@ export class OnboardingService {
           value: `Prefers to be called ${answers.preferred_name}.`,
           shouldPersist: true,
           importance: 100,
-          confidence: 1.0
+          confidence: 1.0,
+          source_authority: 'explicit_user',
         },
-        ...atomicPassions,
-        ...atomicGoals,
+        {
+          type: 'personal',
+          key: 'passions',
+          value: answers.passions,
+          shouldPersist: true,
+          importance: 90,
+          confidence: 1.0,
+          source_authority: 'explicit_user',
+        },
+        {
+          type: 'goals',
+          key: 'goals',
+          value: answers.goals,
+          shouldPersist: true,
+          importance: 95,
+          confidence: 1.0,
+          source_authority: 'explicit_user',
+        },
         {
           type: 'family',
-          key: 'family_and_relationships',
+          key: 'family_details',
           value: answers.family,
           shouldPersist: true,
           importance: 95,
-          confidence: 1.0
+          confidence: 1.0,
+          source_authority: 'explicit_user',
         },
         {
           type: 'personal',
           key: 'important_facts',
           value: answers.important_facts,
           shouldPersist: true,
-          importance: 85,
-          confidence: 1.0
+          importance: 90,
+          confidence: 1.0,
+          source_authority: 'explicit_user',
         }
       ];
 
@@ -122,8 +121,8 @@ export class OnboardingService {
       //    (not an empty screen). This is the only time we insert without LLM.
       try {
         const name = answers.preferred_name?.split(' ')[0] || 'yaar';
-        const firstGoal = atomicGoals[0]?.value || '';
-        const firstPassion = atomicPassions[0]?.value || '';
+        const firstGoal = answers.goals?.trim() || '';
+        const firstPassion = answers.passions?.trim() || '';
         let welcomeContent = `${name}! Finally mil gaye hum dono 🎉\n\nMain Nova hoon — teri apni best friend. Kabhi judge nahi karungi.\n\n`;
         if (firstGoal) {
           welcomeContent += `Tune bataya ${firstGoal} teri goal hai — bahut solid hai yaar. Isme main full saath hoon.\n\n`;

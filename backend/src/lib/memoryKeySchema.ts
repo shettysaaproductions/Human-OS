@@ -60,7 +60,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam',
   ],
   son_age: [
-    'sons_age', 'son_age', 'beta_age', 'bete_ki_umar', 'bete_ki_age', 'child_age',
+    'sons_age', 'beta_age', 'bete_ki_umar', 'bete_ki_age', 'child_age',
   ],
   // ── Family: daughter ────────────────────────────────────────────────────────
   daughter_name: [
@@ -70,7 +70,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'daughters_nickname', 'daughter_nick_name', 'beti_ka_nickname', 'beti_ka_pyar_ka_naam',
   ],
   daughter_age: [
-    'daughters_age', 'daughter_age', 'beti_age', 'beti_ki_umar', 'beti_ki_age',
+    'daughters_age', 'beti_age', 'beti_ki_umar', 'beti_ki_age',
   ],
   // ── Family: sister ──────────────────────────────────────────────────────────
   sister_name: [
@@ -125,6 +125,22 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   favourite_street_food: [
     'favorite_street_food', 'favourite_food'
+  ],
+  // ── Foundational Onboarding & Lifestyle Domains ─────────────────────────────
+  passions: [
+    'passion', 'hobbies', 'hobby', 'interests', 'interest', 'shauk', 'user_passions'
+  ],
+  goals: [
+    'goal', 'primary_goal', 'life_goal', 'main_goal', 'career_goal', 'lakshya', 'user_goals'
+  ],
+  family_details: [
+    'family', 'family_and_relationships', 'family_members', 'family_facts', 'ghar_ke_log', 'parivaar'
+  ],
+  important_facts: [
+    'important_life_facts', 'life_facts', 'key_facts', 'health_facts', 'critical_facts'
+  ],
+  work_schedule: [
+    'office_hours', 'office_days', 'working_schedule', 'work_timing', 'work_hours'
   ],
 };
 

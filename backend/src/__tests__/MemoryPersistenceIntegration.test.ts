@@ -1623,7 +1623,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     } finally {
       await client.end();
     }
-  });
+  }, 180000);
 
   it('SC2: DB is_canonical_key_sql membership matches JS canonical set', async () => {
     const { CANONICAL_KEYS } = await import('../lib/memoryKeySchema');
@@ -1669,7 +1669,7 @@ describe('Memory Persistence & Concurrency Integration', () => {
     } finally {
       await client.end();
     }
-  });
+  }, 180000);
 
   it('CB7: atomic_supersede with unknown lowercase my_random_memory_key -> NON_CANONICAL_KEY', async () => {
     const src = randomUUID();

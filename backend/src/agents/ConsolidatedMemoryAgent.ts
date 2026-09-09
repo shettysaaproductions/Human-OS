@@ -281,13 +281,18 @@ Do NOT invent aliases, plurals, or possessive variants. Use ONLY canonical keys:
   father_name / father_nickname
   son_name / son_nickname          ← use son_name for real/formal name and son_nickname for nickname
   daughter_name / daughter_nickname
+  son_age / daughter_age           ← for age durations like '6 months', '3 years'
   sister_name / sister_nickname
   brother_name / brother_nickname   ← NEVER 'bhai' alone as a key
   husband_name / husband_nickname
   company_name   ← NOT business_name, business, company, startup_name
-  birth_date     ← NOT birthday, dob, bday, child_birthdate
+  birth_date     ← MUST be a calendar date (e.g. '1995-08-14', 'March 2026'). NEVER extract age duration ('6 months', '2 years') as birth_date! Use son_age or daughter_age.
   marriage_date  ← NOT wedding_date, anniversary
   preferred_name ← NOT name, user_name, my_name
+  passions       ← user's hobbies, interests, coding, music, sports
+  goals          ← career goals, fitness goals, personal targets
+  family_details ← overview of family structure
+  important_facts ← health, allergies, dreams, non-negotiable personal facts
   favourite_color ← NOT favorite_color, favourite_colour, and NEVER favourite_color_<value>
 RULE FOR NICKNAMES: NEVER output generic unscoped "real_name" or "nickname". For family members, ALWAYS use <relation>_name for the real name and <relation>_nickname for the nickname.
 For any other concept, use descriptive snake_case that clearly expresses the concept.
