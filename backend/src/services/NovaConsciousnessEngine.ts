@@ -12,6 +12,8 @@ import { novaBrain } from './NovaBrainService';
 import { temporalAwarenessService } from './TemporalAwarenessService';
 import { outboundDispatcherService } from './OutboundDispatcherService';
 import type { OutboundSource } from '../types/outbound';
+import { resolveUserTzOffsetHours } from './ReminderEngine';
+
 // Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
 // The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
 const MIN_GAP_MINUTES = 1;
@@ -22,7 +24,56 @@ let serverBootTime = Date.now();
 let _pulseInProgress = false;
 let _pulseStartTime = 0;
 
-// Human-like response timing (in seconds)
+/**
+ * Identifies natural, unasked questions based on known facts and missing dimensions
+ * (e.g. knowing user has a son named Shreshth, but his age/schooling is unknown).
+ */
+export function deriveMissingMemoryCuriosities(memories: Array<{ key: string; value: string; memory_type?: string }>): string[] {
+  const memMap = new Map<string, string>();
+  for (const m of memories) {
+    if (m.key && m.value) {
+      memMap.set(m.key.toLowerCase().trim(), m.value.trim());
+    }
+  }
+
+  const curiosities: string[] = [];
+
+  // 1. Son details
+  if (memMap.has('son_name')) {
+    const sonName = memMap.get('son_name');
+    if (!memMap.has('son_age') && !memMap.has('son_school')) {
+      curiosities.push(`Son: Name is "${sonName}", but his age and schooling are unknown. (e.g. ask warmly: "${sonName} kitne saal ka hai?", "School shuru ho gayi ya abhi chhota hai?")`);
+    }
+  }
+
+  // 2. Wife details
+  if (memMap.has('wife_name')) {
+    const wifeName = memMap.get('wife_name');
+    if (!memMap.has('wife_profession') && !memMap.has('wife_occupation') && !memMap.has('wife_work')) {
+      curiosities.push(`Wife: Name is "${wifeName}", but what she does or her interests are unknown. (e.g. ask casually: "Waise ${wifeName} kya karti hai?")`);
+    }
+  }
+
+  // 3. Daughter details
+  if (memMap.has('daughter_name')) {
+    const daughterName = memMap.get('daughter_name');
+    if (!memMap.has('daughter_age')) {
+      curiosities.push(`Daughter: Name is "${daughterName}", but her age is unknown.`);
+    }
+  }
+
+  // 4. User Profession / Work
+  if (!memMap.has('profession') && !memMap.has('job') && !memMap.has('company_name') && !memMap.has('occupation')) {
+    curiosities.push(`User Work: Job, profession, or current project is unknown. (e.g. "Waise aap kya kaam karte ho?")`);
+  }
+
+  // 5. User City / Location
+  if (!memMap.has('city') && !memMap.has('hometown') && !memMap.has('location')) {
+    curiosities.push(`User Location: Which city they live in is unknown.`);
+  }
+
+  return curiosities;
+}
 
 export class NovaConsciousnessEngine {
 
@@ -175,7 +226,7 @@ export class NovaConsciousnessEngine {
     // 1. Fetch Profile & Temporal Context
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('push_token, preferred_name, timezone_offset')
+      .select('push_token, preferred_name, timezone_offset, timezone, country')
       .eq('id', userId)
       .maybeSingle();
 
@@ -242,10 +293,9 @@ export class NovaConsciousnessEngine {
       }
     }
 
-    // timezone_offset is stored in MINUTES (e.g. 330 for IST), but getContext expects
-    // HOURS. Passing 330 raw shifted 'now' by 330h (~13.75 days) into the future, which
-    // broke sleep-window + day/night detection for the user.
-    const tContext = await temporalAwarenessService.getContext(userId, (profile.timezone_offset || 0) / 60);
+    // Resolve user's timezone in fractional hours (e.g. 5.5 for IST)
+    const userTzHours = resolveUserTzOffsetHours(profile || undefined);
+    const tContext = await temporalAwarenessService.getContext(userId, userTzHours);
 
     // 2. Fetch Recent Outreach to enforce MIN_GAP
     const { data: recentOutreach } = await supabaseAdmin
@@ -518,9 +568,13 @@ export class NovaConsciousnessEngine {
       .eq('user_id', userId)
       .eq('is_archived', false)
       .order('updated_at', { ascending: false })
-      .limit(5);
+      .limit(20);
 
     const memorySummary = (recentMemories || []).map(m => `[${m.memory_type}] ${m.key}: ${m.value}`).join('\n');
+    const missingMemoryCuriosities = deriveMissingMemoryCuriosities(recentMemories || []);
+    const missingCuriositiesSummary = missingMemoryCuriosities.length > 0
+      ? missingMemoryCuriosities.map(c => `• ${c}`).join('\n')
+      : 'None.';
     
     // Fetch Working Memory (facts, schedules, routines) to ground proactive questions
     const { data: workingMemories } = await supabaseAdmin
@@ -574,7 +628,8 @@ export class NovaConsciousnessEngine {
                               (recentMemories && recentMemories.length > 0) || 
                               (workingMemories && workingMemories.length > 0) || 
                               (lastConversation && lastConversation.length > 0) ||
-                              (lifeThreads && lifeThreads.length > 0);
+                              (lifeThreads && lifeThreads.length > 0) ||
+                              missingMemoryCuriosities.length > 0;
 
     if (!hasGroundedReason) {
       logger.info('[NACE] Deterministic Gate: Skipping — no grounded reason (no agenda, no memory, no chat context, no open threads)', { userId });
@@ -604,7 +659,7 @@ export class NovaConsciousnessEngine {
     // BUG-07: Session-start context note for Tier 1
     // Tells the LLM this is a returning-user evaluation, not a routine check-in.
     const sessionStartNote = isSessionStart
-      ? `\nSESSION START EVALUATION: User just returned online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' minutes' : 'some time'} away.\nThis is a session-start evaluation, NOT a routine NACE check-in.\nIf there is a SPECIFIC grounded unresolved context (open life thread, unanswered question, pending agenda item, reminder that fired while they were away): recommend YES.\nIf there is no specific grounded reason: choose NO.\n"User came online" alone is NEVER a sufficient reason to reach out.`
+      ? `\nSESSION START EVALUATION: User just returned online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' minutes' : 'some time'} away.\nThis is a session-start evaluation, NOT a routine NACE check-in.\nIf there is unresolved context, an active conversation topic, or known family/personal facts with missing natural curiosities (e.g. asking about son's age or wife): recommend YES (triggerType: 'curiosity' or 'engagement').\nIf there is genuinely zero context or user was just spoken to: choose NO.`
       : '';
 
     const tier1Context = `Time: ${tContext.timeOfDayLabel} (${tContext.hour}:00), Day: ${tContext.dayOfWeek}
@@ -615,6 +670,8 @@ Min Gap Allowed Right Now: ${effectiveMinGap} minutes (based on presence)
 Dynamic Situational Gap: ${dynamicGap} minutes
 Pending Agenda Item: ${agendaItem ? agendaItem.event_description + ' [urgency: ' + agendaItem.urgency + ']' : 'None'}
 Recent Memories: ${memorySummary || 'None'}
+Missing Facts & Natural Curiosity Opportunities:
+${missingCuriositiesSummary}
 Working Memory: ${workingMemorySummary || 'None'}
 Last Conversation Snippet: ${lastConvSnippet || 'None'}
 Active Life Threads: ${lifeThreadSummary || 'None'}
@@ -625,8 +682,9 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
 - User is ONLINE: reach out if gap >= 1 min. Being active means they'll see your message immediately — enable back-to-back messaging.
 - User is AWAY: reach out if gap >= 3 min. They stepped away but will see it soon.
 - User is OFFLINE: reach out if gap >= 1 min initially (exponential backoff applies). They're not active right now.
+- Missing Facts / Family Curiosity: If the user recently shared family members (e.g. wife, son) and natural details are missing (e.g. child's age or schooling, spouse), recommend YES with triggerType: 'curiosity' to show genuine care and interest like a best friend.
 - High urgency agenda item: ALWAYS reach out during non-sleep hours.
-- Morning/afternoon work hours without agenda: only reach if gap > 20 min.
+- Morning/afternoon work hours without agenda: only reach if gap > 20 min or there is family/life thread curiosity.
 - Evening/night with no agenda: reach out freely if gap >= dynamic gap.
 - Sleep window: only high-urgency agenda. Otherwise NO.
 - PROACTIVE RESTRAINT: If there is no specific, grounded reason to message (e.g. no agenda, no recent context to follow up on, no missing fact to ask about), choose NO. Time of day alone is NOT a sufficient reason to check in.`;
@@ -736,7 +794,7 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
 
     // BUG-07: returning-user context note for Tier 2
     const sessionStartContextNote = isSessionStart && shouldReach
-      ? `RETURNING USER OPENING: User just came back online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' min' : 'some time'} away. Do NOT use a generic greeting like "hey" or "kaise ho". Open with ONE specific thing you know about them that is genuinely unresolved or relevant RIGHT NOW (e.g. "Woh meeting ka kya hua?", "Dhaba ke liye supplier waali baat yaad hai?"). If there is nothing specific, STAY SILENT (return empty message).`
+      ? `RETURNING USER OPENING: User just came back online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' min' : 'some time'} away. Do NOT use a generic greeting like "hey" or "kaise ho". Open with ONE specific thing you know about them that is genuinely unresolved, a warm question about their family / missing facts (e.g. asking about Shreshth's age/school or Sakshi), or relevant RIGHT NOW. If there is nothing specific, STAY SILENT (return empty message).`
       : '';
 
     const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
@@ -745,6 +803,8 @@ Silence Duration: ${Math.round(gapMinutes / 60)} hours
 Trigger: ${triggerType}
 Agenda Context: ${agendaItem ? agendaItem.follow_up_question : 'N/A'}
 Recent Memories: ${memorySummary}
+Missing Facts & Curiosity Opportunities:
+${missingCuriositiesSummary}
 Working Memory: ${workingMemorySummary || 'None.'}
 Active Life Threads: ${lifeThreadSummary || 'None.'}
 
@@ -761,7 +821,10 @@ ${busyWindowNote}
 ${silentVisitNote}
 ${midSleepWakeNote}
 ${escalationTone}
-${sessionStartContextNote}`;
+${sessionStartContextNote}
+CURIOSITY & FAMILY FOLLOW-UP DIRECTIVE:
+If trigger is 'curiosity' or 'session_start' or if the user recently talked about their family:
+Naturally follow up with ONE warm, casual question exploring one of the Missing Facts (e.g. asking about Shreshth's age/school or Sakshi) like a genuine friend. Keep it short (1-2 sentences in natural Hinglish).`;
 
 
     try {
@@ -892,8 +955,8 @@ ${sessionStartContextNote}`;
         if (existingAgenda && existingAgenda.length > 0) continue; // Already have today's triggers
 
         // Create a habit-based agenda item
-        const { data: profile } = await supabaseAdmin.from('profiles').select('timezone_offset').eq('id', userId).maybeSingle();
-        const tzOffset = profile?.timezone_offset || 0;
+        const { data: profile } = await supabaseAdmin.from('profiles').select('timezone_offset, timezone, country').eq('id', userId).maybeSingle();
+        const tzOffset = Math.round(resolveUserTzOffsetHours(profile || undefined) * 60);
 
         const scheduleDescription = entries.map(e => `${e.key}: ${e.value}`).join(', ');
         

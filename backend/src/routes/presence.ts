@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { subconsciousQueue } from '../services/QueueService';
-
+import { resolveUserTzOffsetHours } from '../services/ReminderEngine';
 
 const router = Router();
 
@@ -16,8 +16,16 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     if (timezone) {
-      // Opportunistically update timezone on presence heartbeat
-      supabaseAdmin.from('profiles').update({ timezone }).eq('id', userId).then(({ error }) => {
+      // Opportunistically update timezone & timezone_offset on presence heartbeat
+      let offsetMinutes = 330;
+      try {
+        const tzHours = resolveUserTzOffsetHours({ timezone });
+        offsetMinutes = Math.round(tzHours * 60);
+      } catch {
+        offsetMinutes = 330;
+      }
+
+      supabaseAdmin.from('profiles').update({ timezone, timezone_offset: offsetMinutes }).eq('id', userId).then(({ error }) => {
         if (error) logger.warn('Failed to update timezone on presence', { userId, error: error.message });
       });
     }

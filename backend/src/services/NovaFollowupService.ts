@@ -21,6 +21,7 @@ import { logger } from '../lib/logger';
 import { proactiveGate } from './ProactiveGate';
 import { outboundDispatcherService } from './OutboundDispatcherService';
 import type { OutboundSource } from '../types/outbound';
+import { resolveUserTzOffsetHours } from './ReminderEngine';
 
 // NOTE: Global proactive cooldown is now enforced by ProactiveGate (DB-backed).
 // lastProactiveSentAt and GLOBAL_PROACTIVE_COOLDOWN_MS removed — they reset on server restart.
@@ -82,12 +83,12 @@ export class NovaFollowupService {
     try {
       const { data: profile } = await supabaseAdmin
         .from('profiles')
-        .select('timezone_offset')
+        .select('timezone_offset, timezone, country')
         .eq('id', userId)
         .maybeSingle();
-      const tzOffsetMinutes = profile?.timezone_offset ?? 0; // default UTC
+      const tzHours = resolveUserTzOffsetHours(profile || undefined);
       const now = new Date();
-      const localMs = now.getTime() + (tzOffsetMinutes * 60 * 1000);
+      const localMs = now.getTime() + (tzHours * 60 * 60 * 1000);
       return new Date(localMs).getUTCHours();
     } catch {
       return new Date().getUTCHours(); // fallback to UTC
@@ -509,10 +510,10 @@ export class NovaFollowupService {
         // DB-backed gate ensures cross-engine dedup even after server restart.
         const profile = await supabaseAdmin
           .from('profiles')
-          .select('timezone_offset')
+          .select('timezone_offset, timezone, country')
           .eq('id', userMsg.user_id)
           .maybeSingle();
-        const tzOffset = profile.data?.timezone_offset ?? 0;
+        const tzOffset = Math.round(resolveUserTzOffsetHours(profile.data || undefined) * 60);
 
         const unanswGateDecision = await proactiveGate.acquire(userMsg.user_id, {
           outreachType: 'engagement_checkin',
