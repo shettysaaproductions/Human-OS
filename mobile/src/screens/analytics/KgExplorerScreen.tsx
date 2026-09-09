@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, ActivityIndicator,
-  TouchableOpacity, ScrollView, Platform
+  TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { G, Line, Circle, Text as SvgText, Defs, RadialGradient, Stop } from 'react-native-svg';
@@ -11,7 +11,7 @@ import * as d3 from 'd3-force';
 import { api } from '../../services/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const CANVAS_SIZE = Math.max(SCREEN_WIDTH, SCREEN_HEIGHT) * 1.5;
+const GRAPH_HEIGHT = SCREEN_HEIGHT - 170;
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -46,6 +46,232 @@ interface DepartmentMeta {
   count: number;
 }
 
+const DOMAIN_COLORS: Record<string, { color: string; emoji: string; name: string }> = {
+  family:    { color: '#EC4899', emoji: '👨‍👩‍👧', name: 'Family & Relationships' },
+  work:      { color: '#3B82F6', emoji: '👔', name: 'Career & Professional' },
+  goals:     { color: '#10B981', emoji: '🎯', name: 'Goals & Ambitions' },
+  lifestyle: { color: '#F59E0B', emoji: '🧘', name: 'Lifestyle & Rhythm' },
+  identity:  { color: '#8B5CF6', emoji: '📌', name: 'Core Identity' },
+};
+
+function inferDomain(rawKey: string, memoryType?: string): string {
+  const k = (rawKey || '').toLowerCase();
+  const mt = (memoryType || '').toLowerCase();
+  if (k.includes('son_age') || k.includes('child_age') || mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family/.test(k)) return 'family';
+  if (mt === 'work' || /company|office|schedule|hours|days|timing|candidate|job|work/.test(k)) return 'work';
+  if (mt === 'goals' || /goal|target|passion|vision|ambition/.test(k)) return 'goals';
+  if (mt === 'preferences' || mt === 'lifestyle' || /favourite|food|drink|beverage|color|routine/.test(k)) return 'lifestyle';
+  return 'identity';
+}
+
+function toGraphLabel(key: string, value: string): string {
+  const k = key.toLowerCase();
+  const v = (value || '').trim();
+
+  if (k === 'wife_name') return `${v} (Wife)`;
+  if (k === 'son_name') return `${v} (Son)`;
+  if (k === 'son_age') return `${v} old (Son)`;
+  if (k === 'father_name') return `${v} (Father)`;
+  if (k === 'mother_name') return `${v} (Mother)`;
+  if (k === 'company_name') return `${v} (Company)`;
+  if (k === 'work_schedule') return '11am - 8pm (Work Hours)';
+  if (k === 'office_hours') return `${v} (Hours)`;
+  if (k === 'current_office_location') return `${v} (Office)`;
+  if (k === 'candidates_for_job') return `${v} (Hiring)`;
+  if (k === 'hope_for_job_selection') return 'Target: 2 Selections';
+  if (k === 'goals') return v.length > 22 ? v.slice(0, 20) + '... (Goal)' : `${v} (Goal)`;
+  if (k === 'passions') return 'Passions & Leadership';
+  if (k === 'preferred_name') {
+    const cleanName = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
+    return `${cleanName} (Name)`;
+  }
+  const cleanKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey);
+}
+
+// Client-side fallback synthesizer if /analytics/kg is not yet populated
+function synthesizeGraph(memories: any[], workingContext: any[], preferredName: string = 'Saa') {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const nodeIds = new Set<string>();
+
+  // 1. Central Core Node
+  const coreNode: GraphNode = {
+    id: 'user-core',
+    name: preferredName || 'You',
+    entity_type: 'self',
+    department: 'identity',
+    color: '#8B5CF6',
+    radius: 28,
+    value: `Central Self: ${preferredName}`,
+    isHub: true,
+    emoji: '🧠'
+  };
+  nodes.push(coreNode);
+  nodeIds.add(coreNode.id);
+
+  // 2. Department Hubs
+  const deptCounts: Record<string, number> = { family: 0, work: 0, goals: 0, lifestyle: 0, identity: 0 };
+  const DEPT_KEYS = ['family', 'work', 'goals', 'lifestyle', 'identity'];
+
+  for (const d of DEPT_KEYS) {
+    const meta = DOMAIN_COLORS[d];
+    const deptNodeId = `dept-${d}`;
+    nodes.push({
+      id: deptNodeId,
+      name: meta.name,
+      entity_type: 'department',
+      department: d,
+      color: meta.color,
+      radius: 22,
+      value: `Department: ${meta.name}`,
+      isDepartment: true,
+      emoji: meta.emoji
+    });
+    nodeIds.add(deptNodeId);
+
+    edges.push({
+      id: `edge-core-${d}`,
+      source: 'user-core',
+      target: deptNodeId,
+      relation: 'HAS_DEPARTMENT',
+      color: 'rgba(255,255,255,0.25)',
+      weight: 3
+    });
+  }
+
+  // 3. Memory Nodes
+  for (const mem of memories) {
+    if (!mem.key || !mem.value) continue;
+    const d = inferDomain(mem.key, mem.memory_type);
+    const meta = DOMAIN_COLORS[d] || DOMAIN_COLORS.identity;
+    const nodeId = `mem-${mem.key}`;
+    if (nodeIds.has(nodeId)) continue;
+
+    nodes.push({
+      id: nodeId,
+      name: toGraphLabel(mem.key, mem.value),
+      entity_type: mem.memory_type || 'memory',
+      department: d,
+      color: meta.color,
+      radius: 15,
+      value: mem.value,
+      raw_key: mem.key,
+      emoji: meta.emoji
+    });
+    nodeIds.add(nodeId);
+    deptCounts[d]++;
+
+    edges.push({
+      id: `edge-dept-${mem.key}`,
+      source: `dept-${d}`,
+      target: nodeId,
+      relation: 'CONTAINS',
+      color: meta.color,
+      weight: 1
+    });
+  }
+
+  // 4. Working Context Nodes
+  for (const wm of workingContext) {
+    if (!wm.key || !wm.value) continue;
+    const d = inferDomain(wm.key);
+    const nodeId = `wm-${wm.key}`;
+    if (nodeIds.has(nodeId)) continue;
+
+    nodes.push({
+      id: nodeId,
+      name: toGraphLabel(wm.key, wm.value),
+      entity_type: 'active_context',
+      department: d,
+      color: '#06B6D4',
+      radius: 13,
+      value: wm.value,
+      raw_key: wm.key,
+      isContext: true,
+      emoji: '⚡'
+    });
+    nodeIds.add(nodeId);
+    deptCounts[d]++;
+
+    edges.push({
+      id: `edge-dept-wm-${wm.key}`,
+      source: `dept-${d}`,
+      target: nodeId,
+      relation: 'ACTIVE_FOCUS',
+      color: '#06B6D4',
+      weight: 1
+    });
+  }
+
+  // 5. Cross-Domain Neural Edges
+  if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-wife_name')) {
+    edges.push({
+      id: 'cross-sched-wife',
+      source: 'mem-work_schedule',
+      target: 'mem-wife_name',
+      relation: 'EVENING_ROUTINE',
+      color: '#C084FC',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+  if (nodeIds.has('mem-work_schedule') && nodeIds.has('mem-son_name')) {
+    edges.push({
+      id: 'cross-sched-son',
+      source: 'mem-work_schedule',
+      target: 'mem-son_name',
+      relation: 'EVENING_ROUTINE',
+      color: '#C084FC',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-company_name')) {
+    edges.push({
+      id: 'cross-cand-comp',
+      source: 'wm-candidates_for_job',
+      target: 'mem-company_name',
+      relation: 'HIRING_AT',
+      color: '#34D399',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+  if (nodeIds.has('wm-candidates_for_job') && nodeIds.has('mem-goals')) {
+    edges.push({
+      id: 'cross-cand-goal',
+      source: 'wm-candidates_for_job',
+      target: 'mem-goals',
+      relation: 'POWERS_GOAL',
+      color: '#10B981',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+  if (nodeIds.has('mem-passions') && nodeIds.has('mem-son_name')) {
+    edges.push({
+      id: 'cross-pass-son',
+      source: 'mem-passions',
+      target: 'mem-son_name',
+      relation: 'FAMILY_BOND',
+      color: '#F472B6',
+      isCrossDomain: true,
+      weight: 2
+    });
+  }
+
+  const departments: DepartmentMeta[] = DEPT_KEYS.map(d => ({
+    id: d,
+    name: DOMAIN_COLORS[d].name,
+    emoji: DOMAIN_COLORS[d].emoji,
+    color: DOMAIN_COLORS[d].color,
+    count: deptCounts[d]
+  }));
+
+  return { nodes, edges, departments };
+}
+
 export function KgExplorerScreen() {
   const [loading, setLoading] = useState(true);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
@@ -78,37 +304,66 @@ export function KgExplorerScreen() {
   const fetchGraph = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/analytics/kg');
-      const { nodes: apiNodes, edges: apiEdges, departments: apiDepts } = res.data.data;
+      let apiNodes: any[] = [];
+      let apiEdges: any[] = [];
+      let apiDepts: any[] = [];
+
+      // Try /analytics/kg first
+      try {
+        const res = await api.get('/analytics/kg');
+        if (res.data?.data?.nodes && res.data.data.nodes.length > 0) {
+          apiNodes = res.data.data.nodes;
+          apiEdges = res.data.data.edges || [];
+          apiDepts = res.data.data.departments || [];
+        }
+      } catch (e) {
+        // Fallback to /analytics/memories
+      }
+
+      // If /analytics/kg was empty, synthesize directly from /analytics/memories
+      if (!apiNodes || apiNodes.length === 0) {
+        const memRes = await api.get('/analytics/memories');
+        const memData = memRes.data?.data;
+        if (memData) {
+          const synthesized = synthesizeGraph(
+            memData.currentMemories || [],
+            memData.workingContext || [],
+            'Saa'
+          );
+          apiNodes = synthesized.nodes;
+          apiEdges = synthesized.edges;
+          apiDepts = synthesized.departments;
+        }
+      }
 
       setDepartments(apiDepts || []);
 
-      const centerX = CANVAS_SIZE / 2;
-      const centerY = CANVAS_SIZE / 2;
+      const centerX = SCREEN_WIDTH / 2;
+      const centerY = GRAPH_HEIGHT / 2;
 
-      // Position nodes with initial radial layout around center
+      // Position nodes in radial clusters around the screen center
       const d3Nodes: GraphNode[] = (apiNodes || []).map((n: any, idx: number) => {
-        let initialX = centerX;
-        let initialY = centerY;
+        let initX = centerX;
+        let initY = centerY;
 
         if (n.isHub) {
-          initialX = centerX;
-          initialY = centerY;
+          initX = centerX;
+          initY = centerY;
         } else if (n.isDepartment) {
           const angle = (idx * 2 * Math.PI) / 5;
-          initialX = centerX + Math.cos(angle) * 140;
-          initialY = centerY + Math.sin(angle) * 140;
+          initX = centerX + Math.cos(angle) * 110;
+          initY = centerY + Math.sin(angle) * 110;
         } else {
           const angle = Math.random() * 2 * Math.PI;
-          const dist = 180 + Math.random() * 100;
-          initialX = centerX + Math.cos(angle) * dist;
-          initialY = centerY + Math.sin(angle) * dist;
+          const dist = 140 + Math.random() * 80;
+          initX = centerX + Math.cos(angle) * dist;
+          initY = centerY + Math.sin(angle) * dist;
         }
 
         return {
           ...n,
-          x: initialX,
-          y: initialY,
+          x: initX,
+          y: initY,
         };
       });
 
@@ -122,27 +377,27 @@ export function KgExplorerScreen() {
         }))
         .filter((e: any) => nodeMap.has(e.source) && nodeMap.has(e.target));
 
-      // D3 Force Simulation
+      // D3 Force Simulation centered exactly in the phone screen
       if (simulationRef.current) simulationRef.current.stop();
 
       const simulation = d3.forceSimulation<GraphNode>(d3Nodes)
         .force('link', d3.forceLink<GraphNode, GraphEdge>(d3Edges)
           .id(d => d.id)
           .distance(d => {
-            if ((d as any).isCrossDomain) return 130;
-            if ((d as any).target?.isDepartment || (d as any).source?.isHub) return 100;
-            return 70;
+            if ((d as any).isCrossDomain) return 110;
+            if ((d as any).target?.isDepartment || (d as any).source?.isHub) return 85;
+            return 55;
           })
-          .strength(d => (d as any).isCrossDomain ? 0.2 : 0.7)
+          .strength(d => (d as any).isCrossDomain ? 0.2 : 0.6)
         )
         .force('charge', d3.forceManyBody<GraphNode>().strength(d => {
-          if (d.isHub) return -600;
-          if (d.isDepartment) return -350;
-          return -180;
+          if (d.isHub) return -450;
+          if (d.isDepartment) return -250;
+          return -120;
         }))
         .force('center', d3.forceCenter(centerX, centerY))
-        .force('collide', d3.forceCollide<GraphNode>().radius(d => d.radius + 16))
-        .alphaDecay(0.04);
+        .force('collide', d3.forceCollide<GraphNode>().radius(d => d.radius + 14))
+        .alphaDecay(0.05);
 
       simulationRef.current = simulation;
 
@@ -157,7 +412,7 @@ export function KgExplorerScreen() {
       });
 
     } catch (err) {
-      console.error('Failed to fetch knowledge graph', err);
+      console.error('Failed to load knowledge graph', err);
     } finally {
       setLoading(false);
     }
@@ -257,7 +512,7 @@ export function KgExplorerScreen() {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#06B6D4" />
-        <Text style={styles.loadingText}>Synthesizing Knowledge Graph...</Text>
+        <Text style={styles.loadingText}>Building Knowledge Galaxy...</Text>
       </View>
     );
   }
@@ -315,15 +570,15 @@ export function KgExplorerScreen() {
         <View style={styles.canvasWrapper}>
           <GestureDetector gesture={composedGesture}>
             <Animated.View style={[styles.animatedContainer, animatedCanvasStyle]}>
-              <Svg width={CANVAS_SIZE} height={CANVAS_SIZE} style={styles.svg}>
+              <Svg width={SCREEN_WIDTH} height={GRAPH_HEIGHT} style={styles.svg}>
                 <Defs>
                   <RadialGradient id="glow-purple" cx="50%" cy="50%" r="50%">
-                    <Stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.5" />
+                    <Stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.6" />
                     <Stop offset="100%" stopColor="#8B5CF6" stopOpacity="0" />
                   </RadialGradient>
                 </Defs>
 
-                {/* Draw Edges */}
+                {/* Draw Connector Edges */}
                 <G>
                   {edges.map((e, i) => {
                     const source = (typeof e.source === 'object' ? e.source : nodes.find(n => n.id === e.source)) as GraphNode;
@@ -361,7 +616,7 @@ export function KgExplorerScreen() {
                   })}
                 </G>
 
-                {/* Draw Nodes */}
+                {/* Draw Graph Nodes */}
                 <G>
                   {nodes.map((n) => {
                     if (n.x === undefined || n.y === undefined) return null;
@@ -376,18 +631,18 @@ export function KgExplorerScreen() {
                         onPress={() => handleNodePress(n)}
                         opacity={opacity}
                       >
-                        {/* Glow halo for hubs */}
+                        {/* Glow Halo for Hubs and Selection */}
                         {(n.isHub || n.isDepartment || isSelected) && (
                           <Circle
                             cx={n.x}
                             cy={n.y}
-                            r={n.radius + (isSelected ? 10 : 8)}
+                            r={n.radius + (isSelected ? 9 : 6)}
                             fill={n.color}
-                            opacity={isSelected ? 0.35 : 0.15}
+                            opacity={isSelected ? 0.4 : 0.18}
                           />
                         )}
 
-                        {/* Core Node Circle */}
+                        {/* Node Circle */}
                         <Circle
                           cx={n.x}
                           cy={n.y}
@@ -397,7 +652,7 @@ export function KgExplorerScreen() {
                           strokeWidth={isSelected ? 3 : n.isDepartment ? 2 : 1}
                         />
 
-                        {/* Emoji inside hub */}
+                        {/* Emoji icon inside hub */}
                         {n.emoji && (
                           <SvgText
                             x={n.x}
@@ -412,9 +667,9 @@ export function KgExplorerScreen() {
                         {/* Node Label Text */}
                         <SvgText
                           x={n.x}
-                          y={n.y + n.radius + 14}
-                          fontSize={n.isHub ? 13 : n.isDepartment ? 12 : 10}
-                          fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : 'normal'}
+                          y={n.y + n.radius + 13}
+                          fontSize={n.isHub ? 12 : n.isDepartment ? 11 : 9.5}
+                          fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '500'}
                           fill={isSelected ? '#FFFFFF' : n.isDepartment ? n.color : '#D4D4D8'}
                           textAnchor="middle"
                         >
@@ -448,7 +703,7 @@ export function KgExplorerScreen() {
           </View>
         </View>
 
-        {/* Selected Node Details Glass Card */}
+        {/* Selected Node Details Card */}
         {selectedNode && (
           <View style={styles.detailCard}>
             <View style={styles.detailHeader}>
@@ -528,8 +783,8 @@ const styles = StyleSheet.create({
   filterChipTextActive: { color: '#06B6D4', fontWeight: 'bold' },
 
   canvasWrapper: { flex: 1, overflow: 'hidden', backgroundColor: '#09090B' },
-  animatedContainer: { width: CANVAS_SIZE, height: CANVAS_SIZE },
-  svg: { width: CANVAS_SIZE, height: CANVAS_SIZE },
+  animatedContainer: { width: SCREEN_WIDTH, height: GRAPH_HEIGHT },
+  svg: { width: SCREEN_WIDTH, height: GRAPH_HEIGHT },
 
   // Floating HUD Zoom Controls
   hudControls: {
