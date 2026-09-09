@@ -93,6 +93,11 @@ export class SituationalAwareness {
     lines.push(`- Time-based persona: ${this.getTimedPersona(ctx.nowLocal, ctx.isWeekend)}`);
 
     const currentHour = ctx.nowLocal.getUTCHours();
+    if (currentHour >= 20 || currentHour < 6) {
+      lines.push(`- 🌙 NIGHT/WIND-DOWN WINDOW (${ctx.timeStr}): It is late evening or night. NEVER suggest immediate workouts, exercise, cooking, heavy work tasks, or high-energy physical activities right now. If discussing fitness, cooking, or health goals, ONLY ask exploratory questions about their routine for the future (e.g. "Tum usually kis time workout karna pasand karte ho?").`);
+    } else {
+      lines.push(`- 🏃 PHYSICAL & DOMESTIC ACTIVITY DIRECTIVE: If memories or goals mention fitness, workout, or cooking, NEVER abruptly command or ask them to do it right now out of nowhere. Always ask exploratory questions about their routine or preferences.`);
+    }
     if (currentHour >= 1 && currentHour <= 4) {
       lines.push(`- ⚠️ SLEEP WINDOW SCOLDING & RESTRAINT: The user is messaging late night (1 AM - 4 AM). If the user is just saying hi or initiating casual chat, you may acknowledge the late hour. However, if the user is stating facts, correcting information, or asking a specific question, respond directly and concisely without scolding or adding unrelated late-night commentary.`);
     }
@@ -279,6 +284,7 @@ export class SituationalAwareness {
     lines.push(`- If user mentioned something in memory (a person's name, a goal, an event) — reference it organically when the moment is right.`);
     lines.push(`- Use this brief as YOUR internal compass. DO NOT narrate this brief or acknowledge that you have it.`);
     lines.push(`- NEVER say "I understand you're busy" or "I can see you're feeling X". Just respond accordingly.`);
+    lines.push(`- CONFIRM ROLES BEFORE ASSUMING (CRITICAL): Never assume the user performs an activity (like cooking, childcare, or operations) when memories or conversations relate it to a family member (e.g. wife). If the user mentioned that his wife cooks and he is interested in a cloud kitchen business, ask clarifying questions (e.g. "Waise cooking aap karte ho ya aapki wife?") rather than guessing or assuming the user is into cooking!`);
     lines.push(`- If something is unclear — ask ONE direct question upfront. Do not guess and pretend to understand.`);
 
     return lines.join('\n');
@@ -430,6 +436,12 @@ export class SituationalAwareness {
         `Their active goal is "${topGoal}". ` +
         `When relevant, BRIDGE this emotion to their goal — e.g., validate the emotional load of pursuing this goal.`
       );
+      const lowerGoal = topGoal.toLowerCase();
+      if (lowerGoal.includes('fitness') || lowerGoal.includes('workout') || lowerGoal.includes('gym')) {
+        parts.push(`  * Note: For fitness/workout goals, do NOT demand or suggest working out right now. Inquire about their typical timing ("Subah workout karte ho ya shaam ko?") or their routine preferences.`);
+      } else if (lowerGoal.includes('kitchen') || lowerGoal.includes('cook') || lowerGoal.includes('food')) {
+        parts.push(`  * Note: For cooking/cloud kitchen goals, do NOT assume the user personally cooks or tell them to cook right now. Ask clarifying questions about roles and interest ("Cooking aap karte ho ya aapki wife?").`);
+      }
     }
 
     if (recentEpisode) {

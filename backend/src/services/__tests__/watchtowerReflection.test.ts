@@ -67,4 +67,17 @@ describe('WatchtowerReflectionService', () => {
 
     expect(watchtowerReflectionService).toBeDefined();
   });
+
+  it('correctly handles scheduling for late-night workout and entity assumption turns', () => {
+    // Verifies that messages with untimely workout commands or cooking assumptions schedule safely
+    expect(() => {
+      watchtowerReflectionService.scheduleReflection({
+        userId,
+        conversationId,
+        messageId: '55555555-5555-5555-5555-555555555555',
+        content: 'Arey sun, exercise karna toh thoda ho gaya hai? Abhi mood hai toh start kar de!',
+        userMessage: 'Abhi raat ke 12:19 min hue hai, ye koi exercise karne ka time thodi na hai',
+      });
+    }).not.toThrow();
+  });
 });

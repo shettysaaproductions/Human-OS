@@ -187,16 +187,34 @@ export class WatchtowerReflectionService {
 
     if (signal.aborted) return;
 
+    // Resolve user's local hour and time string
+    let localHour = 20;
+    let localTimeStr = 'evening';
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('country, timezone_offset, timezone').eq('id', userId).maybeSingle();
+      const { resolveUserTzOffsetHours } = await import('./ReminderEngine');
+      const tzH = resolveUserTzOffsetHours(prof || undefined);
+      const localDate = new Date(Date.now() + tzH * 3600 * 1000);
+      localHour = localDate.getUTCHours();
+      const hh = localHour % 12 || 12;
+      const mm = localDate.getUTCMinutes().toString().padStart(2, '0');
+      const ampm = localHour >= 12 ? 'PM' : 'AM';
+      localTimeStr = `${hh}:${mm} ${ampm}`;
+    } catch {
+      // fallback to defaults
+    }
+
     // 3. Critique Prompt
     const systemPrompt = `You are the Watchtower Post-Reply Reflection Engine for Nova.
 Nova is an AI best friend who texts on WhatsApp.
 Your job is to critically review Nova's latest sent reply for major blunders, logical fallacies, entity confusion, typos, or missed dots.
 
 CRITICAL CHECKS:
-1. ENTITY ATTRIBUTION & AGE PLAUSIBILITY (FATAL FLAW):
-   - Did Nova attribute an adult activity, tool, course, or hobby to an infant/child?
-     (e.g., attributing nail art kit, cooking, or self-learning to a 6-month-old infant Shreshth instead of wife Sakshi).
+1. ENTITY ATTRIBUTION & UNCONFIRMED ASSUMPTIONS (FATAL FLAW):
+   - Did Nova attribute an adult activity, tool, course, or hobby to an infant/child (e.g. nail art to infant Shreshth instead of wife Sakshi)?
+   - Did Nova attribute an activity, skill, or chore to the wrong person (e.g., attributing cooking to the user when the user's wife cooks, or assuming the user cooks when they discussed cooking regarding their wife and cloud kitchen)?
    - Did Nova resolve pronouns ("usse", "usne", "woh") to the wrong person in context?
+   - If so, mark flaw_type: "entity_confusion" and rewrite the reply to politely ask who does the activity (e.g., "Waise cooking aap karte ho ya aapki wife karti hai?") or clarify roles respectfully.
 2. TYPOS & GRAMMAR SLIPS:
    - Obvious typos (e.g. "rata" instead of "raat", weird translations, broken Hinglish).
 3. LEAKED TAGS OR SYSTEM ARTIFACTS:
@@ -210,17 +228,24 @@ CRITICAL CHECKS:
    - Did Nova misunderstand this as a past event (e.g., saying "tumne kal reminder diya tha", "main tumhare reminder ko yaad kar raha hoon" instead of confirming it is scheduled for the future)?
    - Did Nova fail to confirm the future reminder?
    - If so, mark flaw_type: "missed_reminder" and provide corrected_content warmly confirming the reminder for the requested date and time in natural WhatsApp Hinglish (1-2 sentences).
+7. SITUATIONAL / TEMPORAL MISMATCH (WRONG TIME FOR ACTION):
+   - Did Nova ask the user to perform an immediate physical activity or heavy task (e.g. "workout kar lo", "chalo exercise karein", "khana bana lo", "start kar de") at an untimely hour (such as late evening / night, local hour >= 20 or < 6)?
+   - Did Nova demand or suggest an immediate action out of nowhere instead of inquiring about preferred timing or routine (e.g. asking "What time do you usually like to work out?" or "Are you interested in fitness routines?")?
+   - If so, mark flaw_type: "inappropriate_situation" and provide corrected_content replacing the untimely command with a warm, natural question inquiring about their preferred timing or routine in natural WhatsApp Hinglish (1-2 sentences).
 
 OUTPUT FORMAT:
 Respond with ONLY valid JSON:
 {
   "has_flaw": boolean,
-  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "missed_reminder" | "none",
+  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "missed_reminder" | "inappropriate_situation" | "none",
   "explanation": "Clear 1-sentence reason why Nova's reply was flawed or why it is good",
   "corrected_content": "The corrected, warm, natural Hinglish reply formatted like WhatsApp text (1-2 sentences) if has_flaw is true, else null"
 }`;
 
-    const userPrompt = `User's Latest Message:
+    const userPrompt = `User's Current Local Time:
+${localTimeStr} (Hour: ${localHour})
+
+User's Latest Message:
 "${userMessage}"
 
 Recent Conversation Context:
@@ -232,7 +257,7 @@ ${memorySummary}
 Nova's Sent Reply:
 "${content}"
 
-Critique this reply. If there is entity confusion, missed reminders, past-tense hallucination on a future reminder, or typos/leaks, provide the corrected natural Hinglish version.`;
+Critique this reply. If there is entity confusion, unconfirmed role assumptions, missed reminders, past-tense hallucination on a future reminder, or untimely action prompts (e.g. workouts or cooking at night), provide the corrected natural Hinglish version.`;
 
     // Second-layer Reminder Safety Net
     let scheduledByWatchtower: any = null;
@@ -281,6 +306,22 @@ Critique this reply. If there is entity confusion, missed reminders, past-tense 
         critique.flaw_type = 'missed_reminder';
         critique.explanation = 'Nova hallucinated that the user gave a reminder in the past instead of confirming the future reminder.';
         critique.corrected_content = `Haan bilkul! 😊 Maine ${scheduledByWatchtower.formattedTime || 'kal'} ka reminder set kar diya hai — ${scheduledByWatchtower.task || 'tumhare kaam'} ke liye. Main tumhe barabar yaad dila dungi!`;
+      }
+
+      // Deterministic night-time activity mismatch override
+      const isUntimelyHour = localHour >= 20 || localHour < 6;
+      const hasUntimelyActionPrompt = /\b(?:workout\s*(?:karo|kar\s*le|shuru|start)|exercise\s*(?:karo|kar\s*le|start)|khana\s*bana(?:ne)?|start\s*kar\s*de|shuru\s*kar\s*de)\b/i.test(lowerContent);
+      if (isUntimelyHour && hasUntimelyActionPrompt && (!critique.has_flaw || critique.flaw_type === 'none')) {
+        critique.has_flaw = true;
+        critique.flaw_type = 'inappropriate_situation';
+        critique.explanation = `Nova suggested starting an immediate activity at night (${localTimeStr}) without considering the hour or asking about preferred routines.`;
+        if (lowerContent.includes('exercise') || lowerContent.includes('workout')) {
+          critique.corrected_content = 'Waise tum usually kis time workout karna pasand karte ho — morning mein ya evening mein? Ya koi specific routine follow karte ho?';
+        } else if (lowerContent.includes('khana') || lowerContent.includes('cook')) {
+          critique.corrected_content = 'Waise kal ke liye kya plan hai? Cooking aap karte ho ya aapki wife karti hai?';
+        } else {
+          critique.corrected_content = 'Aaram se dekh lena jab free ho! Abhi toh unwinding ka time hai 😊';
+        }
       }
 
       if (!critique.has_flaw || !critique.corrected_content) {

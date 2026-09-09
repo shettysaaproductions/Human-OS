@@ -132,7 +132,7 @@ export class ProactiveGate {
         const nowUtcMs = Date.now();
         const localMs = nowUtcMs + timezoneOffsetMinutes * 60 * 1000;
         const localHour = new Date(localMs).getUTCHours();
-        const isQuiet = localHour >= 23 || localHour < 7;
+        const isQuiet = localHour >= 22 || localHour < 7;
         if (isQuiet) {
           logger.info('[ProactiveGate] BLOCK — quiet hours', { ...logCtx, localHour });
           return { allowed: false, blockedBy: 'quiet_hours', detail: `local hour ${localHour}` };

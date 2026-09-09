@@ -304,7 +304,13 @@ ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
   → Object 1: { "shouldPersist": true, "type": "family", "key": "wife_name", "value": "Sakshi", ... }
   → Object 2: { "shouldPersist": true, "type": "family", "key": "likes_wifes_cooking", "value": "User loves his wife's cooking", ... }
 - Each memory object must contain EXACTLY ONE atomic fact — no compound statements.
-- When in doubt, split it into MORE objects rather than fewer.`
+- When in doubt, split it into MORE objects rather than fewer.
+
+ENTITY ATTRIBUTION & ACTIVITY OWNERSHIP (CRITICAL — ZERO CONFUSION):
+- ALWAYS distinguish WHO performs or owns an activity, skill, plan, or business.
+- If a family member (wife, husband, mother, father, son, daughter) performs an activity (e.g. wife cooks, wife paints, mother sews), attribute it explicitly to THAT person (e.g. key: "wife_cooking", value: "Wife cooks / is responsible for cooking").
+- NEVER attribute a family member's activity or role to the user! (e.g. if wife cooks and user wants to run a cloud kitchen business, do NOT extract "user cooks" or create reminders for user to cook — user role is "business/cloud kitchen", wife role is "cooking").
+- If the user mentions a business idea (e.g. cloud kitchen, startup), attribute it to "goals" or "business_interest" with specific role: "User interested in starting cloud kitchen business; wife handles cooking".`
       },
       {
         role: 'user',

@@ -378,14 +378,19 @@ export class ReminderSchedulerService {
     
     try {
       const { complete } = await import('../lib/nvidia');
-      const prompt = `You are Nova, an AI companion texting your friend. 
-You need to remind them to do this: "${text}". 
-Generate a SINGLE short, warm, and highly conversational Hinglish text message (max 1-2 lines). 
-Do NOT sound like a robotic alarm. Do NOT use words like "Reminder" or "Time for". Just casually nudge them to do it.
+      const prompt = `You are Nova, an AI companion texting your friend on WhatsApp. 
+You need to remind them about this: "${text}". 
+Generate a SINGLE short, warm, and conversational Hinglish text message (max 1-2 lines). 
+Do NOT sound like a robotic alarm. Do NOT use words like "Reminder" or "Time for". Just casually and warmly mention it.
 
-Example 1: "Arey sun, Barfi movie dekhni thi na? Abhi free hai toh shuru kar de!"
-Example 2: "Yaar pani pi le thoda, dehydration ho jayegi."
-Example 3: "Oye uth ja, 10 baj gaye!"
+CRITICAL RULES:
+- Casually remind them about the task for their scheduled time.
+- NEVER say "abhi free hai toh start kar de" or command them to start right now if it is untimely (e.g., cooking, gym, or work tasks late at night).
+- If it's a future plan, remind them gently without demanding immediate execution.
+
+Example 1: "Arey sun, yaad hai na — ${text}? Time pe dekh lena!"
+Example 2: "Yaar, ${text} wala kaam dekh lena araam se."
+Example 3: "Sun, ${text} ke baare me socha tha na? Yaad dila rahi thi."
 
 Output ONLY the raw text message. No markdown, no quotes, no labels.`;
 
@@ -400,13 +405,13 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
       if (clean.startsWith('"') && clean.endsWith('"')) {
         clean = clean.substring(1, clean.length - 1);
       }
-      return clean || `Arey sun, ${text} ka time ho gaya!`;
+      return clean || `Arey sun, ${text} yaad dila rahi thi!`;
     } catch (err) {
       logger.error('Failed to generate dynamic reminder message, falling back to template', { error: err instanceof Error ? err.message : String(err) });
       const templates = [
-        `Yaar, ${text} ka time ho gaya! Done kara ke batana 😊`,
-        `Arre sun, ${text} — abhi kar le! Phir bata kaisa gaya.`,
-        `Boss, ${text} yaad hai na? Chal jaldi kar!`
+        `Yaar, ${text} ka dhyaan rakhna! Done ho jaye toh batana 😊`,
+        `Arre sun, ${text} yaad hai na? Aaram se dekh lena.`,
+        `Sun, ${text} ke baare me yaad dila rahi thi!`
       ];
       return templates[Math.floor(Math.random() * templates.length)];
     }

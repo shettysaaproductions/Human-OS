@@ -228,12 +228,27 @@ export class OutboundDispatcherService {
       // ── 2. GATE ────────────────────────────────────────────────────────────
       if (currentStatus === 'CREATED') {
         if (!outreachId) {
+          let tzOffsetMinutes = 330; // default to IST (+5:30)
+          try {
+            const { data: userProfile } = await supabaseAdmin
+              .from('profiles')
+              .select('timezone_offset, timezone, country')
+              .eq('id', payload.userId)
+              .maybeSingle();
+            if (userProfile) {
+              const { resolveUserTzOffsetHours } = await import('./ReminderEngine');
+              tzOffsetMinutes = Math.round(resolveUserTzOffsetHours(userProfile) * 60);
+            }
+          } catch {
+            // fallback to default
+          }
+
           const gateRes = await proactiveGate.acquire(payload.userId, {
             outreachType: payload.intentType,
             logicalKey: payload.logicalKey,
             skipQuietHoursCheck: payload.skipQuietHoursCheck || false,
             skipMinGapCheck: payload.skipMinGapCheck || false,
-            isUrgent: payload.intentType === 'reminder' || payload.skipQuietHoursCheck,
+            timezoneOffsetMinutes: tzOffsetMinutes,
           });
 
           if (!gateRes.allowed) {
