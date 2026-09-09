@@ -4,7 +4,7 @@ import {
   TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { G, Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
+import Svg, { G, Line, Path } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring
@@ -14,9 +14,9 @@ import { api } from '../../services/api';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const GRAPH_HEIGHT = SCREEN_HEIGHT - 170;
 
-// Safe virtual canvas dimensions well below Android OpenGL texture limit (2048x2048)
-const WORLD_SIZE = 1000;
-const CENTER = WORLD_SIZE / 2; // 500
+// Expanded virtual canvas coordinates for wide, clear gaps between branches and stems
+const WORLD_SIZE = 2000;
+const CENTER = WORLD_SIZE / 2; // 1000
 
 interface GraphNode {
   id: string;
@@ -114,6 +114,8 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   if (k === 'cloud_kitchen_business') return { title: 'Cloud Kitchen', sub: 'Business Plan' };
   if (k === 'father_name') return { title: v || 'Father', sub: 'Father' };
   if (k === 'mother_name') return { title: v || 'Mother', sub: 'Mother' };
+  if (k === 'mother_occupation' || k === 'mother_job') return { title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || 'Tailor'), sub: 'Mother Occupation' };
+  if (k === 'father_business' || k === 'father_job') return { title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || 'Business'), sub: 'Father Business' };
   if (k === 'daughter_name') return { title: v || 'Daughter', sub: 'Daughter' };
   if (k === 'sister_name') return { title: v || 'Sister', sub: 'Sister' };
   if (k === 'brother_name') return { title: v || 'Brother', sub: 'Brother' };
@@ -189,8 +191,8 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     deptBuckets[d].push(n);
   }
 
-  // 2. Department Hubs (Level 1 Trunks) at Radius 175
-  const DEPT_ORBIT_RADIUS = 175;
+  // 2. Department Hubs (Level 1 Trunks) at Radius 380
+  const DEPT_ORBIT_RADIUS = 380;
   const deptList: DepartmentMeta[] = [];
   const DEPT_KEYS = ['family', 'work', 'goals', 'lifestyle', 'identity'];
 
@@ -256,8 +258,8 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
     // Position Level 2 Branches: Fanning outward from Department Hub (hx, hy)
     const branchCount = branchItems.length;
-    const branchDist = 95;
-    const branchSpread = Math.min(Math.PI * 0.65, Math.max(0.35, (branchCount - 1) * 0.32));
+    const branchDist = 260;
+    const branchSpread = Math.min(Math.PI * 0.75, Math.max(0.5, (branchCount - 1) * 0.42));
 
     branchItems.forEach((bMem, bIdx) => {
       const names = toDisplayNames(bMem.raw_key, bMem.value, bMem.name);
@@ -312,8 +314,8 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         : angle;
 
       const sCount = stems.length;
-      const stemDist = 72;
-      const stemSpread = Math.min(Math.PI * 0.65, Math.max(0.4, (sCount - 1) * 0.38));
+      const stemDist = 180;
+      const stemSpread = Math.min(Math.PI * 0.65, Math.max(0.45, (sCount - 1) * 0.46));
 
       stems.forEach((sMem, sIdx) => {
         const names = toDisplayNames(sMem.raw_key, sMem.value, sMem.name);
@@ -382,7 +384,7 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         if (dist > 1) {
           const nx = -dy / dist;
           const ny = dx / dist;
-          const curveAmount = Math.min(65, Math.max(30, dist * 0.18));
+          const curveAmount = Math.min(120, Math.max(50, dist * 0.18));
           const ctrlX = Math.round((sNode.x + tNode.x) / 2 + nx * curveAmount);
           const ctrlY = Math.round((sNode.y + tNode.y) / 2 + ny * curveAmount);
           pathD = `M ${sNode.x} ${sNode.y} Q ${ctrlX} ${ctrlY} ${tNode.x} ${tNode.y}`;
@@ -507,6 +509,18 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
         relation = k.includes('age') ? 'AGE' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = "Detail stem of Son";
+      } else if (k.startsWith('father_') && allKeys.has('father_name')) {
+        parentId = 'mem-father_name';
+        hierarchyLevel = 3;
+        relation = k.includes('business') ? 'FATHER_BUSINESS' : 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Father";
+      } else if (k.startsWith('mother_') && allKeys.has('mother_name')) {
+        parentId = 'mem-mother_name';
+        hierarchyLevel = 3;
+        relation = (k.includes('occupat') || k.includes('job')) ? 'OCCUPATION' : 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Mother";
       }
     }
 
@@ -669,8 +683,8 @@ function KgExplorerContent() {
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
 
-  // Default overview placing center (500, 500) dead-center on phone screen
-  const defaultScale = Math.min((SCREEN_WIDTH - 24) / 720, 0.58);
+  // Default overview placing center (1000, 1000) dead-center on phone screen
+  const defaultScale = Math.min((SCREEN_WIDTH - 24) / 1100, 0.38);
   const defaultTranslateX = (SCREEN_WIDTH - WORLD_SIZE) / 2;
   const defaultTranslateY = (GRAPH_HEIGHT - WORLD_SIZE) / 2;
 
@@ -752,7 +766,7 @@ function KgExplorerContent() {
     return Gesture.Pinch()
       .onUpdate((e) => {
         'worklet';
-        const next = Math.max(0.35, Math.min(4.5, savedScale.value * e.scale));
+        const next = Math.max(0.25, Math.min(5.0, savedScale.value * e.scale));
         scale.value = next;
       })
       .onEnd(() => {
@@ -823,6 +837,17 @@ function KgExplorerContent() {
     };
   });
 
+  // Google Maps Pin Scaling: Pins maintain constant physical screen size when zoomed in (scale >= 0.85).
+  // When zoomed out (< 0.85), pins scale smoothly down to keep the cosmic overview crisp.
+  const animatedPinStyle = useAnimatedStyle(() => {
+    'worklet';
+    const s = isNaN(scale.value) || scale.value <= 0.05 ? 1 : scale.value;
+    const inv = 1 / Math.max(0.85, s);
+    return {
+      transform: [{ scale: inv }]
+    };
+  });
+
   const glideCameraTo = useCallback((targetX: number, targetY: number, targetScale: number = 1.35) => {
     const destX = (SCREEN_WIDTH - WORLD_SIZE) / 2 - (targetX - CENTER) * targetScale;
     const destY = (GRAPH_HEIGHT - WORLD_SIZE) / 2 - (targetY - CENTER) * targetScale;
@@ -862,13 +887,13 @@ function KgExplorerContent() {
   }, [departments, glideCameraTo]);
 
   const handleZoomIn = useCallback(() => {
-    const next = Math.min(scale.value + 0.4, 4.5);
+    const next = Math.min(scale.value + 0.35, 5.0);
     scale.value = withSpring(next);
     savedScale.value = next;
   }, [scale, savedScale]);
 
   const handleZoomOut = useCallback(() => {
-    const next = Math.max(scale.value - 0.4, 0.35);
+    const next = Math.max(scale.value - 0.35, 0.25);
     scale.value = withSpring(next);
     savedScale.value = next;
   }, [scale, savedScale]);
@@ -1057,9 +1082,13 @@ function KgExplorerContent() {
         <View style={styles.canvasContainer}>
           <GestureDetector gesture={composedGesture}>
             <Animated.View style={[styles.universe, animatedUniverseStyle]}>
-              <Svg width={WORLD_SIZE} height={WORLD_SIZE} viewBox={`0 0 ${WORLD_SIZE} ${WORLD_SIZE}`}>
-
-                {/* 1. Draw Connecting Lines with Interactive Hitboxes */}
+              {/* 1. Vector Connection Lines (SVG Canvas with non-scaling stroke) */}
+              <Svg
+                width={WORLD_SIZE}
+                height={WORLD_SIZE}
+                viewBox={`0 0 ${WORLD_SIZE} ${WORLD_SIZE}`}
+                style={StyleSheet.absoluteFill}
+              >
                 <G>
                   {edges.map((e) => {
                     const isCross = !!e.isCrossDomain;
@@ -1109,6 +1138,7 @@ function KgExplorerContent() {
                               strokeLinecap="round"
                               fill="none"
                               opacity={0.35}
+                              vectorEffect="non-scaling-stroke"
                             />
                           )}
                           <Path
@@ -1119,6 +1149,7 @@ function KgExplorerContent() {
                             strokeLinecap="round"
                             fill="none"
                             opacity={strokeOpacity}
+                            vectorEffect="non-scaling-stroke"
                           />
                           {/* Invisible 28px hit-box for easy tap */}
                           <Path
@@ -1146,6 +1177,7 @@ function KgExplorerContent() {
                             strokeWidth={10}
                             strokeLinecap="round"
                             opacity={0.35}
+                            vectorEffect="non-scaling-stroke"
                           />
                         )}
                         <Line
@@ -1157,6 +1189,7 @@ function KgExplorerContent() {
                           strokeWidth={strokeWidth}
                           opacity={strokeOpacity}
                           strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
                         />
                         {/* Invisible 28px hit-box for easy tap */}
                         <Line
@@ -1173,130 +1206,159 @@ function KgExplorerContent() {
                     );
                   })}
                 </G>
+              </Svg>
 
-                {/* 2. Highlighted Midpoint Relationship Badges */}
-                <G>
-                  {edges.map((e) => {
-                    const isDirectlySelected = selectedEdge?.id === e.id;
-                    const isNodeConnected = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
-                    const shouldShowBadge = isDirectlySelected || isNodeConnected || (e.isCrossDomain && !selectedNode && !selectedEdge);
+              {/* 2. Interactive Midpoint Relationship Badges (Constant Google Maps Pin Size) */}
+              {edges.map((e) => {
+                const isDirectlySelected = selectedEdge?.id === e.id;
+                const isNodeConnected = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+                const shouldShowBadge = isDirectlySelected || isNodeConnected || (e.isCrossDomain && !selectedNode && !selectedEdge);
 
-                    if (!shouldShowBadge || !e.relation || !e.midX || !e.midY) {
-                      return null;
-                    }
+                if (!shouldShowBadge || !e.relation || !e.midX || !e.midY) {
+                  return null;
+                }
 
-                    const label = (e.relation || '').replace(/_/g, ' ');
-                    const pillWidth = Math.max(68, label.length * 6.5 + 16);
-                    const badgeColor = isDirectlySelected ? '#38BDF8' : (e.isCrossDomain ? '#C084FC' : '#38BDF8');
+                const label = (e.relation || '').replace(/_/g, ' ');
+                const badgeColor = isDirectlySelected ? '#38BDF8' : (e.isCrossDomain ? '#C084FC' : '#38BDF8');
 
-                    return (
-                      <G key={`badge-${e.id}`} onPress={() => handleEdgePress(e)}>
-                        <Rect
-                          x={e.midX - pillWidth / 2}
-                          y={e.midY - 11}
-                          width={pillWidth}
-                          height={22}
-                          rx={11}
-                          fill="rgba(15,23,42,0.96)"
-                          stroke={badgeColor}
-                          strokeWidth={isDirectlySelected ? 2 : 1.2}
+                return (
+                  <Animated.View
+                    key={`badge-${e.id}`}
+                    style={[
+                      styles.badgeAnchor,
+                      { left: e.midX, top: e.midY },
+                      animatedPinStyle
+                    ]}
+                    pointerEvents="box-none"
+                  >
+                    <TouchableOpacity
+                      style={[
+                        styles.badgePill,
+                        { borderColor: badgeColor },
+                        isDirectlySelected && styles.badgePillSelected
+                      ]}
+                      onPress={() => handleEdgePress(e)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.badgeText, { color: badgeColor }]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                );
+              })}
+
+              {/* 3. Interactive Nodes (Constant Google Maps Pin Size, Wide Gaps on Zoom) */}
+              {nodes.map((n) => {
+                const isSelected = selectedNode?.id === n.id;
+                const isConnected = connectedNodeIds.has(n.id);
+                const isFocus = isSelected || isConnected;
+
+                const opacity = (selectedNode || selectedEdge)
+                  ? (isFocus ? 1.0 : 0.22)
+                  : 1.0;
+
+                const circleSize = n.isHub ? 42 : n.isDepartment ? 36 : (n.hierarchyLevel === 2 ? 28 : 22);
+
+                return (
+                  <Animated.View
+                    key={`node-${n.id}`}
+                    style={[
+                      styles.nodeAnchor,
+                      { left: n.x, top: n.y, marginTop: -circleSize / 2 },
+                      animatedPinStyle,
+                      { opacity }
+                    ]}
+                    pointerEvents="box-none"
+                  >
+                    <TouchableOpacity
+                      style={styles.nodeTouchable}
+                      onPress={() => handleNodePress(n)}
+                      activeOpacity={0.75}
+                    >
+                      {/* Glow Halo */}
+                      {(n.isHub || n.isDepartment || isSelected || (selectedEdge && isConnected)) && (
+                        <View
+                          style={[
+                            styles.glowRing,
+                            {
+                              width: circleSize + (isSelected ? 16 : 8),
+                              height: circleSize + (isSelected ? 16 : 8),
+                              borderRadius: (circleSize + (isSelected ? 16 : 8)) / 2,
+                              backgroundColor: isSelected ? '#38BDF8' : n.color,
+                              opacity: isSelected ? 0.35 : 0.2
+                            }
+                          ]}
                         />
-                        <SvgText
-                          x={e.midX}
-                          y={e.midY + 4}
-                          fontSize={9.5}
-                          fontWeight="bold"
-                          fill={badgeColor}
-                          textAnchor="middle"
-                        >
-                          {label}
-                        </SvgText>
-                      </G>
-                    );
-                  })}
-                </G>
+                      )}
 
-                {/* 3. Draw Nodes (Central Sun, Department Planets, and Memory Moons) */}
-                <G>
-                  {nodes.map((n) => {
-                    const isSelected = selectedNode?.id === n.id;
-                    const isConnected = connectedNodeIds.has(n.id);
-                    const isFocus = isSelected || isConnected;
-
-                    const opacity = (selectedNode || selectedEdge)
-                      ? (isFocus ? 1.0 : 0.22)
-                      : 1.0;
-
-                    return (
-                      <G
-                        key={`node-${n.id}`}
-                        onPress={() => handleNodePress(n)}
-                        opacity={opacity}
+                      {/* Core Node Circle */}
+                      <View
+                        style={[
+                          styles.nodeCircle,
+                          {
+                            width: circleSize,
+                            height: circleSize,
+                            borderRadius: circleSize / 2,
+                            backgroundColor: n.color,
+                            borderColor: isSelected
+                              ? '#FFFFFF'
+                              : isConnected
+                              ? '#38BDF8'
+                              : n.isDepartment
+                              ? 'rgba(255,255,255,0.85)'
+                              : 'rgba(255,255,255,0.4)',
+                            borderWidth: isSelected ? 3 : isConnected ? 2.5 : n.isDepartment ? 2 : 1.2
+                          }
+                        ]}
                       >
-                        {/* Outer Glow Aura */}
-                        {(n.isHub || n.isDepartment || isSelected || (selectedEdge && isConnected)) && (
-                          <Circle
-                            cx={n.x}
-                            cy={n.y}
-                            r={n.radius + (isSelected ? 10 : n.isHub ? 11 : 6)}
-                            fill={isSelected ? '#38BDF8' : n.color}
-                            opacity={isSelected ? 0.45 : 0.2}
+                        {n.emoji ? (
+                          <Text style={[styles.nodeEmoji, { fontSize: circleSize * 0.52 }]}>
+                            {n.emoji}
+                          </Text>
+                        ) : (
+                          <View
+                            style={[
+                              styles.innerDot,
+                              {
+                                backgroundColor: '#FFFFFF',
+                                width: circleSize * 0.28,
+                                height: circleSize * 0.28,
+                                borderRadius: circleSize * 0.14
+                              }
+                            ]}
                           />
                         )}
+                      </View>
 
-                        {/* Core Circle */}
-                        <Circle
-                          cx={n.x}
-                          cy={n.y}
-                          r={n.radius}
-                          fill={n.color}
-                          stroke={isSelected ? '#FFFFFF' : isConnected ? '#38BDF8' : n.isDepartment ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)'}
-                          strokeWidth={isSelected ? 3.5 : isConnected ? 2.5 : n.isDepartment ? 2 : 1.2}
-                        />
-
-                        {/* Emoji Icon inside Node */}
-                        {n.emoji && (
-                          <SvgText
-                            x={n.x}
-                            y={n.y + (n.radius * 0.35)}
-                            fontSize={n.radius * 0.9}
-                            textAnchor="middle"
-                          >
-                            {n.emoji}
-                          </SvgText>
-                        )}
-
-                        {/* Node Title */}
-                        <SvgText
-                          x={n.x}
-                          y={n.y + n.radius + 12}
-                          fontSize={n.isHub ? 13 : n.isDepartment ? 11.5 : (n.hierarchyLevel === 2 ? 10.5 : 9.5)}
-                          fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '600'}
-                          fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#FFFFFF'}
-                          textAnchor="middle"
+                      {/* Label Pill with Dark Background for 100% legibility */}
+                      <View
+                        style={[
+                          styles.labelPill,
+                          isSelected && styles.labelPillSelected,
+                          isConnected && styles.labelPillConnected
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.labelText,
+                            isSelected && styles.labelTextSelected,
+                            n.isDepartment && { color: n.color }
+                          ]}
+                          numberOfLines={1}
                         >
                           {n.name}
-                        </SvgText>
-
-                        {/* Subtitle / Role Tag */}
-                        {n.subLabel && (
-                          <SvgText
-                            x={n.x}
-                            y={n.y + n.radius + 23}
-                            fontSize={8.5}
-                            fontWeight="500"
-                            fill="#A1A1AA"
-                            textAnchor="middle"
-                          >
+                        </Text>
+                        {n.subLabel ? (
+                          <Text style={styles.subLabelText} numberOfLines={1}>
                             {n.subLabel}
-                          </SvgText>
-                        )}
-                      </G>
-                    );
-                  })}
-                </G>
-
-              </Svg>
+                          </Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  </Animated.View>
+                );
+              })}
             </Animated.View>
           </GestureDetector>
 
@@ -1609,6 +1671,114 @@ const styles = StyleSheet.create({
 
   canvasContainer: { flex: 1, overflow: 'hidden', backgroundColor: '#09090B' },
   universe: { width: WORLD_SIZE, height: WORLD_SIZE },
+
+  // Google Maps Pin Overlay Styles
+  nodeAnchor: {
+    position: 'absolute',
+    width: 140,
+    height: 80,
+    marginLeft: -70,
+    alignItems: 'center',
+    zIndex: 5
+  },
+  nodeTouchable: {
+    alignItems: 'center',
+    justifyContent: 'flex-start'
+  },
+  glowRing: {
+    position: 'absolute',
+    top: -4,
+    zIndex: -1
+  },
+  nodeCircle: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 4
+  },
+  nodeEmoji: {
+    textAlign: 'center'
+  },
+  innerDot: {
+    opacity: 0.95
+  },
+  labelPill: {
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    marginTop: 4,
+    alignItems: 'center',
+    maxWidth: 130,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 4
+  },
+  labelPillSelected: {
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(14,116,144,0.95)'
+  },
+  labelPillConnected: {
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(15,23,42,0.96)'
+  },
+  labelText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#F4F4F5',
+    textAlign: 'center'
+  },
+  labelTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '800'
+  },
+  subLabelText: {
+    fontSize: 8.5,
+    fontWeight: '500',
+    color: '#A1A1AA',
+    textAlign: 'center',
+    marginTop: 0.5
+  },
+
+  badgeAnchor: {
+    position: 'absolute',
+    width: 140,
+    height: 30,
+    marginLeft: -70,
+    marginTop: -15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10
+  },
+  badgePill: {
+    backgroundColor: 'rgba(15,23,42,0.94)',
+    borderWidth: 1.2,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 5
+  },
+  badgePillSelected: {
+    borderWidth: 2,
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(12,74,110,0.95)'
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3
+  },
 
   // Compact floating HUD on the bottom-right
   compactHud: {
