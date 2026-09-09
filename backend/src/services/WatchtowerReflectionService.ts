@@ -17,6 +17,7 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
+import { reminderIntentDetector } from './ReminderIntentDetector';
 
 export interface MessageVersionEntry {
   version: number;
@@ -204,12 +205,17 @@ CRITICAL CHECKS:
    - If Nova dumped a 7-line single monolithic paragraph when a WhatsApp chat needs short, conversational bubbles (1-2 sentences).
 5. MISSED DOT CONNECTIONS:
    - Failing to connect an obvious fact (e.g., user is currently on the metro, or specifically answering about a spouse).
+6. MISSED REMINDER OR TEMPORAL CONFUSION (CRITICAL):
+   - Did the user ask to set a reminder or alarm (e.g., "yaad dilao", "remind me", "kal 1 bje", "subah remind karo")?
+   - Did Nova misunderstand this as a past event (e.g., saying "tumne kal reminder diya tha", "main tumhare reminder ko yaad kar raha hoon" instead of confirming it is scheduled for the future)?
+   - Did Nova fail to confirm the future reminder?
+   - If so, mark flaw_type: "missed_reminder" and provide corrected_content warmly confirming the reminder for the requested date and time in natural WhatsApp Hinglish (1-2 sentences).
 
 OUTPUT FORMAT:
 Respond with ONLY valid JSON:
 {
   "has_flaw": boolean,
-  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "none",
+  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "missed_reminder" | "none",
   "explanation": "Clear 1-sentence reason why Nova's reply was flawed or why it is good",
   "corrected_content": "The corrected, warm, natural Hinglish reply formatted like WhatsApp text (1-2 sentences) if has_flaw is true, else null"
 }`;
@@ -226,7 +232,25 @@ ${memorySummary}
 Nova's Sent Reply:
 "${content}"
 
-Critique this reply. If there is entity confusion (like attributing nail art to baby Shreshth instead of Sakshi) or typos/leaks, provide the corrected natural Hinglish version.`;
+Critique this reply. If there is entity confusion, missed reminders, past-tense hallucination on a future reminder, or typos/leaks, provide the corrected natural Hinglish version.`;
+
+    // Second-layer Reminder Safety Net
+    let scheduledByWatchtower: any = null;
+    if (reminderIntentDetector.hasReminderIntent(userMessage)) {
+      try {
+        const checkResult = await reminderIntentDetector.detectAndSchedule(userId, userMessage);
+        if (checkResult.scheduled) {
+          scheduledByWatchtower = checkResult;
+          logger.info('[WATCHTOWER REFLECTION] Second-layer safety net scheduled reminder in DB', {
+            userId,
+            task: checkResult.task,
+            time: checkResult.formattedTime
+          });
+        }
+      } catch (err: any) {
+        logger.warn('[WATCHTOWER REFLECTION] Reminder safety net check failed', { error: err?.message });
+      }
+    }
 
     try {
       const responseText = await complete(
@@ -248,6 +272,16 @@ Critique this reply. If there is entity confusion (like attributing nail art to 
       }
 
       const critique = JSON.parse(jsonMatch[0]);
+
+      // Override if Nova hallucinated past tense on a reminder request
+      const lowerContent = (content || '').toLowerCase();
+      const hasPastTemporalHallucination = /\b(?:reminder\s*diya\s*tha|diya\s*tha|yaad\s*kar\s*raha\s*hoon)\b/i.test(lowerContent);
+      if (scheduledByWatchtower && hasPastTemporalHallucination && (!critique.has_flaw || critique.flaw_type !== 'missed_reminder')) {
+        critique.has_flaw = true;
+        critique.flaw_type = 'missed_reminder';
+        critique.explanation = 'Nova hallucinated that the user gave a reminder in the past instead of confirming the future reminder.';
+        critique.corrected_content = `Haan bilkul! 😊 Maine ${scheduledByWatchtower.formattedTime || 'kal'} ka reminder set kar diya hai — ${scheduledByWatchtower.task || 'tumhare kaam'} ke liye. Main tumhe barabar yaad dila dungi!`;
+      }
 
       if (!critique.has_flaw || !critique.corrected_content) {
         logger.info('[WATCHTOWER REFLECTION] Reply verified clean — no flaws detected', {

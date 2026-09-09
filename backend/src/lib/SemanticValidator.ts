@@ -235,7 +235,19 @@ export function validateReminderCompleteness(action: SemanticAction): ValidatedA
   const d = action.data ?? {};
 
   const hasTask = !!d.task?.trim();
-  const hasExactTime = !!d.time_of_day && /^\d{2}:\d{2}$/.test(d.time_of_day);
+  let exactTimeFormatted: string | null = null;
+  if (d.time_of_day) {
+    const tm = String(d.time_of_day).trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (tm) {
+      let h = parseInt(tm[1], 10);
+      const m = tm[2] ? parseInt(tm[2], 10) : 0;
+      if (tm[3] && tm[3].toLowerCase() === 'pm' && h < 12) h += 12;
+      if (tm[3] && tm[3].toLowerCase() === 'am' && h === 12) h = 0;
+      exactTimeFormatted = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      d.time_of_day = exactTimeFormatted;
+    }
+  }
+  const hasExactTime = !!exactTimeFormatted;
   const hasRelative = (d.relative_value != null) && !!d.relative_unit?.trim();
   const hasEventTrigger = !!d.event_trigger?.trim();
   const hasDate = !!d.date?.trim();

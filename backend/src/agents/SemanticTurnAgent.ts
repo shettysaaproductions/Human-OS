@@ -115,7 +115,7 @@ export class SemanticTurnAgent {
         }
 
         if (scheduleEvents.length > 0) {
-          const { data: profile } = await supabaseAdmin.from('user_profiles').select('country, timezone_offset').eq('id', userId).single();
+          const { data: profile } = await supabaseAdmin.from('profiles').select('country, timezone_offset').eq('id', userId).maybeSingle();
           
           for (const schedEvt of scheduleEvents) {
             try {

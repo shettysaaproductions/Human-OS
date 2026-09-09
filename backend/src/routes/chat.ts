@@ -27,6 +27,7 @@ import { cognitiveDoubtService } from '../services/CognitiveDoubtService';
 import { doubtEligibilityEngine } from '../services/DoubtEligibilityEngine';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
 import { watchtowerReflectionService } from '../services/WatchtowerReflectionService';
+import { reminderIntentDetector } from '../services/ReminderIntentDetector';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1160,7 +1161,8 @@ chatRouter.post(
         'raat ko', 'dopahar', 'shaam ko', 'maine kaha tha', 'tune kaha tha',
         'bataya tha', 'bola tha', 'likha tha'
       ];
-      const isTemporalQuery = TEMPORAL_KEYWORDS.some(kw => effectiveMessage.toLowerCase().includes(kw));
+      const isReminderIntent = reminderIntentDetector.hasReminderIntent(effectiveMessage);
+      const isTemporalQuery = !isReminderIntent && TEMPORAL_KEYWORDS.some(kw => effectiveMessage.toLowerCase().includes(kw));
       const temporalPromise = isTemporalQuery
         ? qt.track('get_temporal_context', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content, created_at').eq('user_id', userId).gte('created_at', new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()).order('created_at', { ascending: false }).limit(80)).then(res => res).catch(() => ({ data: [] }))
         : Promise.resolve({ data: [] });
@@ -1348,6 +1350,28 @@ chatRouter.post(
       const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
+      // Direct high-precision reminder extraction & scheduling guard
+      if (!is_proactive && reminderIntentDetector.hasReminderIntent(effectiveMessage)) {
+        try {
+          const directReminder = await reminderIntentDetector.detectAndSchedule(userId, effectiveMessage, userCountry);
+          if (directReminder.detected) {
+            if (directReminder.scheduled) {
+              deterministicReminderCreated = true;
+              deterministicReminderNote = directReminder.note || '';
+            } else if (directReminder.note && !deterministicReminderNote) {
+              deterministicReminderNote = directReminder.note;
+            }
+            logger.info('[Chat] Direct reminder result', {
+              userId,
+              scheduled: directReminder.scheduled,
+              task: directReminder.task,
+              formattedTime: directReminder.formattedTime
+            });
+          }
+        } catch (rErr: any) {
+          logger.warn('[Chat] Direct reminder detection non-fatal error', { error: rErr?.message });
+        }
+      }
 
       // ── Phase 2B: Cognitive Doubt Subsystem ──────────────────────────────────
       // 1. Detect knowledge gaps (e.g. family count gap)
