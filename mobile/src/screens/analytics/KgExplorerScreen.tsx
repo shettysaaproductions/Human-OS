@@ -1,22 +1,22 @@
-import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, ActivityIndicator,
   TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { G, Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming
+  useSharedValue, useAnimatedStyle, withSpring
 } from 'react-native-reanimated';
 import { api } from '../../services/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const GRAPH_HEIGHT = SCREEN_HEIGHT - 170;
 
-// Generous virtual canvas dimensions so you can zoom in 5x and pan anywhere without clipping
-const WORLD_SIZE = 2600;
-const CENTER = WORLD_SIZE / 2; // 1300
+// Safe virtual canvas dimensions well below Android OpenGL texture limit (2048x2048)
+const WORLD_SIZE = 1000;
+const CENTER = WORLD_SIZE / 2; // 500
 
 interface GraphNode {
   id: string;
@@ -62,15 +62,16 @@ interface DepartmentMeta {
   y: number;
 }
 
+// Single-codepoint, non-ZWJ Unicode emojis safe across all Android Skia/HarfBuzz font engines
 const DOMAIN_COLORS: Record<string, { color: string; emoji: string; name: string; short: string }> = {
-  family:    { color: '#EC4899', emoji: '👨‍👩‍👧', name: 'Family & Relationships', short: 'Family' },
-  work:      { color: '#3B82F6', emoji: '👔', name: 'Career & Professional',  short: 'Career' },
+  family:    { color: '#EC4899', emoji: '👥', name: 'Family & Relationships', short: 'Family' },
+  work:      { color: '#3B82F6', emoji: '💼', name: 'Career & Professional',  short: 'Career' },
   goals:     { color: '#10B981', emoji: '🎯', name: 'Goals & Ambitions',      short: 'Goals' },
   lifestyle: { color: '#F59E0B', emoji: '🧘', name: 'Lifestyle & Rhythm',     short: 'Lifestyle' },
-  identity:  { color: '#8B5CF6', emoji: '📌', name: 'Core Identity',          short: 'Identity' },
+  identity:  { color: '#8B5CF6', emoji: '🧠', name: 'Core Identity',          short: 'Identity' },
 };
 
-// Department hub angles around the central Core (Sun) at radius 300
+// Department hub angles around the central Core (Sun) at radius 200
 const DEPT_ANGLES: Record<string, number> = {
   family:    -Math.PI * 0.18, // Top-right (~ -32 deg)
   work:      -Math.PI * 0.60, // Top-left (~ -108 deg)
@@ -79,7 +80,7 @@ const DEPT_ANGLES: Record<string, number> = {
   identity:   Math.PI * 0.22, // Bottom-right (~ 40 deg)
 };
 
-function inferDomain(rawKey: string, memoryType?: string): string {
+function inferDomain(rawKey?: string, memoryType?: string): string {
   const k = (rawKey || '').toLowerCase();
   const mt = (memoryType || '').toLowerCase();
   if (k.includes('son_age') || k.includes('child_age') || mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family/.test(k)) return 'family';
@@ -89,8 +90,8 @@ function inferDomain(rawKey: string, memoryType?: string): string {
   return 'identity';
 }
 
-function toDisplayNames(key: string, value: string): { title: string; sub?: string } {
-  const k = key.toLowerCase();
+function toDisplayNames(key: string = '', value: string = ''): { title: string; sub?: string } {
+  const k = (key || '').toLowerCase();
   const v = (value || '').trim();
 
   if (k === 'wife_name') return { title: v, sub: 'Wife' };
@@ -110,18 +111,19 @@ function toDisplayNames(key: string, value: string): { title: string; sub?: stri
     const clean = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
     return { title: clean, sub: 'Name' };
   }
-  const cleanKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const cleanKey = (key || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   return {
-    title: v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey),
-    sub: cleanKey
+    title: v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey || 'Memory'),
+    sub: cleanKey || 'Fact'
   };
 }
 
 // ----------------------------------------------------
 // PLANETARY CONSTELLATION ALGORITHM (ZERO OVERLAPPING)
 // Distributes nodes on wide non-intersecting orbital fans
+// Safe coordinate bounds: [125, 875] within 1000x1000 universe
 // ----------------------------------------------------
-function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
+function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
   const nodes: GraphNode[] = [];
   const nodeMap = new Map<string, GraphNode>();
 
@@ -134,7 +136,7 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
     entity_type: 'self',
     department: 'identity',
     color: '#8B5CF6',
-    radius: 36,
+    radius: 30,
     value: 'Saa · Central Brain & Consciousness',
     isHub: true,
     emoji: '🧠',
@@ -150,20 +152,19 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
   };
 
   for (const n of rawNodes) {
-    if (n.id === 'user-core' || n.isHub || n.isDepartment) continue;
+    if (!n || n.id === 'user-core' || n.isHub || n.isDepartment) continue;
     const d = n.department || inferDomain(n.raw_key || n.id, n.entity_type);
     if (!deptBuckets[d]) deptBuckets[d] = [];
     deptBuckets[d].push(n);
   }
 
-  // 2. Department Hubs (Planets) at Radius 310 from Center
-  const DEPT_ORBIT_RADIUS = 310;
+  // 2. Department Hubs (Planets) at Radius 200 from Center
+  const DEPT_ORBIT_RADIUS = 200;
   const deptList: DepartmentMeta[] = [];
-
   const DEPT_KEYS = ['family', 'work', 'goals', 'lifestyle', 'identity'];
 
   for (const d of DEPT_KEYS) {
-    const meta = DOMAIN_COLORS[d];
+    const meta = DOMAIN_COLORS[d] || DOMAIN_COLORS.identity;
     const angle = DEPT_ANGLES[d] ?? 0;
     const hx = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.cos(angle));
     const hy = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.sin(angle));
@@ -176,7 +177,7 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
       entity_type: 'department',
       department: d,
       color: meta.color,
-      radius: 28,
+      radius: 22,
       value: `${meta.name} Department (${deptBuckets[d]?.length || 0} connected memories)`,
       isDepartment: true,
       emoji: meta.emoji,
@@ -210,9 +211,9 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
     members.forEach((mem, idx) => {
       const names = toDisplayNames(mem.raw_key || mem.name || mem.id, mem.value || mem.name);
 
-      // Stagger between inner arc (135px) and outer arc (210px) to guarantee ZERO collision
+      // Stagger between inner arc (100px) and outer arc (160px)
       const isOuter = count > 3 ? idx % 2 === 1 : false;
-      const moonDist = isOuter ? 220 : 140;
+      const moonDist = isOuter ? 160 : 105;
 
       const frac = count === 1 ? 0.5 : idx / (count - 1);
       const moonAngle = startAngle + frac * spreadSpan;
@@ -221,14 +222,14 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
       const my = Math.round(hy + moonDist * Math.sin(moonAngle));
 
       const moonNode: GraphNode = {
-        id: mem.id,
+        id: mem.id || `node-${d}-${idx}`,
         name: names.title,
         shortName: names.title,
         subLabel: names.sub,
         entity_type: mem.entity_type || 'memory',
         department: d,
         color: mem.isContext ? '#06B6D4' : meta.color,
-        radius: mem.isContext ? 16 : 17,
+        radius: mem.isContext ? 14 : 15,
         value: mem.value || names.title,
         raw_key: mem.raw_key,
         isContext: mem.isContext,
@@ -258,7 +259,7 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
       sourceNode: coreNode,
       targetNode: hub,
       relation: 'DEPARTMENT_HUB',
-      color: 'rgba(255,255,255,0.22)',
+      color: 'rgba(255,255,255,0.25)',
       weight: 3
     });
   }
@@ -289,27 +290,26 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
 
   // Cross-Domain Curved Neural Bridges
   for (const re of rawEdges) {
-    if (!re.isCrossDomain) continue;
+    if (!re || !re.isCrossDomain) continue;
     const sId = typeof re.source === 'string' ? re.source : re.source?.id;
     const tId = typeof re.target === 'string' ? re.target : re.target?.id;
+    if (!sId || !tId) continue;
 
     const sNode = nodeMap.get(sId);
     const tNode = nodeMap.get(tId);
     if (!sNode || !tNode) continue;
 
-    // Calculate curved Bézier path
     const dx = tNode.x - sNode.x;
     const dy = tNode.y - sNode.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 1) continue;
 
-    // Normal vector perpendicular to chord
     const nx = -dy / dist;
     const ny = dx / dist;
-    const curveAmount = Math.min(80, Math.max(40, dist * 0.15));
+    const curveAmount = Math.min(60, Math.max(30, dist * 0.15));
 
-    const midX = (sNode.x + tNode.x) / 2 + nx * curveAmount;
-    const midY = (sNode.y + tNode.y) / 2 + ny * curveAmount;
+    const midX = Math.round((sNode.x + tNode.x) / 2 + nx * curveAmount);
+    const midY = Math.round((sNode.y + tNode.y) / 2 + ny * curveAmount);
 
     const pathD = `M ${sNode.x} ${sNode.y} Q ${midX} ${midY} ${tNode.x} ${tNode.y}`;
 
@@ -333,13 +333,13 @@ function buildPlanetaryGalaxy(rawNodes: any[], rawEdges: any[]) {
 }
 
 // Resilient fallback synthesizer
-function synthesizeGalaxy(memories: any[], workingContext: any[]) {
+function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
   const rawNodes: any[] = [];
   const rawEdges: any[] = [];
   const ids = new Set<string>();
 
-  for (const m of memories) {
-    if (!m.key || !m.value) continue;
+  for (const m of (memories || [])) {
+    if (!m || !m.key || !m.value) continue;
     const d = inferDomain(m.key, m.memory_type);
     const nodeId = `mem-${m.key}`;
     if (ids.has(nodeId)) continue;
@@ -355,8 +355,8 @@ function synthesizeGalaxy(memories: any[], workingContext: any[]) {
     ids.add(nodeId);
   }
 
-  for (const w of workingContext) {
-    if (!w.key || !w.value) continue;
+  for (const w of (workingContext || [])) {
+    if (!w || !w.key || !w.value) continue;
     const d = inferDomain(w.key);
     const nodeId = `wm-${w.key}`;
     if (ids.has(nodeId)) continue;
@@ -428,7 +428,38 @@ function synthesizeGalaxy(memories: any[], workingContext: any[]) {
   return buildPlanetaryGalaxy(rawNodes, rawEdges);
 }
 
-export function KgExplorerScreen() {
+// Safe component error boundary
+class KgErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; errorText: string }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorText: '' };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, errorText: error?.message || 'Unknown error' };
+  }
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error('[KgExplorerScreen] Caught UI error:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorTitle}>Knowledge Galaxy</Text>
+          <Text style={styles.errorText}>Unable to load visual graph. Tap below to retry.</Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => this.setState({ hasError: false, errorText: '' })}
+          >
+            <Text style={styles.retryBtnText}>Reload Galaxy</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function KgExplorerContent() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
@@ -441,13 +472,10 @@ export function KgExplorerScreen() {
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
 
-  // ----------------------------------------------------
-  // NATIVE GPU REANIMATED SHARED VALUES (60-120 FPS NATIVELY)
-  // Center of world (1300, 1300) placed dead-center on phone screen
-  // ----------------------------------------------------
+  // Default overview placing center (500, 500) dead-center on phone screen
+  const defaultScale = Math.min((SCREEN_WIDTH - 24) / 720, 0.58);
   const defaultTranslateX = (SCREEN_WIDTH - WORLD_SIZE) / 2;
   const defaultTranslateY = (GRAPH_HEIGHT - WORLD_SIZE) / 2;
-  const defaultScale = 0.72; // Perfect overview fitting all 5 departments comfortably
 
   const translateX = useSharedValue(defaultTranslateX);
   const translateY = useSharedValue(defaultTranslateY);
@@ -462,18 +490,7 @@ export function KgExplorerScreen() {
   const savedPitch = useSharedValue(0.24);
   const savedYaw = useSharedValue(0.35);
 
-  useEffect(() => {
-    fetchGraph();
-
-    // Auto-sync polling every 20 seconds while on screen
-    const interval = setInterval(() => {
-      fetchGraph(true);
-    }, 20000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchGraph = async (isBackground = false) => {
+  const fetchGraph = useCallback(async (isBackground = false) => {
     try {
       if (!isBackground) setLoading(true);
       else setSyncing(true);
@@ -483,12 +500,12 @@ export function KgExplorerScreen() {
 
       try {
         const res = await api.get('/analytics/kg');
-        if (res.data?.data?.nodes && res.data.data.nodes.length > 0) {
+        if (res.data?.data?.nodes && Array.isArray(res.data.data.nodes) && res.data.data.nodes.length > 0) {
           rawNodes = res.data.data.nodes;
           rawEdges = res.data.data.edges || [];
         }
       } catch (e) {
-        // Fallback
+        // Fallback below
       }
 
       if (!rawNodes || rawNodes.length === 0) {
@@ -518,7 +535,18 @@ export function KgExplorerScreen() {
       setLoading(false);
       setSyncing(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchGraph(false);
+
+    // Auto-sync polling every 20 seconds while on screen
+    const interval = setInterval(() => {
+      fetchGraph(true);
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, [fetchGraph]);
 
   // ----------------------------------------------------
   // FLUID GESTURE SYSTEM (GPU-DRIVEN ON NATIVE UI THREAD)
@@ -536,20 +564,20 @@ export function KgExplorerScreen() {
         'worklet';
         savedScale.value = scale.value;
       });
-  }, []);
+  }, [scale, savedScale]);
 
   const panGesture = useMemo(() => {
     return Gesture.Pan()
-      .minDistance(3)
+      .minDistance(2)
       .onUpdate((e) => {
         'worklet';
         if (viewMode === '3d' && gestureMode === 'orbit') {
-          // Continuous 360 degree rotation without any clamping on Yaw!
-          yaw.value = savedYaw.value + (e.translationX * 0.007);
-          // Clamp Pitch between -65 deg and +65 deg to prevent gimbal inversion
-          pitch.value = Math.max(-1.15, Math.min(1.15, savedPitch.value - (e.translationY * 0.007)));
+          // Continuous 360 degree rotation on Yaw
+          yaw.value = savedYaw.value + (e.translationX * 0.006);
+          // Clamp Pitch between -60 deg and +60 deg to prevent gimbal inversion
+          pitch.value = Math.max(-1.05, Math.min(1.05, savedPitch.value - (e.translationY * 0.006)));
         } else {
-          // Free Pan across the entire universe
+          // Free Pan across universe
           translateX.value = savedTranslateX.value + e.translationX;
           translateY.value = savedTranslateY.value + e.translationY;
         }
@@ -564,42 +592,53 @@ export function KgExplorerScreen() {
           savedTranslateY.value = translateY.value;
         }
       });
-  }, [viewMode, gestureMode]);
+  }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, translateX, translateY, savedTranslateX, savedTranslateY]);
 
   const composedGesture = useMemo(() => {
     return Gesture.Simultaneous(pinchGesture, panGesture);
   }, [pinchGesture, panGesture]);
 
-  // Native GPU Animated Style for 3D Perspective vs 2D Canvas
+  // Native GPU Animated Style with Safe Angle Formatting
   const animatedUniverseStyle = useAnimatedStyle(() => {
+    'worklet';
+    const tx = isNaN(translateX.value) ? defaultTranslateX : translateX.value;
+    const ty = isNaN(translateY.value) ? defaultTranslateY : translateY.value;
+    const s = isNaN(scale.value) ? defaultScale : scale.value;
+
     if (viewMode === '3d') {
+      const p = isNaN(pitch.value) ? 0.24 : pitch.value;
+      const y = isNaN(yaw.value) ? 0.35 : yaw.value;
+      const pDeg = `${(p * 57.2958).toFixed(1)}deg`;
+      const yDeg = `${(y * 57.2958).toFixed(1)}deg`;
+
       return {
         transform: [
-          { perspective: 1200 },
-          { translateX: translateX.value },
-          { translateY: translateY.value },
-          { rotateX: `${pitch.value}rad` },
-          { rotateY: `${yaw.value}rad` },
-          { scale: scale.value }
+          { perspective: 1000 },
+          { translateX: tx },
+          { translateY: ty },
+          { scale: s },
+          { rotateX: pDeg },
+          { rotateY: yDeg }
         ]
       };
     }
 
     return {
       transform: [
-        { translateX: translateX.value },
-        { translateY: translateY.value },
-        { scale: scale.value }
+        { translateX: tx },
+        { translateY: ty },
+        { scale: s }
       ]
     };
   });
 
   // ----------------------------------------------------
-  // CAMERA QUICK SNAPS: Glides camera straight to any cluster!
+  // CAMERA QUICK SNAPS: Glides camera straight to any node/dept
   // ----------------------------------------------------
-  const glideCameraTo = useCallback((targetX: number, targetY: number, targetScale: number = 1.4) => {
-    const destX = SCREEN_WIDTH / 2 - targetX * targetScale;
-    const destY = GRAPH_HEIGHT / 2 - targetY * targetScale;
+  const glideCameraTo = useCallback((targetX: number, targetY: number, targetScale: number = 1.35) => {
+    // Relative displacement from canvas center
+    const destX = (SCREEN_WIDTH - WORLD_SIZE) / 2 - (targetX - CENTER) * targetScale;
+    const destY = (GRAPH_HEIGHT - WORLD_SIZE) / 2 - (targetY - CENTER) * targetScale;
 
     translateX.value = withSpring(destX, { damping: 18 });
     translateY.value = withSpring(destY, { damping: 18 });
@@ -608,7 +647,7 @@ export function KgExplorerScreen() {
 
     scale.value = withSpring(targetScale, { damping: 18 });
     savedScale.value = targetScale;
-  }, []);
+  }, [translateX, translateY, savedTranslateX, savedTranslateY, scale, savedScale]);
 
   const handleResetView = useCallback(() => {
     translateX.value = withSpring(defaultTranslateX, { damping: 18 });
@@ -623,35 +662,33 @@ export function KgExplorerScreen() {
     yaw.value = withSpring(0.35, { damping: 18 });
     savedPitch.value = 0.24;
     savedYaw.value = 0.35;
-  }, [defaultTranslateX, defaultTranslateY, defaultScale]);
+  }, [defaultTranslateX, defaultTranslateY, defaultScale, translateX, translateY, savedTranslateX, savedTranslateY, scale, savedScale, pitch, yaw, savedPitch, savedYaw]);
 
   const handleFocusDept = useCallback((deptId: string) => {
     const dept = departments.find(d => d.id === deptId);
     if (!dept) return;
 
     setSelectedDept(deptId);
-    // Smoothly glide camera straight to that department cluster at 1.45x zoom!
-    glideCameraTo(dept.x, dept.y, 1.45);
+    glideCameraTo(dept.x, dept.y, 1.4);
   }, [departments, glideCameraTo]);
 
   const handleZoomIn = useCallback(() => {
-    const next = Math.min(scale.value + 0.45, 4.5);
+    const next = Math.min(scale.value + 0.4, 4.5);
     scale.value = withSpring(next);
     savedScale.value = next;
-  }, []);
+  }, [scale, savedScale]);
 
   const handleZoomOut = useCallback(() => {
-    const next = Math.max(scale.value - 0.45, 0.35);
+    const next = Math.max(scale.value - 0.4, 0.35);
     scale.value = withSpring(next);
     savedScale.value = next;
-  }, []);
+  }, [scale, savedScale]);
 
   const handleNodePress = (node: GraphNode) => {
     if (selectedNode?.id === node.id) {
       setSelectedNode(null);
     } else {
       setSelectedNode(node);
-      // Smoothly zoom in to focus on this node and its immediate connections
       glideCameraTo(node.x, node.y, Math.max(scale.value, 1.35));
     }
   };
@@ -675,13 +712,13 @@ export function KgExplorerScreen() {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#06B6D4" />
-        <Text style={styles.loadingText}>Synthesizing Infinite Knowledge Galaxy...</Text>
+        <Text style={styles.loadingText}>Synthesizing Knowledge Galaxy...</Text>
       </View>
     );
   }
 
   return (
-    <GestureHandlerRootView style={styles.container}>
+    <View style={styles.container}>
       <SafeAreaView style={styles.container} edges={['top']}>
 
         {/* Top Header & View Switcher */}
@@ -696,7 +733,7 @@ export function KgExplorerScreen() {
               </TouchableOpacity>
             </View>
             <Text style={styles.headerSubtitle}>
-              {nodes.length} nodes · {edges.length} connections across 5 departments
+              {nodes.length} nodes · {edges.length} connections across {departments.length} departments
             </Text>
           </View>
 
@@ -799,7 +836,7 @@ export function KgExplorerScreen() {
           )}
         </View>
 
-        {/* INFINITE GALAXY CANVAS */}
+        {/* GALAXY CANVAS */}
         <View style={styles.canvasContainer}>
           <GestureDetector gesture={composedGesture}>
             <Animated.View style={[styles.universe, animatedUniverseStyle]}>
@@ -836,12 +873,11 @@ export function KgExplorerScreen() {
                       // Curved Bézier Arch for Cross-Domain Connections
                       return (
                         <G key={`edge-${e.id}`}>
-                          {/* Glow backdrop for selected lines */}
                           {isSelectedEdge && (
                             <Path
                               d={e.pathD}
                               stroke="#38BDF8"
-                              strokeWidth={9}
+                              strokeWidth={8}
                               strokeLinecap="round"
                               fill="none"
                               opacity={0.3}
@@ -851,7 +887,7 @@ export function KgExplorerScreen() {
                             d={e.pathD}
                             stroke={strokeColor}
                             strokeWidth={strokeWidth}
-                            strokeDasharray={isSelectedEdge ? undefined : '6, 6'}
+                            strokeDasharray={isSelectedEdge ? undefined : '5, 5'}
                             strokeLinecap="round"
                             fill="none"
                             opacity={strokeOpacity}
@@ -885,8 +921,8 @@ export function KgExplorerScreen() {
                     }
                     if (!e.midX || !e.midY) return null;
 
-                    const label = e.relation.replace(/_/g, ' ');
-                    const pillWidth = Math.max(70, label.length * 7 + 16);
+                    const label = (e.relation || '').replace(/_/g, ' ');
+                    const pillWidth = Math.max(68, label.length * 6.5 + 16);
 
                     return (
                       <G key={`badge-${e.id}`}>
@@ -937,7 +973,7 @@ export function KgExplorerScreen() {
                           <Circle
                             cx={n.x}
                             cy={n.y}
-                            r={n.radius + (isSelected ? 11 : n.isHub ? 12 : 7)}
+                            r={n.radius + (isSelected ? 10 : n.isHub ? 11 : 6)}
                             fill={isSelected ? '#38BDF8' : n.color}
                             opacity={isSelected ? 0.45 : 0.2}
                           />
@@ -968,7 +1004,7 @@ export function KgExplorerScreen() {
                         {/* Node Title */}
                         <SvgText
                           x={n.x}
-                          y={n.y + n.radius + 13}
+                          y={n.y + n.radius + 12}
                           fontSize={n.isHub ? 13 : n.isDepartment ? 11.5 : 10}
                           fontWeight={n.isHub || n.isDepartment || isSelected ? 'bold' : '600'}
                           fill={isSelected ? '#38BDF8' : n.isDepartment ? n.color : '#FFFFFF'}
@@ -981,7 +1017,7 @@ export function KgExplorerScreen() {
                         {n.subLabel && (
                           <SvgText
                             x={n.x}
-                            y={n.y + n.radius + 24}
+                            y={n.y + n.radius + 23}
                             fontSize={8.5}
                             fontWeight="500"
                             fill="#A1A1AA"
@@ -1058,7 +1094,7 @@ export function KgExplorerScreen() {
                         onPress={() => handleNodePress(otherNode)}
                       >
                         <Text style={[styles.linkChipRelation, { color: otherNode.color }]}>
-                          [{e.relation.replace(/_/g, ' ')}]
+                          [{(e.relation || '').replace(/_/g, ' ')}]
                         </Text>
                         <Text style={styles.linkChipTarget}>
                           ➔ {otherNode.name}
@@ -1075,14 +1111,26 @@ export function KgExplorerScreen() {
         )}
 
       </SafeAreaView>
-    </GestureHandlerRootView>
+    </View>
+  );
+}
+
+export function KgExplorerScreen() {
+  return (
+    <KgErrorBoundary>
+      <KgExplorerContent />
+    </KgErrorBoundary>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090B' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B', padding: 24 },
   loadingText: { color: '#71717A', marginTop: 12, fontSize: 14 },
+  errorTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 8 },
+  errorText: { fontSize: 13, color: '#A1A1AA', textAlign: 'center', marginBottom: 16 },
+  retryBtn: { backgroundColor: '#06B6D4', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8 },
+  retryBtnText: { color: '#FFFFFF', fontWeight: 'bold' },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
