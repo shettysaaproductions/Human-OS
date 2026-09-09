@@ -400,7 +400,8 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
         const text = (mem.value || (mem as any).content || '').trim();
         const body = text ? `: ${text}` : '';
         const importance = (mem.importance || 0) >= 7 ? ' (IMPORTANT)' : '';
-        return `- [${mem.memory_type.toUpperCase()}] ${mem.key.replace(/_/g, ' ')}${body}${importance}`;
+        const memType = (mem.memory_type || 'FACT').toUpperCase();
+        return `- [${memType}] ${(mem.key || 'fact').replace(/_/g, ' ')}${body}${importance}`;
       };
 
       if (critical.length > 0 || familyEntityLines.length > 0) {

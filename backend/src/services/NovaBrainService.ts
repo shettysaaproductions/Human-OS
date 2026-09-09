@@ -22,6 +22,57 @@ export interface NormalizedMessage {
 }
 
 /**
+ * Detects whether a text output contains prompt instruction leaks or model parrots.
+ */
+export function isPromptLeak(text: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+
+  // Known prompt phrases echoed by small models
+  const leakSignatures = [
+    'output only your conversational reply',
+    'no xml tags',
+    'no json',
+    'no subconscious_actions',
+    'just what you would text the user',
+    '## output instruction',
+    'output instruction',
+    '## situation brief',
+    '## reminder status',
+    'current emotion:',
+    'system prompt',
+    'you are nova',
+    'a casual hinglish-speaking friend',
+    'code-switch naturally',
+    'hinglish rules:',
+    'do not contradict',
+    'deterministic — do not contradict',
+    '<subconscious_actions>',
+    'subconscious_actions:',
+    'subconscious actions',
+  ];
+
+  for (const sig of leakSignatures) {
+    if (lower.startsWith(sig) || lower.includes('output only your conversational reply')) {
+      return true;
+    }
+  }
+
+  // Regex patterns for prompt instructions leaked at start or standalone
+  if (/^(?:##\s*)?output\s+only\b/i.test(trimmed)) {
+    return true;
+  }
+  if (/\boutput\s+only\b/i.test(lower) && /\b(?:plain\s+text|conversational\s+reply|whatsapp)\b/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Sanitizes a Nova conversational reply before it reaches the user:
  * - strips bold markdown (**text**), markdown headings and list bullets
  * - strips emoji-heavy sequences (packed emoji renderer noise)
@@ -31,6 +82,7 @@ export interface NormalizedMessage {
  */
 export function sanitizeReply(reply: string): string {
   if (!reply) return '';
+  if (isPromptLeak(reply)) return '';
   let text = String(reply);
 
   // ── Extract "Actual Output:" section if model narrates its reasoning ──────────
@@ -62,7 +114,7 @@ export function sanitizeReply(reply: string): string {
     text = firstSentenceMatch ? firstSentenceMatch[0] : text.split('\n')[0];
   }
 
-  return text
+  text = text
     .replace(/\*\*(.*?)\*\*/gs, '$1')                                   // **bold**
     .replace(/^[\s]*#{1,6}\s+/gm, '')                                   // # headings
     .replace(/^[\s]*[-•*]\s+/gm, '')                                    // bullet markers (-, •, *)
@@ -74,6 +126,15 @@ export function sanitizeReply(reply: string): string {
     .replace(/^(?:[A-Z][A-Z\s&'()\d]+|(?:[A-Z][a-z]+\s*)+):\s*$/gm, '')
     // Strip specific internal orchestration tags (case insensitive)
     .replace(/^[\s]*(?:CURRENT TIME ACKNOWLEDGMENT|GET-TO-KNOW-YOU QUESTION|DISCOVERY PHASE|SITUATION BRIEF|INTERNAL UNDERSTANDING|USER PRESENCE:|BEHAVIOR PATTERN:|CURRENT TIME:|REMINDER NAG:|TIER 1:|TIER 2:|AUTONOMOUS BEHAVIORAL PATCHES|FOLLOW-UP ENGINE|SUBCONSCIOUS ACTIONS)[\s\S]*?(?=\n|$)/gmi, '')
+    // Strip prompt instruction fragments and parrots
+    .replace(/(?:##\s*)?OUTPUT INSTRUCTION[\s\S]*?(?=\n|$)/gmi, '')
+    .replace(/Output ONLY your conversational reply[\s\S]*?(?:No XML|\.\s*|\n|$)/gi, '')
+    .replace(/Output ONLY[^\n.]*[.]?/gi, '')
+    .replace(/No XML tags[^\n.]*[.]?/gi, '')
+    .replace(/No JSON[^\n.]*[.]?/gi, '')
+    .replace(/No subconscious_actions[^\n.]*[.]?/gi, '')
+    .replace(/Just what you would text the user on WhatsApp[.]?/gi, '')
+    .replace(/\[Output format:[^\]]*\]/gi, '')
     // Strip "Subconscious Actions" leaks of all forms
     .replace(/\*\[Subconscious Actions[\s\S]*?\*\*/gi, ' ')
     .replace(/\s*Subconscious Action[s]?\s*$/gi, '')
@@ -113,6 +174,12 @@ export function sanitizeReply(reply: string): string {
     .replace(/\n{3,}/g, '\n')
     .replace(/\s{2,}/g, ' ')
     .trim();
+
+  if (isPromptLeak(text)) {
+    return '';
+  }
+
+  return text;
 }
 
 /**
@@ -219,7 +286,21 @@ function buildMessages(
   recentMessages: any[] | undefined,
   message: string
 ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
-  const history = (recentMessages || []).map((m: any) => ({ role: m.role, content: m.content }));
+  const rawHistory = (recentMessages || []).map((m: any) => ({
+    role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
+    content: (m.content || '').trim(),
+  })).filter(m => m.content.length > 0);
+
+  // Merge consecutive same-role messages in history so turns strictly alternate
+  const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const msg of rawHistory) {
+    if (history.length > 0 && history[history.length - 1].role === msg.role) {
+      history[history.length - 1].content += '\n' + msg.content;
+    } else {
+      history.push({ ...msg });
+    }
+  }
+
   const last = history[history.length - 1];
   const lastIsSameTurn =
     !!last &&
@@ -358,7 +439,7 @@ export class NovaBrainService {
       context.remindersContext || '',
       deterministicReminderSection,
       context.lengthInstruction || '',
-      '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
+      '\n\n[Output format: Plain conversational text only, exactly what you would text a friend on WhatsApp. Do not include XML tags, JSON, or prompt labels.]',
     ].filter(Boolean).join('\n');
 
     const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
@@ -385,6 +466,18 @@ export class NovaBrainService {
         .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '')
         .replace(/\[[\s\S]*?"tool"[\s\S]*?\]/g, '')
         .trim();
+
+      if (isPromptLeak(reply)) {
+        logger.warn('[NOVA BRAIN] Primary model emitted prompt instruction leak, failing over to secondary worker', {
+          leakedText: reply,
+        });
+        const { complete: nvidiaComplete } = await import('../lib/nvidia');
+        const secondaryReply = await nvidiaComplete('USER_FAST', convoMessages, {
+          temperature: 0.85,
+          maxTokens: maxTok,
+        });
+        reply = secondaryReply || '';
+      }
 
       if (!reply) reply = NOVA_EMPTY_REPLY;
       reply = sanitizeReply(reply);
@@ -480,7 +573,7 @@ export class NovaBrainService {
       context.remindersContext || '',
       context.lengthInstruction || '',
       criticalActionSuccessContext,
-      '\n\n## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply as plain text. No XML tags. No JSON. No subconscious_actions. Just what you would text the user on WhatsApp.',
+      '\n\n[Output format: Plain conversational text only, exactly what you would text a friend on WhatsApp. Do not include XML tags, JSON, or prompt labels.]',
     ].filter(Boolean).join('\n');
 
     const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
@@ -497,31 +590,55 @@ export class NovaBrainService {
     let fullText = '';
     let fallbackReply = '';
     let replyStreamed = '';
+    let hasReplyTags = false;
     let replyClosed = false;
 
     for await (const chunk of responseStream) {
       fullText += chunk;
-      if (replyClosed) continue;
 
-      const openIdx = fullText.indexOf('<reply>');
-      if (openIdx === -1) continue; // open tag not seen yet
-
-      const closeIdx = fullText.indexOf('</reply>');
-      const subIdx = fullText.indexOf('<subconscious_actions>', openIdx);
-      const replyEnd = closeIdx === -1 ? (subIdx === -1 ? fullText.length : subIdx) : closeIdx;
-
-      const sanitizedReply = sanitizeReply(fullText.slice(openIdx + '<reply>'.length, replyEnd));
-      if (sanitizedReply.length > replyStreamed.length) {
-        const delta = sanitizedReply.slice(replyStreamed.length);
-        replyStreamed = sanitizedReply;
-        yield delta;
+      if (!hasReplyTags && fullText.includes('<reply>')) {
+        hasReplyTags = true;
       }
 
-      if (closeIdx !== -1) replyClosed = true;
+      if (hasReplyTags) {
+        if (replyClosed) continue;
+
+        const openIdx = fullText.indexOf('<reply>');
+        if (openIdx === -1) continue; // open tag not seen yet
+
+        const closeIdx = fullText.indexOf('</reply>');
+        const subIdx = fullText.indexOf('<subconscious_actions>', openIdx);
+        const replyEnd = closeIdx === -1 ? (subIdx === -1 ? fullText.length : subIdx) : closeIdx;
+
+        const sanitizedReply = sanitizeReply(fullText.slice(openIdx + '<reply>'.length, replyEnd));
+        if (sanitizedReply.length > replyStreamed.length) {
+          const delta = sanitizedReply.slice(replyStreamed.length);
+          replyStreamed = sanitizedReply;
+          if (!isPromptLeak(delta)) {
+            yield delta;
+          }
+        }
+
+        if (closeIdx !== -1) replyClosed = true;
+      } else {
+        // Plain text streaming: yield chunks progressively as they arrive.
+        // If the model begins a subconscious or tag block, stop streaming content.
+        if (fullText.includes('<subconscious_actions>') || fullText.includes('**Subconscious Actions**')) {
+          continue;
+        }
+
+        const sanitizedReply = sanitizeReply(fullText);
+        if (sanitizedReply.length > replyStreamed.length) {
+          const delta = sanitizedReply.slice(replyStreamed.length);
+          replyStreamed = sanitizedReply;
+          if (!isPromptLeak(delta)) {
+            yield delta;
+          }
+        }
+      }
     }
 
     if (replyStreamed.length === 0 && fullText.trim().length > 0) {
-      let fallbackReply = '';
       const mdResponseMatch = fullText.match(/\*\*Response\*\*[:\s]*([\s\S]*?)(?:\*\*Subconscious Actions\*\*|$)/i);
       if (mdResponseMatch) {
         fallbackReply = mdResponseMatch[1].trim();
@@ -530,6 +647,7 @@ export class NovaBrainService {
           .replace(/\*\*Subconscious Actions\*\*[\s\S]*/gi, '')
           .replace(/\*\*Response\*\*[:\s]*/gi, '')
           .replace(/<subconscious_actions>[\s\S]*?<\/subconscious_actions>/g, '')
+          .replace(/<reply>([\s\S]*?)<\/reply>/gi, '$1')
           .trim();
       }
 
@@ -542,7 +660,7 @@ export class NovaBrainService {
         .trim();
 
       fallbackReply = sanitizeReply(fallbackReply);
-      if (fallbackReply) {
+      if (fallbackReply && !isPromptLeak(fallbackReply)) {
         yield fallbackReply;
       }
     }

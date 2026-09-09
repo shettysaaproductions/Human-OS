@@ -1,4 +1,4 @@
-import { NovaBrainService, sanitizeReply } from '../NovaBrainService';
+import { NovaBrainService, sanitizeReply, isPromptLeak } from '../NovaBrainService';
 import { complete, stream } from '../../lib/nvidia';
 import { promptBuilder } from '../promptBuilder';
 import { logger } from '../../lib/logger';
@@ -358,6 +358,15 @@ describe('NovaBrainService', () => {
     });
     it('collapses repeated emoji sequences', () => {
       expect(sanitizeReply('Hello 😊😊😊 there')).toBe('Hello 😊 there');
+    });
+    it('detects prompt leaks with isPromptLeak', () => {
+      expect(isPromptLeak('Output ONLY your conversational reply as plain text. No 😄')).toBe(true);
+      expect(isPromptLeak('## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply')).toBe(true);
+      expect(isPromptLeak('No XML tags. No JSON. Just what you would text')).toBe(true);
+      expect(isPromptLeak('Arre waah! 6 months ka hai toh bahut cute hoga!')).toBe(false);
+    });
+    it('sanitizeReply suppresses pure prompt leak into empty string', () => {
+      expect(sanitizeReply('Output ONLY your conversational reply as plain text. No')).toBe('');
     });
   });
 });

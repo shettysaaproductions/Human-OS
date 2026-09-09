@@ -20,7 +20,7 @@ import { reminderService } from '../services/reminderService';
 // ReminderEngine imported dynamically where needed
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
-import { sanitizeReply, NOVA_EMPTY_REPLY } from '../services/NovaBrainService';
+import { sanitizeReply, NOVA_EMPTY_REPLY, isPromptLeak } from '../services/NovaBrainService';
 import { TurnAnalyzer } from '../services/TurnAnalyzer';
 import { cognitiveContextService } from '../services/CognitiveContextService';
 import { cognitiveDoubtService } from '../services/CognitiveDoubtService';
@@ -1419,7 +1419,7 @@ chatRouter.post(
                       novaBrain.processInteraction(userId, normalizedMessages, brainContext),
                       retryTimeoutPromise,
                     ]);
-                    if (retryResult.reply) {
+                    if (retryResult.reply && !isPromptLeak(retryResult.reply)) {
                       retrySucceeded = true;
                       rawReply = retryResult.reply;
                       res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
@@ -1533,6 +1533,30 @@ HINGLISH RULES:
             }
 
             rawReply = result.reply;
+            if (isPromptLeak(rawReply) || rawReply === NOVA_EMPTY_REPLY) {
+              logger.warn('[Chat] Prompt instruction leak detected in rawReply, triggering secondary fast worker retry', { rawReply });
+              try {
+                const { complete: nvidiaComplete } = await import('../lib/nvidia');
+                const fastRetryMessages = [
+                  {
+                    role: 'system' as const,
+                    content: `You are Nova, a casual Hinglish-speaking friend texting on WhatsApp.
+Reply in 1-2 SHORT sentences. Max 1 emoji. NO lists, NO formatting, NO prompt rules or internal labels.
+Use natural conversational Hinglish like "Arre waah!", "Sahi hai yaar", "Mast". Plain text only.`
+                  },
+                  { role: 'user' as const, content: primaryMessage }
+                ];
+                const fastReply = await nvidiaComplete('TIMEOUT_FALLBACK', fastRetryMessages, {
+                  maxTokens: 256,
+                  temperature: 0.85
+                });
+                if (fastReply && !isPromptLeak(fastReply)) {
+                  rawReply = sanitizeReply(fastReply);
+                }
+              } catch (e: any) {
+                logger.error('[Chat] Fast retry on prompt leak failed', { error: e.message });
+              }
+            }
             if (result.subconscious_actions && result.subconscious_actions.length > 0) {
               extractedActions = result.subconscious_actions;
             }
@@ -1660,7 +1684,8 @@ HINGLISH RULES:
         }
       }
 
-      let parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
+      let parsedMessages = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)))
+        .filter(msg => !isPromptLeak(msg));
       
       // Append generated images as separate bubbles after stripping so they aren't removed
       if (generatedImages.length > 0) {
@@ -1676,7 +1701,7 @@ HINGLISH RULES:
       });
       
       // Split each parsed message further if it's too long
-      let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m)).filter(b => b.trim().length > 0);
+      let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m)).filter(b => b.trim().length > 0 && !isPromptLeak(b));
       
       // If no valid bubbles were generated (e.g. LLM returned blank), safely abort.
       // Streaming: the 'done' event was already flushed above — writing again after

@@ -245,13 +245,18 @@ class CognitiveModelRouter {
     const nvidiaProfile = WORKLOAD_TO_NVIDIA_PROFILE[workload];
 
     if (primaryProvider === 'gemini') {
-      const timeoutMs = options.timeoutMs ?? (
-        workload === 'CONVERSATION' ? config.gemini.conversationTimeoutMs : 30_000
+      // Interactive CONVERSATION streams enforce a strict 2.8s Gemini budget.
+      // If Gemini cannot yield within 2.8s across keys, fail fast to NVIDIA's 15-key pool
+      // so the mobile client (30s timeout) never aborts or shows connection lag.
+      const geminiTimeoutMs = options.timeoutMs ?? (
+        workload === 'CONVERSATION' ? Math.min(2800, config.gemini.conversationTimeoutMs) : 30_000
       );
+      const geminiDeadline = Date.now() + geminiTimeoutMs;
       const geminiOpts = {
         maxTokens: options.maxTokens,
         temperature: options.temperature,
-        timeoutMs,
+        timeoutMs: geminiTimeoutMs,
+        deadlineMs: geminiDeadline,
       };
       let geminiOk = false;
       let streamStarted = false;

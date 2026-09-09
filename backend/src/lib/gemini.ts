@@ -265,12 +265,32 @@ export const pool = new GeminiPool();
 type OAIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 function toGeminiHistory(messages: OAIMessage[]): GeminiMessage[] {
-  return messages
-    .filter(m => m.role !== 'system') // system is handled as systemInstruction
+  const nonSystem = messages
+    .filter(m => m.role !== 'system')
     .map(m => ({
       role: m.role === 'assistant' ? 'model' as const : 'user' as const,
-      content: m.content,
-    }));
+      content: (m.content || '').trim(),
+    }))
+    .filter(m => m.content.length > 0);
+
+  if (nonSystem.length === 0) return [];
+
+  // Merge consecutive same-role messages so turns strictly alternate
+  const merged: GeminiMessage[] = [];
+  for (const msg of nonSystem) {
+    if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
+      merged[merged.length - 1].content += '\n' + msg.content;
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+
+  // Gemini startChat requires the first message in history to be 'user'
+  if (merged.length > 0 && merged[0].role === 'model') {
+    merged.unshift({ role: 'user', content: 'Hi' });
+  }
+
+  return merged;
 }
 
 function extractSystem(messages: OAIMessage[]): string {
@@ -401,7 +421,8 @@ export async function* geminiStream(
   let streamErr: any = null;
   const chunks: string[] = [];
 
-  await pool.execute(async (client) => {
+  await pool.execute(async (client, _slot, remainingTimeoutMs) => {
+    const effectiveTimeoutMs = Math.min(timeoutMs, remainingTimeoutMs);
     const model = client.getGenerativeModel({
       model: modelName,
       systemInstruction: systemInstruction || undefined,
@@ -415,7 +436,7 @@ export async function* geminiStream(
     if (historyMsgs.length === 0) {
       const result = await withGeminiTimeout(
         () => model.generateContentStream(lastMessage.content),
-        timeoutMs
+        effectiveTimeoutMs
       );
       for await (const chunk of result.stream) {
         const t = chunk.text();
@@ -431,7 +452,7 @@ export async function* geminiStream(
 
       const result = await withGeminiTimeout(
         () => chat.sendMessageStream([{ text: lastMessage.content }]),
-        timeoutMs
+        effectiveTimeoutMs
       );
 
       for await (const chunk of result.stream) {
@@ -440,7 +461,7 @@ export async function* geminiStream(
       }
     }
     return null;
-  }).catch(err => {
+  }, options.targetSlot, options.deadlineMs, timeoutMs).catch(err => {
     streamErr = err;
   });
 
