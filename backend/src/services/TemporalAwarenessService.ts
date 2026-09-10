@@ -73,8 +73,49 @@ export class TemporalAwarenessService {
           }
         }
       }
+
+      // Check for user-defined sleep_time and wake_time in working_memory or memories
+      const { data: sleepWm } = await supabaseAdmin
+        .from('working_memory')
+        .select('key, value')
+        .eq('user_id', userId)
+        .in('key', ['sleep_time', 'bedtime', 'wake_time', 'wake_up_time']);
+
+      let customSleepStr = sleepWm?.find(w => w.key === 'sleep_time' || w.key === 'bedtime')?.value;
+      let customWakeStr = sleepWm?.find(w => w.key === 'wake_time' || w.key === 'wake_up_time')?.value;
+
+      if (!customSleepStr || !customWakeStr) {
+        const { data: sleepMem } = await supabaseAdmin
+          .from('memories')
+          .select('key, value')
+          .eq('user_id', userId)
+          .in('key', ['sleep_time', 'bedtime', 'wake_time', 'wake_up_time']);
+        if (!customSleepStr) customSleepStr = sleepMem?.find(m => m.key === 'sleep_time' || m.key === 'bedtime')?.value;
+        if (!customWakeStr) customWakeStr = sleepMem?.find(m => m.key === 'wake_time' || m.key === 'wake_up_time')?.value;
+      }
+
+      if (customSleepStr || customWakeStr) {
+        const { parseCustomHourMinute } = require('./UserLifeStageEngine');
+        const parsedSleep = parseCustomHourMinute(customSleepStr);
+        const parsedWake = parseCustomHourMinute(customWakeStr);
+
+        const sHour = parsedSleep ? parsedSleep.hour : 23;
+        const sMin = parsedSleep ? parsedSleep.minute : 30;
+        const wHour = parsedWake ? parsedWake.hour : 7;
+        const wMin = parsedWake ? parsedWake.minute : 30;
+
+        const curMin = hour * 60 + nowLocal.getUTCMinutes();
+        const sleepMin = sHour * 60 + sMin;
+        const wakeMin = wHour * 60 + wMin;
+
+        if (sleepMin > wakeMin) {
+          isSleepWindow = curMin >= sleepMin || curMin < wakeMin;
+        } else {
+          isSleepWindow = curMin >= sleepMin && curMin < wakeMin;
+        }
+      }
     } catch (err) {
-      logger.warn('[TemporalAwareness] Failed to fetch routines', { error: err instanceof Error ? err.message : String(err) });
+      logger.warn('[TemporalAwareness] Failed to fetch routines or sleep schedule', { error: err instanceof Error ? err.message : String(err) });
     }
 
     return {

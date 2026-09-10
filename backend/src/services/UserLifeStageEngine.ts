@@ -19,6 +19,33 @@ import { logger } from '../lib/logger';
 import { clusterMemoriesIntoWardrobes, EntityWardrobe } from '../lib/memoryDomains';
 import { resolveUserTzOffsetHours } from './ReminderEngine';
 
+export function parseCustomHourMinute(val?: string): { hour: number; minute: number } | null {
+  if (!val) return null;
+  const cleaned = val.trim().toLowerCase();
+  const match12 = cleaned.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (match12) {
+    let h = parseInt(match12[1], 10);
+    const m = match12[2] ? parseInt(match12[2], 10) : 0;
+    const isPm = match12[3].toLowerCase() === 'pm';
+    if (isPm && h < 12) h += 12;
+    if (!isPm && h === 12) h = 0;
+    return { hour: h, minute: m };
+  }
+  const match24 = cleaned.match(/(\d{1,2}):(\d{2})/);
+  if (match24) {
+    return { hour: parseInt(match24[1], 10), minute: parseInt(match24[2], 10) };
+  }
+  const matchBaje = cleaned.match(/(\d{1,2})\s*(?:baje|o'clock)/i);
+  if (matchBaje) {
+    let h = parseInt(matchBaje[1], 10);
+    if (cleaned.includes('raat') || cleaned.includes('shaam')) {
+      if (h < 12) h += 12;
+    }
+    return { hour: h, minute: 0 };
+  }
+  return null;
+}
+
 export type LifeStageType =
   | 'FAMILY_FOUNDER_WITH_INFANT'
   | 'FAMILY_WITH_CHILDREN'
@@ -252,6 +279,54 @@ export class UserLifeStageEngine {
       const dayOfWeek = dayNames[localDate.getUTCDay()];
       const isWeekendDay = dayOfWeek === 'Sunday';
 
+      // Inspect custom sleep/wake memories if known
+      const memMap = new Map<string, string>();
+      for (const m of memories || []) {
+        if (m.key && m.value) memMap.set(m.key.toLowerCase(), String(m.value));
+      }
+      if (workingContext) {
+        if (Array.isArray(workingContext)) {
+          for (const w of workingContext) {
+            if (w.key && w.value) memMap.set(w.key.toLowerCase(), String(w.value));
+          }
+        } else if (typeof workingContext === 'object') {
+          for (const [k, v] of Object.entries(workingContext)) {
+            if (k && v) memMap.set(k.toLowerCase(), String(v));
+          }
+        }
+      }
+
+      const customSleepVal = memMap.get('sleep_time') || memMap.get('bedtime') || memMap.get('sleep_schedule');
+      const customWakeVal = memMap.get('wake_time') || memMap.get('wake_up_time') || memMap.get('wakeup_time');
+
+      const parsedSleep = parseCustomHourMinute(customSleepVal);
+      const parsedWake = parseCustomHourMinute(customWakeVal);
+
+      const sleepHour = parsedSleep ? parsedSleep.hour : 23;
+      const sleepMinute = parsedSleep ? parsedSleep.minute : 30;
+      const wakeHour = parsedWake ? parsedWake.hour : 7;
+      const wakeMinute = parsedWake ? parsedWake.minute : 30;
+
+      const currentMinutesFromMidnight = localHour * 60 + localMinute;
+      const sleepMinutesFromMidnight = sleepHour * 60 + sleepMinute;
+      const wakeMinutesFromMidnight = wakeHour * 60 + wakeMinute;
+
+      let isSleepingNow = false;
+      if (sleepMinutesFromMidnight > wakeMinutesFromMidnight) {
+        // e.g. 23:30 (1410 min) to 7:30 (450 min) across midnight
+        isSleepingNow = currentMinutesFromMidnight >= sleepMinutesFromMidnight || currentMinutesFromMidnight < wakeMinutesFromMidnight;
+      } else {
+        // e.g. 01:00 AM (60 min) to 09:00 AM (540 min)
+        isSleepingNow = currentMinutesFromMidnight >= sleepMinutesFromMidnight && currentMinutesFromMidnight < wakeMinutesFromMidnight;
+      }
+
+      const windDownStartMinutes = (sleepMinutesFromMidnight - 60 + 1440) % 1440;
+      const isWindDownNow = !isSleepingNow && (
+        sleepMinutesFromMidnight > windDownStartMinutes
+          ? (currentMinutesFromMidnight >= windDownStartMinutes && currentMinutesFromMidnight < sleepMinutesFromMidnight)
+          : (currentMinutesFromMidnight >= windDownStartMinutes || currentMinutesFromMidnight < sleepMinutesFromMidnight)
+      );
+
       let currentPhase: DailyRhythmPhase = 'WORK_FOCUS';
       let phaseDescription = '';
       let proactiveAllowance: ProactiveAllowance = 'FULL';
@@ -261,9 +336,9 @@ export class UserLifeStageEngine {
       let isSleepQuietHours = false;
 
       // Time classifications
-      if (localHour >= 23 || (localHour === 23 && localMinute >= 30) || localHour < 7 || (localHour === 7 && localMinute < 30)) {
+      if (isSleepingNow) {
         currentPhase = 'SLEEP_REST';
-        phaseDescription = 'Sleep & Quiet Hours (11:30 PM – 7:30 AM). Strict silence unless urgent medical/safety emergency.';
+        phaseDescription = `Sleep & Quiet Hours (${customSleepVal || '11:30 PM'} – ${customWakeVal || '7:30 AM'}). Strict silence unless urgent medical/safety emergency.`;
         proactiveAllowance = 'STRICT_SILENCE';
         isSleepQuietHours = true;
       } else if (isWeekendDay) {
@@ -280,11 +355,15 @@ export class UserLifeStageEngine {
         phaseDescription = 'Evening Family Time & Venture Brainstorming (8:00 PM – 10:30 PM). Post-shift wind-down with Sakshi and baby Shreshth.';
         proactiveAllowance = 'FAMILY_STRATEGIC';
         isFamilyCollaborativeHours = true;
-      } else {
+      } else if (isWindDownNow || localHour >= 22) {
         currentPhase = 'WIND_DOWN';
-        phaseDescription = 'Late Night Reflection & Next-Day Planning (10:30 PM – 11:30 PM). Calm, reflective tone.';
+        phaseDescription = `Late Night Reflection & Next-Day Planning (Wind-down before ${customSleepVal || 'bedtime'}). Calm, reflective tone.`;
         proactiveAllowance = 'MINIMAL_CALM';
         isWindDownHours = true;
+      } else {
+        currentPhase = 'WORK_FOCUS';
+        phaseDescription = 'Early Morning Prep / Daytime Active Focus.';
+        proactiveAllowance = 'FULL';
       }
 
       // 8. Classify Holistic Life Stage

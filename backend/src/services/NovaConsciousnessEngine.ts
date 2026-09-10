@@ -96,6 +96,24 @@ export function deriveMissingMemoryCuriosities(
     curiosities.push(`User Location: Which city they live in is unknown.`);
   }
 
+  // 5. Foundational Life Blueprint Gaps (Sleep, DOB, Diet, Habits, Personal Choices)
+  try {
+    const { lifeBlueprintCuriosityEngine } = require('./LifeBlueprintCuriosityEngine');
+    const blueprintSummary = lifeBlueprintCuriosityEngine.evaluateMissingBlueprintGaps(
+      memories,
+      workingContext || {},
+      undefined,
+      wardrobes
+    );
+
+    if (blueprintSummary.nextBestCuriosity) {
+      const top = blueprintSummary.nextBestCuriosity;
+      curiosities.push(`Life Blueprint Anchor: "${top.title}" [${top.key}] is unknown. Suggested: "${top.suggestedPrompt}" (${top.companionValue})`);
+    }
+  } catch (err) {
+    // Non-critical curiosity fallback
+  }
+
   return curiosities;
 }
 
