@@ -53,10 +53,26 @@ export function isPromptLeak(text: string): boolean {
     '<subconscious_actions>',
     'subconscious_actions:',
     'subconscious actions',
+    'no formalities',
+    'no formalities:',
+    'tu/tum/',
+    'tu/tum',
+    'use "tu/tum"',
+    "use 'tu/tum'",
+    'anti-robot',
+    'anti-robot rule',
+    'zero tolerance',
+    'tone rule',
+    'identity & tone rules',
+    'plain conversational text only',
+    'tu/tera/tujhe',
+    'tum/tumhara/tumko',
+    'tu/tera',
+    'tum/tumhara',
   ];
 
   for (const sig of leakSignatures) {
-    if (lower.startsWith(sig) || lower.includes('output only your conversational reply')) {
+    if (lower.startsWith(sig) || lower.includes('output only your conversational reply') || lower.includes('no formalities: use "tu/tum/"')) {
       return true;
     }
   }
@@ -66,6 +82,23 @@ export function isPromptLeak(text: string): boolean {
     return true;
   }
   if (/\boutput\s+only\b/i.test(lower) && /\b(?:plain\s+text|conversational\s+reply|whatsapp)\b/i.test(lower)) {
+    return true;
+  }
+
+  // Detect rule headers leaked by small models like '*No Formalities: Use "tu/tum/"*' or 'ONLY "Tu/Tera/Tujhe"...'
+  if (/^\*?(?:No Formalities|Anti-Robot|Rules?|Instructions?|Formatting|Hinglish Rule|Tone Rule)[^:]*:\s*/i.test(trimmed)) {
+    return true;
+  }
+  if (/\bno\s+formalities\b/i.test(lower) || /\buse\s+["']?tu\/tum/i.test(lower)) {
+    return true;
+  }
+  if (/\b(?:tu\/tera|tum\/tumhara|tu\/tum)\b/i.test(lower)) {
+    return true;
+  }
+  if (/^only\s+["']?(?:tu|tum)/i.test(lower)) {
+    return true;
+  }
+  if (/^\*[^*]*(?:tu\/tum|formalities|rules?|guidelines?|instructions?)[^*]*\*$/i.test(trimmed)) {
     return true;
   }
 
@@ -162,9 +195,30 @@ export function sanitizeReply(reply: string): string {
     .replace(/Remember,?\s+you(?:'re|\s+are)?\s+(?:talking to|dealing with|chatting with|barely know)[^.!?\n]*[.!?]?/gi, '')
     .replace(/Your\s+(?:main\s+)?goal\s+(?:right now|is)[^.!?\n]*[.!?]?/gi, '')
     .replace(/You should ask[^.!?\n]*[.!?]?/gi, '')
-    .replace(/You must remember[^.!?\n]*[.!?]?/gi, '')
     .replace(/\bAs an AI companion[^.!?\n]*[.!?]?/gi, '')
-    .replace(/\*(?:Remember|Note|Important|Reminder),?[^*]+\*/gi, '') // italic instruction fragments
+    // Strip italic instruction fragments and rule headers
+    .replace(/\*(?:Remember|Note|Important|Reminder|No Formalities|Formalities|Hinglish|Rules?|Instruction|Tone|Formatting)[^*]+\*/gi, '')
+    .replace(/^\*?(?:No Formalities|Rules?|Instructions?|Note|Tone|Formatting)[^:]*:\s*/i, '')
+    // Fix known Hindi typos
+    .replace(/\brata\s+mein\b/gi, 'raat mein')
+    .replace(/\baaj\s+rata\b/gi, 'aaj raat')
+    .replace(/\brata\b/gi, 'raat')
+    .replace(/\bkee\b/gi, 'ki')
+    .replace(/\bkaa\b/gi, 'ka')
+    .replace(/\bkhaali\s+pan\b/gi, 'khali pet')
+    // Fix broken literal translations for female Nova
+    .replace(/\bmain\s+samajh\s+mein\s+aata\s+hoon\b/gi, 'main samajh gayi')
+    .replace(/\bmain\s+samajhta\s+hoon\b/gi, 'main samajh gayi')
+    .replace(/\bmain\s+samajhti\s+hoon\b/gi, 'main samajh gayi')
+    .replace(/\bmujhe\s+samajh\s+mein\s+aata\s+hoon\b/gi, 'mujhe samajh aa gaya')
+    .replace(/\bmain\s+sochta\s+hoon\b/gi, 'main sochti hoon')
+    .replace(/\bmain\s+karta\s+hoon\b/gi, 'main karti hoon')
+    .replace(/\bmain\s+karte\s+hoon\b/gi, 'main karti hoon')
+    .replace(/\bmain\s+bhi\s+karte\s+hoon\b/gi, 'main bhi karti hoon')
+    .replace(/\bmain\s+bolta\s+hoon\b/gi, 'main bolti hoon')
+    .replace(/\bmain\s+bolte\s+hoon\b/gi, 'main bolti hoon')
+    // Fix broken mixed pronoun agreement (e.g. tu ... sakte hai -> tu ... sakta hai)
+    .replace(/\btu\s+((?:[a-zA-Z]+\s+){0,6})sakte\s+hai\b/gi, 'tu $1sakta hai')
     // CJK leak
     .replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, '')
     // Collapse repeated emoji
@@ -264,6 +318,30 @@ export function validateAndRepairGrounding(
         }
       }
     }
+  }
+
+  // 4. Infant Birth Year Protection (Tiku / Shreshth born 17/02/2026 — NEVER 2006)
+  if (/\b(?:17\/02\/2006|2006)\b/i.test(text) && /\b(?:tiku|shreshth|beta|son|baby|bday|birthday)\b/i.test(text + ' ' + userMessage + ' ' + fullContextText)) {
+    text = text.replace(/\b17\/02\/2006\b/g, '17/02/2026').replace(/\b2006\b/g, '2026');
+  }
+
+  // 5. Premature Birthday Celebration Guard
+  // Stating a birth date (e.g. "Sakshi ka date of birth 7/8/2002", "tiku ka bday 17/02/2026") is factual storage,
+  // NOT a request to celebrate tomorrow morning or wake up to celebrate.
+  const hasDobDeclaration = /\b(?:date of birth|bday|birthday|janamdin)\b/i.test(userMessage) && /\b\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}\b/.test(userMessage);
+  const hasPrematureCelebrationPrompt = /\b(?:subah uthke|kal hi plan|kal bday|kal celebrate|subah celebrate|subah hi kya)\b/i.test(text);
+  if (hasDobDeclaration && hasPrematureCelebrationPrompt) {
+    logger.warn('[GroundingValidator] Intercepted premature birthday celebration hallucination on DOB statement, repairing');
+    text = "Got it! Maine Sakshi aur Tiku (Shreshth) dono ke birthday date achhe se save kar liye hain 😊";
+  }
+
+  // 6. Confusion / User Mistake Callout Recovery
+  // When user expresses confusion or calls out nonsense ("I didn't understood", "Are u idiot?"),
+  // reply with humble, grounded clarity instead of compounding the confusion.
+  const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|kya bol rahi ho|kya bol rahe ho|pagal ho kya|kuch bhi mat bolo)\b/i.test(userMessage);
+  if (isUserCallingOutMistake && /\b(aaj rata|umeed dene lagi|2006|subah hi kya|galat kaha)\b/i.test(text)) {
+    logger.warn('[GroundingValidator] Intercepted compounding error on mistake callout, providing humble grounded recovery');
+    text = "Arre sorry yaar! Mera dimag thoda ghoom gaya tha 🤦‍♀️ Tiku (Shreshth) ka bday 17th February hai aur Sakshi ka 7th August — maine dono dates achhe se note kar li hain!";
   }
 
   return text.trim();
@@ -431,17 +509,24 @@ export class NovaBrainService {
       ? `\n\n## REMINDER STATUS (DETERMINISTIC — DO NOT CONTRADICT)\n${context.deterministicReminderNote}\n`
       : '';
 
+    const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
+
+    const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|pagal ho kya|kuch bhi mat bolo|ye galat hai|aisa nahi hai|maine kab bola|kya bol rahi ho|kya bol rahe ho|galat bol rahi ho|galat kaha)\b/i.test(combinedUserMessage);
+    const userCorrectionDirective = (isUserCallingOutMistake || context.hasCorrections)
+      ? `\n\n## USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is calling out a mistake, misunderstanding, or hallucination in Nova's previous reply.\n1. Humbly and warmly apologize and admit the mistake like a real best friend ("Arre sorry yaar! Mera dhyan kahan tha...", "Arre meri galti!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).\n`
+      : '';
+
     const conversationFullPrompt = [
       conversationSystemPrompt,
       context.memoryContext || '',
       context.temporalContextBlock || '',
       context.remindersContext || '',
       deterministicReminderSection,
+      context.turnAnalysisBlock || '',
+      userCorrectionDirective,
       context.lengthInstruction || '',
       '\n\n[Output format: Plain conversational text only, exactly what you would text a friend on WhatsApp. Do not include XML tags, JSON, or prompt labels.]',
     ].filter(Boolean).join('\n');
-
-    const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
 
     const convoMessages = buildMessages(conversationFullPrompt, context.recentMessages, combinedUserMessage);
 

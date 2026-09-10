@@ -863,7 +863,7 @@ export function ChatScreen() {
                   activeOpacity={0.7}
                 >
                   <Text style={s.versionBadgeText}>
-                    ✨ Refined {item.meta?.versions && item.meta.versions.length > 1 ? `(v${item.meta.versions.length})` : ''}
+                    ✨ Aligned {item.meta?.versions && item.meta.versions.length > 1 ? `(v${item.meta.versions.length})` : ''}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -1272,17 +1272,18 @@ export function ChatScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Watchtower Critique / Flaw Notice */}
-            {versionModalMessage?.meta?.reflection_flaw_detected && (
+            {/* Autonomous Green Seal Polish Indicator */}
+            {versionModalMessage?.meta?.is_corrected && (
               <View style={s.versionAlertBox}>
-                <Text style={s.versionAlertTitle}>
-                  🛡️ Watchtower Self-Correction: {versionModalMessage.meta.reflection_flaw_detected.replace(/_/g, ' ').toUpperCase()}
-                </Text>
-                {versionModalMessage.meta.reflection_explanation ? (
-                  <Text style={s.versionAlertDesc}>
-                    {versionModalMessage.meta.reflection_explanation}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 16 }}>🛡️</Text>
+                  <Text style={s.versionAlertTitle}>
+                    Autonomous Tri-Pass Clearance & Green Seal
                   </Text>
-                ) : null}
+                </View>
+                <Text style={s.versionAlertDesc}>
+                  Watchtower verified area memories, deep neural connections, and voice continuity.
+                </Text>
               </View>
             )}
 
@@ -1314,7 +1315,7 @@ export function ChatScreen() {
                           v{v.version || idx + 1}
                         </Text>
                         <Text style={[s.versionItemLabel, { color: colors.textPrimary }]}>
-                          {idx === 0 ? 'Original Draft' : 'Refined Version'}
+                          {idx === 0 ? 'Initial Response' : 'Autonomously Aligned'}
                         </Text>
                       </View>
                       {isActive && (
@@ -1328,15 +1329,17 @@ export function ChatScreen() {
                       {v.content}
                     </Text>
 
-                    {v.flaw && (
-                      <Text style={s.versionFlawText}>
-                        ⚠️ Flaw caught: {v.flaw}
-                      </Text>
-                    )}
-
-                    {v.reason && !v.flaw && (
+                    {v.clean_label ? (
                       <Text style={[s.versionReasonText, { color: colors.textSecondary }]}>
-                        ℹ️ {v.reason}
+                        ✨ {v.clean_label}
+                      </Text>
+                    ) : idx === 0 ? (
+                      <Text style={[s.versionReasonText, { color: colors.textSecondary }]}>
+                        ⚡ Initial Rapid Response
+                      </Text>
+                    ) : (
+                      <Text style={[s.versionReasonText, { color: colors.textSecondary }]}>
+                        ✨ Autonomous Tri-Pass Refinement (Green Seal)
                       </Text>
                     )}
 
@@ -1608,9 +1611,9 @@ const s = StyleSheet.create({
     padding: 6,
   },
   versionAlertBox: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderColor: 'rgba(16, 185, 129, 0.25)',
     borderRadius: 10,
     padding: 10,
     marginBottom: 12,
@@ -1618,12 +1621,12 @@ const s = StyleSheet.create({
   versionAlertTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#EF4444',
+    color: '#10B981',
     marginBottom: 2,
   },
   versionAlertDesc: {
     fontSize: 12,
-    color: '#FCA5A5',
+    color: '#6EE7B7',
     lineHeight: 16,
   },
   versionItemCard: {

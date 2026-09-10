@@ -135,7 +135,7 @@ export class TurnAnalyzer {
 
         // 1. Check for structured/explicit correction
         const structuredCorrection = this.extractStructuredCorrection(clause);
-        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:|wrong|incorrect|no, that is wrong)\b/i.test(lower);
+        const isCorrectionRegex = /\b(actually|correction|nahi yaar|galat|nahi uska naam|not that|instead|wait no|correction:|wrong|incorrect|no, that is wrong|i didn't understood|didn't understand|are u idiot|are you an idiot|pagal ho kya|kuch bhi mat bolo|ye galat hai|aisa nahi hai|maine kab bola|kya bol rahi ho|kya bol rahe ho|galat bol rahi ho|galat kaha)\b/i.test(lower);
         // Deterministic canonical favourite statement (e.g. "My favourite colour is blue").
         // Routed through the correction path so it is persisted deterministically without the LLM.
         const canonicalFavourite = this.extractCanonicalFavourite(clause);

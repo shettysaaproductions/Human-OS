@@ -301,6 +301,12 @@ Use the recent context to resolve any pronouns (e.g. "uska", "uski", "unka", "he
   → Concept: "son_age", Value: "6 months" (or "6 months ka"), groundedInTurn: true
 - Example: Current: "Mera full name Sagar shetty hai"
   → Concept: "preferred_name", Value: "Sagar shetty", groundedInTurn: true
+- Example: Current: "Hum shreshth ko pyar se ghr pe tiku bulate hai"
+  → Concept: "son_nickname", Value: "tiku", groundedInTurn: true
+- Example: Current: "Sakshi ka date of birth 7/8/2002 hai"
+  → Concept: "wife_birth_date", Value: "7/8/2002", groundedInTurn: true
+- Example: Preceding: "Hum shreshth ko pyar se ghr pe tiku bulate hai" | Current: "And tiku ka bday 17/02/2026 hai"
+  → Concept: "son_birth_date", Value: "17/02/2026", groundedInTurn: true
 
 DAY-OF-WEEK HANDLING (for reminder actions):
 - "Mon to Sat" / "mon se sat" / "Monday se Saturday" / "mom to sat" → active_days: ["monday","tuesday","wednesday","thursday","friday","saturday"]

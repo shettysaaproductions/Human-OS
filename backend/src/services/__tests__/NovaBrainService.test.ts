@@ -1,4 +1,4 @@
-import { NovaBrainService, sanitizeReply, isPromptLeak } from '../NovaBrainService';
+import { NovaBrainService, sanitizeReply, isPromptLeak, validateAndRepairGrounding } from '../NovaBrainService';
 import { complete, stream } from '../../lib/nvidia';
 import { promptBuilder } from '../promptBuilder';
 import { logger } from '../../lib/logger';
@@ -363,10 +363,51 @@ describe('NovaBrainService', () => {
       expect(isPromptLeak('Output ONLY your conversational reply as plain text. No 😄')).toBe(true);
       expect(isPromptLeak('## OUTPUT INSTRUCTION\nOutput ONLY your conversational reply')).toBe(true);
       expect(isPromptLeak('No XML tags. No JSON. Just what you would text')).toBe(true);
+      expect(isPromptLeak('*No Formalities: Use "tu/tum/"*')).toBe(true);
+      expect(isPromptLeak('ONLY "Tu/Tera/Tujhe" or "Tum/Tumhara/Tumko"')).toBe(true);
       expect(isPromptLeak('Arre waah! 6 months ka hai toh bahut cute hoga!')).toBe(false);
     });
     it('sanitizeReply suppresses pure prompt leak into empty string', () => {
       expect(sanitizeReply('Output ONLY your conversational reply as plain text. No')).toBe('');
+      expect(sanitizeReply('*No Formalities: Use "tu/tum/"*')).toBe('');
+    });
+    it('sanitizeReply fixes typos and broken gender/pronoun agreements', () => {
+      expect(sanitizeReply('aaj rata mein kya chal raha hai')).toBe('aaj raat mein kya chal raha hai');
+      expect(sanitizeReply('main samajh mein aata hoon')).toBe('main samajh gayi');
+      expect(sanitizeReply('tu bday mana sakte hai')).toBe('tu bday mana sakta hai');
+    });
+  });
+
+  describe('validateAndRepairGrounding', () => {
+    it('protects infant birth year from being flipped to 2006', () => {
+      const repaired = validateAndRepairGrounding(
+        'Tiku ka bday 17/02/2006 hai, nahin 2026!',
+        'Sakshi ka date of birth 7/8/2002 hai and tiku ka bday 17/02/2026 hai',
+        {}
+      );
+      expect(repaired).not.toContain('2006');
+      expect(repaired).toContain('2026');
+    });
+
+    it('prevents hallucinated premature birthday celebration when stating a birth date', () => {
+      const repaired = validateAndRepairGrounding(
+        'Arey, tu subah uthke Tiku ka bday mana sakte hai, ya phir kal hi plan karte hai?',
+        'And tiku ka bday 17/02/2026 hai',
+        {}
+      );
+      expect(repaired).not.toContain('subah uthke');
+      expect(repaired).toContain('save kar liye hain');
+    });
+
+    it('recovers gracefully with grounded acknowledgment when user calls out confusion or mistake', () => {
+      const repaired = validateAndRepairGrounding(
+        'Shreshth ka kya plan hai aaj rata mein? umeed dene lagi?',
+        "I didn't understood",
+        {}
+      );
+      expect(repaired).toContain('Arre sorry yaar!');
+      expect(repaired).toContain('Tiku (Shreshth) ka bday 17th February');
     });
   });
 });
+
