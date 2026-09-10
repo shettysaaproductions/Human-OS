@@ -140,6 +140,8 @@ export class WatchtowerReflectionService {
 
     // 1. Fetch user memories (family, wife, children, ages, schedule)
     let memorySummary = '';
+    let canonicalData: any[] = [];
+    let workingData: any[] = [];
     try {
       const [canonicalRes, workingRes] = await Promise.all([
         supabaseAdmin
@@ -155,9 +157,11 @@ export class WatchtowerReflectionService {
           .limit(20)
       ]);
 
-      const canonicalList = (canonicalRes.data || [])
+      canonicalData = canonicalRes.data || [];
+      workingData = workingRes.data || [];
+      const canonicalList = canonicalData
         .map((m: any) => `- ${m.key}: ${m.value} (${m.memory_type || 'general'})`);
-      const workingList = (workingRes.data || [])
+      const workingList = workingData
         .map((w: any) => `- [working] ${w.key}: ${w.value}`);
 
       let wardrobeSection = '';
@@ -198,11 +202,11 @@ export class WatchtowerReflectionService {
       }
     }
 
-    if (signal.aborted) return;
-
-    // Resolve user's local hour and time string
+    if (signal.aborted) return;    // Resolve user's local hour, time string, and exact calendar date
     let localHour = 20;
     let localTimeStr = 'evening';
+    let localDateStr = 'Current Date';
+    let localTomorrowDateStr = 'Tomorrow';
     let tzOffsetHours = 5.5;
     try {
       const { data: prof } = await supabaseAdmin.from('profiles').select('country, timezone_offset, timezone').eq('id', userId).maybeSingle();
@@ -214,6 +218,12 @@ export class WatchtowerReflectionService {
       const mm = localDate.getUTCMinutes().toString().padStart(2, '0');
       const ampm = localHour >= 12 ? 'PM' : 'AM';
       localTimeStr = `${hh}:${mm} ${ampm}`;
+
+      const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      localDateStr = `${DAYS[localDate.getUTCDay()]}, ${localDate.getUTCDate()} ${MONTHS[localDate.getUTCMonth()]} ${localDate.getUTCFullYear()}`;
+      const nextDate = new Date(localDate.getTime() + 24 * 3600 * 1000);
+      localTomorrowDateStr = `${DAYS[nextDate.getUTCDay()]}, ${nextDate.getUTCDate()} ${MONTHS[nextDate.getUTCMonth()]} ${nextDate.getUTCFullYear()}`;
     } catch {
       // fallback to defaults
     }
@@ -230,9 +240,13 @@ CRITICAL CHECKS:
    - Did Nova resolve pronouns ("usse", "usne", "woh") to the wrong person in context?
    - If so, mark flaw_type: "entity_confusion" and rewrite the reply to politely ask who does the activity (e.g., "Waise cooking aap karte ho ya aapki wife karti hai?") or clarify roles respectfully.
 2. TYPOS & GRAMMAR SLIPS:
-   - Obvious typos (e.g. "rata" instead of "raat", weird translations, broken Hinglish).
+   - Obvious typos (e.g. "rata" instead of "raat", broken Hindi/Hinglish).
+   - Broken literal translations (e.g. "Main samajh mein aata hoon" → must be female "Main samajh gayi").
+   - Nova is FEMALE: always use feminine first-person ("main samajh gayi", "main batati hoon", "main yaad rakhungi").
 3. LEAKED TAGS OR SYSTEM ARTIFACTS:
+   - Leaked prompt rule names (e.g. '*No Formalities: Use "tu/tum/"*', 'Rule:', 'Instruction:').
    - Leaked [Replying to: "..."], tool tags, XML, or bullet points in casual WhatsApp chat.
+   - If present, mark flaw_type: "robotic_leak" and replace with warm, natural conversational text!
 4. MONOLITHIC WALL OF TEXT:
    - If Nova dumped a 7-line single monolithic paragraph when a WhatsApp chat needs short, conversational bubbles (1-2 sentences).
 5. MISSED DOT CONNECTIONS:
@@ -240,16 +254,19 @@ CRITICAL CHECKS:
 6. MISSED REMINDER OR TEMPORAL CONFUSION (CRITICAL):
    - Did the user ask to set a reminder or alarm (e.g., "yaad dilao", "remind me", "kal 1 bje", "subah remind karo")?
    - Did Nova misunderstand this as a past event (e.g., saying "tumne kal reminder diya tha", "main tumhare reminder ko yaad kar raha hoon" instead of confirming it is scheduled for the future)?
-   - Did Nova fail to confirm the future reminder?
    - If so, mark flaw_type: "missed_reminder" and provide corrected_content warmly confirming the reminder for the requested date and time in natural WhatsApp Hinglish (1-2 sentences).
 7. SITUATIONAL / TEMPORAL MISMATCH (WRONG TIME FOR ACTION):
    - Did Nova ask the user to perform an immediate physical activity or heavy task (e.g. "workout kar lo", "chalo exercise karein", "khana bana lo", "start kar de") at an untimely hour (such as late evening / night, local hour >= 20 or < 6)?
-   - Did Nova demand or suggest an immediate action out of nowhere instead of inquiring about preferred timing or routine (e.g. asking "What time do you usually like to work out?" or "Are you interested in fitness routines?")?
    - If so, mark flaw_type: "inappropriate_situation" and provide corrected_content replacing the untimely command with a warm, natural question inquiring about their preferred timing or routine in natural WhatsApp Hinglish (1-2 sentences).
 8. MISSED FUTURE PLAN / PROACTIVE SMART REMINDER OFFER (CRITICAL):
    - Did the user share or discuss a future-dated plan, upcoming activity, daily routine, or habit (e.g., "Sube muje roz workout start karna hai 8 baje uth ke", "kal se gym start karna hai", "roz raat ko padhna hai", waking up, cooking, meetings)?
    - Did Nova give a lazy, passive, or dead 1-word reply (like "Sahi", "Theek hai", "Ok", "Mast"), OR fail to proactively ask if the user wants a reminder/alarm set for this?
-   - If so, mark flaw_type: "missed_future_plan_reminder" and provide corrected_content warmly acknowledging their plan/habit and proactively asking if you can set a reminder or alarm, confirming the exact time, frequency (daily or specific days), and period in natural WhatsApp Hinglish (1-2 sentences).
+   - If so, mark flaw_type: "missed_future_plan_reminder" and provide corrected_content warmly acknowledging their plan/habit and proactively asking if you can set a reminder or alarm in natural WhatsApp Hinglish (1-2 sentences).
+9. CALENDAR & BIRTHDAY REGISTRATION INVARIANTS (CRITICAL):
+   - Stating a birth date (e.g. "Sakshi ka date of birth 7/8/2002 hai", "tiku ka bday 17/02/2026 hai") is FACTUAL RECORDING. It is NOT a request to celebrate a party tomorrow morning!
+   - Compare dates mathematically against Today's Date. 17 February 2026 is months away from September. NEVER suggest celebrating a distant birthday "tomorrow" or "subah uthke".
+   - Baby Tiku / Shreshth was born in February 2026 (an infant, 6-7 months old). 2026 is his REAL birth year. NEVER hallucinate that 2026 is a typo for 2006!
+   - When the user shares family birth dates, corrected_content must warmly acknowledge and confirm saving them (e.g. "Noted! Sakshi ka 7th August aur Tiku ka 17th February — dono dates save kar liye maine 😊").
 
 OUTPUT FORMAT:
 Respond with ONLY valid JSON:
@@ -260,8 +277,10 @@ Respond with ONLY valid JSON:
   "corrected_content": "The corrected, warm, natural Hinglish reply formatted like WhatsApp text (1-2 sentences) if has_flaw is true, else null"
 }`;
 
-    const userPrompt = `User's Current Local Time:
-${localTimeStr} (Hour: ${localHour})
+    const userPrompt = `Current Calendar Ground Truth:
+- Today's Date: ${localDateStr}
+- Tomorrow's Date: ${localTomorrowDateStr}
+- Current Local Time: ${localTimeStr} (Hour: ${localHour})
 
 User's Latest Message:
 "${userMessage}"
@@ -275,7 +294,7 @@ ${memorySummary}
 Nova's Sent Reply:
 "${content}"
 
-Critique this reply. If there is entity confusion, unconfirmed role assumptions, missed reminders, past-tense hallucination on a future reminder, or untimely action prompts (e.g. workouts or cooking at night), provide the corrected natural Hinglish version.`;
+Critique this reply. If there is a prompt leak, entity confusion, unconfirmed role assumptions, missed reminders, baby age confusion, premature birthday celebration suggestions for distant dates, typos ("rata"), or broken grammar ("samajh mein aata hoon"), provide the corrected natural Hinglish version.`;
 
     // Second-layer Reminder Safety Net
     let scheduledByWatchtower: any = null;
@@ -367,6 +386,18 @@ Critique this reply. If there is entity confusion, unconfirmed role assumptions,
           messageId,
           explanation: critique.explanation
         });
+        return;
+      }
+
+      // Quality Gate: Sanitize and validate Watchtower's own corrected_content
+      const { sanitizeReply, isPromptLeak, validateAndRepairGrounding } = await import('./NovaBrainService');
+      critique.corrected_content = validateAndRepairGrounding(
+        sanitizeReply(critique.corrected_content),
+        userMessage,
+        { memories: canonicalData, workingMemories: workingData }
+      );
+      if (isPromptLeak(critique.corrected_content) || !critique.corrected_content.trim()) {
+        logger.warn('[WATCHTOWER REFLECTION] Corrected content itself leaked prompt rules or was blank, cancelling correction', { critique });
         return;
       }
 

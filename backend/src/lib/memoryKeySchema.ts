@@ -99,6 +99,17 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'birthday', 'date_of_birth', 'dob', 'bday', 'janam_din',
     'child_birthdate',  // generic child birthdate — we preserve the value
   ],
+  wife_birth_date: [
+    'wife_dob', 'wifes_birthday', 'wifes_birth_date', 'wife_birthday',
+    'wifes_dob', 'sakshi_birthday', 'sakshi_dob', 'sakshi_birth_date',
+    'biwi_ka_bday', 'wife_bday',
+  ],
+  son_birth_date: [
+    'son_dob', 'sons_birthday', 'sons_birth_date', 'son_birthday',
+    'sons_dob', 'child_birth_date', 'child_dob', 'tiku_birthday',
+    'tiku_dob', 'tiku_birth_date', 'shreshth_birthday', 'shreshth_dob',
+    'shreshth_birth_date', 'bete_ka_bday', 'son_bday',
+  ],
   // ── Dates: marriage ─────────────────────────────────────────────────────────
   marriage_date: [
     'wedding_date', 'anniversary', 'anniversary_date', 'shadi_date',

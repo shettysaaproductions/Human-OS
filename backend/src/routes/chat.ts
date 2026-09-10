@@ -20,7 +20,7 @@ import { reminderService } from '../services/reminderService';
 // ReminderEngine imported dynamically where needed
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
-import { sanitizeReply, NOVA_EMPTY_REPLY, isPromptLeak } from '../services/NovaBrainService';
+import { sanitizeReply, NOVA_EMPTY_REPLY, isPromptLeak, validateAndRepairGrounding } from '../services/NovaBrainService';
 import { TurnAnalyzer } from '../services/TurnAnalyzer';
 import { cognitiveContextService } from '../services/CognitiveContextService';
 import { cognitiveDoubtService } from '../services/CognitiveDoubtService';
@@ -1642,26 +1642,28 @@ chatRouter.post(
                 // FAST RETRY: Use the 8B extraction model with a minimal prompt
                 try {
                   const { complete } = await import('../lib/nvidia');
+                  const recentSnippet = Array.isArray(brainContext?.recentMessages)
+                    ? brainContext.recentMessages.slice(-2).map((m: any) => `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content}`).join('\n')
+                    : '';
                   const fastRetryMessages = [
-                    { role: 'system' as const, content: `You are Nova, a casual Hinglish-speaking friend texting on WhatsApp.
-Reply in 1-2 SHORT sentences. Max 1 emoji. NO lists, NO formatting, NO emoji spam.
-HINGLISH RULES:
-- NEVER use "Aap", "Aapka", "Aapko", "Aapne", "Dhanyavad", "Shubh ratri", "Suprabhat", "Namaste", "Kripaya", "Prayas", "Laado", "Khed".
-- ONLY "Tu/Tera/Tujhe" or "Tum/Tumhara/Tumko".
-- Code-switch naturally: English verbs + Hindi nouns = "Tu office gaya?", "Main wahan milta hoon".
-- Question at END: "Kahan ja raha hai tu?", "Kya chal raha hai?".
-- Use: "yaar", "bhai", "sahi hai", "mast", "tension mat le", "scene kya hai", "kya chal raha hai", "jhakaas", "bakwas", "chill", "full on", "top", "solid".
-- NO bullet points, NO bold, NO markdown. Plain text only.` },
-                    { role: 'user' as const, content: primaryMessage }
+                    {
+                      role: 'system' as const,
+                      content: `You are Nova, a female virtual best friend texting on WhatsApp.
+Reply in 1-2 SHORT, natural Hinglish sentences. Max 1 emoji.
+Output ONLY conversational text. NEVER output rule names, labels, guidelines, instructions, or bullet points.
+Nova is female: use "Main samajh gayi", "Main batati hoon".
+Use casual "tu/tum", never formal "Aap". Plain conversational text only.`
+                    },
+                    ...(recentSnippet ? [{ role: 'user' as const, content: `Recent Context:\n${recentSnippet}\n\nUser: ${primaryMessage}` }] : [{ role: 'user' as const, content: primaryMessage }])
                   ];
                   const fastReply = await complete('TIMEOUT_FALLBACK', fastRetryMessages, {
                     maxTokens: 256,
-                    temperature: 0.9
+                    temperature: 0.65
                   });
-                  if (fastReply && fastReply.trim().length > 0) {
+                  if (fastReply && fastReply.trim().length > 0 && !isPromptLeak(fastReply)) {
                     logger.info('[Chat] Fast 8B retry succeeded', { userId });
-                    // Sanitize to prevent subconscious action leaks from 8B model
-                    const sanitizedFastReply = sanitizeReply(fastReply.trim());
+                    // Sanitize and validate grounding
+                    const sanitizedFastReply = validateAndRepairGrounding(sanitizeReply(fastReply.trim()), primaryMessage, brainContext);
                     result = { reply: sanitizedFastReply || NOVA_EMPTY_REPLY, subconscious_actions: [] };
                   } else {
                     result = { reply: FALLBACK_REPLY, subconscious_actions: [] };
@@ -1685,18 +1687,19 @@ HINGLISH RULES:
                 const fastRetryMessages = [
                   {
                     role: 'system' as const,
-                    content: `You are Nova, a casual Hinglish-speaking friend texting on WhatsApp.
-Reply in 1-2 SHORT sentences. Max 1 emoji. NO lists, NO formatting, NO prompt rules or internal labels.
-Use natural conversational Hinglish like "Arre waah!", "Sahi hai yaar", "Mast". Plain text only.`
+                    content: `You are Nova, a female best friend texting on WhatsApp in natural Hinglish.
+Reply in 1-2 SHORT sentences. Output ONLY spoken conversational dialogue.
+NO lists, NO formatting, NO prompt rules, NO internal labels.
+Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
                   },
                   { role: 'user' as const, content: primaryMessage }
                 ];
                 const fastReply = await nvidiaComplete('TIMEOUT_FALLBACK', fastRetryMessages, {
                   maxTokens: 256,
-                  temperature: 0.85
+                  temperature: 0.65
                 });
                 if (fastReply && !isPromptLeak(fastReply)) {
-                  rawReply = sanitizeReply(fastReply);
+                  rawReply = validateAndRepairGrounding(sanitizeReply(fastReply), primaryMessage, brainContext);
                 }
               } catch (e: any) {
                 logger.error('[Chat] Fast retry on prompt leak failed', { error: e.message });
@@ -1845,8 +1848,12 @@ Use natural conversational Hinglish like "Arre waah!", "Sahi hai yaar", "Mast". 
         return MessageFormatter.addEmoji(msg, emotion);
       });
       
-      // Split each parsed message further if it's too long
-      let finalBubbles = messagesWithEmoji.flatMap(m => chunkResponse(m)).filter(b => b.trim().length > 0 && !isPromptLeak(b));
+      // Split each parsed message further if it's too long and apply strict pre-delivery sanitization
+      let finalBubbles = messagesWithEmoji
+        .map(m => validateAndRepairGrounding(sanitizeReply(m), primaryMessage, brainContext))
+        .flatMap(m => chunkResponse(m))
+        .map(b => sanitizeReply(b))
+        .filter(b => b.trim().length > 0 && !isPromptLeak(b));
       
       // If no valid bubbles were generated (e.g. LLM returned blank), safely abort.
       // Streaming: the 'done' event was already flushed above — writing again after
