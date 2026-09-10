@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, ActivityIndicator,
-  ScrollView, TouchableOpacity, Animated
+  TouchableOpacity, RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { api } from '../../services/api';
+import { BrainHeader } from '../../components/BrainHeader';
 
 interface Goal {
   id: string;
@@ -20,11 +22,6 @@ interface Goal {
 }
 
 function ProgressRing({ progress, color, size = 60 }: { progress: number; color: string; size?: number }) {
-  const radius = (size - 8) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference * (1 - Math.min(1, Math.max(0, progress / 100)));
-
-  // SVG-like rendering using View (no Skia needed for simple rings)
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <View style={[
@@ -47,7 +44,9 @@ function ProgressRing({ progress, color, size = 60 }: { progress: number; color:
 }
 
 export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<any>(null);
   const [tab, setTab] = useState<'active' | 'completed'>('active');
 
@@ -62,8 +61,14 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
       console.error('Failed to fetch goals', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchGoals();
+  }, []);
 
   const allGoals: Goal[] = data?.activeGoals || [];
   const activeGoals = useMemo(() => allGoals.filter(g => g.attributes?.status !== 'completed'), [allGoals]);
@@ -76,13 +81,19 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
     return total / activeGoals.length;
   }, [activeGoals]);
 
-  if (loading) {
+  if (loading && !data) {
     return <View style={gr.center}><ActivityIndicator size="large" color="#10B981" /></View>;
   }
 
   return (
     <SafeAreaView style={gr.container} edges={['top']}>
-      <Text style={gr.title}>Goal Constellations</Text>
+      <BrainHeader
+        title="Goals & Milestones"
+        subtitle={`${activeGoals.length} active · ${completedGoals.length} completed`}
+        icon="🎯"
+        onRefresh={handleRefresh}
+        isRefreshing={refreshing}
+      />
 
       {/* Summary Stats */}
       <View style={gr.statsRow}>
@@ -95,8 +106,8 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
           <Text style={gr.statLabel}>Completed</Text>
         </View>
         <View style={gr.statCard}>
-          <ProgressRing progress={overallProgress} color="#10B981" size={52} />
-          <Text style={gr.statLabel}>Overall</Text>
+          <ProgressRing progress={overallProgress} color="#10B981" size={50} />
+          <Text style={gr.statLabel}>Avg Progress</Text>
         </View>
       </View>
 
@@ -115,6 +126,7 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
         data={displayGoals}
         keyExtractor={(item) => item.id}
         removeClippedSubviews
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#10B981" />}
         renderItem={({ item }) => {
           const progress = item.attributes?.progress || 0;
           const deadline = item.attributes?.deadline;
@@ -126,30 +138,59 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
                 <Text style={gr.starIcon}>{isCompleted ? '⭐' : '🌟'}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={[gr.goalName, { color }]}>{item.name}</Text>
-                  {item.attributes?.description && (
+                  {item.attributes?.description ? (
                     <Text style={gr.goalDesc}>{item.attributes.description}</Text>
-                  )}
+                  ) : null}
                 </View>
-                <ProgressRing progress={progress} color={color} size={48} />
+                <ProgressRing progress={progress} color={color} size={44} />
               </View>
 
               {/* Progress bar */}
               <View style={gr.progressTrack}>
-                <View style={[gr.progressFill, { width: `${Math.min(100, progress)}%`, backgroundColor: color }]} />
+                <View style={[gr.progressFill, { width: `${Math.min(100, Math.max(0, progress))}%`, backgroundColor: color }]} />
               </View>
 
               <View style={gr.goalFooter}>
-                {deadline ? <Text style={gr.deadline}>📅 {new Date(deadline).toLocaleDateString()}</Text> : null}
-                <Text style={gr.addedDate}>Added {new Date(item.created_at).toLocaleDateString()}</Text>
+                {deadline ? (
+                  <Text style={gr.deadline}>📅 {new Date(deadline).toLocaleDateString()}</Text>
+                ) : <View />}
+                {item.created_at ? (
+                  <Text style={gr.addedDate}>Added {new Date(item.created_at).toLocaleDateString()}</Text>
+                ) : null}
               </View>
             </View>
           );
         }}
         contentContainerStyle={gr.listContent}
         ListEmptyComponent={
-          <Text style={gr.emptyText}>
-            {tab === 'active' ? 'No active goals. Tell Nova about a goal to get started!' : 'No completed goals yet. Keep going!'}
-          </Text>
+          <View style={gr.lifestyleCard}>
+            <View style={gr.lifestyleIconWrap}>
+              <Text style={gr.lifestyleEmoji}>🎯</Text>
+            </View>
+            <Text style={gr.lifestyleTitle}>
+              {tab === 'active' ? 'No Active Goals Yet' : 'No Completed Goals Yet'}
+            </Text>
+            <Text style={gr.lifestyleSubtitle}>
+              {tab === 'active'
+                ? 'Whether fitness targets, career promotions, creative projects, or daily routines — Nova tracks progress automatically from your chats.'
+                : 'Keep conversing with Nova as you hit milestones. Completed achievements will shine here!'}
+            </Text>
+
+            <View style={gr.lifestyleQuoteBox}>
+              <Text style={gr.lifestyleQuoteLabel}>💡 GOAL IDEAS FOR YOUR LIFESTYLE:</Text>
+              <Text style={gr.lifestyleQuoteText}>• "My goal is working out 4x a week and drinking 3L water."</Text>
+              <Text style={gr.lifestyleQuoteText}>• "I want to finish our startup beta by next month."</Text>
+              <Text style={gr.lifestyleQuoteText}>• "I aim to read 1 chapter every night before bed."</Text>
+            </View>
+
+            <TouchableOpacity
+              style={gr.lifestyleChatBtn}
+              onPress={() => navigation.navigate('Chat')}
+              activeOpacity={0.8}
+            >
+              <Text style={gr.lifestyleChatBtnText}>💬 Set a Goal with Nova</Text>
+            </TouchableOpacity>
+          </View>
         }
       />
     </SafeAreaView>
@@ -159,15 +200,14 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
 const gr = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginHorizontal: 16, marginTop: 8, marginBottom: 12 },
-  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 16, gap: 8 },
+  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginTop: 14, marginBottom: 14, gap: 8 },
   statCard: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center'
   },
   statNum: { fontSize: 22, fontWeight: 'bold' },
   statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
-  tabRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 16, gap: 8 },
+  tabRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 14, gap: 8 },
   tab: {
     flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'
@@ -189,11 +229,83 @@ const gr = StyleSheet.create({
     overflow: 'hidden', marginBottom: 10
   },
   progressFill: { height: '100%', borderRadius: 2 },
-  goalFooter: { flexDirection: 'row', justifyContent: 'space-between' },
+  goalFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   deadline: { fontSize: 11, color: '#F59E0B' },
   addedDate: { fontSize: 11, color: '#555' },
-  emptyText: { color: '#555', textAlign: 'center', marginTop: 48, fontSize: 14, marginHorizontal: 32 },
   ringOuter: { alignItems: 'center', justifyContent: 'center', borderWidth: 3 },
   ringInner: { alignItems: 'center', justifyContent: 'center' },
   ringText: { fontSize: 9, fontWeight: 'bold' },
+
+  // Lifestyle Empty Card
+  lifestyleCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.2)',
+    borderRadius: 16,
+    padding: 22,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  lifestyleIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(16,185,129,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  lifestyleEmoji: {
+    fontSize: 26,
+  },
+  lifestyleTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  lifestyleSubtitle: {
+    fontSize: 13,
+    color: '#A1A1AA',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  lifestyleQuoteBox: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  lifestyleQuoteLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#10B981',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  lifestyleQuoteText: {
+    fontSize: 12,
+    color: '#D4D4D8',
+    lineHeight: 18,
+  },
+  lifestyleChatBtn: {
+    backgroundColor: '#10B981',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lifestyleChatBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });

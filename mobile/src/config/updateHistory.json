@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.0-beta",
+    "date": "2026-09-11",
+    "title": "🧠 Brain Section Overhaul, Seamless Back Navigation & Lifestyle Starters",
+    "message": [
+      "Streamlined 5-Pillar Navigation: Modernized bottom navigation into 5 core tabs (Tree, Galaxy, Emotions, Goals, Timeline) with rich icons, eliminating 9-tab mobile crowding.",
+      "Seamless Back Navigation: Sleek '‹ Chat' header on every Brain screen so you are never trapped and can return to chat with one tap.",
+      "Pull-to-Refresh Everywhere: Swipe down anytime on Memory Tree, Emotions, Goals, or Timeline to instantly sync fresh thoughts from Nova.",
+      "Lifestyle Starter Guidance: Interactive inspiration cards tailored to your lifestyle (Family, Career, Goals, Habits, Identity) with a 1-tap 'Tell Nova in Chat' button.",
+      "Crash-Resilient Search & Dates: Bulletproofed search filtering and safe timestamp parsing across all screens."
+    ]
+  },
+  {
     "version": "0.2.9-beta",
     "date": "2026-09-11",
     "title": "🌌 3D Neural Galaxy, 360° Free Orbit & Hierarchical Tree Branching",

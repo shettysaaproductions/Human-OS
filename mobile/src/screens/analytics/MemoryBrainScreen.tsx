@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator,
-  TouchableOpacity, TextInput, ScrollView, SectionList, Alert, Modal, KeyboardAvoidingView, Platform
+  TouchableOpacity, TextInput, ScrollView, SectionList, Alert, Modal, KeyboardAvoidingView, Platform,
+  RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { api } from '../../services/api';
+import { BrainHeader } from '../../components/BrainHeader';
 
 // ── Wardrobe Life Domain Definitions ──────────────────────────────────────────
 const DOMAINS: Array<{ key: string; label: string; emoji: string; color: string }> = [
@@ -21,6 +24,52 @@ const DOMAIN_META_MAP: Record<string, { label: string; emoji: string; color: str
   goals:     { label: 'Goals & Ambitions',      emoji: '🎯', color: '#10B981' },
   lifestyle: { label: 'Lifestyle & Rhythm',     emoji: '🧘', color: '#F59E0B' },
   identity:  { label: 'Core Identity',          emoji: '📌', color: '#8B5CF6' },
+};
+
+// ── Lifestyle Starter Guidance For Users With Different Lifestyles ─────────────
+const LIFESTYLE_PROMPTS: Record<string, { title: string; subtitle: string; example: string; emoji: string; color: string }> = {
+  family: {
+    title: 'Family & Relationships',
+    subtitle: 'Nova maps your family members, spouse, children, nicknames, and special milestones.',
+    example: '"My wife Sakshi is a self-taught nail artist and my son Shreshth (nickname Tiku) is 6 months old."',
+    emoji: '👨‍👩‍👧',
+    color: '#EC4899',
+  },
+  work: {
+    title: 'Career, Projects & Ambitions',
+    subtitle: 'Track your current company, office timings, candidates, clients, or freelancing work.',
+    example: '"I work as a senior designer at Acme, in the office Monday through Friday 10am to 7pm."',
+    emoji: '👔',
+    color: '#3B82F6',
+  },
+  goals: {
+    title: 'Goals & Ambitions',
+    subtitle: 'Stay focused on your active sprint targets and long-term life aspirations.',
+    example: '"My primary goal for Q3 is launching our beta product and reading 2 books a month."',
+    emoji: '🎯',
+    color: '#10B981',
+  },
+  lifestyle: {
+    title: 'Lifestyle, Habits & Daily Rhythm',
+    subtitle: 'Preserve your daily routines, coffee preferences, workout schedule, and diet.',
+    example: '"I drink oat milk cold brew in the morning and workout at the gym 4 days a week."',
+    emoji: '🧘',
+    color: '#F59E0B',
+  },
+  identity: {
+    title: 'Core Identity & Values',
+    subtitle: 'Anchor your core philosophies, personal quirks, birth details, and values.',
+    example: '"I value craftsmanship, deep intellectual focus, and honest communication."',
+    emoji: '📌',
+    color: '#8B5CF6',
+  },
+  all: {
+    title: 'Living Memory Tree',
+    subtitle: 'As you converse naturally with Nova, she synthesizes and interconnects your world into a living neural tree.',
+    example: '"Chat with Nova about your day, projects, family, or routines to grow your branches."',
+    emoji: '🌳',
+    color: '#8B5CF6',
+  }
 };
 
 // ── Human-readable memory type labels ─────────────────────────────────────────
@@ -106,7 +155,9 @@ function inferDomain(item: any): string {
 }
 
 export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -131,8 +182,14 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       console.error('Failed to fetch memories', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchMemories();
+  }, []);
 
   const toggleWardrobe = useCallback((id: string) => {
     setExpandedWardrobes(prev => ({ ...prev, [id]: !prev[id] }));
@@ -146,12 +203,16 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter((w: any) =>
-        w.name.toLowerCase().includes(q) ||
-        w.summary.toLowerCase().includes(q) ||
-        (w.roleTitle && w.roleTitle.toLowerCase().includes(q)) ||
-        w.traits.some((t: any) => t.label.toLowerCase().includes(q) || t.value.toLowerCase().includes(q))
-      );
+      list = list.filter((w: any) => {
+        const name = String(w.name || '').toLowerCase();
+        const summary = String(w.summary || '').toLowerCase();
+        const role = String(w.roleTitle || '').toLowerCase();
+        const hasTrait = (w.traits || []).some((t: any) =>
+          String(t.label || '').toLowerCase().includes(q) ||
+          String(t.value || '').toLowerCase().includes(q)
+        );
+        return name.includes(q) || summary.includes(q) || role.includes(q) || hasTrait;
+      });
     }
     return list;
   }, [data, selectedType, searchQuery]);
@@ -163,7 +224,10 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     const matchesSearch = (item: any) => {
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
-      return item.key?.toLowerCase().includes(q) || item.value?.toLowerCase().includes(q);
+      const k = String(item.key || '').toLowerCase();
+      const v = String(item.value || '').toLowerCase();
+      const l = String(item.label || '').toLowerCase();
+      return k.includes(q) || v.includes(q) || l.includes(q);
     };
 
     const compartments = data.domainCompartments || {};
@@ -265,7 +329,12 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     setIsSaving(true);
     try {
       if (editMemory.id && !editMemory.id.startsWith('trait-')) {
-        await api.patch(`/memories/${editMemory.id}`, { value: editValue });
+        await api.patch(`/memories/${editMemory.id}`, { value: editValue.trim() });
+      } else if (editMemory.key) {
+        const match = data?.currentMemories?.find((m: any) => m.key === editMemory.key);
+        if (match?.id) {
+          await api.patch(`/memories/${match.id}`, { value: editValue.trim() });
+        }
       }
       setEditModalVisible(false);
       fetchMemories();
@@ -284,7 +353,13 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <Text style={s.title}>Brain</Text>
+      <BrainHeader
+        title="Memory Tree"
+        subtitle={`${data?.totalCount || 0} facts across ${data?.entityWardrobes?.length || 0} branches`}
+        icon="🌳"
+        onRefresh={handleRefresh}
+        isRefreshing={refreshing}
+      />
 
       {/* Stats row */}
       <View style={s.statsRow}>
@@ -391,9 +466,47 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
 
       {/* Main Content Area */}
       {viewMode === 'wardrobes' ? (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={s.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#A78BFA" />}
+        >
           {filteredWardrobes.length === 0 ? (
-            <Text style={s.emptyText}>No memory branches found in this compartment.</Text>
+            searchQuery.trim() ? (
+              <View style={s.searchEmptyCard}>
+                <Text style={s.searchEmptyIcon}>🔍</Text>
+                <Text style={s.searchEmptyTitle}>No memories match "{searchQuery}"</Text>
+                <TouchableOpacity style={s.searchEmptyBtn} onPress={() => setSearchQuery('')}>
+                  <Text style={s.searchEmptyBtnText}>Clear Search</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              (() => {
+                const prompt = LIFESTYLE_PROMPTS[selectedType || 'all'] || LIFESTYLE_PROMPTS.all;
+                return (
+                  <View style={s.lifestyleCard}>
+                    <View style={[s.lifestyleIconWrap, { backgroundColor: `${prompt.color}20`, borderColor: `${prompt.color}60` }]}>
+                      <Text style={s.lifestyleEmoji}>{prompt.emoji}</Text>
+                    </View>
+                    <Text style={s.lifestyleTitle}>{prompt.title}</Text>
+                    <Text style={s.lifestyleSubtitle}>{prompt.subtitle}</Text>
+
+                    <View style={s.lifestyleQuoteBox}>
+                      <Text style={[s.lifestyleQuoteLabel, { color: prompt.color }]}>💡 TRY TELLING NOVA IN CHAT:</Text>
+                      <Text style={s.lifestyleQuoteText}>{prompt.example}</Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[s.lifestyleChatBtn, { backgroundColor: prompt.color }]}
+                      onPress={() => navigation.navigate('Chat')}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={s.lifestyleChatBtnText}>💬 Open Chat with Nova</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()
+            )
           ) : (
             <View style={s.treeContainer}>
               {/* Vertical Tree Spine */}
@@ -483,7 +596,29 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
           removeClippedSubviews
           windowSize={10}
           contentContainerStyle={s.listContent}
-          ListEmptyComponent={<Text style={s.emptyText}>No memories found in this compartment.</Text>}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#A78BFA" />}
+          ListEmptyComponent={
+            searchQuery.trim() ? (
+              <View style={s.searchEmptyCard}>
+                <Text style={s.searchEmptyIcon}>🔍</Text>
+                <Text style={s.searchEmptyTitle}>No facts match "{searchQuery}"</Text>
+                <TouchableOpacity style={s.searchEmptyBtn} onPress={() => setSearchQuery('')}>
+                  <Text style={s.searchEmptyBtnText}>Clear Search</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={s.lifestyleCard}>
+                <Text style={s.lifestyleTitle}>No Facts Found</Text>
+                <Text style={s.lifestyleSubtitle}>As you chat, Nova extracts key durable facts into this compartment.</Text>
+                <TouchableOpacity
+                  style={[s.lifestyleChatBtn, { backgroundColor: '#8B5CF6', marginTop: 12 }]}
+                  onPress={() => navigation.navigate('Chat')}
+                >
+                  <Text style={s.lifestyleChatBtnText}>💬 Chat with Nova</Text>
+                </TouchableOpacity>
+              </View>
+            )
+          }
           renderSectionHeader={({ section }: any) => {
             if (section.type === 'archived' || section.type === 'archived_collapsed') {
               return (
@@ -892,5 +1027,105 @@ const s = StyleSheet.create({
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   modalBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
   modalBtnPrimary: { backgroundColor: '#8B5CF6' },
-  modalBtnText: { color: '#ccc', fontSize: 15, fontWeight: '600' }
+  modalBtnText: { color: '#ccc', fontSize: 15, fontWeight: '600' },
+
+  // Lifestyle Empty State Styles
+  lifestyleCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 24,
+  },
+  lifestyleIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  lifestyleEmoji: {
+    fontSize: 28,
+  },
+  lifestyleTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  lifestyleSubtitle: {
+    fontSize: 13,
+    color: '#A1A1AA',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  lifestyleQuoteBox: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  lifestyleQuoteLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  lifestyleQuoteText: {
+    fontSize: 12,
+    color: '#E4E4E7',
+    fontStyle: 'italic',
+    lineHeight: 17,
+  },
+  lifestyleChatBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lifestyleChatBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  // Search Empty Styles
+  searchEmptyCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 36,
+  },
+  searchEmptyIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  searchEmptyTitle: {
+    fontSize: 14,
+    color: '#71717A',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  searchEmptyBtn: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  searchEmptyBtnText: {
+    color: '#A78BFA',
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });

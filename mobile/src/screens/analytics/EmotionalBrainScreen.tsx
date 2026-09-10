@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator,
-  ScrollView, Dimensions
+  View, Text, StyleSheet, ActivityIndicator,
+  ScrollView, Dimensions, RefreshControl, TouchableOpacity
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { api } from '../../services/api';
+import { BrainHeader } from '../../components/BrainHeader';
 
 const { width } = Dimensions.get('window');
 
@@ -30,8 +32,11 @@ function WeeklyGraph({ states }: { states: any[] }) {
       buckets[d.toISOString().split('T')[0]] = [];
     }
     (states || []).forEach(s => {
-      const day = s.created_at.split('T')[0];
-      if (buckets[day]) buckets[day].push(s.intensity);
+      if (!s?.created_at) return;
+      const day = String(s.created_at).split('T')[0];
+      if (buckets[day] && typeof s.intensity === 'number') {
+        buckets[day].push(s.intensity);
+      }
     });
     return Object.entries(buckets).map(([day, vals]) => ({
       day: new Date(day).toLocaleDateString('en', { weekday: 'short' }),
@@ -43,7 +48,7 @@ function WeeklyGraph({ states }: { states: any[] }) {
 
   return (
     <View style={sg.graphContainer}>
-      <Text style={sg.sectionTitle}>Weekly Mood Graph</Text>
+      <Text style={sg.sectionTitle}>Weekly Mood Rhythm</Text>
       <View style={sg.barChart}>
         {last7.map((d, i) => (
           <View key={i} style={sg.barCol}>
@@ -67,9 +72,9 @@ function EmotionHeatmap({ states }: { states: any[] }) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
-      const dayStates = (states || []).filter(s => s.created_at.startsWith(dateStr));
+      const dayStates = (states || []).filter(s => s?.created_at && String(s.created_at).startsWith(dateStr));
       const avg = dayStates.length > 0
-        ? dayStates.reduce((a: number, s: any) => a + s.intensity, 0) / dayStates.length
+        ? dayStates.reduce((a: number, s: any) => a + (s.intensity || 0), 0) / dayStates.length
         : 0;
       cells.push({ date: dateStr, avg, moods: dayStates.map((s: any) => s.mood) });
     }
@@ -86,7 +91,7 @@ function EmotionHeatmap({ states }: { states: any[] }) {
 
   return (
     <View style={sg.heatmapContainer}>
-      <Text style={sg.sectionTitle}>Monthly Heatmap</Text>
+      <Text style={sg.sectionTitle}>28-Day Emotional Heatmap</Text>
       <View style={sg.heatGrid}>
         {weeks.map((cell, i) => (
           <View
@@ -107,7 +112,9 @@ function EmotionHeatmap({ states }: { states: any[] }) {
 }
 
 export const EmotionalBrainScreen = React.memo(function EmotionalBrainScreen() {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<any>(null);
 
   useEffect(() => { fetchEmotions(); }, []);
@@ -121,20 +128,25 @@ export const EmotionalBrainScreen = React.memo(function EmotionalBrainScreen() {
       console.error('Failed to fetch emotions', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchEmotions();
+  }, []);
 
   const states = data?.graph || [];
 
   const streakInfo = useMemo(() => {
-    // Count consecutive days with at least one entry
     let streak = 0;
     const now = new Date();
     for (let i = 0; i < 30; i++) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
-      const hasEntry = states.some((s: any) => s.created_at.startsWith(dateStr));
+      const hasEntry = states.some((s: any) => s?.created_at && String(s.created_at).startsWith(dateStr));
       if (hasEntry) streak++;
       else if (i > 0) break;
     }
@@ -144,26 +156,37 @@ export const EmotionalBrainScreen = React.memo(function EmotionalBrainScreen() {
   const dominantMood = useMemo(() => {
     const counts: Record<string, number> = {};
     states.forEach((s: any) => {
-      counts[s.mood] = (counts[s.mood] || 0) + 1;
+      if (s?.mood) {
+        counts[s.mood] = (counts[s.mood] || 0) + 1;
+      }
     });
     const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
     return top ? top[0] : null;
   }, [states]);
 
   const avgIntensity = useMemo(() => {
-    if (!states.length) return 0;
+    if (!states.length) return '0.0';
     return (states.reduce((a: number, s: any) => a + (s.intensity || 0), 0) / states.length).toFixed(1);
   }, [states]);
 
-  if (loading) {
+  if (loading && !data) {
     return <View style={sg.center}><ActivityIndicator size="large" color="#EC4899" /></View>;
   }
 
   return (
     <SafeAreaView style={sg.container} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <Text style={sg.title}>Emotional Brain</Text>
+      <BrainHeader
+        title="Emotional Brain"
+        subtitle="Mood Rhythm & Emotional Resonance"
+        icon="💫"
+        onRefresh={handleRefresh}
+        isRefreshing={refreshing}
+      />
 
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#EC4899" />}
+      >
         {/* Insights Row */}
         <View style={sg.statsRow}>
           <View style={sg.statCard}>
@@ -195,20 +218,42 @@ export const EmotionalBrainScreen = React.memo(function EmotionalBrainScreen() {
 
         {/* Recent Moods */}
         <Text style={[sg.sectionTitle, { marginHorizontal: 16 }]}>Recent Moods</Text>
-        {states.slice(0, 10).map((item: any) => (
-          <View key={item.id} style={[sg.card, { borderColor: `${getMoodColor(item.mood)}33` }]}>
-            <View style={sg.cardRow}>
-              <Text style={[sg.moodText, { color: getMoodColor(item.mood) }]}>{item.mood}</Text>
-              <View style={sg.intensityBar}>
-                <View style={[sg.intensityFill, { width: `${(item.intensity / 10) * 100}%`, backgroundColor: getMoodColor(item.mood) }]} />
+        {states.slice(0, 10).map((item: any) => {
+          const dateStr = item?.created_at ? new Date(item.created_at).toLocaleDateString() : '';
+          return (
+            <View key={item.id} style={[sg.card, { borderColor: `${getMoodColor(item.mood)}33` }]}>
+              <View style={sg.cardRow}>
+                <Text style={[sg.moodText, { color: getMoodColor(item.mood) }]}>{item.mood}</Text>
+                <View style={sg.intensityBar}>
+                  <View style={[sg.intensityFill, { width: `${(Math.min(10, item.intensity || 0) / 10) * 100}%`, backgroundColor: getMoodColor(item.mood) }]} />
+                </View>
+                <Text style={sg.intensityNum}>{item.intensity || 0}/10</Text>
               </View>
-              <Text style={sg.intensityNum}>{item.intensity}/10</Text>
+              {item.notes ? <Text style={sg.notes}>{item.notes}</Text> : null}
+              {dateStr ? <Text style={sg.dateText}>{dateStr}</Text> : null}
             </View>
-            {item.notes ? <Text style={sg.notes}>{item.notes}</Text> : null}
-            <Text style={sg.dateText}>{new Date(item.created_at).toLocaleDateString()}</Text>
+          );
+        })}
+
+        {states.length === 0 && (
+          <View style={sg.lifestyleCard}>
+            <View style={sg.lifestyleIconWrap}>
+              <Text style={sg.lifestyleEmoji}>🌱</Text>
+            </View>
+            <Text style={sg.lifestyleTitle}>Emotional Well-being Tracking</Text>
+            <Text style={sg.lifestyleSubtitle}>
+              Nova observes tone, gratitude, and stress cues from your conversations to build an emotional rhythm graph and protect your work-life harmony.
+            </Text>
+            <TouchableOpacity
+              style={sg.lifestyleChatBtn}
+              onPress={() => navigation.navigate('Chat')}
+              activeOpacity={0.8}
+            >
+              <Text style={sg.lifestyleChatBtnText}>💬 Chat with Nova</Text>
+            </TouchableOpacity>
           </View>
-        ))}
-        {states.length === 0 && <Text style={sg.emptyText}>No emotional states recorded yet.</Text>}
+        )}
+
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
@@ -218,8 +263,7 @@ export const EmotionalBrainScreen = React.memo(function EmotionalBrainScreen() {
 const sg = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginHorizontal: 16, marginTop: 8, marginBottom: 12 },
-  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 16, gap: 8 },
+  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginTop: 14, marginBottom: 16, gap: 8 },
   statCard: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center'
@@ -256,5 +300,57 @@ const sg = StyleSheet.create({
   intensityNum: { fontSize: 12, color: '#888', width: 36, textAlign: 'right' },
   notes: { fontSize: 13, color: '#bbb', marginBottom: 4, fontStyle: 'italic' },
   dateText: { fontSize: 11, color: '#555' },
-  emptyText: { color: '#555', textAlign: 'center', marginTop: 48, fontSize: 15 },
+
+  // Lifestyle Empty Card
+  lifestyleCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(236,72,153,0.2)',
+    borderRadius: 16,
+    padding: 22,
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  lifestyleIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(236,72,153,0.15)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(236,72,153,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  lifestyleEmoji: {
+    fontSize: 26,
+  },
+  lifestyleTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  lifestyleSubtitle: {
+    fontSize: 13,
+    color: '#A1A1AA',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  lifestyleChatBtn: {
+    backgroundColor: '#EC4899',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lifestyleChatBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });

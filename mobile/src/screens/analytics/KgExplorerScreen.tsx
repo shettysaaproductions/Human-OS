@@ -4,6 +4,7 @@ import {
   TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import Svg, { G, Line, Path } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -742,6 +743,7 @@ class KgErrorBoundary extends React.Component<{ children: React.ReactNode }, { h
 }
 
 function KgExplorerContent() {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
@@ -1111,10 +1113,21 @@ function KgExplorerContent() {
         <View style={styles.header}>
           <View>
             <View style={styles.titleRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  try { navigation.navigate('Chat'); } catch { if (navigation.canGoBack()) navigation.goBack(); }
+                }}
+                style={styles.backBtn}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.backChevron}>‹</Text>
+                <Text style={styles.backText}>Chat</Text>
+              </TouchableOpacity>
               <Text style={styles.headerTitle}>Neural Galaxy</Text>
               <TouchableOpacity style={styles.syncBadge} onPress={() => fetchGraph(false)}>
                 <Text style={styles.syncBadgeText}>
-                  {syncing ? '↻ Syncing...' : `● LIVE · ${lastSyncTime}`}
+                  {syncing ? '↻' : `● LIVE · ${lastSyncTime}`}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1809,7 +1822,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingTop: 6, paddingBottom: 4
   },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginRight: 2,
+  },
+  backChevron: {
+    color: '#06B6D4',
+    fontSize: 18,
+    lineHeight: 18,
+    fontWeight: '700',
+    marginRight: 2,
+    marginTop: -1,
+  },
+  backText: {
+    color: '#E4E4E7',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
   syncBadge: {
     backgroundColor: 'rgba(16,185,129,0.15)', borderWidth: 1, borderColor: '#10B981',
     paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6

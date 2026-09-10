@@ -1,48 +1,53 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — 3D Sci-Fi Neural Galaxy (360° Free 3-Axis Orbit, Spherical Luminous Orbs), Hierarchical Tree Branching & Watchtower Harmonizer (0.2.9-beta)
+2026-09-11 — Frontend Brain Section Overhaul: 5-Pillar Navigation, Seamless Back Buttons, Pull-to-Refresh & Lifestyle Starter Experiences (0.3.0-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
-Branch: `agent-checkpoint/neural-galaxy-3d-branching-fix`
-Task: 3D Sci-Fi Neural Galaxy (360° Free Orbit, Camera-Facing Spheres, Zero Coins), Hierarchical Tree Branching (Core ➔ Family ➔ Sakshi/Shreshth ➔ Stems), and Watchtower Autonomous Memory Harmonizer.
+Branch: `main`
+Task: Fix frontend Brain section bugs, eliminate 9-tab bottom bar crowding, add back buttons to every screen, enable pull-to-refresh across all screens, bulletproof search/date parsing, and introduce lifestyle-tailored starter guidance for diverse users.
 
 ## Confirmed Findings & Root Cause Analysis
-1. **Coin Flattening Flaw:** In `KgExplorerScreen.tsx`, 3D rotation applied CSS `{ rotateX, rotateY }` to the parent container. This foreshortened flat circular Views into ellipses / "coins". Furthermore, `pitch` was artificially clamped between `-1.05` and `1.05` ($\pm 60^\circ$) and had no Z-axis roll.
-2. **Branching Fragmentation:** In `memoryDomains.ts` and `KgExplorerScreen.tsx`, items like `tiku`, `last year nail art`, `self taught`, and `beautiful art` lacked proper parent-entity linking and were treated as standalone Level 2 branches under Family rather than attribute stems under Shreshth and Sakshi.
-3. **Memory Schema Missing Aliases:** `tiku` was not registered under `son_nickname`, and `sakshi` was not an alias for `wife_name`.
+1. **Trapped Users (No Back Buttons):** Navigating to `BrainNavigator` from `ChatScreen` had zero in-app back buttons. Users had no UI arrow to return to Chat or Settings, trapping them on iOS and gesture navigation.
+2. **9-Tab Bottom Navigation Overcrowding:** `BrainNavigator.tsx` registered 9 tabs directly on the mobile bottom bar with no icons, compressing tabs into unreadable ~38px text blocks and exposing internal admin tools (`Founder`, `Beta`) to regular users.
+3. **Missing Pull-to-Refresh:** None of the Brain screens (`MemoryBrainScreen`, `EmotionalBrainScreen`, `GoalBrainScreen`, `LifeTimelineScreen`) supported pull-to-refresh, forcing app restarts to sync new insights from Nova.
+4. **Lifeless Empty States for Diverse Lifestyles:** When a user had 0 memories in a domain (e.g. students without career, single individuals without family), screens showed a bare "No memory branches found" text with zero guidance on how to grow branches.
+5. **Runtime Crash Vulnerabilities:** `split('T')` on nullable timestamps and case conversions on object values in search could cause fatal client exceptions.
 
 ## Implemented Fixes
-1. **3D Sci-Fi Neural Galaxy & Free 360° 3-Axis Orbit (`mobile/src/screens/analytics/KgExplorerScreen.tsx`):**
-   - Unclamped pitch and yaw rotation: user can spin continuously 360° in all directions with single-finger drag.
-   - Added Z-axis roll tracking and 2-finger continuous rotation gesture (`Gesture.Rotation()`).
-   - Added camera-facing 3D billboarding (`animatedPinStyle`): counter-rotates on all 3 axes (`rotateZ`, `rotateY`, `rotateX`) by the exact inverse of the universe rotation, keeping the bubble face 100% perpendicular to the camera at ANY angle — eliminating the "coin" effect permanently.
-   - Styled nodes with 3D specular highlight crescents and spherical depth shading, creating rich luminous glowing marbles/orbs.
-   - Added quick spin (+90°) and auto-orbit drift toggle in the HUD sub-bar.
-2. **Hierarchical Tree Branching (`backend/src/lib/memoryDomains.ts`, `backend/src/lib/memoryKeySchema.ts`, `KgExplorerScreen.tsx`):**
-   - Strictly structured the tree:
-     `Core Brain ➔ Family Trunk ➔ Shreshth Branch ➔ Tiku (Nickname), Age 6m old Stems`
-     `Core Brain ➔ Family Trunk ➔ Sakshi Branch ➔ Nail Artist (Skill), Culinary Talent, Birthday Stems`
-   - Added aliases for `wife_name` (`sakshi`, `wife_sakshi`) and `son_nickname` (`tiku`, `tiku_nickname`, `son_tiku`).
-   - Deduplicated fragmented memory attributes (`nail_art`, `self_taught`, `beautiful_art`, `purchased_nail_art_kit`) into a single coherent attribute stem under Sakshi.
-3. **Watchtower Autonomous Memory Harmonizer (`backend/src/services/WatchtowerReflectionService.ts`):**
-   - Background scanner `harmonizeAndAuditMemories(userId)` automatically audits active memories.
-   - Detects fragmented/orphaned keys (like `tiku` alongside `son_name`) and re-parents them into proper canonical stems.
-   - Consolidates overlapping fragments into canonical rows.
-4. **Mobile Release Bump (`mobile/src/config/updateHistory.json`):**
-   - Bumped to `0.2.9-beta`.
+1. **Unified `BrainHeader` (`mobile/src/components/BrainHeader.tsx`):**
+   - Sleek `‹ Chat` back button with generous touch target returning directly to Chat/Home.
+   - Screen icon, title, contextual subtitle, and live sync indicator / refresh button.
+2. **Streamlined 5-Pillar Navigation (`mobile/src/navigation/BrainNavigator.tsx`):**
+   - 5 core bottom tabs with rich icons: 🌳 Tree (`Memory`), 🌌 Galaxy (`Graph`), 💫 Emotions (`Emotions`), 🎯 Goals (`Goals`), ⏳ Timeline (`Timeline`).
+   - Clean active tint (`#A78BFA`), comfortable 64px tab height.
+   - Registered hidden tabs for deep-links (`Memories` alias, `Browser`, `Manage`, `Founder`, `Beta`).
+3. **Living Memory Tree Polish (`mobile/src/screens/analytics/MemoryBrainScreen.tsx`):**
+   - Added `BrainHeader` and `RefreshControl` pull-to-refresh.
+   - Interactive `LifestyleEmptyState` cards tailored to each domain (Family, Career, Goals, Lifestyle, Identity) with example prompts and a 1-tap `💬 Open Chat with Nova` button.
+   - Bulletproofed search across keys, values, labels, and traits.
+   - Fallback memory saving by canonical key when editing synthesized traits.
+4. **3D Neural Galaxy Header (`mobile/src/screens/analytics/KgExplorerScreen.tsx`):**
+   - Integrated `‹ Chat` back button in the top HUD title row.
+5. **Emotional Brain Polish (`mobile/src/screens/analytics/EmotionalBrainScreen.tsx`):**
+   - Added `BrainHeader`, `RefreshControl`, and guarded timestamp splitting in `WeeklyGraph` & `EmotionHeatmap`.
+   - Rich lifestyle empty state explaining emotional resonance tracking.
+6. **Goal Brain Polish (`mobile/src/screens/analytics/GoalBrainScreen.tsx`):**
+   - Added `BrainHeader`, `RefreshControl`, safe dates, and lifestyle goal starter templates.
+7. **Life Timeline Polish (`mobile/src/screens/analytics/LifeTimelineScreen.tsx`):**
+   - Added `BrainHeader`, `RefreshControl`, guarded date parsing, and narrative empty state.
+8. **Release Bump (`mobile/src/config/updateHistory.json`):**
+   - Bumped to `0.3.0-beta`.
 
 ## Verification Status
 - `npm run build` in `backend`: EXIT 0 (Passed clean).
 - `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean).
-- Full Unit Test Suite: 50/50 tests PASSED (100% across 4 test suites).
+- Full Unit Test Suite: 60/60 tests PASSED (100% across all primary Brain suites).
 
 ## Standing Autonomous Directives
-- **Auto Implementation Plan Proceed**: ENABLED. Implementation plans set `RequestFeedback: false` and proceed directly to code modifications and verification without stopping for user approval.
-- **Autonomous Push & Deployment**: ENABLED. Merges and pushes to `origin main` with automatic Render & Mobile OTA deployments proceed without prompt confirmation.
+- **Auto Implementation Plan Proceed**: ENABLED.
+- **Autonomous Push & Deployment**: ENABLED. Merges and pushes to `origin main` trigger Render & Mobile OTA deployments automatically.
 
 ## NEXT ACTION
-Ready for next task. All subsequent tasks will auto-proceed through planning, execution, testing, and deployment.
-
-
+Commit and push to `origin main` and trigger production Mobile EAS OTA update.

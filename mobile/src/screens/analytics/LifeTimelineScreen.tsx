@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity
+  View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { api } from '../../services/api';
+import { BrainHeader } from '../../components/BrainHeader';
 
 type TimelineItem = {
   id: string;
@@ -23,8 +25,11 @@ const TYPE_CONFIG = {
 
 function groupByDate(items: TimelineItem[]): Array<{ date: string; items: TimelineItem[] }> {
   const groups: Record<string, TimelineItem[]> = {};
-  items.forEach(item => {
-    const date = new Date(item.created_at).toLocaleDateString('en', {
+  (items || []).forEach(item => {
+    if (!item?.created_at) return;
+    const dateObj = new Date(item.created_at);
+    if (isNaN(dateObj.getTime())) return;
+    const date = dateObj.toLocaleDateString('en', {
       month: 'long', day: 'numeric', year: 'numeric'
     });
     if (!groups[date]) groups[date] = [];
@@ -34,7 +39,9 @@ function groupByDate(items: TimelineItem[]): Array<{ date: string; items: Timeli
 }
 
 export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<TimelineItem[]>([]);
   const [filter, setFilter] = useState<'all' | 'moment' | 'episodic'>('all');
 
@@ -43,17 +50,23 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
   const fetchTimeline = async () => {
     try {
       setLoading(true);
-      const [timelineRes, reflectionsRes] = await Promise.all([
+      const [timelineRes] = await Promise.all([
         api.get('/analytics/timeline'),
-        api.get('/analytics/memories'), // reuse for reflection count context
+        api.get('/analytics/memories').catch(() => ({})), // resilience
       ]);
-      setData(timelineRes.data.data || []);
+      setData(timelineRes.data?.data || []);
     } catch (err) {
       console.error('Failed to fetch timeline', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchTimeline();
+  }, []);
 
   const filteredData = useMemo(() => {
     if (filter === 'all') return data;
@@ -62,13 +75,19 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
 
   const grouped = useMemo(() => groupByDate(filteredData), [filteredData]);
 
-  if (loading) {
+  if (loading && !data.length) {
     return <View style={lt.center}><ActivityIndicator size="large" color="#F59E0B" /></View>;
   }
 
   return (
     <SafeAreaView style={lt.container} edges={['top']}>
-      <Text style={lt.title}>Life Timeline</Text>
+      <BrainHeader
+        title="Life Timeline"
+        subtitle={`${data.length} chronological moments`}
+        icon="⏳"
+        onRefresh={handleRefresh}
+        isRefreshing={refreshing}
+      />
 
       {/* Stats Row */}
       <View style={lt.statsRow}>
@@ -107,12 +126,16 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
         keyExtractor={(item) => item.date}
         removeClippedSubviews
         windowSize={10}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#F59E0B" />}
         renderItem={({ item: group }) => (
           <View style={lt.group}>
             <Text style={lt.groupDate}>{group.date}</Text>
             {group.items.map(item => {
               const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.episodic;
               const text = item.title || item.summary || item.body || '';
+              const timeStr = item.created_at
+                ? new Date(item.created_at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })
+                : '';
               return (
                 <View key={item.id} style={lt.timelineRow}>
                   <View style={lt.timelineLine}>
@@ -123,9 +146,7 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
                     <View style={lt.nodeHeader}>
                       <Text style={lt.nodeIcon}>{cfg.icon}</Text>
                       <Text style={[lt.nodeType, { color: cfg.color }]}>{cfg.label}</Text>
-                      <Text style={lt.nodeTime}>
-                        {new Date(item.created_at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
+                      {timeStr ? <Text style={lt.nodeTime}>{timeStr}</Text> : null}
                     </View>
                     <Text style={lt.nodeText} numberOfLines={3}>{text}</Text>
                     {item.emotion && <Text style={lt.emotionTag}>💭 {item.emotion}</Text>}
@@ -136,7 +157,24 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
           </View>
         )}
         contentContainerStyle={lt.listContent}
-        ListEmptyComponent={<Text style={lt.emptyText}>No timeline events yet. Start talking to Nova!</Text>}
+        ListEmptyComponent={
+          <View style={lt.lifestyleCard}>
+            <View style={lt.lifestyleIconWrap}>
+              <Text style={lt.lifestyleEmoji}>⏳</Text>
+            </View>
+            <Text style={lt.lifestyleTitle}>Chronological Life Moments</Text>
+            <Text style={lt.lifestyleSubtitle}>
+              As you share important stories, accomplishments, or daily happenings with Nova, she curates them into a beautiful, chronological narrative of your journey.
+            </Text>
+            <TouchableOpacity
+              style={lt.lifestyleChatBtn}
+              onPress={() => navigation.navigate('Chat')}
+              activeOpacity={0.8}
+            >
+              <Text style={lt.lifestyleChatBtnText}>💬 Share a Moment in Chat</Text>
+            </TouchableOpacity>
+          </View>
+        }
       />
     </SafeAreaView>
   );
@@ -145,15 +183,14 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
 const lt = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginHorizontal: 16, marginTop: 8, marginBottom: 12 },
-  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 16, gap: 8 },
+  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginTop: 14, marginBottom: 14, gap: 8 },
   statCard: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center'
   },
   statNum: { fontSize: 22, fontWeight: 'bold' },
   statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
-  filterRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 16, gap: 8 },
+  filterRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 14, gap: 8 },
   filterBtn: {
     flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'
@@ -163,7 +200,7 @@ const lt = StyleSheet.create({
   filterTextActive: { color: '#F59E0B' },
   listContent: { paddingBottom: 40 },
   group: { marginHorizontal: 16, marginBottom: 8 },
-  groupDate: { fontSize: 13, fontWeight: '700', color: '#555', marginBottom: 8, marginLeft: 24 },
+  groupDate: { fontSize: 13, fontWeight: '700', color: '#71717A', marginBottom: 8, marginLeft: 24 },
   timelineRow: { flexDirection: 'row', marginBottom: 8 },
   timelineLine: { width: 24, alignItems: 'center', paddingTop: 14 },
   dot: { width: 8, height: 8, borderRadius: 4, marginBottom: 4 },
@@ -178,5 +215,57 @@ const lt = StyleSheet.create({
   nodeTime: { fontSize: 11, color: '#555' },
   nodeText: { fontSize: 13, color: '#ccc', lineHeight: 19 },
   emotionTag: { fontSize: 11, color: '#888', marginTop: 6, fontStyle: 'italic' },
-  emptyText: { color: '#555', textAlign: 'center', marginTop: 48, fontSize: 14, marginHorizontal: 32 },
+
+  // Lifestyle Empty Card
+  lifestyleCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.2)',
+    borderRadius: 16,
+    padding: 22,
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  lifestyleIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(245,158,11,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  lifestyleEmoji: {
+    fontSize: 26,
+  },
+  lifestyleTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  lifestyleSubtitle: {
+    fontSize: 13,
+    color: '#A1A1AA',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  lifestyleChatBtn: {
+    backgroundColor: '#F59E0B',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lifestyleChatBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });
