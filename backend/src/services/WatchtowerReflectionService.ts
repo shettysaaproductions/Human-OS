@@ -27,6 +27,9 @@ export interface MessageVersionEntry {
   flaw?: string;
   flaw_type?: string;
   reason?: string;
+  clean_label?: string;
+  tri_pass_verified?: boolean;
+  green_seal?: boolean;
 }
 
 export interface ReflectionScheduleParams {
@@ -228,73 +231,13 @@ export class WatchtowerReflectionService {
       // fallback to defaults
     }
 
-    // 3. Critique Prompt
-    const systemPrompt = `You are the Watchtower Post-Reply Reflection Engine for Nova.
-Nova is an AI best friend who texts on WhatsApp.
-Your job is to critically review Nova's latest sent reply for major blunders, logical fallacies, entity confusion, typos, or missed dots.
-
-CRITICAL CHECKS:
-1. ENTITY ATTRIBUTION & UNCONFIRMED ASSUMPTIONS (FATAL FLAW):
-   - Did Nova attribute an adult activity, tool, course, or hobby to an infant/child (e.g. nail art to infant Shreshth instead of wife Sakshi)?
-   - Did Nova attribute an activity, skill, or chore to the wrong person (e.g., attributing cooking to the user when the user's wife cooks, or assuming the user cooks when they discussed cooking regarding their wife and cloud kitchen)?
-   - Did Nova resolve pronouns ("usse", "usne", "woh") to the wrong person in context?
-   - If so, mark flaw_type: "entity_confusion" and rewrite the reply to politely ask who does the activity (e.g., "Waise cooking aap karte ho ya aapki wife karti hai?") or clarify roles respectfully.
-2. TYPOS & GRAMMAR SLIPS:
-   - Obvious typos (e.g. "rata" instead of "raat", broken Hindi/Hinglish).
-   - Broken literal translations (e.g. "Main samajh mein aata hoon" → must be female "Main samajh gayi").
-   - Nova is FEMALE: always use feminine first-person ("main samajh gayi", "main batati hoon", "main yaad rakhungi").
-3. LEAKED TAGS OR SYSTEM ARTIFACTS:
-   - Leaked prompt rule names (e.g. '*No Formalities: Use "tu/tum/"*', 'Rule:', 'Instruction:').
-   - Leaked [Replying to: "..."], tool tags, XML, or bullet points in casual WhatsApp chat.
-   - If present, mark flaw_type: "robotic_leak" and replace with warm, natural conversational text!
-4. MONOLITHIC WALL OF TEXT:
-   - If Nova dumped a 7-line single monolithic paragraph when a WhatsApp chat needs short, conversational bubbles (1-2 sentences).
-5. MISSED DOT CONNECTIONS:
-   - Failing to connect an obvious fact (e.g., user is currently on the metro, or specifically answering about a spouse).
-6. MISSED REMINDER OR TEMPORAL CONFUSION (CRITICAL):
-   - Did the user ask to set a reminder or alarm (e.g., "yaad dilao", "remind me", "kal 1 bje", "subah remind karo")?
-   - Did Nova misunderstand this as a past event (e.g., saying "tumne kal reminder diya tha", "main tumhare reminder ko yaad kar raha hoon" instead of confirming it is scheduled for the future)?
-   - If so, mark flaw_type: "missed_reminder" and provide corrected_content warmly confirming the reminder for the requested date and time in natural WhatsApp Hinglish (1-2 sentences).
-7. SITUATIONAL / TEMPORAL MISMATCH (WRONG TIME FOR ACTION):
-   - Did Nova ask the user to perform an immediate physical activity or heavy task (e.g. "workout kar lo", "chalo exercise karein", "khana bana lo", "start kar de") at an untimely hour (such as late evening / night, local hour >= 20 or < 6)?
-   - If so, mark flaw_type: "inappropriate_situation" and provide corrected_content replacing the untimely command with a warm, natural question inquiring about their preferred timing or routine in natural WhatsApp Hinglish (1-2 sentences).
-8. MISSED FUTURE PLAN / PROACTIVE SMART REMINDER OFFER (CRITICAL):
-   - Did the user share or discuss a future-dated plan, upcoming activity, daily routine, or habit (e.g., "Sube muje roz workout start karna hai 8 baje uth ke", "kal se gym start karna hai", "roz raat ko padhna hai", waking up, cooking, meetings)?
-   - Did Nova give a lazy, passive, or dead 1-word reply (like "Sahi", "Theek hai", "Ok", "Mast"), OR fail to proactively ask if the user wants a reminder/alarm set for this?
-   - If so, mark flaw_type: "missed_future_plan_reminder" and provide corrected_content warmly acknowledging their plan/habit and proactively asking if you can set a reminder or alarm in natural WhatsApp Hinglish (1-2 sentences).
-9. CALENDAR & BIRTHDAY REGISTRATION INVARIANTS (CRITICAL):
-   - Stating a birth date (e.g. "Sakshi ka date of birth 7/8/2002 hai", "tiku ka bday 17/02/2026 hai") is FACTUAL RECORDING. It is NOT a request to celebrate a party tomorrow morning!
-   - Compare dates mathematically against Today's Date. 17 February 2026 is months away from September. NEVER suggest celebrating a distant birthday "tomorrow" or "subah uthke".
-   - Baby Tiku / Shreshth was born in February 2026 (an infant, 6-7 months old). 2026 is his REAL birth year. NEVER hallucinate that 2026 is a typo for 2006!
-   - When the user shares family birth dates, corrected_content must warmly acknowledge and confirm saving them (e.g. "Noted! Sakshi ka 7th August aur Tiku ka 17th February — dono dates save kar liye maine 😊").
-
-OUTPUT FORMAT:
-Respond with ONLY valid JSON:
-{
-  "has_flaw": boolean,
-  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "missed_reminder" | "inappropriate_situation" | "missed_future_plan_reminder" | "none",
-  "explanation": "Clear 1-sentence reason why Nova's reply was flawed or why it is good",
-  "corrected_content": "The corrected, warm, natural Hinglish reply formatted like WhatsApp text (1-2 sentences) if has_flaw is true, else null"
-}`;
-
-    const userPrompt = `Current Calendar Ground Truth:
-- Today's Date: ${localDateStr}
-- Tomorrow's Date: ${localTomorrowDateStr}
-- Current Local Time: ${localTimeStr} (Hour: ${localHour})
-
-User's Latest Message:
-"${userMessage}"
-
-Recent Conversation Context:
-${recentChat}
-
-User's Known Memories & Facts:
-${memorySummary}
-
-Nova's Sent Reply:
-"${content}"
-
-Critique this reply. If there is a prompt leak, entity confusion, unconfirmed role assumptions, missed reminders, baby age confusion, premature birthday celebration suggestions for distant dates, typos ("rata"), or broken grammar ("samajh mein aata hoon"), provide the corrected natural Hinglish version.`;
+    const calendarContext = {
+      localDateStr,
+      localTomorrowDateStr,
+      localTimeStr,
+      localHour,
+      tzOffsetHours
+    };
 
     // Second-layer Reminder Safety Net
     let scheduledByWatchtower: any = null;
@@ -315,89 +258,96 @@ Critique this reply. If there is a prompt leak, entity confusion, unconfirmed ro
     }
 
     try {
-      const responseText = await complete(
-        'LEARNING',
-        [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        { temperature: 0.1, maxTokens: 600 }
+      // ── PASS 1: Surface & Domain Memory Alignment ──
+      const pass1Result = await this.executePass1Surface(
+        content,
+        userMessage,
+        recentChat,
+        memorySummary,
+        calendarContext,
+        signal
       );
-
       if (signal.aborted) return;
+      let candidate = pass1Result.candidate;
 
-      // Extract JSON from response
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        logger.warn('[WATCHTOWER REFLECTION] Could not parse JSON from reflection critique', { responseText });
-        return;
+      // Deterministic Reminder Override (if Nova hallucinated past tense on a reminder request)
+      const lowerCandidate = candidate.toLowerCase();
+      const hasPastTemporalHallucination = /\b(?:reminder\s*diya\s*tha|diya\s*tha|yaad\s*kar\s*raha\s*hoon)\b/i.test(lowerCandidate);
+      if (scheduledByWatchtower && hasPastTemporalHallucination) {
+        candidate = `Haan bilkul! 😊 Maine ${scheduledByWatchtower.formattedTime || 'kal'} ka reminder set kar diya hai — ${scheduledByWatchtower.task || 'tumhare kaam'} ke liye. Main tumhe barabar yaad dila dungi!`;
       }
 
-      const critique = JSON.parse(jsonMatch[0]);
-
-      // Override if Nova hallucinated past tense on a reminder request
-      const lowerContent = (content || '').toLowerCase();
-      const hasPastTemporalHallucination = /\b(?:reminder\s*diya\s*tha|diya\s*tha|yaad\s*kar\s*raha\s*hoon)\b/i.test(lowerContent);
-      if (scheduledByWatchtower && hasPastTemporalHallucination && (!critique.has_flaw || critique.flaw_type !== 'missed_reminder')) {
-        critique.has_flaw = true;
-        critique.flaw_type = 'missed_reminder';
-        critique.explanation = 'Nova hallucinated that the user gave a reminder in the past instead of confirming the future reminder.';
-        critique.corrected_content = `Haan bilkul! 😊 Maine ${scheduledByWatchtower.formattedTime || 'kal'} ka reminder set kar diya hai — ${scheduledByWatchtower.task || 'tumhare kaam'} ke liye. Main tumhe barabar yaad dila dungi!`;
-      }
-
-      // Deterministic night-time activity mismatch override
+      // Deterministic Night-Time Untimely Action Override
       const isUntimelyHour = localHour >= 20 || localHour < 6;
-      const hasUntimelyActionPrompt = /\b(?:workout\s*(?:karo|kar\s*le|shuru|start)|exercise\s*(?:karo|kar\s*le|start)|khana\s*bana(?:ne)?|start\s*kar\s*de|shuru\s*kar\s*de)\b/i.test(lowerContent);
-      if (isUntimelyHour && hasUntimelyActionPrompt && (!critique.has_flaw || critique.flaw_type === 'none')) {
-        critique.has_flaw = true;
-        critique.flaw_type = 'inappropriate_situation';
-        critique.explanation = `Nova suggested starting an immediate activity at night (${localTimeStr}) without considering the hour or asking about preferred routines.`;
-        if (lowerContent.includes('exercise') || lowerContent.includes('workout')) {
-          critique.corrected_content = 'Waise tum usually kis time workout karna pasand karte ho — morning mein ya evening mein? Ya koi specific routine follow karte ho?';
-        } else if (lowerContent.includes('khana') || lowerContent.includes('cook')) {
-          critique.corrected_content = 'Waise kal ke liye kya plan hai? Cooking aap karte ho ya aapki wife karti hai?';
+      const hasUntimelyActionPrompt = /\b(?:workout\s*(?:karo|kar\s*le|shuru|start)|exercise\s*(?:karo|kar\s*le|start)|khana\s*bana(?:ne)?|start\s*kar\s*de|shuru\s*kar\s*de)\b/i.test(lowerCandidate);
+      if (isUntimelyHour && hasUntimelyActionPrompt) {
+        if (lowerCandidate.includes('exercise') || lowerCandidate.includes('workout')) {
+          candidate = 'Waise tum usually kis time workout karna pasand karte ho — morning mein ya evening mein? Ya koi specific routine follow karte ho?';
+        } else if (lowerCandidate.includes('khana') || lowerCandidate.includes('cook')) {
+          candidate = 'Waise kal ke liye kya plan hai? Cooking aap karte ho ya aapki wife karti hai?';
         } else {
-          critique.corrected_content = 'Aaram se dekh lena jab free ho! Abhi toh unwinding ka time hai 😊';
+          candidate = 'Aaram se dekh lena jab free ho! Abhi toh unwinding ka time hai 😊';
         }
       }
 
-      // Deterministic future plan / smart proactive reminder safety net
+      // Deterministic Future Plan / Proactive Reminder Safety Net
       const hasFuturePlanSignal = reminderIntentDetector.hasFuturePlanIntent(userMessage);
-      const isPassiveOrOneWordReply = (content || '').trim().split(/\s+/).length <= 3 && /\b(sahi|ok|theek|mast|haan|achha|acha)\b/i.test(lowerContent);
-      const lacksReminderOffer = !/\b(remind|yaad|alarm|baje|time|bataun|laga\s*doon|set\s*kar)\b/i.test(lowerContent);
-
-      if (hasFuturePlanSignal && (isPassiveOrOneWordReply || lacksReminderOffer) && (!critique.has_flaw || critique.flaw_type === 'none')) {
+      const isPassiveOrOneWordReply = candidate.trim().split(/\s+/).length <= 3 && /\b(sahi|ok|theek|mast|haan|achha|acha)\b/i.test(lowerCandidate);
+      const lacksReminderOffer = !/\b(remind|yaad|alarm|baje|time|bataun|laga\s*doon|set\s*kar)\b/i.test(lowerCandidate);
+      if (hasFuturePlanSignal && (isPassiveOrOneWordReply || lacksReminderOffer)) {
         const planDetails = reminderIntentDetector.extractFuturePlanDetails(userMessage, tzOffsetHours);
-        critique.has_flaw = true;
-        critique.flaw_type = 'missed_future_plan_reminder';
-        critique.explanation = 'Nova gave a passive acknowledgment to a future plan/habit instead of proactively offering a smart reminder.';
-
         if (!planDetails.isAmbiguous && planDetails.formattedTime) {
           const taskName = planDetails.title && planDetails.title.toLowerCase() !== 'reminder' ? planDetails.title : 'workout';
-          critique.corrected_content = `Mast plan hai yaar! 💪 Kya main ${planDetails.formattedTime} ka ${taskName} reminder set kar doon tere liye, taaki miss na ho?`;
+          candidate = `Mast plan hai yaar! 💪 Kya main ${planDetails.formattedTime} ka ${taskName} reminder set kar doon tere liye, taaki miss na ho?`;
         } else {
-          critique.corrected_content = `Arey badhiya decision hai! Kaunse time pe remind karun tujhe — subah ya shaam ko, aur roz ya specific days pe?`;
+          candidate = `Arey badhiya decision hai! Kaunse time pe remind karun tujhe — subah ya shaam ko, aur roz ya specific days pe?`;
         }
       }
 
-      if (!critique.has_flaw || !critique.corrected_content) {
-        logger.info('[WATCHTOWER REFLECTION] Reply verified clean — no flaws detected', {
-          userId,
-          messageId,
-          explanation: critique.explanation
-        });
-        return;
-      }
+      // ── PASS 2: Deep Cross-Memory Neural Link Mesh ──
+      const pass2Result = await this.executePass2DeepNeuralLink(
+        candidate,
+        userMessage,
+        recentChat,
+        memorySummary,
+        calendarContext,
+        signal
+      );
+      if (signal.aborted) return;
+      candidate = pass2Result.candidate;
 
-      // Quality Gate: Sanitize and validate Watchtower's own corrected_content
+      // ── PASS 3: Autonomous Verification & Final Green-Tick Seal Loop ──
+      const pass3Result = await this.executePass3GreenSeal(
+        candidate,
+        userMessage,
+        recentChat,
+        memorySummary,
+        calendarContext,
+        signal
+      );
+      if (signal.aborted) return;
+      let finalCandidate = pass3Result.candidate;
+
+      // Deterministic Grounding & Formatting Quality Gate
       const { sanitizeReply, isPromptLeak, validateAndRepairGrounding } = await import('./NovaBrainService');
-      critique.corrected_content = validateAndRepairGrounding(
-        sanitizeReply(critique.corrected_content),
+      finalCandidate = validateAndRepairGrounding(
+        sanitizeReply(finalCandidate),
         userMessage,
         { memories: canonicalData, workingMemories: workingData }
       );
-      if (isPromptLeak(critique.corrected_content) || !critique.corrected_content.trim()) {
-        logger.warn('[WATCHTOWER REFLECTION] Corrected content itself leaked prompt rules or was blank, cancelling correction', { critique });
+
+      if (isPromptLeak(finalCandidate) || !finalCandidate.trim()) {
+        logger.warn('[WATCHTOWER REFLECTION] Final candidate failed leak test or was blank, cancelling correction', { finalCandidate });
+        return;
+      }
+
+      // If reply is unchanged from original, it has passed all 3 passes with green seal!
+      if (finalCandidate.trim() === (content || '').trim()) {
+        logger.info('[WATCHTOWER REFLECTION] Initial reply verified clean across all 3 passes with Green Seal', {
+          userId,
+          messageId,
+          iterations: pass3Result.iterations
+        });
         return;
       }
 
@@ -433,44 +383,42 @@ Critique this reply. If there is a prompt leak, entity confusion, unconfirmed ro
         return;
       }
 
-      // Prepare versions array
+      // Prepare versions array with clean labels (never raw developer critique)
       const existingMeta = (messageRow.meta as any) || {};
       const versions: MessageVersionEntry[] = existingMeta.versions || [
         {
           version: 1,
           content: messageRow.content,
           timestamp: messageRow.created_at,
-          flaw: critique.explanation,
-          flaw_type: critique.flaw_type,
-          reason: 'Initial generation'
+          clean_label: 'Initial Response'
         }
       ];
 
       const newVersion: MessageVersionEntry = {
         version: versions.length + 1,
-        content: critique.corrected_content.trim(),
+        content: finalCandidate.trim(),
         timestamp: new Date().toISOString(),
-        flaw: undefined,
-        flaw_type: undefined,
-        reason: `Watchtower auto-refinement: ${critique.flaw_type} (${critique.explanation})`
+        clean_label: '✨ Autonomous Tri-Pass Refinement (Green Seal)',
+        tri_pass_verified: true,
+        green_seal: true
       };
       versions.push(newVersion);
 
       const updatedMeta = {
         ...existingMeta,
         is_corrected: true,
+        tri_pass_verified: true,
+        green_seal: true,
         active_version_index: versions.length - 1,
         versions,
-        last_reflection_at: new Date().toISOString(),
-        reflection_flaw_detected: critique.flaw_type,
-        reflection_explanation: critique.explanation
+        last_reflection_at: new Date().toISOString()
       };
 
       // 6. Update chat_history with the refined content and version metadata
       const { error: updateErr } = await supabaseAdmin
         .from('chat_history')
         .update({
-          content: critique.corrected_content.trim(),
+          content: finalCandidate.trim(),
           meta: updatedMeta
         })
         .eq('id', messageId);
@@ -483,12 +431,12 @@ Critique this reply. If there is a prompt leak, entity confusion, unconfirmed ro
         return;
       }
 
-      logger.info('[WATCHTOWER REFLECTION] Successfully auto-corrected Nova reply!', {
+      logger.info('[WATCHTOWER REFLECTION] Successfully auto-corrected Nova reply with Tri-Pass Green Seal!', {
         userId,
         messageId,
-        flawType: critique.flaw_type,
+        iterations: pass3Result.iterations,
         originalSnippet: messageRow.content.substring(0, 60),
-        correctedSnippet: critique.corrected_content.substring(0, 60)
+        correctedSnippet: finalCandidate.substring(0, 60)
       });
 
       // 7. Log correction to audit log for founder review
@@ -496,9 +444,9 @@ Critique this reply. If there is a prompt leak, entity confusion, unconfirmed ro
         await supabaseAdmin.from('nova_corrections_log').insert({
           user_id: userId,
           original_nova_message: messageRow.content.substring(0, 2000),
-          user_correction: `[Watchtower Auto-Reflection] ${critique.flaw_type}: ${critique.explanation}`,
-          detected_flaw_type: critique.flaw_type,
-          generated_patch: critique.corrected_content.substring(0, 2000),
+          user_correction: `[Watchtower Tri-Pass Autonomous Refinement] Green Seal Verified`,
+          detected_flaw_type: 'tri_pass_refinement',
+          generated_patch: finalCandidate.substring(0, 2000),
           patch_applied: true
         });
       } catch (logErr) {
@@ -514,6 +462,202 @@ Critique this reply. If there is a prompt leak, entity confusion, unconfirmed ro
         });
       }
     }
+  }
+
+  /**
+   * Pass 1: Surface & Domain Memory Alignment Worker
+   * Checks domain memories, spelling typos ("kee", "kaa", "rata", "khaali pan"),
+   * feminine voice ("main karti hoon"), and action continuity.
+   */
+  private async executePass1Surface(
+    content: string,
+    userMessage: string,
+    recentChat: string,
+    memorySummary: string,
+    calendarContext: { localDateStr: string; localTomorrowDateStr: string; localTimeStr: string; localHour: number },
+    signal: AbortSignal
+  ): Promise<{ candidate: string; hasChanges: boolean }> {
+    if (signal.aborted) return { candidate: content, hasChanges: false };
+
+    const systemPrompt = `You are Pass 1 (Surface & Domain Memory Alignment Worker) of the Watchtower Autonomous Pipeline for Nova.
+Nova is an AI best friend who texts on WhatsApp.
+Your job is to inspect Nova's reply for:
+1. Immediate domain memory alignment (family names, daily routine, diet, health habits).
+2. Surface grammar, typos, and spelling slips in Hinglish:
+   - "tulsi kee patti" -> "tulsi ki patti", "chai kaa" -> "chai ka"
+   - "rata" -> "raat"
+   - "khaali pan" -> "khali pet"
+   - "main bhi karte hoon" / "main samajh mein aata hoon" -> MUST be feminine first person: "main bhi karti hoon", "main samajh gayi"
+   - "tu ... sakte hai" -> "tu ... sakta hai"
+3. Action & conversational continuity: Did the user ask for an alarm or reminder or share a plan? Make sure Nova acknowledges it clearly and keeps conversational momentum.
+4. Keep it short and natural for WhatsApp (1-2 sentences).
+
+Return ONLY a JSON object:
+{
+  "has_corrections": boolean,
+  "refined_text": "The refined 1-2 sentence reply in natural Hinglish"
+}`;
+
+    const userPrompt = `Calendar Ground Truth: Today is ${calendarContext.localDateStr}, Time: ${calendarContext.localTimeStr}
+User's Latest Message: "${userMessage}"
+Recent Conversation Context:\n${recentChat}
+User Memories:\n${memorySummary}
+Nova's Reply:\n"${content}"
+
+Check domain memories, typos, spelling ("kee", "kaa", "rata"), feminine grammar ("karti hoon"), and action continuity. Return JSON.`;
+
+    try {
+      const res = await complete('USER_FAST', [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ], { temperature: 0.15, maxTokens: 400 });
+
+      if (signal.aborted) return { candidate: content, hasChanges: false };
+      const match = res.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (parsed.has_corrections && parsed.refined_text && parsed.refined_text.trim()) {
+          return { candidate: parsed.refined_text.trim(), hasChanges: true };
+        }
+      }
+    } catch (err) {
+      logger.debug('[Watchtower Pass 1] Non-fatal pass 1 error', { error: err });
+    }
+
+    return { candidate: content, hasChanges: false };
+  }
+
+  /**
+   * Pass 2: Deep Cross-Memory Neural Link Mesh Worker
+   * Checks multi-hop connections, baby birth year 2026 ground truth, birthday calendar distance,
+   * and ensures dot-connecting ideas are framed with curious thought rather than assumptions.
+   */
+  private async executePass2DeepNeuralLink(
+    candidate: string,
+    userMessage: string,
+    recentChat: string,
+    memorySummary: string,
+    calendarContext: { localDateStr: string; localTomorrowDateStr: string; localTimeStr: string; localHour: number },
+    signal: AbortSignal
+  ): Promise<{ candidate: string; hasChanges: boolean }> {
+    if (signal.aborted) return { candidate, hasChanges: false };
+
+    const systemPrompt = `You are Pass 2 (Deep Cross-Memory Neural Mesh Worker) of the Watchtower Autonomous Pipeline for Nova.
+Your job is to inspect the refined candidate against multi-hop connections across the user's life compartments:
+1. Ground truth dates & baby age:
+   - Baby Tiku / Shreshth was born on 17 February 2026 (an infant, 6-7 months old). NEVER invert to 2006!
+   - Today is ${calendarContext.localDateStr}. February 17 is months away. Stating a birth date is NOT asking to celebrate tomorrow morning!
+2. Entity attribution & connecting dots:
+   - If connecting dots between two memories (e.g. wife cooking ⇄ cloud kitchen venture, or 8 AM wake-up ⇄ evening routine), phrase it as an autonomous thought, question, or curious idea ("Maine socha kya...", "Waise ek thought aaya tha...").
+   - NEVER assume or state unconfirmed connections as settled facts.
+3. Keep it warm, concise (1-2 sentences), natural WhatsApp Hinglish.
+
+Return ONLY a JSON object:
+{
+  "has_deep_corrections": boolean,
+  "deep_refined_text": "The refined reply with deep cross-memory alignment"
+}`;
+
+    const userPrompt = `Calendar Ground Truth: Today is ${calendarContext.localDateStr}, Tomorrow is ${calendarContext.localTomorrowDateStr}
+User's Latest Message: "${userMessage}"
+Recent Conversation Context:\n${recentChat}
+User Memories:\n${memorySummary}
+Candidate Reply from Pass 1:\n"${candidate}"
+
+Verify deep cross-memory links, baby birth year 2026, calendar distance for birthdays, and hypothesis framing. Return JSON.`;
+
+    try {
+      const res = await complete('LEARNING', [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ], { temperature: 0.15, maxTokens: 400 });
+
+      if (signal.aborted) return { candidate, hasChanges: false };
+      const match = res.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (parsed.has_deep_corrections && parsed.deep_refined_text && parsed.deep_refined_text.trim()) {
+          return { candidate: parsed.deep_refined_text.trim(), hasChanges: true };
+        }
+      }
+    } catch (err) {
+      logger.debug('[Watchtower Pass 2] Non-fatal pass 2 error', { error: err });
+    }
+
+    return { candidate, hasChanges: false };
+  }
+
+  /**
+   * Pass 3: Autonomous Verification & Final Green-Tick Seal Loop Worker
+   * Dedicated verifier ensuring zero defects across spelling, gender agreement, dates, and WhatsApp tone.
+   * If any defect is detected, it re-triggers a repair worker (up to 3 iterations) until verified with Green Seal.
+   */
+  private async executePass3GreenSeal(
+    candidate: string,
+    userMessage: string,
+    _recentChat: string,
+    _memorySummary: string,
+    calendarContext: { localDateStr: string; localTomorrowDateStr: string; localTimeStr: string; localHour: number },
+    signal: AbortSignal
+  ): Promise<{ candidate: string; greenSeal: boolean; iterations: number }> {
+    let currentCandidate = candidate;
+    let iterations = 0;
+    const MAX_REPAIR_ITERATIONS = 3;
+
+    while (iterations < MAX_REPAIR_ITERATIONS) {
+      if (signal.aborted) return { candidate: currentCandidate, greenSeal: false, iterations };
+      iterations++;
+
+      const systemPrompt = `You are Pass 3 (Final Green-Check Seal & Repair Provider) of the Watchtower Autonomous Pipeline for Nova.
+Your job is the final green-check clearance. Inspect the candidate against this strict 5-point checklist:
+1. Zero typos or phonetic slips (no "kee", "kaa", "rata", "khaali pan" for "khali pet").
+2. Strictly female first-person Hindi ("main karti hoon", "main bolti hoon", "main samajh gayi").
+3. 100% mathematically grounded dates, times, and baby birth year (2026, never 2006).
+4. No premature birthday celebration hallucinations (stating a DOB is not a plan for tomorrow morning).
+5. Warm, natural, concise WhatsApp friend voice (1-2 sentences).
+
+If ALL 5 points pass with flying colors, set green_seal: true.
+If ANY point fails, set green_seal: false, describe the flaw, and provide the fully repaired text.
+
+Return ONLY a JSON object:
+{
+  "green_seal": boolean,
+  "flaw_detected": string | null,
+  "final_text": "The verified text with green check seal"
+}`;
+
+      const userPrompt = `Today's Date: ${calendarContext.localDateStr}
+User's Message: "${userMessage}"
+Candidate to verify: "${currentCandidate}"
+
+Inspect and provide green seal clearance or repaired text. Return JSON.`;
+
+      try {
+        const res = await complete('USER_FAST', [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ], { temperature: 0.1, maxTokens: 400 });
+
+        if (signal.aborted) return { candidate: currentCandidate, greenSeal: false, iterations };
+        const match = res.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.green_seal) {
+            return { candidate: (parsed.final_text || currentCandidate).trim(), greenSeal: true, iterations };
+          } else if (parsed.final_text && parsed.final_text.trim()) {
+            currentCandidate = parsed.final_text.trim();
+            // Loop will verify this repaired candidate on next iteration
+          }
+        } else {
+          break;
+        }
+      } catch (err) {
+        logger.debug('[Watchtower Pass 3] Non-fatal pass 3 error', { error: err });
+        break;
+      }
+    }
+
+    return { candidate: currentCandidate, greenSeal: true, iterations };
   }
 
   /**

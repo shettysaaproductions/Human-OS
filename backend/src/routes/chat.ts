@@ -1385,6 +1385,13 @@ chatRouter.post(
         }
       }
 
+      // User Mistake Callout & Misunderstanding Reconciliation Directive
+      const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|pagal ho kya|kuch bhi mat bolo|ye galat hai|aisa nahi hai|maine kab bola|kya bol rahi ho|kya bol rahe ho|galat bol rahi ho|galat kaha)\b/i.test(effectiveMessage);
+      if (turnAnalysis.hasCorrections || isUserCallingOutMistake) {
+        const correctionDirective = `\n\n## 🛠️ USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is pointing out a mistake, misunderstanding, or incorrect assertion made by Nova in the previous reply.\n1. Humbly and warmly acknowledge the misunderstanding like a true best friend ("Arre sorry yaar! Mera dhyan kahan tha...", "Arre meri galti!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).`;
+        turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + correctionDirective;
+      }
+
       // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
       // Direct high-precision reminder extraction & scheduling guard
       if (!is_proactive && reminderIntentDetector.hasReminderIntent(effectiveMessage)) {
@@ -1464,6 +1471,7 @@ chatRouter.post(
         recentMessages,
         memoryContext,
         turnAnalysisBlock,
+        hasCorrections: turnAnalysis.hasCorrections || isUserCallingOutMistake,
         // BUG-06: Forward negated correction concepts so NovaBrainService can pass them
         // to the extract_life_threads job → LifeThreadAgent.updateThreadProvenanceForCorrection()
         negativeCorrectionConcepts: turnAnalysis.negativeCorrectionConcepts || [],

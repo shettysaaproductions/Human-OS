@@ -14,6 +14,9 @@ export interface MessageVersion {
   flaw?: string;
   flaw_type?: string;
   reason?: string;
+  clean_label?: string;
+  tri_pass_verified?: boolean;
+  green_seal?: boolean;
 }
 
 export interface MessageMeta {
@@ -22,6 +25,8 @@ export interface MessageMeta {
   versions?: MessageVersion[];
   reflection_flaw_detected?: string;
   reflection_explanation?: string;
+  tri_pass_verified?: boolean;
+  green_seal?: boolean;
   [key: string]: any;
 }
 

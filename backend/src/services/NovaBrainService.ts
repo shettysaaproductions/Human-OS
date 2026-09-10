@@ -203,6 +203,9 @@ export function sanitizeReply(reply: string): string {
     .replace(/\brata\s+mein\b/gi, 'raat mein')
     .replace(/\baaj\s+rata\b/gi, 'aaj raat')
     .replace(/\brata\b/gi, 'raat')
+    .replace(/\bkee\b/gi, 'ki')
+    .replace(/\bkaa\b/gi, 'ka')
+    .replace(/\bkhaali\s+pan\b/gi, 'khali pet')
     // Fix broken literal translations for female Nova
     .replace(/\bmain\s+samajh\s+mein\s+aata\s+hoon\b/gi, 'main samajh gayi')
     .replace(/\bmain\s+samajhta\s+hoon\b/gi, 'main samajh gayi')
@@ -210,7 +213,10 @@ export function sanitizeReply(reply: string): string {
     .replace(/\bmujhe\s+samajh\s+mein\s+aata\s+hoon\b/gi, 'mujhe samajh aa gaya')
     .replace(/\bmain\s+sochta\s+hoon\b/gi, 'main sochti hoon')
     .replace(/\bmain\s+karta\s+hoon\b/gi, 'main karti hoon')
+    .replace(/\bmain\s+karte\s+hoon\b/gi, 'main karti hoon')
+    .replace(/\bmain\s+bhi\s+karte\s+hoon\b/gi, 'main bhi karti hoon')
     .replace(/\bmain\s+bolta\s+hoon\b/gi, 'main bolti hoon')
+    .replace(/\bmain\s+bolte\s+hoon\b/gi, 'main bolti hoon')
     // Fix broken mixed pronoun agreement (e.g. tu ... sakte hai -> tu ... sakta hai)
     .replace(/\btu\s+((?:[a-zA-Z]+\s+){0,6})sakte\s+hai\b/gi, 'tu $1sakta hai')
     // CJK leak
@@ -503,17 +509,24 @@ export class NovaBrainService {
       ? `\n\n## REMINDER STATUS (DETERMINISTIC — DO NOT CONTRADICT)\n${context.deterministicReminderNote}\n`
       : '';
 
+    const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
+
+    const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|pagal ho kya|kuch bhi mat bolo|ye galat hai|aisa nahi hai|maine kab bola|kya bol rahi ho|kya bol rahe ho|galat bol rahi ho|galat kaha)\b/i.test(combinedUserMessage);
+    const userCorrectionDirective = (isUserCallingOutMistake || context.hasCorrections)
+      ? `\n\n## USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is calling out a mistake, misunderstanding, or hallucination in Nova's previous reply.\n1. Humbly and warmly apologize and admit the mistake like a real best friend ("Arre sorry yaar! Mera dhyan kahan tha...", "Arre meri galti!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).\n`
+      : '';
+
     const conversationFullPrompt = [
       conversationSystemPrompt,
       context.memoryContext || '',
       context.temporalContextBlock || '',
       context.remindersContext || '',
       deterministicReminderSection,
+      context.turnAnalysisBlock || '',
+      userCorrectionDirective,
       context.lengthInstruction || '',
       '\n\n[Output format: Plain conversational text only, exactly what you would text a friend on WhatsApp. Do not include XML tags, JSON, or prompt labels.]',
     ].filter(Boolean).join('\n');
-
-    const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
 
     const convoMessages = buildMessages(conversationFullPrompt, context.recentMessages, combinedUserMessage);
 
