@@ -229,12 +229,32 @@ export class BackgroundActionService {
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
            const q = String(action.data?.question || '').trim();
-           // Guard: Suppress premature short-term followups for annual/distant events (e.g. wife's birthday next year)
+           // Guard 1: Suppress premature short-term followups for annual/distant events (e.g. wife's birthday next year)
            const isFarEvent = /\b(?:birthday|anniversary|janamdin|gift|dob|date of birth)\b/i.test(q);
-           if (isFarEvent && action.data?.delay_hours && action.data.delay_hours < 72) {
-             logger.info('[BackgroundAction] Suppressed premature short-term followup for distant/annual event', { q, delay_hours: action.data.delay_hours });
+           if (isFarEvent && (!action.data?.delay_hours || action.data.delay_hours < 72)) {
+             logger.info('[BackgroundAction] Suppressed premature short-term followup for distant/annual event', { q, delay_hours: action.data?.delay_hours });
              continue;
            }
+
+           // Guard 2: Discard robotic English followups (e.g. "Do you want to buy a gift for your wife's birthday?")
+           const isRoboticEnglish = /^(?:Do you want to|Would you like to|Are you planning to|Have you thought about|Did you want to)\b/i.test(q);
+           if (isRoboticEnglish) {
+             logger.info('[BackgroundAction] Suppressed unnatural robotic English followup', { q });
+             continue;
+           }
+
+           // Guard 3: Respect user work focus hours (postpone casual followups until after work shift)
+           try {
+             const { userLifeStageEngine } = await import('./UserLifeStageEngine');
+             const stageCtx = await userLifeStageEngine.getUserLifeStageContext(userId);
+             if (stageCtx.lifestyleRhythm.isWorkFocusHours && (!action.data?.delay_hours || action.data.delay_hours < 2)) {
+               logger.info('[BackgroundAction] Postponing followup past user work shift focus hours', { q });
+               action.data.delay_hours = Math.max(action.data?.delay_hours || 0, (20 - stageCtx.lifestyleRhythm.localHour) + 0.5);
+             }
+           } catch {
+             // Non-critical
+           }
+
            const { novaFollowupService } = await import('./NovaFollowupService');
            await novaFollowupService.queueFollowup(userId, conversationId, action.data.question, action.data.delay_hours);
         }

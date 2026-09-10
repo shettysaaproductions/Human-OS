@@ -39,6 +39,7 @@ export interface SituationContext {
   totalMemoriesCount?: number | null; // count of long-term memories
   goalMemories?: { key: string; value: string; memory_type?: string }[];
   activeLifeThreads?: { id: string; topic: string; state: string; priority: string; provenance?: string; last_relevant_at?: string }[]; // Phase 8 Life Threads
+  lifeStageSummary?: string; // Phase 12 Life Stage, Stakes & Purpose Summary
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -129,6 +130,11 @@ export class SituationalAwareness {
         if (thread.provenance) lines.push(`    Context: ${thread.provenance}`);
       });
       lines.push(`  (Do NOT force these topics unless relevant, but use them to contextualize the user's ongoing life.)`);
+    }
+
+    // ── User Life Stage & Real-World Stakes (Phase 12) ──
+    if (ctx.lifeStageSummary) {
+      lines.push(`- 🎯 USER LIFE STAGE, PURPOSE & STAKES:\n  ${ctx.lifeStageSummary}`);
     }
 
     // ── User Presence / Last-Seen (read-receipt awareness) ──

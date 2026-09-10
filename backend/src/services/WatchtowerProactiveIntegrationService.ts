@@ -374,14 +374,24 @@ export const watchtowerProactiveIntegrationService = new WatchtowerProactiveInte
 
 outboundDispatcherService.registerStrategy('watchtower_tier2', async (context: any) => {
   const { att, topic } = context;
-  const tContext = await temporalAwarenessService.getContext(att.userId || att.user_id, 0);
+  const uid = att.userId || att.user_id;
+  const tContext = await temporalAwarenessService.getContext(uid, 0);
   
+  let lifeStageBlock = '';
+  try {
+    const { userLifeStageEngine } = await import('./UserLifeStageEngine');
+    const stageCtx = await userLifeStageEngine.getUserLifeStageContext(uid);
+    lifeStageBlock = `\nUser Life Stage & Mission: ${stageCtx.stageLabel}. ${stageCtx.corePurposeSummary}\nCurrent Lifestyle Phase: ${stageCtx.lifestyleRhythm.phaseDescription}`;
+  } catch {
+    // Non-critical
+  }
+
   const tier2Context = `Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
 Watchtower Target: ${att.targetType || att.target_type}
 Topic: ${topic}
-Urgency: ${att.scores?.urgency || 0}/100
+Urgency: ${att.scores?.urgency || 0}/100${lifeStageBlock}
 
-Generate a short, natural proactive message asking the user about this topic. Be helpful and contextual.`;
+Generate a short, natural proactive message in conversational Hinglish asking the user about this topic. Be helpful, empathetic, and grounded in their real stakes.`;
 
   const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
   return generated.message || `[Watchtower ${att.targetType || att.target_type}: ${topic}]`;

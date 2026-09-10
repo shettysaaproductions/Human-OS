@@ -28,6 +28,7 @@ import { doubtEligibilityEngine } from '../services/DoubtEligibilityEngine';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
 import { watchtowerReflectionService } from '../services/WatchtowerReflectionService';
 import { reminderIntentDetector } from '../services/ReminderIntentDetector';
+import { userLifeStageEngine } from '../services/UserLifeStageEngine';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1295,6 +1296,14 @@ chatRouter.post(
 
       const userPresence = presenceResult.data ? { status: presenceResult.data.status || 'offline', last_active_at: presenceResult.data.last_active_at, last_typing_at: presenceResult.data.last_typing_at } : null;
 
+      let lifeStageSummary: string | undefined;
+      try {
+        const stageCtx = await userLifeStageEngine.getUserLifeStageContext(userId, memories, workingMemories);
+        lifeStageSummary = `${stageCtx.stageLabel}: ${stageCtx.corePurposeSummary} (Lifestyle Rhythm: ${stageCtx.lifestyleRhythm.phaseDescription})`;
+      } catch (err) {
+        // Non-critical
+      }
+
       const situationCtx = {
         nowLocal, tzLabel, country: userCountry, gapMinutes,
         latestEmotion: emotionResult.data, recentEpisodes: episodicResult.data || [],
@@ -1305,6 +1314,7 @@ chatRouter.post(
         totalMemoriesCount: totalMemoriesResult.count || 0,
         goalMemories: memories.filter((m: any) => m.memory_type === 'goals'),
         activeLifeThreads: lifeThreadsResult.data || [],
+        lifeStageSummary,
       };
       situationBrief = situationalAwareness.buildBrief(situationCtx);
 
