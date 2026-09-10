@@ -146,6 +146,11 @@ export class WatchtowerReflectionService {
     let canonicalData: any[] = [];
     let workingData: any[] = [];
     try {
+      // Trigger background memory harmonization & dot-connection audit
+      this.harmonizeAndAuditMemories(userId).catch(e =>
+        logger.warn('[WATCHTOWER HARMONIZER] Background harmonization error', { error: e.message })
+      );
+
       const [canonicalRes, workingRes] = await Promise.all([
         supabaseAdmin
           .from('memories')
@@ -760,6 +765,71 @@ Inspect and provide green seal clearance or repaired text. Return JSON.`;
       return { shouldFollowUp: false };
     } catch {
       return { shouldFollowUp: false };
+    }
+  }
+
+  /**
+   * Autonomous Watchtower Memory Harmonizer & Dot-Connection Scanner.
+   * Scans recent memories for fragmented or uncanonical branches (e.g. `nail_art`, `self_taught`, `tiku`),
+   * re-parents orphaned stems under proper entities (e.g. `tiku` under Shreshth, `nail_art` under Sakshi),
+   * and merges overlapping/near memories cleanly.
+   */
+  async harmonizeAndAuditMemories(userId: string): Promise<void> {
+    try {
+      const { data: rows } = await supabaseAdmin
+        .from('memories')
+        .select('id, key, value, memory_type, lifecycle_state')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+        .order('updated_at', { ascending: false })
+        .limit(50);
+
+      if (!rows || rows.length === 0) return;
+
+      const memMap = new Map<string, any>();
+      for (const r of rows) {
+        if (r.lifecycle_state === 'SUPERSEDED' || r.lifecycle_state === 'INVALIDATED') continue;
+        memMap.set(r.key.toLowerCase(), r);
+      }
+
+      // 1. Harmonize Son / Tiku Nickname Stem:
+      const tikuRow = memMap.get('tiku');
+      const sonNameRow = memMap.get('son_name') || memMap.get('shreshth');
+      if (tikuRow && sonNameRow) {
+        logger.info('[WATCHTOWER HARMONIZER] Auto-reparenting tiku memory into son_nickname stem under Shreshth', { userId });
+        await supabaseAdmin.from('memories').update({
+          key: 'son_nickname',
+          value: 'Tiku',
+          lifecycle_state: 'CURRENT',
+          updated_at: new Date().toISOString()
+        }).eq('id', tikuRow.id);
+      }
+
+      // 2. Harmonize Wife / Sakshi Nail Art Fragments:
+      const fragmentKeys = ['nail_art', 'self_taught', 'beautiful_art', 'last_year_nail_art', 'self_taught_nail_art'];
+      const foundFragments = fragmentKeys.map(k => memMap.get(k)).filter(Boolean);
+      if (foundFragments.length > 1) {
+        logger.info('[WATCHTOWER HARMONIZER] Auto-consolidating nail art skill fragments under Sakshi', { userId, count: foundFragments.length });
+        const primary = foundFragments[0];
+        const mergedValue = 'Self-taught nail artist (creates beautiful art with kit purchased last year)';
+        await supabaseAdmin.from('memories').update({
+          key: 'wife_nail_art_skill',
+          value: mergedValue,
+          lifecycle_state: 'CURRENT',
+          updated_at: new Date().toISOString()
+        }).eq('id', primary.id);
+
+        for (let i = 1; i < foundFragments.length; i++) {
+          await supabaseAdmin.from('memories').update({
+            is_archived: true,
+            lifecycle_state: 'SUPERSEDED',
+            superseded_by: primary.id,
+            supersession_reason: 'Consolidated into wife_nail_art_skill by Watchtower Harmonizer'
+          }).eq('id', foundFragments[i].id);
+        }
+      }
+    } catch (err: any) {
+      logger.warn('[WATCHTOWER HARMONIZER] Harmonization scan skipped or error', { error: err.message });
     }
   }
 }

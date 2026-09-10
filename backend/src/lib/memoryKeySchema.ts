@@ -38,11 +38,19 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: wife ────────────────────────────────────────────────────────────
   wife_name: [
     'wives_name', 'wife', 'biwi', 'patni', 'biwi_name', 'patni_name',
-    'spouse_name', 'wife_real_name',
+    'spouse_name', 'wife_real_name', 'sakshi', 'wife_sakshi', 'biwi_sakshi',
   ],
   wife_nickname: [
     'wives_nickname', 'wife_nick_name', 'biwi_ka_nickname', 'patni_ka_nickname',
     'spouse_nickname',
+  ],
+  wife_nail_art_skill: [
+    'wife_nail_art', 'nail_art', 'last_year_nail_art', 'self_taught_nail_art',
+    'self_taught', 'beautiful_art', 'wife_art', 'wife_passion_nail_art',
+    'purchased_nail_art_kit', 'learned_nail_art', 'enjoyed_nail_art',
+  ],
+  wife_cooking_skill: [
+    'wife_cooking', 'likes_wifes_cooking', 'wifes_cooking', 'cooking_talent',
   ],
   // ── Family: husband ─────────────────────────────────────────────────────────
   husband_name: [
@@ -55,9 +63,11 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: son ─────────────────────────────────────────────────────────────
   son_name: [
     'sons_name', 'son', 'beta', 'beta_name', 'bete_ka_naam', 'son_real_name',
+    'shreshth', 'shresth',
   ],
   son_nickname: [
     'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam',
+    'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'baby_nickname', 'child_nickname',
   ],
   son_age: [
     'sons_age', 'beta_age', 'bete_ki_umar', 'bete_ki_age', 'child_age',

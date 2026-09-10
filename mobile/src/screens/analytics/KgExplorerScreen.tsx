@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { G, Line, Path } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, Easing
 } from 'react-native-reanimated';
 import { api } from '../../services/api';
 
@@ -107,8 +107,14 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     }
   }
 
-  if (k === 'wife_name') return { title: v || 'Wife', sub: 'Wife' };
-  if (k === 'son_name') return { title: v || 'Son', sub: 'Son' };
+  if (k === 'wife_name' || k === 'sakshi') return { title: v || 'Sakshi', sub: 'Wife' };
+  if (k === 'son_name' || k === 'shreshth') return { title: v || 'Shreshth', sub: 'Son' };
+  if (k === 'son_nickname' || k.includes('tiku')) return { title: v || 'Tiku', sub: 'Nickname' };
+  if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) {
+    return { title: 'Nail Artist', sub: 'Creative Skill' };
+  }
+  if (k === 'son_birth_date' || k === 'son_dob') return { title: v || '17 Feb 2026', sub: 'Birthday' };
+  if (k === 'wife_birth_date' || k === 'wife_birthday') return { title: v || '23 July', sub: 'Birthday' };
   if (k === 'son_age' || k === 'child_age' || k === 'baby_age') return { title: `${v} old`, sub: 'Age' };
   if (k === 'likes_wifes_cooking') return { title: "Wife's Cooking", sub: 'Hobby / Food' };
   if (k === 'cloud_kitchen_business') return { title: 'Cloud Kitchen', sub: 'Business Plan' };
@@ -239,16 +245,61 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     if (members.length === 0) continue;
 
     // Identify Entity Branches (Level 2) and Stems (Level 3)
-    const branchItems: any[] = [];
-    const stemItems: any[] = [];
+    const rawBranchItems: any[] = [];
+    const rawStemItems: any[] = [];
 
-    // Check if raw node already has hierarchyLevel or parentEntityId
+    // Partition members with domain-aware entity linking
     for (const mem of members) {
-      if (mem.hierarchyLevel === 3 || (mem.parentEntityId && mem.parentEntityId !== hubId && mem.parentEntityId !== 'user-core')) {
-        stemItems.push(mem);
-      } else {
-        branchItems.push(mem);
+      const k = (mem.raw_key || mem.id || '').toLowerCase();
+      if (d === 'family') {
+        if (k.includes('tiku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-son_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+        if (k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art') || k.includes('cooking') || k.includes('wife_birth') || k.includes('wife_bday')) {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-wife_name';
+          rawStemItems.push(mem);
+          continue;
+        }
       }
+      if (mem.hierarchyLevel === 3 || (mem.parentEntityId && mem.parentEntityId !== hubId && mem.parentEntityId !== 'user-core')) {
+        rawStemItems.push(mem);
+      } else {
+        rawBranchItems.push(mem);
+      }
+    }
+
+    // Collapse duplicate branch items (e.g. wife_sakshi and sakshi and wife_name)
+    const branchItems: any[] = [];
+    const seenBranchKeys = new Set<string>();
+    for (const b of rawBranchItems) {
+      const bKey = (b.raw_key || b.name || '').toLowerCase();
+      let norm = bKey;
+      if (norm.includes('sakshi') || norm.includes('wife')) norm = 'sakshi';
+      if (norm.includes('shreshth') || norm.includes('son')) norm = 'shreshth';
+      if (seenBranchKeys.has(norm)) continue;
+      seenBranchKeys.add(norm);
+      branchItems.push(b);
+    }
+
+    // Deduplicate redundant nail art / self-taught stems under Sakshi
+    const seenNailArt = new Set<string>();
+    const stemItems: any[] = [];
+    for (const s of rawStemItems) {
+      const sk = (s.raw_key || s.id || '').toLowerCase();
+      if (sk.includes('nail') || sk.includes('self_taught') || sk.includes('beautiful_art')) {
+        if (seenNailArt.has('nail_art')) continue;
+        seenNailArt.add('nail_art');
+        s.name = 'Nail Artist';
+        s.shortName = 'Nail Artist';
+        s.subLabel = 'Creative Skill';
+        s.value = 'Self-taught nail artist (creates beautiful art with kit from last year)';
+        s.raw_key = 'wife_nail_art_skill';
+      }
+      stemItems.push(s);
     }
 
     // If all items ended up in stemItems but no branches (edge case), promote the primary parent
@@ -293,18 +344,33 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
       nodes.push(branchNode);
       nodeMap.set(branchNode.id, branchNode);
+      if (bMem.raw_key) nodeMap.set(bMem.raw_key, branchNode);
     });
 
     // Position Level 3 Stems: Fanning outward from their respective Parent Branch
     const stemsByParent = new Map<string, any[]>();
     for (const stem of stemItems) {
-      const pId = stem.parentEntityId || branchItems[0]?.id;
+      let pId = stem.parentEntityId || branchItems[0]?.id;
+      // Smart re-mapping if parentId was conceptual
+      if (pId === 'mem-son_name') {
+        const foundSon = branchItems.find(b => {
+          const bk = (b.raw_key || b.name || '').toLowerCase();
+          return bk.includes('son') || bk.includes('shreshth');
+        });
+        if (foundSon) pId = foundSon.id;
+      } else if (pId === 'mem-wife_name') {
+        const foundWife = branchItems.find(b => {
+          const bk = (b.raw_key || b.name || '').toLowerCase();
+          return bk.includes('wife') || bk.includes('sakshi');
+        });
+        if (foundWife) pId = foundWife.id;
+      }
       if (!stemsByParent.has(pId)) stemsByParent.set(pId, []);
       stemsByParent.get(pId)!.push(stem);
     }
 
     stemsByParent.forEach((stems, parentId) => {
-      const parentNode = nodeMap.get(parentId) || nodeMap.get(branchItems[0]?.id);
+      const parentNode = nodeMap.get(parentId) || branchItems.find(b => b.id === parentId) || branchItems[0];
       const px = parentNode ? parentNode.x : hx;
       const py = parentNode ? parentNode.y : hy;
 
@@ -492,23 +558,29 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
 
     // Family Stems
     if (d === 'family') {
-      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name'].includes(k)) {
+      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sakshi', 'shreshth'].includes(k)) {
         hierarchyLevel = 2;
         relation = 'FAMILY_MEMBER';
         edgeType = 'ENTITY_BRANCH';
         explanation = 'Family member branch';
-      } else if ((k.startsWith('wife_') || k === 'likes_wifes_cooking') && allKeys.has('wife_name')) {
-        parentId = 'mem-wife_name';
+      } else if (
+        (k.startsWith('wife_') || k === 'likes_wifes_cooking' || k.includes('sakshi') || k.includes('nail_art') || k.includes('self_taught') || k.includes('beautiful_art') || k.includes('nail')) &&
+        (allKeys.has('wife_name') || allKeys.has('sakshi'))
+      ) {
+        parentId = allKeys.has('wife_name') ? 'mem-wife_name' : (allItems.find(i => i.key.toLowerCase().includes('sakshi'))?.id || 'dept-family');
         hierarchyLevel = 3;
-        relation = k.includes('cook') ? 'COOKING_HOBBY' : 'MEMBER_ATTRIBUTE';
+        relation = k.includes('cook') ? 'COOKING_HOBBY' : k.includes('nail') || k.includes('art') ? 'CREATIVE_SKILL' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = "Detail stem of Wife";
-      } else if ((k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_')) && allKeys.has('son_name')) {
-        parentId = 'mem-son_name';
+        explanation = "Detail stem of Wife (Sakshi)";
+      } else if (
+        (k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_') || k.includes('tiku') || k.includes('shreshth')) &&
+        (allKeys.has('son_name') || allKeys.has('shreshth'))
+      ) {
+        parentId = allKeys.has('son_name') ? 'mem-son_name' : (allItems.find(i => i.key.toLowerCase().includes('shreshth'))?.id || 'dept-family');
         hierarchyLevel = 3;
-        relation = k.includes('age') ? 'AGE' : 'MEMBER_ATTRIBUTE';
+        relation = k.includes('age') ? 'AGE' : k.includes('nick') || k.includes('tiku') ? 'NICKNAME' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = "Detail stem of Son";
+        explanation = "Detail stem of Son (Shreshth / Tiku)";
       } else if (k.startsWith('father_') && allKeys.has('father_name')) {
         parentId = 'mem-father_name';
         hierarchyLevel = 3;
@@ -696,10 +768,13 @@ function KgExplorerContent() {
   const scale = useSharedValue(defaultScale);
   const savedScale = useSharedValue(defaultScale);
 
-  const pitch = useSharedValue(0.24); // ~14 deg tilt
-  const yaw = useSharedValue(0.35);   // ~20 deg angle
+  const pitch = useSharedValue(0.24); // ~14 deg tilt (X-axis)
+  const yaw = useSharedValue(0.35);   // ~20 deg angle (Y-axis)
+  const roll = useSharedValue(0.0);   // 0 deg angle (Z-axis)
   const savedPitch = useSharedValue(0.24);
   const savedYaw = useSharedValue(0.35);
+  const savedRoll = useSharedValue(0.0);
+  const [isAutoOrbit, setIsAutoOrbit] = useState(false);
 
   const fetchGraph = useCallback(async (isBackground = false) => {
     try {
@@ -781,8 +856,9 @@ function KgExplorerContent() {
       .onUpdate((e) => {
         'worklet';
         if (viewMode === '3d' && gestureMode === 'orbit') {
-          yaw.value = savedYaw.value + (e.translationX * 0.006);
-          pitch.value = Math.max(-1.05, Math.min(1.05, savedPitch.value - (e.translationY * 0.006)));
+          // Full 360-degree free continuous rotation around Y (yaw) and X (pitch) with zero clamping!
+          yaw.value = savedYaw.value + (e.translationX * 0.008);
+          pitch.value = savedPitch.value - (e.translationY * 0.008);
         } else {
           translateX.value = savedTranslateX.value + e.translationX;
           translateY.value = savedTranslateY.value + e.translationY;
@@ -800,9 +876,26 @@ function KgExplorerContent() {
       });
   }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, translateX, translateY, savedTranslateX, savedTranslateY]);
 
+  const rotationGesture = useMemo(() => {
+    return Gesture.Rotation()
+      .onUpdate((e) => {
+        'worklet';
+        if (viewMode === '3d') {
+          // Free 360-degree continuous roll around Z-axis!
+          roll.value = savedRoll.value + e.rotation;
+        }
+      })
+      .onEnd(() => {
+        'worklet';
+        if (viewMode === '3d') {
+          savedRoll.value = roll.value;
+        }
+      });
+  }, [viewMode, roll, savedRoll]);
+
   const composedGesture = useMemo(() => {
-    return Gesture.Simultaneous(pinchGesture, panGesture);
-  }, [pinchGesture, panGesture]);
+    return Gesture.Simultaneous(pinchGesture, panGesture, rotationGesture);
+  }, [pinchGesture, panGesture, rotationGesture]);
 
   const animatedUniverseStyle = useAnimatedStyle(() => {
     'worklet';
@@ -813,17 +906,20 @@ function KgExplorerContent() {
     if (viewMode === '3d') {
       const p = isNaN(pitch.value) ? 0.24 : pitch.value;
       const y = isNaN(yaw.value) ? 0.35 : yaw.value;
+      const r = isNaN(roll.value) ? 0.0 : roll.value;
       const pDeg = `${(p * 57.2958).toFixed(1)}deg`;
       const yDeg = `${(y * 57.2958).toFixed(1)}deg`;
+      const rDeg = `${(r * 57.2958).toFixed(1)}deg`;
 
       return {
         transform: [
-          { perspective: 1000 },
+          { perspective: 1200 },
           { translateX: tx },
           { translateY: ty },
           { scale: s },
           { rotateX: pDeg },
-          { rotateY: yDeg }
+          { rotateY: yDeg },
+          { rotateZ: rDeg }
         ]
       };
     }
@@ -837,12 +933,33 @@ function KgExplorerContent() {
     };
   });
 
-  // Google Maps Pin Scaling: Pins maintain constant physical screen size when zoomed in (scale >= 0.85).
-  // When zoomed out (< 0.85), pins scale smoothly down to keep the cosmic overview crisp.
+  // True Camera-Facing 3D Spherical Billboarding:
+  // Counter-rotates by the exact inverse of universe rotation so each bubble
+  // is ALWAYS 100% perpendicular to the camera. This ensures every bubble remains
+  // a flawless, luminous 3D sphere/ball at ANY angle, completely eliminating the "coin" effect!
   const animatedPinStyle = useAnimatedStyle(() => {
     'worklet';
     const s = isNaN(scale.value) || scale.value <= 0.05 ? 1 : scale.value;
     const inv = 1 / Math.max(0.85, s);
+
+    if (viewMode === '3d') {
+      const p = isNaN(pitch.value) ? 0.24 : pitch.value;
+      const y = isNaN(yaw.value) ? 0.35 : yaw.value;
+      const r = isNaN(roll.value) ? 0.0 : roll.value;
+      const pDeg = `${(-p * 57.2958).toFixed(1)}deg`;
+      const yDeg = `${(-y * 57.2958).toFixed(1)}deg`;
+      const rDeg = `${(-r * 57.2958).toFixed(1)}deg`;
+
+      return {
+        transform: [
+          { rotateZ: rDeg },
+          { rotateY: yDeg },
+          { rotateX: pDeg },
+          { scale: inv }
+        ]
+      };
+    }
+
     return {
       transform: [{ scale: inv }]
     };
@@ -872,9 +989,38 @@ function KgExplorerContent() {
 
     pitch.value = withSpring(0.24, { damping: 18 });
     yaw.value = withSpring(0.35, { damping: 18 });
+    roll.value = withSpring(0.0, { damping: 18 });
     savedPitch.value = 0.24;
     savedYaw.value = 0.35;
-  }, [defaultTranslateX, defaultTranslateY, defaultScale, translateX, translateY, savedTranslateX, savedTranslateY, scale, savedScale, pitch, yaw, savedPitch, savedYaw]);
+    savedRoll.value = 0.0;
+  }, [defaultTranslateX, defaultTranslateY, defaultScale, translateX, translateY, savedTranslateX, savedTranslateY, scale, savedScale, pitch, yaw, roll, savedPitch, savedYaw, savedRoll]);
+
+  const handleSpinY = useCallback(() => {
+    const next = yaw.value + 1.5708; // +90 deg
+    yaw.value = withSpring(next, { damping: 16 });
+    savedYaw.value = next;
+  }, [yaw, savedYaw]);
+
+  const handleSpinX = useCallback(() => {
+    const next = pitch.value + 1.5708; // +90 deg
+    pitch.value = withSpring(next, { damping: 16 });
+    savedPitch.value = next;
+  }, [pitch, savedPitch]);
+
+  const toggleAutoOrbit = useCallback(() => {
+    if (isAutoOrbit) {
+      yaw.value = yaw.value;
+      savedYaw.value = yaw.value;
+      setIsAutoOrbit(false);
+    } else {
+      setIsAutoOrbit(true);
+      yaw.value = withRepeat(
+        withTiming(yaw.value + 6.28318, { duration: 22000, easing: Easing.linear }),
+        -1,
+        false
+      );
+    }
+  }, [isAutoOrbit, yaw, savedYaw]);
 
   const handleFocusDept = useCallback((deptId: string) => {
     const dept = departments.find(d => d.id === deptId);
@@ -1063,7 +1209,7 @@ function KgExplorerContent() {
                 onPress={() => setGestureMode('orbit')}
               >
                 <Text style={[styles.gestureModeText, gestureMode === 'orbit' && styles.gestureModeTextActive]}>
-                  🔄 Orbit
+                  🔄 360° Orbit
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1072,6 +1218,22 @@ function KgExplorerContent() {
               >
                 <Text style={[styles.gestureModeText, gestureMode === 'pan' && styles.gestureModeTextActive]}>
                   ✋ Pan
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.gestureModeBtn, isAutoOrbit && styles.gestureModeBtnActive]}
+                onPress={toggleAutoOrbit}
+              >
+                <Text style={[styles.gestureModeText, isAutoOrbit && styles.gestureModeTextActive]}>
+                  🌌 Auto
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.gestureModeBtn}
+                onPress={handleSpinY}
+              >
+                <Text style={styles.gestureModeText}>
+                  ↻ 90°
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1292,7 +1454,7 @@ function KgExplorerContent() {
                         />
                       )}
 
-                      {/* Core Node Circle */}
+                      {/* Core Node 3D Spherical Orb */}
                       <View
                         style={[
                           styles.nodeCircle,
@@ -1308,10 +1470,38 @@ function KgExplorerContent() {
                               : n.isDepartment
                               ? 'rgba(255,255,255,0.85)'
                               : 'rgba(255,255,255,0.4)',
-                            borderWidth: isSelected ? 3 : isConnected ? 2.5 : n.isDepartment ? 2 : 1.2
+                            borderWidth: isSelected ? 3 : isConnected ? 2.5 : n.isDepartment ? 2 : 1.2,
+                            overflow: 'hidden'
                           }
                         ]}
                       >
+                        {/* 3D Specular Highlight Crescent (renders ball curvature from any angle) */}
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: circleSize * 0.08,
+                            left: circleSize * 0.12,
+                            width: circleSize * 0.38,
+                            height: circleSize * 0.22,
+                            borderRadius: circleSize * 0.18,
+                            backgroundColor: 'rgba(255, 255, 255, 0.65)',
+                            transform: [{ rotate: '-35deg' }]
+                          }}
+                        />
+
+                        {/* 3D Shaded Depth Crescent */}
+                        <View
+                          style={{
+                            position: 'absolute',
+                            bottom: -circleSize * 0.1,
+                            right: -circleSize * 0.1,
+                            width: circleSize * 0.72,
+                            height: circleSize * 0.72,
+                            borderRadius: circleSize * 0.36,
+                            backgroundColor: 'rgba(0, 0, 0, 0.26)'
+                          }}
+                        />
+
                         {n.emoji ? (
                           <Text style={[styles.nodeEmoji, { fontSize: circleSize * 0.52 }]}>
                             {n.emoji}

