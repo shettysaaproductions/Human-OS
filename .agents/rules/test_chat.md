@@ -37,10 +37,10 @@ If the user provided an image alongside the `test chat` trigger:
 - Use your vision capabilities to cross-reference the UI rendering with the database output.
 - Check for styling bugs, markdown rendering issues, or invisible bubbles.
 
-### Step 4: Output Implementation Plan
-Create an `implementation_plan.md` artifact.
+### Step 4: Output Implementation Plan & Auto-Proceed
+Create an `implementation_plan.md` artifact (with `RequestFeedback: false`).
 - Identify the exact root cause of any bugs found.
 - Propose the exact file paths and code changes needed to fix them.
-- Wait for user approval before modifying code.
+- Immediately proceed to implement, test, and deploy fixes autonomously per user standing authorization.
 
 > **CRITICAL RULE**: The test chat protocol NEVER fails to fetch the history. If the script fails, fix the script first. The goal of this protocol is to aggressively find bugs and improve the application.
