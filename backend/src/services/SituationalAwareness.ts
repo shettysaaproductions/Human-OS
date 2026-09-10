@@ -40,6 +40,7 @@ export interface SituationContext {
   goalMemories?: { key: string; value: string; memory_type?: string }[];
   activeLifeThreads?: { id: string; topic: string; state: string; priority: string; provenance?: string; last_relevant_at?: string }[]; // Phase 8 Life Threads
   lifeStageSummary?: string; // Phase 12 Life Stage, Stakes & Purpose Summary
+  blueprintDiscoveryNote?: string; // Progressive Personal Life Blueprint Discovery Note
 }
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
@@ -135,6 +136,11 @@ export class SituationalAwareness {
     // ── User Life Stage & Real-World Stakes (Phase 12) ──
     if (ctx.lifeStageSummary) {
       lines.push(`- 🎯 USER LIFE STAGE, PURPOSE & STAKES:\n  ${ctx.lifeStageSummary}`);
+    }
+
+    // ── Personal Life Blueprint Discovery (Phase 13) ──
+    if (ctx.blueprintDiscoveryNote) {
+      lines.push(ctx.blueprintDiscoveryNote);
     }
 
     // ── User Presence / Last-Seen (read-receipt awareness) ──
