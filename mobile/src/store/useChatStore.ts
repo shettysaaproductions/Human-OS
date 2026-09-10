@@ -188,9 +188,14 @@ function startQueueWatchdog(processQueueFn: () => Promise<void>) {
 
 // ── Pending queue persistence (survives app swipe-away) ─────────────────────
 const QUEUE_KEY = 'humanOs_pendingQueue';
-async function savePendingQueue(queue: { id: string; content: string; replyToId?: string; replyToContent?: string; }[]) {
+async function savePendingQueue(queue: { id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string; }[]) {
   try {
-    await SecureStore.setItemAsync(QUEUE_KEY, JSON.stringify(queue));
+    // Strip heavy base64 image data to prevent exceeding Android SecureStore limits (< 2KB)
+    const sanitized = queue.map(item => {
+      const { imageBase64, ...rest } = item;
+      return rest;
+    });
+    await SecureStore.setItemAsync(QUEUE_KEY, JSON.stringify(sanitized));
   } catch (e) {
     console.warn('[QUEUE] Failed to persist queue:', e);
   }
@@ -267,7 +272,11 @@ const MSG_CACHE_KEY = 'humanOs_messageCache';
 const CONV_CACHE_KEY = 'humanOs_conversationId';
 async function saveMessageCache(messages: Message[], conversationId: string | null) {
   try {
-    const toCache = messages.filter(m => m.status !== 'sending' && m.status !== 'error').slice(-50);
+    // Strip heavy base64 image strings and exclude error/failed/sending states
+    const toCache = messages
+      .filter(m => m.status !== 'sending' && m.status !== 'error' && m.status !== 'failed')
+      .slice(-50)
+      .map(m => (m.image_base64 ? { ...m, image_base64: undefined } : m));
     await SecureStore.setItemAsync(MSG_CACHE_KEY, JSON.stringify(toCache));
     if (conversationId) await SecureStore.setItemAsync(CONV_CACHE_KEY, conversationId);
   } catch (e) {
@@ -356,6 +365,29 @@ export const isInternalContextRow = (content?: string) =>
     content.startsWith('/proactive') ||
     content.startsWith('/checkin')
   );
+
+// Deterministic message comparator: sorts chronologically, breaks ties by placing user message
+// before assistant reply, and maintains sequential part order for split chunks (_part_1, _part_2).
+export const compareMessagesDeterministic = (a: Message, b: Message): number => {
+  const timeA = new Date(a.timestamp || 0).getTime();
+  const timeB = new Date(b.timestamp || 0).getTime();
+  if (timeA !== timeB) {
+    return timeA - timeB;
+  }
+  // Tie-breaker 1: user queries precede assistant replies
+  if (a.role === 'user' && b.role === 'assistant') return -1;
+  if (a.role === 'assistant' && b.role === 'user') return 1;
+
+  // Tie-breaker 2: part ordering for split chunks (e.g. msg_123_part_1 vs msg_123_part_2)
+  const aPartMatch = a.id.match(/_part_(\d+)$/);
+  const bPartMatch = b.id.match(/_part_(\d+)$/);
+  const aPart = a.chunkIndex ?? (aPartMatch ? parseInt(aPartMatch[1], 10) : 0);
+  const bPart = b.chunkIndex ?? (bPartMatch ? parseInt(bPartMatch[1], 10) : 0);
+  if (aPart !== bPart) return aPart - bPart;
+
+  // Tie-breaker 3: deterministic ID comparison
+  return a.id.localeCompare(b.id);
+};
 
 let _queueTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -658,8 +690,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           );
           const mergedMessages = [...freshMessages, ...localExtra];
 
-          // Sort merged messages by timestamp to prevent backdated display
-          mergedMessages.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+          // Sort merged messages deterministically by timestamp, role, and chunk part
+          mergedMessages.sort(compareMessagesDeterministic);
 
           set({
             messages: mergedMessages,
@@ -844,7 +876,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     retryMessage: async (messageId: string) => {
       const state = get();
-      const msg = state.messages.find(m => m.id === messageId && m.status === 'error');
+      const msg = state.messages.find(m => m.id === messageId && (m.status === 'error' || m.status === 'failed'));
       if (!msg) return;
 
       set((s) => ({
@@ -1047,7 +1079,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
           set((s) => {
             const combined = [...s.messages, ...newMessages];
-            combined.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+            combined.sort(compareMessagesDeterministic);
             return {
               messages: combined,
               isTyping: delayedChunks.length > 0 ? true : s.isTyping,
@@ -1086,7 +1118,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                   if (s.messages.some(m => m.id === msg.id)) return s;
                   const msgWithFreshTime = { ...msg, timestamp: new Date().toISOString() };
                   const combined = [...s.messages, msgWithFreshTime];
-                  combined.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+                  combined.sort(compareMessagesDeterministic);
                   return {
                     messages: combined,
                     isTyping: index < delayedChunks.length - 1,

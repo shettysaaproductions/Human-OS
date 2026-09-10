@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Animated } from 'react-native';
-import { useTheme } from '@react-navigation/native';
+import { useTheme } from '../theme/ThemeContext';
 import { api } from '../services/api';
 
 interface ThoughtBubbleProps {
@@ -112,9 +112,9 @@ export const ThoughtBubble: React.FC<ThoughtBubbleProps> = ({ messageId }) => {
         onPress={toggleExpand}
         activeOpacity={0.6}
       >
-        <Text style={[styles.headerText, { color: colors.text, opacity: 0.7 }]}>🧠 Nova's Subconscious</Text>
+        <Text style={[styles.headerText, { color: colors.textSecondary, opacity: 0.85 }]}>🧠 Nova's Subconscious</Text>
         <Animated.View style={{ transform: [{ rotate: rotateInterpolate }] }}>
-          <Text style={[styles.chevronIcon, { color: colors.text, opacity: 0.7 }]}>›</Text>
+          <Text style={[styles.chevronIcon, { color: colors.textSecondary, opacity: 0.85 }]}>›</Text>
         </Animated.View>
       </TouchableOpacity>
 

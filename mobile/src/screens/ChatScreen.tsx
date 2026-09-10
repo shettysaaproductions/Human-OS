@@ -27,6 +27,7 @@ import * as ImagePicker from 'expo-image-picker';
 const formatTime = (dateString?: string) => {
   if (!dateString) return '';
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
   let hours = date.getHours();
   const minutes = date.getMinutes();
   const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -39,6 +40,7 @@ const formatTime = (dateString?: string) => {
 const formatDateSeparator = (dateString?: string) => {
   if (!dateString) return '';
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -425,6 +427,207 @@ function NovaLoader() {
   );
 }
 
+// ── Lifestyle Tracks for Autonomous Smart Living Companion ────────────────────
+interface LifestylePrompt {
+  id: string;
+  category: string;
+  emoji: string;
+  title: string;
+  description: string;
+  prompt: string;
+  badge: string;
+  color: string;
+}
+
+const LIFESTYLE_TRACKS: LifestylePrompt[] = [
+  {
+    id: 'fitness',
+    category: 'Fitness',
+    emoji: '🏋️',
+    title: 'Fitness & Health',
+    description: 'Log workout, meals & health routine',
+    prompt: "Let's log my workout and diet today. Keep me accountable on my fitness goals!",
+    badge: 'Fitness',
+    color: '#10B981',
+  },
+  {
+    id: 'student',
+    category: 'Student',
+    emoji: '🎓',
+    title: 'Student & Learning',
+    description: 'Exam prep, study routines & concepts',
+    prompt: "Help me create an exam study schedule for this week with deep work blocks.",
+    badge: 'Learning',
+    color: '#3B82F6',
+  },
+  {
+    id: 'work',
+    category: 'Work',
+    emoji: '💼',
+    title: 'Work & Productivity',
+    description: 'Daily standup, priorities & sprint focus',
+    prompt: "Plan my top 3 high-impact focus blocks and action items for today.",
+    badge: 'Career',
+    color: '#8B5CF6',
+  },
+  {
+    id: 'pet',
+    category: 'Pet Parent',
+    emoji: '🐾',
+    title: 'Pet Parent',
+    description: 'Feeding times, walks & vet tracking',
+    prompt: "Help me track my pet's feeding routine, walking times, and vet checkups.",
+    badge: 'Pet Care',
+    color: '#F59E0B',
+  },
+  {
+    id: 'creative',
+    category: 'Creative',
+    emoji: '🎨',
+    title: 'Creative & Ideas',
+    description: 'Brainstorming, drafting & new angles',
+    prompt: "Brainstorm 5 innovative concepts and fresh angles for my new creative project.",
+    badge: 'Creative',
+    color: '#EC4899',
+  },
+  {
+    id: 'habits',
+    category: 'Habits',
+    emoji: '🧘',
+    title: 'Habits & Mindset',
+    description: 'Morning rituals & evening reflection',
+    prompt: "Set up a high-energy morning routine and a quick evening reflection for my habits.",
+    badge: 'Mindset',
+    color: '#6366F1',
+  },
+];
+
+const QUICK_ACTION_CHIPS = [
+  { id: 'remind', icon: '⏰', label: 'Remind', prefix: 'Remind me to ' },
+  { id: 'goal', icon: '🎯', label: 'Goal', prefix: 'My goal is: ' },
+  { id: 'note', icon: '📝', label: 'Note', prefix: 'Note: ' },
+  { id: 'routine', icon: '🌿', label: 'Routine', prefix: 'My routine today is: ' },
+  { id: 'brain', icon: '🧠', label: 'Brain Galaxy', isNavigation: true },
+];
+
+function LifestyleOnboardingHub({
+  colors,
+  onSelectPrompt,
+  onCustomize,
+}: {
+  colors: any;
+  onSelectPrompt: (text: string) => void;
+  onCustomize: (text: string) => void;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const categories = ['All', 'Fitness', 'Student', 'Work', 'Pet Parent', 'Creative', 'Habits'];
+
+  const filtered = selectedCategory === 'All'
+    ? LIFESTYLE_TRACKS
+    : LIFESTYLE_TRACKS.filter(t => t.category === selectedCategory);
+
+  return (
+    <View style={[s.lifestyleHubContainer, { transform: [{ scaleY: -1 }] }]}>
+      {/* Hero Avatar & Mindset */}
+      <View style={s.lifestyleHero}>
+        <View style={s.lifestyleAvatarOrb}>
+          <Text style={s.lifestyleAvatarText}>N</Text>
+        </View>
+        <Text style={[s.lifestyleTitle, { color: colors.textPrimary }]}>Meet Nova</Text>
+        <Text style={[s.lifestyleSubtitle, { color: colors.textSecondary }]}>
+          Your autonomous living companion • Connected to memory & cognitive mind
+        </Text>
+        <View style={s.lifestyleStatusPill}>
+          <View style={s.onlineDotPulse} />
+          <Text style={s.lifestyleStatusText}>Ready to empower your lifestyle</Text>
+        </View>
+      </View>
+
+      {/* Category Pills */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.categoryScrollContent}
+        style={s.categoryScroll}
+      >
+        {categories.map(cat => {
+          const isActive = selectedCategory === cat;
+          return (
+            <TouchableOpacity
+              key={cat}
+              style={[
+                s.catPill,
+                { borderColor: isActive ? '#8B5CF6' : colors.border },
+                isActive && { backgroundColor: 'rgba(139, 92, 246, 0.2)' }
+              ]}
+              onPress={() => setSelectedCategory(cat)}
+            >
+              <Text
+                style={[
+                  s.catPillText,
+                  { color: isActive ? '#A78BFA' : colors.textSecondary }
+                ]}
+              >
+                {cat}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* Lifestyle Cards */}
+      <View style={s.tracksGrid}>
+        {filtered.map(track => (
+          <View
+            key={track.id}
+            style={[
+              s.trackCard,
+              { backgroundColor: 'rgba(255, 255, 255, 0.03)', borderColor: colors.border }
+            ]}
+          >
+            <View style={s.trackCardHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontSize: 20 }}>{track.emoji}</Text>
+                <Text style={[s.trackTitle, { color: colors.textPrimary }]}>{track.title}</Text>
+              </View>
+              <View style={[s.trackBadge, { backgroundColor: `${track.color}20`, borderColor: `${track.color}40` }]}>
+                <Text style={[s.trackBadgeText, { color: track.color }]}>{track.badge}</Text>
+              </View>
+            </View>
+
+            <Text style={[s.trackDesc, { color: colors.textSecondary }]}>
+              {track.description}
+            </Text>
+
+            <View style={s.promptBox}>
+              <Text style={s.promptPreview} numberOfLines={2}>
+                "{track.prompt}"
+              </Text>
+            </View>
+
+            <View style={s.trackActionsRow}>
+              <TouchableOpacity
+                style={[s.trackActionBtn, { backgroundColor: '#8B5CF6' }]}
+                onPress={() => onSelectPrompt(track.prompt)}
+                activeOpacity={0.7}
+              >
+                <Text style={s.trackActionBtnText}>Send Now ↑</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.trackCustomizeBtn, { borderColor: colors.border }]}
+                onPress={() => onCustomize(track.prompt)}
+                activeOpacity={0.7}
+              >
+                <Text style={[s.trackCustomizeBtnText, { color: colors.textSecondary }]}>Edit ✏️</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function SwipeableBubble({ item, children, onReply }: { item: Message, children: React.ReactNode, onReply: (msg: Message) => void }) {
   const swipeRef = useRef<any>(null);
   return (
@@ -456,12 +659,12 @@ export function ChatScreen() {
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [versionModalMessage, setVersionModalMessage] = useState<Message | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const inputRef = useRef<TextInput>(null);
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
   const isFocused = useIsFocused();
   const [isOffline, setIsOffline] = useState(false);
-
 
   const isSelectionMode = selectedMessageIds.length > 0;
   
@@ -482,19 +685,25 @@ export function ChatScreen() {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const showScrollDownRef = useRef(false);
 
-  useEffect(() => {
-    const listenerId = mainScrollY.addListener(({ value }) => {
-      currentOffsetRef.current = value;
-      isNearBottomRef.current = value < 100;
-      
-      const shouldShow = value > 250;
-      if (shouldShow !== showScrollDownRef.current) {
-        showScrollDownRef.current = shouldShow;
-        setShowScrollDown(shouldShow);
+  const handleScroll = useRef(
+    Animated.event(
+      [{ nativeEvent: { contentOffset: { y: mainScrollY } } }],
+      {
+        useNativeDriver: false,
+        listener: (e: any) => {
+          presenceService.onUserActivity();
+          const y = e.nativeEvent?.contentOffset?.y ?? 0;
+          currentOffsetRef.current = y;
+          isNearBottomRef.current = y < 100;
+          const shouldShow = y > 250;
+          if (shouldShow !== showScrollDownRef.current) {
+            showScrollDownRef.current = shouldShow;
+            setShowScrollDown(shouldShow);
+          }
+        }
       }
-    });
-    return () => mainScrollY.removeListener(listenerId);
-  }, [mainScrollY]);
+    )
+  ).current;
 
   const logEvent = (eventName: string, explicitOffset?: number) => {
     const offset = explicitOffset !== undefined ? explicitOffset : currentOffsetRef.current;
@@ -619,17 +828,21 @@ export function ChatScreen() {
     setChatScreenActive(isFocused);
   }, [isFocused]);
 
-  const handleSend = useCallback(() => {
-    if (!inputText.trim() && !selectedImage) return;
+  const handleSend = useCallback((overrideText?: string) => {
+    const textToEvaluate = typeof overrideText === 'string' ? overrideText : inputText;
+    if (!textToEvaluate.trim() && !selectedImage) return;
     
     presenceService.onMessageSent();
     
     // If only image is sent with no text, use a meaningful placeholder so backend min(1) passes
-    const textToSend = inputText.trim() || '📷 (image attached)';
+    const textToSend = textToEvaluate.trim() || '📷 (image attached)';
     sendMessage(textToSend, selectedImage?.base64);
-    setInputText('');
+    if (typeof overrideText !== 'string') {
+      setInputText('');
+    }
     setSelectedImage(null);
     isNearBottomRef.current = true;
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, [inputText, selectedImage, sendMessage]);
 
   const handlePickImage = useCallback(() => {
@@ -677,13 +890,6 @@ export function ChatScreen() {
     );
   }, []);
 
-  const handleScroll = useCallback((event: any) => {
-    presenceService.onUserActivity();
-    const { contentOffset } = event.nativeEvent;
-    currentOffsetRef.current = contentOffset.y;
-    const paddingToBottom = 150;
-    isNearBottomRef.current = contentOffset.y < paddingToBottom;
-  }, []);
   const renderItem = useCallback(({ item, index }: { item: Message, index: number }) => {
     const isUser = item.role === 'user';
     
@@ -691,8 +897,12 @@ export function ChatScreen() {
     if (isUser) {
       if (item.status === 'sending') {
         StatusIcon = <Text style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 4 }}>🕒</Text>;
-      } else if (item.status === 'error') {
-        StatusIcon = <Text style={{ fontSize: 10, color: '#EF4444', marginLeft: 4 }}>❌</Text>;
+      } else if (item.status === 'error' || item.status === 'failed') {
+        StatusIcon = (
+          <TouchableOpacity onPress={() => retryMessage(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={{ fontSize: 10, color: '#EF4444', marginLeft: 4 }}>❌</Text>
+          </TouchableOpacity>
+        );
       } else if (item.status === 'responded') {
         StatusIcon = <Text style={{ fontSize: 10, color: '#3B82F6', marginLeft: 4 }}>✓✓</Text>;
       } else {
@@ -883,6 +1093,15 @@ export function ChatScreen() {
               </Text>
               {isUser && StatusIcon}
             </View>
+            {isUser && (item.status === 'error' || item.status === 'failed') && (
+              <TouchableOpacity
+                style={s.retryButton}
+                onPress={() => retryMessage(item.id)}
+                activeOpacity={0.7}
+              >
+                <Text style={s.retryText}>↺ Tap to retry</Text>
+              </TouchableOpacity>
+            )}
             </View>
           </View>
           
@@ -901,13 +1120,14 @@ export function ChatScreen() {
             </View>
           )}
           
-          {item.options && item.options.length > 0 && !isUser && (
+          {item.options && item.options.length > 0 && !isUser && index <= 1 && (
             <View style={s.optionsContainer}>
               {item.options.map((option, idx) => (
                 <TouchableOpacity
                   key={idx}
                   style={s.optionChip}
-                  onPress={() => sendMessage(option)}
+                  onPress={() => handleSend(option)}
+                  activeOpacity={0.7}
                 >
                   <Text style={s.optionText}>{option}</Text>
                 </TouchableOpacity>
@@ -918,7 +1138,7 @@ export function ChatScreen() {
         </SwipeableBubble>
       </View>
     );
-  }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage]);
+  }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage, handleSend, setReplyingTo, setVersionModalMessage]);
 
   if (!isHydrated) {
     return (
@@ -932,7 +1152,7 @@ export function ChatScreen() {
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={[s.container, { backgroundColor: colors.background }]}
-        behavior="padding"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <OfflineBanner visible={isOffline} />
@@ -1054,14 +1274,12 @@ export function ChatScreen() {
             inverted
             data={reversedMessages}
             showsVerticalScrollIndicator={false}
-            extraData={selectedMessageIds}
+            extraData={messages.length + (selectedMessageIds.length > 0 ? selectedMessageIds[0] : '') + (isTyping ? '1' : '0')}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
-            onScroll={(e) => {
-              Animated.event([{ nativeEvent: { contentOffset: { y: mainScrollY } } }], { useNativeDriver: false })(e);
-              presenceService.onUserActivity();
-            }}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             onContentSizeChange={(w, h) => {
               setMainWidths(prev => ({ ...prev, content: h }));
               logEvent('ON_CONTENT_SIZE_CHANGE');
@@ -1102,11 +1320,14 @@ export function ChatScreen() {
             }
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
-              <View style={s.emptyChat}>
-                <Text style={s.emptyChatEmoji}>🌌</Text>
-                <Text style={[s.emptyChatText, { color: colors.textPrimary }]}>Hi, I'm Nova.</Text>
-                <Text style={[s.emptyChatSubtext, { color: colors.textSecondary }]}>Tell me about yourself — your goals, your day, what's on your mind. I remember everything.</Text>
-              </View>
+              <LifestyleOnboardingHub
+                colors={colors}
+                onSelectPrompt={(prompt) => handleSend(prompt)}
+                onCustomize={(prompt) => {
+                  setInputText(prompt);
+                  inputRef.current?.focus();
+                }}
+              />
             }
           />
 
@@ -1205,6 +1426,34 @@ export function ChatScreen() {
           </View>
         )}
 
+        {/* Smart Quick Actions Bar */}
+        <View style={s.quickActionsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.quickActionsScroll}
+          >
+            {QUICK_ACTION_CHIPS.map(chip => (
+              <TouchableOpacity
+                key={chip.id}
+                style={[s.quickActionChip, { backgroundColor: 'rgba(139, 92, 246, 0.12)', borderColor: 'rgba(139, 92, 246, 0.28)' }]}
+                onPress={() => {
+                  if (chip.isNavigation) {
+                    navigation.navigate('Brain');
+                  } else if (chip.prefix) {
+                    setInputText(chip.prefix);
+                    inputRef.current?.focus();
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 13, marginRight: 5 }}>{chip.icon}</Text>
+                <Text style={[s.quickActionText, { color: '#C4B5FD' }]}>{chip.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
         {/* Input */}
         <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>
           {selectedImage && (
@@ -1224,21 +1473,39 @@ export function ChatScreen() {
             <TouchableOpacity onPress={handlePickImage} style={{ padding: 10 }}>
               <Text style={{ fontSize: 24 }}>👁️</Text>
             </TouchableOpacity>
-            <TextInput
-              style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg, marginLeft: 4 }]}
-              value={inputText}
-              onChangeText={(text) => {
-                setInputText(text);
-                presenceService.onTypingStart();
-              }}
-              placeholder="Message Nova..."
-              placeholderTextColor={colors.placeholder}
-              multiline
-              maxLength={2000}
-            />
+            <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
+              <TextInput
+                ref={inputRef}
+                style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg, marginLeft: 4, paddingRight: inputText ? 36 : 16 }]}
+                value={inputText}
+                onChangeText={(text) => {
+                  setInputText(text);
+                  presenceService.onTypingStart();
+                }}
+                placeholder="Message Nova..."
+                placeholderTextColor={colors.placeholder}
+                multiline
+                maxLength={2000}
+                textAlignVertical="center"
+              />
+              {inputText.length > 0 && (
+                <TouchableOpacity
+                  style={s.clearInputBtn}
+                  onPress={() => setInputText('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={{ color: colors.textSecondary, fontSize: 14 }}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {inputText.length > 1800 && (
+              <Text style={[s.charCountText, { color: inputText.length >= 2000 ? '#EF4444' : '#F59E0B' }]}>
+                {inputText.length}/2000
+              </Text>
+            )}
             <TouchableOpacity
               style={[s.sendBtn, !inputText.trim() && !selectedImage && s.sendBtnDisabled]}
-              onPress={handleSend}
+              onPress={() => handleSend()}
               disabled={!inputText.trim() && !selectedImage}
             >
               <Text style={s.sendBtnText}>↑</Text>
@@ -1439,7 +1706,8 @@ const s = StyleSheet.create({
   input: {
     flex: 1,
     borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10,
-    fontSize: 16, maxHeight: 120, lineHeight: 22
+    fontSize: 16, maxHeight: 120, lineHeight: 22,
+    textAlignVertical: 'center',
   },
   sendBtn: {
     width: 36, height: 36, borderRadius: 18, backgroundColor: '#8B5CF6',
@@ -1688,5 +1956,205 @@ const s = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Quick Actions Bar
+  quickActionsContainer: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  quickActionsScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  quickActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  quickActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  clearInputBtn: {
+    position: 'absolute',
+    right: 12,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  charCountText: {
+    fontSize: 10,
+    fontWeight: '600',
+    alignSelf: 'center',
+    marginRight: 4,
+  },
+  // Lifestyle Onboarding Hub
+  lifestyleHubContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  lifestyleHero: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 16,
+  },
+  lifestyleAvatarOrb: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  lifestyleAvatarText: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: 'bold',
+  },
+  lifestyleTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  lifestyleSubtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 10,
+    maxWidth: 320,
+  },
+  lifestyleStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  onlineDotPulse: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#10B981',
+  },
+  lifestyleStatusText: {
+    color: '#6EE7B7',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  categoryScroll: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  categoryScrollContent: {
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  catPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  catPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  tracksGrid: {
+    width: '100%',
+    gap: 12,
+  },
+  trackCard: {
+    width: '100%',
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+  },
+  trackCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  trackTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  trackBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  trackBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  trackDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  promptBox: {
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    padding: 10,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#8B5CF6',
+    marginBottom: 12,
+  },
+  promptPreview: {
+    color: '#D1D5DB',
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 18,
+  },
+  trackActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  trackActionBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trackActionBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  trackCustomizeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trackCustomizeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

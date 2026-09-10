@@ -18,6 +18,7 @@ export const LiveThinkingIndicator: React.FC = () => {
 
   // Cycle thinking phrases
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const interval = setInterval(() => {
       Animated.sequence([
         Animated.timing(fadeAnim, {
@@ -32,12 +33,15 @@ export const LiveThinkingIndicator: React.FC = () => {
         }),
       ]).start();
 
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         setStepIndex((prev) => (prev + 1) % THOUGHT_STEPS.length);
       }, 250);
     }, 2400);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [fadeAnim]);
 
   // Pulse animation for the brain icon

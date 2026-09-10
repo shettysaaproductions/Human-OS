@@ -1,50 +1,59 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Backend Brain Section Optimization: In-Memory TTL Caching, Parallel DB Queries, Dynamic Wardrobes & Diverse Lifestyles Support
+2026-09-11 — Front-End Chat Section Bug Fixes, SecureStore Cache Protection & Autonomous Smart Living Companion Overhaul
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Fix backend Brain section bugs, eliminate slow sequential database bottlenecks, expand wardrobe and knowledge graph clustering to support any lifestyle, and synthesize goals/emotions/milestones.
+Task: Fix critical front-end bugs in the chat section, protect SecureStore from image overflow, optimize scroll performance to 60fps, wire up missing 1-tap retry, and build the Lifestyle Onboarding Hub and Smart Quick Actions Bar.
 
 ## Confirmed Findings & Root Cause Analysis
-1. **Goal Endpoint Blindness (`/analytics/goals`):**
-   - Previously exclusively queried `kg_nodes` where `entity_type = 'goal'`. Because goals extracted from conversation are written to `memories`, `kg_nodes` was empty for most users, causing empty states. `completedGoals` and `timeline` were hardcoded as empty arrays.
-2. **20s Polling Database Latency Bottleneck:**
-   - Mobile polls `/analytics/memories` and `/analytics/kg` every 20s.
-   - Handlers executed sequential roundtrips (~450ms total) repeatedly hitting Supabase.
-3. **Rigid Entity Wardrobes & Missing Diverse Lifestyles:**
-   - `clusterMemoriesIntoWardrobes` hardcoded wardrobes for 6 entities only. Routine reminders hardcoded Sakshi's birthday and 11-8 work shift for all users regardless of lifestyle.
-   - Users with pets, daughters, partners, workouts, education, or freelance ventures received no dedicated wardrobes.
-4. **Emotions and Timeline Placeholders:**
-   - Dominant emotions and trends were empty placeholders. Timeline omitted high-significance life milestone memories.
+1. **Missing 1-Tap Message Retry Handler (`ChatScreen.tsx`):**
+   - When a message failed (`status === 'error'` or `'failed'`), it displayed an un-clickable red `❌`. The stylesheet defined `s.retryButton` and `s.retryText`, and `retryMessage` was exported by `useChatStore`, but neither was wired into the message bubble.
+   - `useChatStore.ts`'s `retryMessage` only checked `m.status === 'error'`, ignoring `'failed'`.
+2. **SecureStore Size Overflow on Image Sends (`useChatStore.ts`):**
+   - Sending photos adds `image_base64` into messages. `saveMessageCache` and `savePendingQueue` serialized the entire raw base64 string into `SecureStore.setItemAsync`. On Android KeyStore / EncryptedSharedPreferences (max ~2KB), this threw `Size limit exceeded`, wiping the offline message cache on reopen.
+3. **Non-Deterministic Message Sorting & Part Scrambling (`useChatStore.ts`):**
+   - `mergedMessages.sort` only compared `timestamp`. When messages or split chunks shared the same second/millisecond timestamp, `Array.prototype.sort` scrambled chunk order (`part_2` before `part_1`) or put assistant replies before user queries.
+4. **Android Keyboard Jumping & Stuttering (`ChatScreen.tsx`):**
+   - `KeyboardAvoidingView` unconditionally used `behavior="padding"` on Android, conflicting with Expo's `softwareKeyboardLayoutMode: resize` and causing double insets.
+5. **Scroll Event Thrashing & Inline Allocation (`ChatScreen.tsx`):**
+   - `FlatList`'s `onScroll` re-instantiated `Animated.event` on every single touch frame (60-120/sec), causing garbage collection spikes. `scrollEventThrottle` was omitted.
+6. **Unsafe Date Parsing (`ChatScreen.tsx`):**
+   - `formatTime` and `formatDateSeparator` lacked `isNaN(date.getTime())` checks, outputting `NaN:NaN AM` or `NaN undefined NaN` on malformed timestamps.
+7. **Component Unmount Timeout Leak (`LiveThinkingIndicator.tsx`):**
+   - The 250ms phrase-cycling timeout in `LiveThinkingIndicator` was not stored in a ref or cleared upon unmount, causing React unmounted-state-update warnings.
+8. **Stale/Zombie Options (`ChatScreen.tsx`):**
+   - Option chips remained active across the entire chat history, allowing users to accidentally re-trigger historical prompts while scrolling.
+9. **Zero-Guidance Empty State for Diverse Lifestyles (`ChatScreen.tsx`):**
+   - Brand new users and users starting a new conversation faced a lonely text screen with zero interactive cues on how to use Nova for their personal lifestyle.
 
 ## Implemented Fixes
-1. **In-Memory TTL Caching & Query Parallelization (`backend/src/routes/analytics.ts`):**
-   - Implemented `analyticsCache` with 15-second user-scoped TTL returning cached Brain state in <1ms.
-   - Exported `invalidateAnalyticsCache(userId)`.
-   - Used `Promise.all` across `/analytics/memories`, `/analytics/kg`, and `/analytics/timeline` to run concurrent database queries (~150ms on cache miss).
-2. **Instant Cache Invalidation (`backend/src/routes/memoryManagement.ts`):**
-   - Invalidation hooked into `DELETE /:id`, `PATCH /:id/archive`, and `PATCH /:id` to guarantee instant freshness.
-   - Updated `KEY_LABELS` and `KEY_CATEGORIES` for lifestyle keys.
-3. **Goal Synthesis (`/analytics/goals` in `backend/src/routes/analytics.ts`):**
-   - Concurrently queries both `kg_nodes` and `memories` table for goal memories.
-   - Partitions into `activeGoals` (with progress, targetDate, category) and `completedGoals`, with milestone timeline.
-4. **Emotional Trajectories (`/analytics/emotions` in `backend/src/routes/analytics.ts`):**
-   - Computes dominant emotion frequency distribution and recent valence/energy trends with episodic memory fallback.
-5. **Milestone Timeline Integration (`/analytics/timeline` in `backend/src/routes/analytics.ts`):**
-   - Integrates high-importance life memories (`importance >= 7`) into the chronological feed alongside moments and episodic memories.
-6. **Diverse Lifestyle Wardrobes & Universal Neural Dots (`backend/src/lib/memoryDomains.ts` & `backend/src/lib/memoryKeySchema.ts`):**
-   - Added canonical keys: `pet_name`, `partner_name`, `workout_routine`, `diet_preference`, `sleep_schedule`, `education_degree`.
-   - Routine reminders now dynamically reflect user's real schedule, workout, and sleep routines without falsely attributing Sakshi's birthday to other users.
-   - Added dynamic entity wardrobes: `wardrobe-pet` (🐶/🐱/🐾), `wardrobe-person-daughter` (👧), `wardrobe-person-partner` (💍), `wardrobe-lifestyle-fitness` (🏋️), `wardrobe-goal-education` (🎓), and custom business ventures.
-   - Added universal cross-domain neural bridges: fitness ⇄ goals, education ⇄ career, pet ⇄ lifestyle, sleep ⇄ work.
-   - Enhanced `toGraphLabel` with dynamic work hours and lifestyle labels.
+1. **1-Tap Message Retry (`ChatScreen.tsx` & `useChatStore.ts`):**
+   - Attached retry handler to red `❌` status icon with hit slop and a dedicated `↺ Tap to retry` button below failed bubbles.
+   - Expanded `retryMessage` to support both `status === 'error'` and `status === 'failed'`.
+2. **SecureStore Cache Protection (`useChatStore.ts`):**
+   - Sanitized `imageBase64` in `savePendingQueue` and stripped `image_base64` from `saveMessageCache` before SecureStore persistence.
+3. **Deterministic Message Sorting (`useChatStore.ts`):**
+   - Implemented `compareMessagesDeterministic` enforcing timestamp order, user-before-assistant on ties, and numeric sequential ordering for split chunks (`_part_1`, `_part_2`).
+4. **60fps FlatList Scroll Optimization & Android Keyboard Fix (`ChatScreen.tsx`):**
+   - Replaced inline event allocation with a persistent `useRef` Animated listener and `scrollEventThrottle={16}`.
+   - Set `behavior={Platform.OS === 'ios' ? 'padding' : undefined}`.
+5. **Safe Date & Time Parsing (`ChatScreen.tsx`):**
+   - Added `isNaN(date.getTime())` guards to `formatTime` and `formatDateSeparator`.
+6. **LiveThinkingIndicator Memory Leak Fix (`LiveThinkingIndicator.tsx`):**
+   - Stored timeout in a ref and cleaned it up on unmount.
+7. **Interactive Lifestyle Onboarding Hub (`ChatScreen.tsx`):**
+   - Replaced empty chat state with a Lifestyle Hub supporting 6 tracks: Fitness & Health, Student & Learning, Work & Productivity, Pet Parent, Creative & Ideas, Habits & Mindset.
+   - Counter-inverted with `transform: [{ scaleY: -1 }]` to display properly in inverted FlatList.
+8. **Smart Quick Actions Bar & Input Refinements (`ChatScreen.tsx`):**
+   - Added floating horizontal Quick Action chips (`⏰ Remind`, `🎯 Goal`, `📝 Note`, `🌿 Routine`, `🧠 Brain Galaxy`).
+   - Added draft clear button `✕`, character limit warning (> 1800 chars), and instant scroll to offset 0 on send.
 
 ## Verification Status
-- `npm run build` in `backend`: EXIT 0 (Passed clean).
 - `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean).
+- `npm run build` in `backend`: EXIT 0 (Passed clean).
 - Full Unit Test Suite: 62/62 tests PASSED (100% across all suites).
 
 ## Standing Autonomous Directives
