@@ -164,6 +164,31 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'office_hours', 'office_days', 'working_schedule', 'work_timing', 'work_hours',
     'nai_morning_schedule', 'office_timing', 'office_timings', 'work_timings'
   ],
+  // ── Lifestyle Diversity: Pets, Fitness, Wellness, Partner, Education ────────
+  pet_name: [
+    'pets_name', 'pet', 'dog_name', 'dogs_name', 'cat_name', 'cats_name',
+    'pet_dog', 'pet_cat', 'mera_pet', 'pet_naam'
+  ],
+  partner_name: [
+    'partners_name', 'partner', 'boyfriend_name', 'girlfriend_name',
+    'significant_other', 'fiance_name', 'fiancee_name'
+  ],
+  workout_routine: [
+    'gym_routine', 'fitness_routine', 'workout_plan', 'exercise_routine',
+    'gym_schedule', 'fitness_schedule', 'kasrat_routine'
+  ],
+  diet_preference: [
+    'diet', 'eating_habit', 'dietary_preference', 'food_preference',
+    'diet_plan', 'vegetarian_status', 'diet_type'
+  ],
+  sleep_schedule: [
+    'sleeping_hours', 'bedtime', 'sleep_routine', 'sleep_timing',
+    'wake_up_time', 'morning_routine', 'wake_up_routine'
+  ],
+  education_degree: [
+    'college_name', 'university_name', 'school_name', 'degree',
+    'course_name', 'study_subject', 'major_subject', 'education'
+  ],
 };
 
 // ── Reverse lookup: alias → canonical key ─────────────────────────────────────

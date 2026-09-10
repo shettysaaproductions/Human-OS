@@ -4,6 +4,7 @@ import { memoryRepository } from '../services/memoryRepository';
 import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
+import { invalidateAnalyticsCache } from './analytics';
 
 export const memoryManagementRouter = Router();
 
@@ -33,6 +34,12 @@ const KEY_LABELS: Record<string, string> = {
   favourite_color: "Favourite color",
   favourite_beverage: "Favourite beverage",
   favourite_street_food: "Favourite street food",
+  pet_name: "Pet's name",
+  partner_name: "Partner's name",
+  workout_routine: "Workout routine",
+  diet_preference: "Dietary preference",
+  sleep_schedule: "Sleep & morning rhythm",
+  education_degree: "Education & degree",
 };
 
 // Category grouping for the Memory Browser
@@ -61,6 +68,12 @@ const KEY_CATEGORIES: Record<string, 'Personal' | 'Family' | 'Work' | 'Preferenc
   favourite_color: 'Preferences',
   favourite_beverage: 'Preferences',
   favourite_street_food: 'Preferences',
+  pet_name: 'Family',
+  partner_name: 'Family',
+  workout_routine: 'Preferences',
+  diet_preference: 'Preferences',
+  sleep_schedule: 'Personal',
+  education_degree: 'Work',
 };
 
 function getLabel(canonicalKey: string): string {
@@ -367,6 +380,7 @@ memoryManagementRouter.delete('/:id', async (req: Request, res: Response, next: 
 
     // Log without exposing raw memory value
     logger.info('User forgot memory', { memoryId: id, userId, action: 'forget' });
+    invalidateAnalyticsCache(userId);
 
     res.status(200).json({ success: true, message: 'Nova no longer uses this memory' });
   } catch (err) {
@@ -388,6 +402,7 @@ memoryManagementRouter.patch('/:id/archive', async (req: Request, res: Response,
     if (shouldArchive) {
       const ok = await memoryRepository.archiveMemory(userId, id, 'User archive via memory management');
       if (!ok) { res.status(404).json({ error: 'Memory not found' }); return; }
+      invalidateAnalyticsCache(userId);
       res.status(200).json({ success: true, data: { id, is_archived: true } });
       return;
     }
@@ -407,6 +422,7 @@ memoryManagementRouter.patch('/:id/archive', async (req: Request, res: Response,
       return;
     }
 
+    invalidateAnalyticsCache(userId);
     res.status(200).json({ success: true, data: { id, is_archived: false } });
   } catch (err) {
     logger.error('Failed to archive memory', { error: err instanceof Error ? err.message : String(err) });
@@ -480,6 +496,8 @@ memoryManagementRouter.patch('/:id', async (req: Request, res: Response, next: N
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    invalidateAnalyticsCache(userId);
 
     res.status(200).json({
       success: true,

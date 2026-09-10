@@ -62,15 +62,17 @@ export const DOMAIN_TAXONOMY: Record<LifeDomainKey, DomainMeta> = {
 
 // ── Key to Domain Pattern Mapping ─────────────────────────────────────────────
 const FAMILY_PATTERNS = [
-  'wife', 'husband', 'spouse', 'son', 'daughter', 'child', 'baby', 'kid',
-  'mother', 'father', 'mom', 'dad', 'sister', 'brother', 'family', 'parents',
+  'wife', 'husband', 'spouse', 'partner', 'fiance', 'fiancee', 'son', 'daughter',
+  'child', 'baby', 'kid', 'mother', 'father', 'mom', 'dad', 'sister', 'brother',
+  'family', 'parents', 'pet', 'dog', 'cat', 'puppy', 'kitten',
   'bhai', 'behen', 'maa', 'papa', 'beta', 'beti', 'biwi', 'patni'
 ];
 
 const WORK_PATTERNS = [
   'company', 'office', 'work', 'job', 'profession', 'workplace', 'schedule',
   'timing', 'candidate', 'interview', 'hiring', 'shift', 'boss', 'client',
-  'business', 'startup', 'conviction', 'login', 'logout', 'colleague'
+  'business', 'startup', 'conviction', 'login', 'logout', 'colleague',
+  'college', 'university', 'degree', 'course', 'study', 'education', 'project', 'freelance'
 ];
 
 const GOALS_PATTERNS = [
@@ -80,8 +82,8 @@ const GOALS_PATTERNS = [
 
 const LIFESTYLE_PATTERNS = [
   'favourite', 'favorite', 'food', 'beverage', 'drink', 'color', 'colour',
-  'street_food', 'hobby', 'hobbies', 'gym', 'workout', 'sleep', 'morning_routine',
-  'evening_routine', 'habit', 'diet', 'tea', 'coffee'
+  'street_food', 'hobby', 'hobbies', 'gym', 'workout', 'fitness', 'exercise',
+  'sleep', 'morning_routine', 'evening_routine', 'habit', 'diet', 'tea', 'coffee'
 ];
 
 const IDENTITY_PATTERNS = [
@@ -105,6 +107,10 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     k.startsWith('mother_') ||
     k.startsWith('wife_') ||
     k.startsWith('husband_') ||
+    k.startsWith('partner_') ||
+    k.startsWith('pet_') ||
+    k.includes('dog_') ||
+    k.includes('cat_') ||
     k.startsWith('son_') ||
     k.startsWith('daughter_') ||
     k.includes('nail_art')
@@ -112,7 +118,33 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     return DOMAIN_TAXONOMY.family;
   }
 
-  // 1b. Explicit work keys take priority over mistyped memory_type (e.g. Shetty's Dhaba)
+  // 1b. Explicit work & study keys take priority over mistyped memory_type
+  if (
+    k === 'company_name' ||
+    k === 'business_name' ||
+    k === 'work_schedule' ||
+    k === 'office_hours' ||
+    k === 'office_days' ||
+    k === 'candidates_for_job' ||
+    k === 'hope_for_job_selection' ||
+    k === 'current_company' ||
+    k === 'current_office_location' ||
+    k.startsWith('education_') ||
+    k.startsWith('university_') ||
+    k.startsWith('college_')
+  ) {
+    return DOMAIN_TAXONOMY.work;
+  }
+
+  // 1c. Explicit lifestyle & wellness keys
+  if (
+    k.startsWith('workout_') ||
+    k.startsWith('gym_') ||
+    k.startsWith('diet_') ||
+    k.startsWith('sleep_')
+  ) {
+    return DOMAIN_TAXONOMY.lifestyle;
+  }
   if (
     k === 'company_name' ||
     k === 'business_name' ||
@@ -324,6 +356,58 @@ export function synthesizeConnectedDots(
       badge: '🧘 Lifestyle ⇄ 👨‍👩‍👧 Family',
       insight: `Key passion includes quality family time alongside professional drive; nurturing son ${sonName || 'family'} remains a daily anchor.`,
       sourceEntities: ['passions', 'son_name'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 7: Fitness / Daily Training ⇄ Vitality & Goals
+  const workout = memMap.get('workout_routine') || wmMap.get('workout_routine') || memMap.get('gym_routine');
+  if (workout && goals) {
+    dots.push({
+      id: 'dot-fitness-goals',
+      domains: ['lifestyle', 'goals'],
+      title: 'Physical Vitality & Ambition',
+      badge: '🏋️ Fitness ⇄ 🎯 Goals',
+      insight: `Consistent training discipline (${workout}) fuels high cognitive endurance and energy towards key life ambitions.`,
+      sourceEntities: ['workout_routine', 'goals'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 8: Academic Learning ⇄ Career Advancement
+  const education = memMap.get('education_degree') || wmMap.get('education_degree') || memMap.get('university_name');
+  if (education && (companyName || goals)) {
+    dots.push({
+      id: 'dot-education-career',
+      domains: ['work', 'goals'],
+      title: 'Academics & Strategic Capability',
+      badge: '🎓 Education ⇄ 👔 Career',
+      insight: `Academic grounding (${education}) underpins leadership capability and professional growth targets.`,
+      sourceEntities: ['education_degree', 'company_name', 'goals'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 9: Daily Sleep/Morning Rhythm ⇄ Work Productivity
+  const sleepSched = memMap.get('sleep_schedule') || wmMap.get('sleep_schedule') || memMap.get('morning_routine');
+  if (sleepSched && (workSchedule || companyName)) {
+    dots.push({
+      id: 'dot-sleep-productivity',
+      domains: ['lifestyle', 'work'],
+      title: 'Circadian Rhythm & Daily Focus',
+      badge: '🧘 Rhythm ⇄ 👔 Work',
+      insight: `Predictable daily rhythm (${sleepSched}) supports optimal concentration during active working hours.`,
+      sourceEntities: ['sleep_schedule', 'work_schedule'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 10: Pet Companionship ⇄ Daily Balance
+  const petName = memMap.get('pet_name') || wmMap.get('pet_name') || memMap.get('dog_name') || memMap.get('cat_name');
+  if (petName) {
+    dots.push({
+      id: 'dot-pet-lifestyle',
+      domains: ['family', 'lifestyle'],
+      title: 'Companionship & Mindful Moments',
+      badge: '🐾 Pet ⇄ 🧘 Lifestyle',
+      insight: `Caring for ${petName} introduces joyful grounding breaks and emotional warmth into the user's daily routine.`,
+      sourceEntities: ['pet_name'].filter(k => memMap.has(k) || wmMap.has(k))
     });
   }
 
@@ -959,8 +1043,12 @@ export function clusterMemoriesIntoWardrobes(
   });
 
   // ── 8. ROUTINE & REMINDERS WARDROBE ─────────────────────────────────────────
-  const reminderTraits: WardrobeTrait[] = [
-    {
+  const reminderTraits: WardrobeTrait[] = [];
+
+  // Annual Birthday Reminder (only when wife Sakshi or birthday is present)
+  const hasSakshiBday = memMap.has('reminder_sakshi_birthday') || memMap.has('wife_birth_date') || (wifeNameVal && wifeNameVal.toLowerCase().includes('sakshi')) || hasSakshiMention;
+  if (hasSakshiBday) {
+    reminderTraits.push({
       id: `trait-rem-bday`,
       key: 'reminder_sakshi_birthday',
       label: 'Annual Reminder',
@@ -968,17 +1056,50 @@ export function clusterMemoriesIntoWardrobes(
       category: 'task',
       confidence: 'confirmed',
       updatedAt: nowStr
-    },
-    {
+    });
+  }
+
+  // Daily Work Shift (dynamic to user's actual schedule)
+  const shiftVal = memMap.get('work_schedule')?.value || memMap.get('office_hours')?.value;
+  if (shiftVal || hasConviction) {
+    reminderTraits.push({
       id: `trait-rem-shift`,
       key: 'daily_shift_routine',
       label: 'Daily Work Shift',
-      value: '11:00 AM start – 8:00 PM logout',
+      value: shiftVal || '11:00 AM start – 8:00 PM logout',
       category: 'schedule',
       confidence: 'confirmed',
       updatedAt: nowStr
-    }
-  ];
+    });
+  }
+
+  // Daily Fitness Routine
+  const routineWorkout = memMap.get('workout_routine')?.value || memMap.get('gym_routine')?.value;
+  if (routineWorkout) {
+    reminderTraits.push({
+      id: `trait-rem-workout`,
+      key: 'workout_routine',
+      label: 'Fitness Routine',
+      value: routineWorkout,
+      category: 'schedule',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    });
+  }
+
+  // Sleep & Morning Rhythm
+  const routineSleep = memMap.get('sleep_schedule')?.value || memMap.get('morning_routine')?.value;
+  if (routineSleep) {
+    reminderTraits.push({
+      id: `trait-rem-sleep`,
+      key: 'sleep_schedule',
+      label: 'Sleep & Morning Rhythm',
+      value: routineSleep,
+      category: 'detail',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    });
+  }
 
   if (memMap.has('goodnight_message') || memMap.has('kal_sube_reminder')) {
     consumedKeys.add('goodnight_message');
@@ -995,6 +1116,30 @@ export function clusterMemoriesIntoWardrobes(
     });
   }
 
+  // Default fallback trait if none populated
+  if (reminderTraits.length === 0) {
+    reminderTraits.push({
+      id: `trait-rem-default`,
+      key: 'daily_rhythm',
+      label: 'Daily Focus',
+      value: 'Active daily rhythm & contextual memory tracking',
+      category: 'detail',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    });
+  }
+
+  const routineConnectedDots: WardrobeConnectedDot[] = [];
+  if (hasSakshiMention && hasSakshiBday) {
+    routineConnectedDots.push({
+      targetEntityId: 'wardrobe-person-sakshi',
+      targetEntityName: 'Sakshi',
+      relation: 'ANNUAL_CELEBRATION',
+      insight: 'Proactive reminder set for Sakshi\'s birthday on 23 July (recurring annually).',
+      badge: '⏰ Reminders ⇄ 👩 Sakshi'
+    });
+  }
+
   wardrobes.push({
     id: 'wardrobe-routine-reminders',
     entityType: 'routine',
@@ -1003,19 +1148,262 @@ export function clusterMemoriesIntoWardrobes(
     roleTitle: 'Daily Rhythm & Active Tasks',
     avatarEmoji: '⏰',
     color: '#10B981',
-    summary: 'Annual Reminders · Bank Tasks · Daily Work/Family Rhythm',
+    summary: 'Daily Work/Life Rhythm · Focus & Reminders',
     traits: reminderTraits,
-    connectedDots: [
-      {
-        targetEntityId: 'wardrobe-person-sakshi',
-        targetEntityName: 'Sakshi',
-        relation: 'ANNUAL_CELEBRATION',
-        insight: 'Proactive reminder set for Sakshi\'s birthday on 23 July (recurring annually).',
-        badge: '⏰ Reminders ⇄ 👩 Sakshi'
-      }
-    ],
+    connectedDots: routineConnectedDots,
     lastUpdated: nowStr
   });
+
+  // ── 9. DIVERSE LIFESTYLE WARDROBES ──────────────────────────────────────────
+
+  // A. Daughter Wardrobe
+  const daughterNameVal = memMap.get('daughter_name')?.value;
+  const hasDaughterMention = Array.from(memMap.values()).some(e => /daughter/i.test(e.key) || /beti/i.test(e.key));
+  if (daughterNameVal || hasDaughterMention) {
+    const name = cleanStr(daughterNameVal || 'Daughter');
+    consumedKeys.add('daughter_name');
+    consumedKeys.add('daughter_nickname');
+    consumedKeys.add('daughter_age');
+    consumedKeys.add('daughter_birth_date');
+    const traits: WardrobeTrait[] = [
+      {
+        id: 'trait-daughter-role',
+        key: 'daughter_name',
+        label: 'Relationship',
+        value: 'Daughter',
+        category: 'role',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('daughter_name')?.id,
+        updatedAt: memMap.get('daughter_name')?.updated_at || nowStr
+      }
+    ];
+    const dNick = memMap.get('daughter_nickname')?.value;
+    if (dNick) {
+      traits.push({
+        id: 'trait-daughter-nick',
+        key: 'daughter_nickname',
+        label: 'Nickname',
+        value: dNick,
+        category: 'detail',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      });
+    }
+    const dAge = memMap.get('daughter_age')?.value;
+    if (dAge) {
+      traits.push({
+        id: 'trait-daughter-age',
+        key: 'daughter_age',
+        label: 'Age',
+        value: dAge.includes('old') ? dAge : `${dAge} old`,
+        category: 'milestone',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      });
+    }
+    wardrobes.push({
+      id: 'wardrobe-person-daughter',
+      entityType: 'person',
+      domain: 'family',
+      name,
+      roleTitle: 'Daughter',
+      avatarEmoji: '👧',
+      color: '#EC4899',
+      summary: `Daughter · ${dAge || 'Beloved child'}`,
+      traits,
+      connectedDots: [],
+      lastUpdated: nowStr
+    });
+  }
+
+  // B. Husband / Life Partner Wardrobe
+  const husbandNameVal = memMap.get('husband_name')?.value;
+  const partnerNameVal = memMap.get('partner_name')?.value;
+  if (husbandNameVal || partnerNameVal) {
+    const isHusband = Boolean(husbandNameVal);
+    const name = cleanStr(husbandNameVal || partnerNameVal);
+    const relKey = isHusband ? 'husband_name' : 'partner_name';
+    consumedKeys.add('husband_name');
+    consumedKeys.add('partner_name');
+    consumedKeys.add('husband_nickname');
+    consumedKeys.add('partner_nickname');
+    const traits: WardrobeTrait[] = [
+      {
+        id: 'trait-partner-role',
+        key: relKey,
+        label: 'Relationship',
+        value: isHusband ? 'Husband' : 'Partner',
+        category: 'role',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get(relKey)?.id,
+        updatedAt: memMap.get(relKey)?.updated_at || nowStr
+      }
+    ];
+    wardrobes.push({
+      id: isHusband ? 'wardrobe-person-husband' : 'wardrobe-person-partner',
+      entityType: 'person',
+      domain: 'family',
+      name,
+      roleTitle: isHusband ? 'Husband' : 'Life Partner',
+      avatarEmoji: '💍',
+      color: '#EC4899',
+      summary: `${isHusband ? 'Husband' : 'Partner'} · Relationship & Shared Life`,
+      traits,
+      connectedDots: [],
+      lastUpdated: nowStr
+    });
+  }
+
+  // C. Pet Companionship Wardrobe
+  const petNameVal = memMap.get('pet_name')?.value || memMap.get('dog_name')?.value || memMap.get('cat_name')?.value;
+  if (petNameVal) {
+    const name = cleanStr(petNameVal);
+    const isDog = Array.from(memMap.entries()).some(([k, entry]) =>
+      /\bdog\b|dogs_name|dog_name|pet_dog|puppy/i.test(k) || /\bdog\b|puppy|retriever|labrador|shepherd|hound/i.test(entry.value || '')
+    );
+    const isCat = Array.from(memMap.entries()).some(([k, entry]) =>
+      /\bcat\b|cats_name|cat_name|pet_cat|kitten/i.test(k) || /\bcat\b|kitten|feline/i.test(entry.value || '')
+    );
+    const emoji = isDog ? '🐶' : isCat ? '🐱' : '🐾';
+    consumedKeys.add('pet_name');
+    consumedKeys.add('dog_name');
+    consumedKeys.add('cat_name');
+    consumedKeys.add('pet_breed');
+    const traits: WardrobeTrait[] = [
+      {
+        id: 'trait-pet-role',
+        key: 'pet_name',
+        label: 'Family Member',
+        value: isCat ? 'Cat' : isDog ? 'Dog' : 'Pet',
+        category: 'role',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('pet_name')?.id,
+        updatedAt: nowStr
+      }
+    ];
+    wardrobes.push({
+      id: 'wardrobe-pet',
+      entityType: 'lifestyle',
+      domain: 'family',
+      name,
+      roleTitle: isCat ? 'Companion Cat' : isDog ? 'Faithful Dog' : 'Beloved Pet',
+      avatarEmoji: emoji,
+      color: '#F59E0B',
+      summary: `Beloved ${isCat ? 'Cat' : isDog ? 'Dog' : 'Pet'} · ${name}`,
+      traits,
+      connectedDots: [],
+      lastUpdated: nowStr
+    });
+  }
+
+  // D. Fitness & Wellness Wardrobe
+  const fitWorkoutVal = memMap.get('workout_routine')?.value || memMap.get('gym_routine')?.value;
+  const fitDietVal = memMap.get('diet_preference')?.value;
+  if (fitWorkoutVal || fitDietVal) {
+    const traits: WardrobeTrait[] = [];
+    if (fitWorkoutVal) {
+      consumedKeys.add('workout_routine');
+      consumedKeys.add('gym_routine');
+      traits.push({
+        id: 'trait-fit-workout',
+        key: 'workout_routine',
+        label: 'Workout Routine',
+        value: fitWorkoutVal,
+        category: 'schedule',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      });
+    }
+    if (fitDietVal) {
+      consumedKeys.add('diet_preference');
+      traits.push({
+        id: 'trait-fit-diet',
+        key: 'diet_preference',
+        label: 'Dietary Preference',
+        value: fitDietVal,
+        category: 'preference',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      });
+    }
+    wardrobes.push({
+      id: 'wardrobe-lifestyle-fitness',
+      entityType: 'lifestyle',
+      domain: 'lifestyle',
+      name: 'Fitness & Vitality',
+      roleTitle: 'Physical Wellbeing & Daily Training',
+      avatarEmoji: '🏋️',
+      color: '#10B981',
+      summary: 'Active Training · Nutrition · Physical Longevity',
+      traits,
+      connectedDots: [],
+      lastUpdated: nowStr
+    });
+  }
+
+  // E. Education & Studies Wardrobe
+  const eduVal = memMap.get('education_degree')?.value || memMap.get('university_name')?.value || memMap.get('course_name')?.value;
+  if (eduVal) {
+    consumedKeys.add('education_degree');
+    consumedKeys.add('university_name');
+    consumedKeys.add('course_name');
+    consumedKeys.add('degree');
+    const traits: WardrobeTrait[] = [
+      {
+        id: 'trait-edu-degree',
+        key: 'education_degree',
+        label: 'Studies & Focus',
+        value: eduVal,
+        category: 'skill',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      }
+    ];
+    wardrobes.push({
+      id: 'wardrobe-goal-education',
+      entityType: 'goal',
+      domain: 'work',
+      name: 'Academics & Skills',
+      roleTitle: 'Higher Learning & Specialization',
+      avatarEmoji: '🎓',
+      color: '#3B82F6',
+      summary: `Academics & Learning · ${eduVal}`,
+      traits,
+      connectedDots: [],
+      lastUpdated: nowStr
+    });
+  }
+
+  // F. Generic / Custom Venture Wardrobe
+  const rawCompany = memMap.get('company_name')?.value;
+  if (rawCompany && !consumedKeys.has('company_name')) {
+    const cName = cleanStr(rawCompany);
+    consumedKeys.add('company_name');
+    wardrobes.push({
+      id: `wardrobe-biz-${cName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+      entityType: 'business',
+      domain: 'work',
+      name: cName,
+      roleTitle: 'Company / Project',
+      avatarEmoji: '💼',
+      color: '#3B82F6',
+      summary: `${cName} · Core Professional Venture`,
+      traits: [
+        {
+          id: `trait-custom-biz-role`,
+          key: 'company_name',
+          label: 'Company',
+          value: rawCompany,
+          category: 'role',
+          confidence: 'confirmed',
+          sourceMemoryId: memMap.get('company_name')?.id,
+          updatedAt: nowStr
+        }
+      ],
+      connectedDots: [],
+      lastUpdated: nowStr
+    });
+  }
 
   // ── 9. Filter Composite Duplicates ──────────────────────────────────────────
   // Composite aggregate rows like family_details (which repeats wife, son, father, mother)
@@ -1095,14 +1483,23 @@ function toGraphLabel(key: string, value: string): string {
   if (k === 'father_name') return `${v} (Father)`;
   if (k === 'mother_name') return `${v} (Mother)`;
   if (k === 'daughter_name') return `${v} (Daughter)`;
+  if (k === 'husband_name') return `${v} (Husband)`;
+  if (k === 'partner_name') return `${v} (Partner)`;
+  if (k === 'pet_name' || k.includes('dog_name') || k.includes('cat_name')) return `${v} (Pet)`;
 
   // Work
   if (k === 'company_name') return `${v} (Company)`;
-  if (k === 'work_schedule') return '11am - 8pm (Work Hours)';
+  if (k === 'work_schedule') return v.length > 22 ? `${v.slice(0, 20)}... (Hours)` : `${v} (Hours)`;
   if (k === 'office_hours') return `${v} (Office Hours)`;
   if (k === 'current_office_location') return `${v} (Office)`;
   if (k === 'candidates_for_job') return `${v} (Interviews)`;
   if (k === 'hope_for_job_selection') return 'Target: 2 (Selections)';
+  if (k === 'education_degree' || k.includes('university') || k.includes('college')) return `${v} (Studies)`;
+
+  // Lifestyle & Health
+  if (k === 'workout_routine' || k.includes('gym')) return `${v} (Fitness)`;
+  if (k === 'diet_preference') return `${v} (Diet)`;
+  if (k === 'sleep_schedule') return `${v} (Sleep)`;
 
   // Goals
   if (k === 'goals') {

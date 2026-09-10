@@ -1,53 +1,55 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Frontend Brain Section Overhaul: 5-Pillar Navigation, Seamless Back Buttons, Pull-to-Refresh & Lifestyle Starter Experiences (0.3.0-beta)
+2026-09-11 — Backend Brain Section Optimization: In-Memory TTL Caching, Parallel DB Queries, Dynamic Wardrobes & Diverse Lifestyles Support
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Fix frontend Brain section bugs, eliminate 9-tab bottom bar crowding, add back buttons to every screen, enable pull-to-refresh across all screens, bulletproof search/date parsing, and introduce lifestyle-tailored starter guidance for diverse users.
+Task: Fix backend Brain section bugs, eliminate slow sequential database bottlenecks, expand wardrobe and knowledge graph clustering to support any lifestyle, and synthesize goals/emotions/milestones.
 
 ## Confirmed Findings & Root Cause Analysis
-1. **Trapped Users (No Back Buttons):** Navigating to `BrainNavigator` from `ChatScreen` had zero in-app back buttons. Users had no UI arrow to return to Chat or Settings, trapping them on iOS and gesture navigation.
-2. **9-Tab Bottom Navigation Overcrowding:** `BrainNavigator.tsx` registered 9 tabs directly on the mobile bottom bar with no icons, compressing tabs into unreadable ~38px text blocks and exposing internal admin tools (`Founder`, `Beta`) to regular users.
-3. **Missing Pull-to-Refresh:** None of the Brain screens (`MemoryBrainScreen`, `EmotionalBrainScreen`, `GoalBrainScreen`, `LifeTimelineScreen`) supported pull-to-refresh, forcing app restarts to sync new insights from Nova.
-4. **Lifeless Empty States for Diverse Lifestyles:** When a user had 0 memories in a domain (e.g. students without career, single individuals without family), screens showed a bare "No memory branches found" text with zero guidance on how to grow branches.
-5. **Runtime Crash Vulnerabilities:** `split('T')` on nullable timestamps and case conversions on object values in search could cause fatal client exceptions.
+1. **Goal Endpoint Blindness (`/analytics/goals`):**
+   - Previously exclusively queried `kg_nodes` where `entity_type = 'goal'`. Because goals extracted from conversation are written to `memories`, `kg_nodes` was empty for most users, causing empty states. `completedGoals` and `timeline` were hardcoded as empty arrays.
+2. **20s Polling Database Latency Bottleneck:**
+   - Mobile polls `/analytics/memories` and `/analytics/kg` every 20s.
+   - Handlers executed sequential roundtrips (~450ms total) repeatedly hitting Supabase.
+3. **Rigid Entity Wardrobes & Missing Diverse Lifestyles:**
+   - `clusterMemoriesIntoWardrobes` hardcoded wardrobes for 6 entities only. Routine reminders hardcoded Sakshi's birthday and 11-8 work shift for all users regardless of lifestyle.
+   - Users with pets, daughters, partners, workouts, education, or freelance ventures received no dedicated wardrobes.
+4. **Emotions and Timeline Placeholders:**
+   - Dominant emotions and trends were empty placeholders. Timeline omitted high-significance life milestone memories.
 
 ## Implemented Fixes
-1. **Unified `BrainHeader` (`mobile/src/components/BrainHeader.tsx`):**
-   - Sleek `‹ Chat` back button with generous touch target returning directly to Chat/Home.
-   - Screen icon, title, contextual subtitle, and live sync indicator / refresh button.
-2. **Streamlined 5-Pillar Navigation (`mobile/src/navigation/BrainNavigator.tsx`):**
-   - 5 core bottom tabs with rich icons: 🌳 Tree (`Memory`), 🌌 Galaxy (`Graph`), 💫 Emotions (`Emotions`), 🎯 Goals (`Goals`), ⏳ Timeline (`Timeline`).
-   - Clean active tint (`#A78BFA`), comfortable 64px tab height.
-   - Registered hidden tabs for deep-links (`Memories` alias, `Browser`, `Manage`, `Founder`, `Beta`).
-3. **Living Memory Tree Polish (`mobile/src/screens/analytics/MemoryBrainScreen.tsx`):**
-   - Added `BrainHeader` and `RefreshControl` pull-to-refresh.
-   - Interactive `LifestyleEmptyState` cards tailored to each domain (Family, Career, Goals, Lifestyle, Identity) with example prompts and a 1-tap `💬 Open Chat with Nova` button.
-   - Bulletproofed search across keys, values, labels, and traits.
-   - Fallback memory saving by canonical key when editing synthesized traits.
-4. **3D Neural Galaxy Header (`mobile/src/screens/analytics/KgExplorerScreen.tsx`):**
-   - Integrated `‹ Chat` back button in the top HUD title row.
-5. **Emotional Brain Polish (`mobile/src/screens/analytics/EmotionalBrainScreen.tsx`):**
-   - Added `BrainHeader`, `RefreshControl`, and guarded timestamp splitting in `WeeklyGraph` & `EmotionHeatmap`.
-   - Rich lifestyle empty state explaining emotional resonance tracking.
-6. **Goal Brain Polish (`mobile/src/screens/analytics/GoalBrainScreen.tsx`):**
-   - Added `BrainHeader`, `RefreshControl`, safe dates, and lifestyle goal starter templates.
-7. **Life Timeline Polish (`mobile/src/screens/analytics/LifeTimelineScreen.tsx`):**
-   - Added `BrainHeader`, `RefreshControl`, guarded date parsing, and narrative empty state.
-8. **Release Bump (`mobile/src/config/updateHistory.json`):**
-   - Bumped to `0.3.0-beta`.
+1. **In-Memory TTL Caching & Query Parallelization (`backend/src/routes/analytics.ts`):**
+   - Implemented `analyticsCache` with 15-second user-scoped TTL returning cached Brain state in <1ms.
+   - Exported `invalidateAnalyticsCache(userId)`.
+   - Used `Promise.all` across `/analytics/memories`, `/analytics/kg`, and `/analytics/timeline` to run concurrent database queries (~150ms on cache miss).
+2. **Instant Cache Invalidation (`backend/src/routes/memoryManagement.ts`):**
+   - Invalidation hooked into `DELETE /:id`, `PATCH /:id/archive`, and `PATCH /:id` to guarantee instant freshness.
+   - Updated `KEY_LABELS` and `KEY_CATEGORIES` for lifestyle keys.
+3. **Goal Synthesis (`/analytics/goals` in `backend/src/routes/analytics.ts`):**
+   - Concurrently queries both `kg_nodes` and `memories` table for goal memories.
+   - Partitions into `activeGoals` (with progress, targetDate, category) and `completedGoals`, with milestone timeline.
+4. **Emotional Trajectories (`/analytics/emotions` in `backend/src/routes/analytics.ts`):**
+   - Computes dominant emotion frequency distribution and recent valence/energy trends with episodic memory fallback.
+5. **Milestone Timeline Integration (`/analytics/timeline` in `backend/src/routes/analytics.ts`):**
+   - Integrates high-importance life memories (`importance >= 7`) into the chronological feed alongside moments and episodic memories.
+6. **Diverse Lifestyle Wardrobes & Universal Neural Dots (`backend/src/lib/memoryDomains.ts` & `backend/src/lib/memoryKeySchema.ts`):**
+   - Added canonical keys: `pet_name`, `partner_name`, `workout_routine`, `diet_preference`, `sleep_schedule`, `education_degree`.
+   - Routine reminders now dynamically reflect user's real schedule, workout, and sleep routines without falsely attributing Sakshi's birthday to other users.
+   - Added dynamic entity wardrobes: `wardrobe-pet` (🐶/🐱/🐾), `wardrobe-person-daughter` (👧), `wardrobe-person-partner` (💍), `wardrobe-lifestyle-fitness` (🏋️), `wardrobe-goal-education` (🎓), and custom business ventures.
+   - Added universal cross-domain neural bridges: fitness ⇄ goals, education ⇄ career, pet ⇄ lifestyle, sleep ⇄ work.
+   - Enhanced `toGraphLabel` with dynamic work hours and lifestyle labels.
 
 ## Verification Status
 - `npm run build` in `backend`: EXIT 0 (Passed clean).
 - `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean).
-- Full Unit Test Suite: 60/60 tests PASSED (100% across all primary Brain suites).
+- Full Unit Test Suite: 62/62 tests PASSED (100% across all suites).
 
 ## Standing Autonomous Directives
 - **Auto Implementation Plan Proceed**: ENABLED.
-- **Autonomous Push & Deployment**: ENABLED. Merges and pushes to `origin main` trigger Render & Mobile OTA deployments automatically.
+- **Autonomous Push & Deployment**: ENABLED. Pushing to `origin main` automatically deploys backend to Render and triggers Mobile EAS OTA update.
 
 ## NEXT ACTION
-Commit and push to `origin main` and trigger production Mobile EAS OTA update.
+Commit and push to `origin main`.

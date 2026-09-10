@@ -160,5 +160,85 @@ describe('Wardrobe Memory Clustering & Neural Dot-Connecting Engine', () => {
       expect(heritageDot?.insight).toContain('Suresh');
       expect(heritageDot?.insight).toContain('Rajeshree');
     });
+
+    it('synthesizes universal lifestyle bridges for students, athletes, and pet owners', () => {
+      const studentMemories = [
+        { key: 'education_degree', value: 'Master of Computer Science at Stanford' },
+        { key: 'goals', value: 'Publish AI research and launch an open-source tool' },
+        { key: 'workout_routine', value: 'CrossFit 4 days a week' },
+        { key: 'sleep_schedule', value: '11:00 PM to 7:00 AM circadian rest' },
+        { key: 'pet_name', value: 'Milo the Golden Retriever' }
+      ];
+
+      const dots = synthesizeConnectedDots(studentMemories, []);
+      const dotIds = dots.map(d => d.id);
+
+      expect(dotIds).toContain('dot-fitness-goals');
+      expect(dotIds).toContain('dot-education-career');
+      expect(dotIds).toContain('dot-pet-lifestyle');
+
+      const petDot = dots.find(d => d.id === 'dot-pet-lifestyle');
+      expect(petDot?.insight).toContain('Milo');
+    });
+  });
+
+  describe('Diverse Lifestyle Wardrobes', () => {
+    it('generates rich dedicated wardrobes for pets, daughters, partners, workouts, and education', () => {
+      const diverseUserMemories = [
+        { key: 'preferred_name', value: 'Aria' },
+        { key: 'daughter_name', value: 'Ananya' },
+        { key: 'daughter_age', value: '4 years old' },
+        { key: 'partner_name', value: 'Alex' },
+        { key: 'pet_name', value: 'Bruno' },
+        { key: 'dog_name', value: 'Bruno' },
+        { key: 'workout_routine', value: 'Half-marathon training 3x/week' },
+        { key: 'diet_preference', value: 'High protein plant-based diet' },
+        { key: 'education_degree', value: 'B.Sc Cognitive Science' },
+        { key: 'company_name', value: 'Studio Aurora' }
+      ];
+
+      const { wardrobes } = clusterMemoriesIntoWardrobes(diverseUserMemories, []);
+
+      // 1. Daughter Wardrobe
+      const daughterWardrobe = wardrobes.find(w => w.id === 'wardrobe-person-daughter');
+      expect(daughterWardrobe).toBeDefined();
+      expect(daughterWardrobe?.name).toBe('Ananya');
+      expect(daughterWardrobe?.avatarEmoji).toBe('👧');
+      expect(daughterWardrobe?.domain).toBe('family');
+
+      // 2. Partner Wardrobe
+      const partnerWardrobe = wardrobes.find(w => w.id === 'wardrobe-person-partner');
+      expect(partnerWardrobe).toBeDefined();
+      expect(partnerWardrobe?.name).toBe('Alex');
+      expect(partnerWardrobe?.avatarEmoji).toBe('💍');
+
+      // 3. Pet Wardrobe
+      const petWardrobe = wardrobes.find(w => w.id === 'wardrobe-pet');
+      expect(petWardrobe).toBeDefined();
+      expect(petWardrobe?.name).toBe('Bruno');
+      expect(petWardrobe?.avatarEmoji).toBe('🐶');
+
+      // 4. Fitness Wardrobe
+      const fitnessWardrobe = wardrobes.find(w => w.id === 'wardrobe-lifestyle-fitness');
+      expect(fitnessWardrobe).toBeDefined();
+      expect(fitnessWardrobe?.avatarEmoji).toBe('🏋️');
+      expect(fitnessWardrobe?.traits.length).toBeGreaterThanOrEqual(2);
+
+      // 5. Education Wardrobe
+      const eduWardrobe = wardrobes.find(w => w.id === 'wardrobe-goal-education');
+      expect(eduWardrobe).toBeDefined();
+      expect(eduWardrobe?.avatarEmoji).toBe('🎓');
+
+      // 6. Custom Studio/Business Wardrobe
+      const customBizWardrobe = wardrobes.find(w => w.id.includes('studio-aurora'));
+      expect(customBizWardrobe).toBeDefined();
+      expect(customBizWardrobe?.name).toBe('Studio Aurora');
+
+      // 7. Routine does not wrongly force Sakshi's birthday when user is Aria
+      const rhythmWardrobe = wardrobes.find(w => w.id === 'wardrobe-routine-reminders');
+      expect(rhythmWardrobe).toBeDefined();
+      const hasSakshi = rhythmWardrobe?.traits.some(t => t.value.includes('Sakshi'));
+      expect(hasSakshi).toBe(false);
+    });
   });
 });
