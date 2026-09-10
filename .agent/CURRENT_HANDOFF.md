@@ -1,58 +1,41 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-10 — Wardrobe Memory Clustering, Neural Dot-Connecting & Watchtower Entity Consolidation
+2026-09-11 — Purpose-Driven Life Stage Engine & Contextual Companion Hardening
 
 ## Session / Agent
 Agent: MonkeyCode
-Branch: `agent-checkpoint/memory-wardrobe-clustering`
-Task: Wardrobe Memory Clustering, Neural Dot-Connecting, Watchtower Reflection Consolidation, and Brain Screen UI Redesign.
+Branch: `agent-checkpoint/purpose-driven-life-stage-engine`
+Task: Purpose-Driven Life Stage Engine, Amnesia Prevention in NACE, Contextual Reminder Enrichment, and Active Lifestyle/Rhythm Protection.
 
 ## Implemented Work
-1. **Entity Wardrobe Clustering Engine (`backend/src/lib/memoryDomains.ts`):**
-   - Implemented `clusterMemoriesIntoWardrobes(memories, workingContext)`:
-     - Unifies fragmented memory rows into 8 rich Entity Wardrobes:
-       - 👩 **Sakshi (Wife)**: Wife role, culinary talent ("Passionate cook & signature dishes"), self-taught nail artist (with kit and beautiful design skills), and annual birthday reminder.
-       - 👶 **Shreshth (Son)**: Son role, age ("6 mahine ka old"), and milestones.
-       - 👨‍🦳 **Suresh (Father)**: Father role, undergarments distribution business.
-       - 👵 **Rajeshree (Mother)**: Mother role, tailoring and garment craftsmanship.
-       - 💼 **Conviction HR (Career)**: Recruitment agency, Monday-Saturday 11 AM - 8 PM shift, scaling goal, and 4 candidates hiring drive.
-       - 🍲 **Shetty's Dhaba (Venture)**: Cloud kitchen & dhaba food venture, 15k PF funding, and portal update task.
-       - 🧠 **Saa (Identity & Core Mindset)**: Multi-venture founder, entrepreneurship, recruitment leadership, and family passions.
-       - ⏰ **Life Rhythm & Reminders**: Annual reminders, bank tasks, daily work/family shift routines.
-     - **No-Hard-Delete Compliance**: Preserves all rows in Supabase. Identifies composite aggregate duplicates (`family_details`, redundant `important_facts`) and flags `isCompositeDuplicate: true` to suppress duplicate bubbles from the presentation layer.
-2. **Dynamic Cross-Wardrobe Neural Dot-Connecting (`memoryDomains.ts`):**
-   - Added dynamic bridges:
-     - 👩 Sakshi ⇄ 🍲 Shetty's Dhaba: Sakshi's cooking flair and recipes anchor the cloud kitchen menu.
-     - 👨‍🦳 Suresh ⇄ 👵 Rajeshree: Undergarments sales + tailoring combine into family apparel heritage.
-     - 💼 Conviction HR ⇄ 👨‍👩‍👧 Family: 8:00 PM shift logout marks daily transition into evening family time.
-     - 💼 Work ⇄ 🎯 Goals: 4 candidate interviews accelerate Conviction HR scaling.
-     - 💰 PF Funds ⇄ 🍲 Dhaba: 15k PF funds and bank update provide launch capital.
-3. **Cognitive Reasoning & Prompt Integration (`promptBuilder.ts` & `WatchtowerReflectionService.ts`):**
-   - Injected structured Entity Wardrobes into Nova's system prompt via `formatHierarchicalMemoryPrompt`.
-   - Updated Watchtower reflection critique with wardrobe context to prevent attribute confusion between entities.
-4. **Backend Analytics Endpoint (`backend/src/routes/analytics.ts`):**
-   - Enriched `GET /analytics/memories` to return `entityWardrobes`, `connectedDots`, clean `currentMemories`, and domain compartments.
-   - Refined `classifyDomain` to properly prioritize work keys over mistyped family types (e.g. Shetty's Dhaba).
-5. **Mobile Frontend Redesign (`mobile/src/screens/analytics/MemoryBrainScreen.tsx`):**
-   - Added top View Switcher tabs: **🗄️ Wardrobe Clusters** vs **📝 All Facts**.
-   - Built rich Wardrobe Cards with entity emoji avatars, domain-colored accent borders, role badges, summary descriptions, connected dots banners, and trait chips.
-   - Expandable cards with long-press trait editing.
+1. **User Life Stage & Stakes Engine (`backend/src/services/UserLifeStageEngine.ts`):**
+   - Inactive reminder app paradigm replaced with purpose-driven companion engine.
+   - Extracts family dependents (infant Shreshth, wife Sakshi, parents Suresh & Rajeshree), primary livelihood (Conviction HR, 11am-8pm shift), active ventures (Shetty's Dhaba cloud kitchen), and financial stakes (15k PF seed capital).
+   - Dynamically categorizes life stage (`FAMILY_FOUNDER_WITH_INFANT`) and daily rhythm (`WORK_FOCUS`, `FAMILY_COLLABORATIVE`, `WIND_DOWN`, `SLEEP_REST`).
+   - Implemented `enrichReminderMessage(rawReminder, stageCtx)`: transforms mechanical reminder text into purpose-connected companion touchpoints (e.g. PF update -> 15k seed funds for Shetty's Dhaba).
+2. **Amnesia Prevention in Nova Consciousness Engine (NACE) (`backend/src/services/NovaConsciousnessEngine.ts`):**
+   - Replaced amnesiac queries (e.g. asking what Sakshi does or what her hobbies are) with Entity Wardrobe lookups.
+   - Curiosity engine checks Entity Wardrobes first; if facts are already known, pivots to strategic venture synergy (e.g. connecting Sakshi's culinary flair to Shetty's Dhaba menu).
+   - Injected `UserLifeStageContext` into Tier 2 proactive prompt.
+   - Suppresses casual domestic curiosity queries during `WORK_FOCUS` hours (11:00 AM – 8:00 PM).
+3. **Smart Reminder Scheduler Service (`backend/src/services/ReminderSchedulerService.ts`):**
+   - Removed mechanical 2-minute nagging retry loops.
+   - Integrated `UserLifeStageEngine` to enrich reminders with real-life purpose before delivery.
+4. **Followup & Background Action Hardening (`backend/src/services/BackgroundActionService.ts`):**
+   - Guarded `NovaFollowupService.queue`: blocked premature short-term followups for distant/annual events (>72h away), suppressed robotic English followup templates, and postponed casual followups past active work hours.
+5. **Situational Awareness & Prompt Context (`backend/src/services/SituationalAwareness.ts` & `backend/src/routes/chat.ts`):**
+   - Injected `🎯 USER LIFE STAGE, PURPOSE & STAKES` into the situation brief before every chat turn.
 
 ## Verification Status
-- `npm test -- wardrobeClustering.test.ts memoryDomains.test.ts`: 13/13 tests PASS.
-- `mobile`: `npx tsc --noEmit` exits 0 (zero TypeScript errors).
-- `backend`: `npm run build` exits 0 (zero TypeScript errors).
-
-## Production Deployment & OTA Status
-- **Branch**: `main`
-- **Commit**: `d003f6d8231960759a5f5bdf1cf9825ec25cee5f`
-- **Render Backend Deploy**: Triggered via webhook (Run ID: `34509234347`).
-- **Mobile Production EAS OTA Update**:
-  - Update Group ID: `43b72054-3a78-4170-89a1-acc76d007dcb`
-  - Android Update ID: `01a08c65-ef27-781e-a884-acf6f8ca3a9a`
-  - Version: `0.2.6-beta` ("🗄️ Brain Wardrobe Clusters & Smart Reminders")
-  - EAS Dashboard: `https://expo.dev/accounts/shettysaa/projects/mobile/updates/43b72054-3a78-4170-89a1-acc76d007dcb`
+- `npm run build` in `backend`: EXIT 0 (Zero TypeScript errors).
+- Tests passed (11/11):
+  - `src/services/__tests__/UserLifeStageEngine.test.ts` (3 passed)
+  - `src/services/__tests__/NovaConsciousnessEngineCuriosity.test.ts` (1 passed)
+  - `src/services/__tests__/wardrobeClustering.test.ts` (7 passed)
+  - `src/services/__tests__/AntiNaggingSilenceRespect.test.ts`
+  - `src/services/__tests__/SmartProactiveReminderEngine.test.ts`
+  - `src/services/__tests__/ReminderEngine.test.ts`
 
 ## NEXT ACTION
-Verify the updated `Backend Test` CI run on GitHub Actions and monitor user device OTA uptake on launch.
+Merge `agent-checkpoint/purpose-driven-life-stage-engine` to `main`, push to `origin main` to trigger Render backend deployment, and verify live companion interactions.
