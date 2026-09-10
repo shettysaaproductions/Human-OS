@@ -13,6 +13,7 @@ import { temporalAwarenessService } from './TemporalAwarenessService';
 import { outboundDispatcherService } from './OutboundDispatcherService';
 import type { OutboundSource } from '../types/outbound';
 import { resolveUserTzOffsetHours } from './ReminderEngine';
+import { userLifeStageEngine } from './UserLifeStageEngine';
 
 // Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
 // The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
@@ -25,10 +26,14 @@ let _pulseInProgress = false;
 let _pulseStartTime = 0;
 
 /**
- * Identifies natural, unasked questions based on known facts and missing dimensions
- * (e.g. knowing user has a son named Shreshth, but his age/schooling is unknown).
+ * Identifies natural, unasked questions based on known facts and missing dimensions.
+ * Crucially checks Entity Wardrobes FIRST so Nova never asks about facts that are
+ * already established (e.g. Sakshi's cooking talent or baby Shreshth's age).
  */
-export function deriveMissingMemoryCuriosities(memories: Array<{ key: string; value: string; memory_type?: string }>): string[] {
+export function deriveMissingMemoryCuriosities(
+  memories: Array<{ key: string; value: string; memory_type?: string }>,
+  workingContext?: Record<string, string>
+): string[] {
   const memMap = new Map<string, string>();
   for (const m of memories) {
     if (m.key && m.value) {
@@ -36,38 +41,57 @@ export function deriveMissingMemoryCuriosities(memories: Array<{ key: string; va
     }
   }
 
+  // Check Entity Wardrobes first to prevent asking already-known facts
+  const { clusterMemoriesIntoWardrobes } = require('../lib/memoryDomains');
+  const clusterResult: any = clusterMemoriesIntoWardrobes(memories, workingContext || {});
+  const wardrobes: any[] = Array.isArray(clusterResult) ? clusterResult : (clusterResult?.wardrobes || []);
+
   const curiosities: string[] = [];
 
-  // 1. Son details
-  if (memMap.has('son_name')) {
-    const sonName = memMap.get('son_name');
-    if (!memMap.has('son_age') && !memMap.has('son_school')) {
-      curiosities.push(`Son: Name is "${sonName}", but his age and schooling are unknown. (e.g. ask warmly: "${sonName} kitne saal ka hai?", "School shuru ho gayi ya abhi chhota hai?")`);
+  // 1. Son / Infant check
+  const sonW = wardrobes.find((w: any) => (w.domain === 'family' || w.entityType === 'person') && (w.name.toLowerCase().includes('shreshth') || (w.roleTitle && w.roleTitle.toLowerCase().includes('son'))));
+  const sonTraits = sonW ? sonW.traits.map((t: any) => `${t.label} ${t.value}`).join(' ').toLowerCase() : '';
+  const isSonAgeKnown = sonTraits.includes('month') || sonTraits.includes('mahine') || sonTraits.includes('age') || sonTraits.includes('saal') || memMap.has('son_age');
+
+  if (sonW || memMap.has('son_name')) {
+    const sonName = sonW?.name || memMap.get('son_name') || 'beta';
+    if (!isSonAgeKnown) {
+      curiosities.push(`Son: Name is "${sonName}", but his age is unknown. (e.g. ask warmly: "${sonName} kitne saal ya mahine ka hai?")`);
+    } else if (sonTraits.includes('6') || sonTraits.includes('infant') || sonTraits.includes('baby')) {
+      // Age is known as infant — do NOT ask about school or age!
     }
   }
 
-  // 2. Wife details
-  if (memMap.has('wife_name')) {
-    const wifeName = memMap.get('wife_name');
-    if (!memMap.has('wife_profession') && !memMap.has('wife_occupation') && !memMap.has('wife_work')) {
+  // 2. Wife check — NEVER ask "Sakshi kya karti hai" if skills/traits are known!
+  const wifeW = wardrobes.find((w: any) => (w.domain === 'family' || w.entityType === 'person') && (w.name.toLowerCase().includes('sakshi') || (w.roleTitle && w.roleTitle.toLowerCase().includes('wife'))));
+  const wifeTraits = wifeW ? wifeW.traits.map((t: any) => `${t.label} ${t.value}`).join(' ').toLowerCase() : '';
+  const isWifeSkillsKnown = wifeTraits.includes('cook') || wifeTraits.includes('culinary') || wifeTraits.includes('nail') || wifeTraits.includes('art') || memMap.has('wife_profession') || memMap.has('wife_skills');
+
+  if (wifeW || memMap.has('wife_name')) {
+    const wifeName = wifeW?.name || memMap.get('wife_name') || 'wife';
+    if (!isWifeSkillsKnown) {
       curiosities.push(`Wife: Name is "${wifeName}", but what she does or her interests are unknown. (e.g. ask casually: "Waise ${wifeName} kya karti hai?")`);
+    } else if (wifeTraits.includes('cook')) {
+      // High-IQ strategic synergy: If user has food venture (Shetty's Dhaba) and wife is a cook:
+      const hasDhaba = wardrobes.some((w: any) => 
+        w.name.toLowerCase().includes('dhaba') || 
+        w.name.toLowerCase().includes('kitchen') || 
+        (w.summary && (w.summary.toLowerCase().includes('dhaba') || w.summary.toLowerCase().includes('cloud kitchen')))
+      ) || memories.some(m => /dhaba|kitchen/i.test(m.value) || /dhaba|kitchen/i.test(m.key));
+
+      if (hasDhaba) {
+        curiosities.push(`Venture Synergy: ${wifeName} is a passionate cook, and user is launching Shetty's Dhaba cloud kitchen. Explore how ${wifeName}'s signature recipes will anchor the cloud kitchen menu.`);
+      }
     }
   }
 
-  // 3. Daughter details
-  if (memMap.has('daughter_name')) {
-    const daughterName = memMap.get('daughter_name');
-    if (!memMap.has('daughter_age')) {
-      curiosities.push(`Daughter: Name is "${daughterName}", but her age is unknown.`);
-    }
-  }
-
-  // 4. User Profession / Work
-  if (!memMap.has('profession') && !memMap.has('job') && !memMap.has('company_name') && !memMap.has('occupation')) {
+  // 3. User Work / Profession
+  const hasWorkWardrobe = wardrobes.some((w: any) => (w.domain === 'work' || w.entityType === 'business') && (w.name.toLowerCase().includes('conviction') || (w.roleTitle && w.roleTitle.toLowerCase().includes('founder'))));
+  if (!hasWorkWardrobe && !memMap.has('profession') && !memMap.has('job') && !memMap.has('company_name') && !memMap.has('occupation')) {
     curiosities.push(`User Work: Job, profession, or current project is unknown. (e.g. "Waise aap kya kaam karte ho?")`);
   }
 
-  // 5. User City / Location
+  // 4. User Location
   if (!memMap.has('city') && !memMap.has('hometown') && !memMap.has('location')) {
     curiosities.push(`User Location: Which city they live in is unknown.`);
   }
@@ -562,30 +586,46 @@ export class NovaConsciousnessEngine {
     }
 
     // --- GATHER FULL CONTEXT (All Engines) ---
-    const { data: recentMemories } = await supabaseAdmin
-      .from('memories')
-      .select('key, value, memory_type')
-      .eq('user_id', userId)
-      .eq('is_archived', false)
-      .order('updated_at', { ascending: false })
-      .limit(20);
+    const [memoriesRes, workingMemoriesRes] = await Promise.all([
+      supabaseAdmin
+        .from('memories')
+        .select('key, value, memory_type')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+        .order('updated_at', { ascending: false })
+        .limit(30),
+      supabaseAdmin
+        .from('working_memory')
+        .select('key, value')
+        .eq('user_id', userId)
+        .not('key', 'in', '("last_proactive_content","silent_visit_count","followup_suppressed_until","user_busy_until")')
+        .order('updated_at', { ascending: false })
+        .limit(15)
+    ]);
 
-    const memorySummary = (recentMemories || []).map(m => `[${m.memory_type}] ${m.key}: ${m.value}`).join('\n');
-    const missingMemoryCuriosities = deriveMissingMemoryCuriosities(recentMemories || []);
+    const recentMemories = memoriesRes.data || [];
+    const workingMemories = workingMemoriesRes.data || [];
+
+    const workingContextObj: Record<string, string> = {};
+    for (const row of workingMemories) {
+      workingContextObj[row.key] = typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value);
+    }
+
+    const stageCtx = await userLifeStageEngine.getUserLifeStageContext(userId, recentMemories, workingContextObj);
+
+    // If user is in WORK_FOCUS hours and there is no high-urgency agenda, protect their focus!
+    if (stageCtx.lifestyleRhythm.isWorkFocusHours && (!agendaItem || agendaItem.urgency !== 'high') && !userIsActivelyChatting) {
+      logger.info('[NACE] Suppressing proactive pulse — user is in WORK_FOCUS shift at ' + (stageCtx.primaryLivelihood?.name || 'work'), { userId });
+      return;
+    }
+
+    const memorySummary = recentMemories.map(m => `[${m.memory_type}] ${m.key}: ${m.value}`).join('\n');
+    const missingMemoryCuriosities = deriveMissingMemoryCuriosities(recentMemories, workingContextObj);
     const missingCuriositiesSummary = missingMemoryCuriosities.length > 0
       ? missingMemoryCuriosities.map(c => `• ${c}`).join('\n')
       : 'None.';
-    
-    // Fetch Working Memory (facts, schedules, routines) to ground proactive questions
-    const { data: workingMemories } = await supabaseAdmin
-      .from('working_memory')
-      .select('key, value')
-      .eq('user_id', userId)
-      .not('key', 'in', '("last_proactive_content","silent_visit_count","followup_suppressed_until","user_busy_until")')
-      .order('updated_at', { ascending: false })
-      .limit(10);
       
-    const workingMemorySummary = (workingMemories || []).map(m => `${m.key}: ${m.value}`).join('\n');
+    const workingMemorySummary = workingMemories.map(m => `${m.key}: ${m.value}`).join('\n');
     
     // Fetch last 6 chat messages for TIER2 context (so outreach is grounded in real conversation)
     const { data: lastConversation } = await supabaseAdmin
@@ -797,13 +837,16 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
       ? `RETURNING USER OPENING: User just came back online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' min' : 'some time'} away. Do NOT use a generic greeting like "hey" or "kaise ho". Open with ONE specific thing you know about them that is genuinely unresolved, a warm question about their family / missing facts (e.g. asking about Shreshth's age/school or Sakshi), or relevant RIGHT NOW. If there is nothing specific, STAY SILENT (return empty message).`
       : '';
 
-    const tier2Context = `Name: ${profile.preferred_name || 'yaar'}
+    const tier2Context = `Name: ${profile.preferred_name || stageCtx.userName || 'yaar'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
+User Life Stage & Real Stakes: ${stageCtx.stageLabel}
+Core Purpose & Mission: ${stageCtx.corePurposeSummary}
+Daily Lifestyle Phase: ${stageCtx.lifestyleRhythm.phaseDescription}
 Silence Duration: ${Math.round(gapMinutes / 60)} hours
 Trigger: ${triggerType}
 Agenda Context: ${agendaItem ? agendaItem.follow_up_question : 'N/A'}
 Recent Memories: ${memorySummary}
-Missing Facts & Curiosity Opportunities:
+Missing Facts & Strategic Curiosities:
 ${missingCuriositiesSummary}
 Working Memory: ${workingMemorySummary || 'None.'}
 Active Life Threads: ${lifeThreadSummary || 'None.'}
@@ -822,9 +865,11 @@ ${silentVisitNote}
 ${midSleepWakeNote}
 ${escalationTone}
 ${sessionStartContextNote}
-CURIOSITY & FAMILY FOLLOW-UP DIRECTIVE:
-If trigger is 'curiosity' or 'session_start' or if the user recently talked about their family:
-Naturally follow up with ONE warm, casual question exploring one of the Missing Facts (e.g. asking about Shreshth's age/school or Sakshi) like a genuine friend. Keep it short (1-2 sentences in natural Hinglish).`;
+PURPOSE-DRIVEN COMPANION DIRECTIVE:
+- Speak as a perceptive, supportive life companion who understands their real-world stakes (father of baby Shreshth, family provider, Conviction HR lead, aspiring founder of Shetty's Dhaba).
+- NEVER ask questions about facts already known (Sakshi's cooking talent and nail art are known; Shreshth's infant age is known).
+- If exploring ventures or family, connect the dots (e.g. how Sakshi's recipes anchor Shetty's Dhaba, or gentle check-in on baby).
+- Keep it short (1-2 sentences in natural conversational Hinglish).`;
 
 
     try {

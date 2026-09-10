@@ -305,49 +305,38 @@ export class ReminderSchedulerService {
         .eq('id', reminderId);
       logger.info('Reminder fired and completed', { reminderId });
 
-      // ACK-CHECK NAGGING LOOP: queue a high-cadence agenda item so NACE
-      // re-sends the reminder every 2 minutes until user replies.
-      // Classifier determines urgency so sleep window is respected for
-      // casual reminders (water, washroom) but broken for critical ones
-      // (medicine, ticket, deadline).
+      // Respectful check-in: ONLY for genuinely critical/emergency reminders (health, deadlines).
+      // Never nag every 2 minutes for general/lifestyle reminders — silence is respect.
       try {
         const reminderText = reminder.text.toLowerCase();
 
-        // Context-aware urgency: analyse reminder text to decide if Nova
-        // should break sleep window (high) or respect it (medium).
         const isCritical = [
           'medicine', 'tablet', 'pill', 'dawai', 'dawa', 'doctor',
           'hospital', 'injection', 'dose', 'medication',   // health
-          'ticket', 'booking', 'deadline', 'exam', 'interview',
-          'payment', 'fee', 'bill', 'rent', 'submit',      // time-sensitive
-          'emergency', 'urgent', 'important',
+          'flight', 'train', 'ticket', 'exam', 'interview', // high stakes
+          'emergency', 'urgent',
         ].some(k => reminderText.includes(k));
 
-        const ackUrgency = isCritical ? 'high' : 'medium';
+        if (isCritical) {
+          const firedAt = now.toISOString();
+          const firstCheckAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min gap, not 2 min
 
-        const firedAt = now.toISOString();
-        const firstNagAt = new Date(Date.now() + 2 * 60 * 1000); // 2 min from now
-
-        await supabaseAdmin.from('nova_agenda').insert({
-          user_id: reminder.user_id,
-          event_description: reminder.text.substring(0, 500),
-          follow_up_question: `User was reminded: "${reminder.text}". Check if acknowledged.`,
-          follow_up_after: firstNagAt.toISOString(),
-          // Store fired timestamp so NACE can check for user replies AFTER this moment
-          source_message: `reminder_ack_check:${firedAt}`,
-          status: 'pending',
-          next_retry_at: firstNagAt.toISOString(),
-          urgency: ackUrgency,  // high breaks sleep window; medium respects it
-          is_recurring: true,
-          max_retries: 10,      // ~20 minutes of nagging (10 × 2-min retries)
-        });
-        logger.info('[Reminder] ACK-check nag loop queued in agenda', {
-          reminderId,
-          urgency: ackUrgency,
-          firstNagAt: firstNagAt.toISOString(),
-        });
+          await supabaseAdmin.from('nova_agenda').insert({
+            user_id: reminder.user_id,
+            event_description: reminder.text.substring(0, 500),
+            follow_up_question: `User was reminded about critical task: "${reminder.text}". Check warmly if completed.`,
+            follow_up_after: firstCheckAt.toISOString(),
+            source_message: `reminder_ack_check:${firedAt}`,
+            status: 'pending',
+            next_retry_at: firstCheckAt.toISOString(),
+            urgency: 'high',
+            is_recurring: false, // Do not loop endlessly
+            max_retries: 2,      // Max 2 gentle attempts
+          });
+          logger.info('[Reminder] Respectful check-in queued for critical task', { reminderId });
+        }
       } catch (agendaErr) {
-        logger.warn('[Reminder] Failed to queue ACK-check agenda', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
+        logger.warn('[Reminder] Failed to queue check-in agenda', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
       }
 
     }
@@ -361,11 +350,6 @@ export class ReminderSchedulerService {
    */
   async fireReminderWithStatus(reminderId: string): Promise<'dispatched' | 'suppressed'> {
     try {
-      // We need to inspect the dispatch result; wrap fireReminder to intercept finalStatus.
-      // fireReminder calls outboundDispatcherService.dispatch internally and returns void,
-      // returning early on FAILED_TRANSIENT/FAILED_TERMINAL. We approximate via a short-circuit:
-      // if fireReminder completes without throwing, treat as dispatched (it logs details internally).
-      // Any thrown error or early return on suppression is caught as suppressed.
       await this.fireReminder(reminderId);
       return 'dispatched';
     } catch {
@@ -377,20 +361,23 @@ export class ReminderSchedulerService {
     const text = reminder.text || 'kuch kaam tha';
     
     try {
+      const { userLifeStageEngine } = await import('./UserLifeStageEngine');
+      const stageCtx = await userLifeStageEngine.getUserLifeStageContext(reminder.user_id);
+      const enrichedDefault = userLifeStageEngine.enrichReminderMessage(text, stageCtx);
+
       const { complete } = await import('../lib/nvidia');
-      const prompt = `You are Nova, an AI companion texting your friend on WhatsApp. 
-You need to remind them about this: "${text}". 
-Generate a SINGLE short, warm, and conversational Hinglish text message (max 1-2 lines). 
-Do NOT sound like a robotic alarm. Do NOT use words like "Reminder" or "Time for". Just casually and warmly mention it.
+      const prompt = `You are Nova, an AI companion texting your friend (${stageCtx.userName}) on WhatsApp.
+User Life Stage & Real Mission: ${stageCtx.stageLabel}. ${stageCtx.corePurposeSummary}
+Daily Lifestyle Rhythm: ${stageCtx.lifestyleRhythm.phaseDescription}
 
-CRITICAL RULES:
-- Casually remind them about the task for their scheduled time.
-- NEVER say "abhi free hai toh start kar de" or command them to start right now if it is untimely (e.g., cooking, gym, or work tasks late at night).
-- If it's a future plan, remind them gently without demanding immediate execution.
-
-Example 1: "Arey sun, yaad hai na — ${text}? Time pe dekh lena!"
-Example 2: "Yaar, ${text} wala kaam dekh lena araam se."
-Example 3: "Sun, ${text} ke baare me socha tha na? Yaad dila rahi thi."
+You need to remind them about this: "${text}".
+PURPOSE-DRIVEN COMPANION RULES:
+- Connect this task to their real-life purpose (e.g. if PF/bank details, it clears 15k capital to launch Shetty's Dhaba cloud kitchen; if interview/hiring, it scales Conviction HR; if family, it supports baby Shreshth and Sakshi).
+- Speak as a perceptive, supportive companion.
+- DO NOT sound like a robotic alarm clock.
+- NEVER use boilerplate formulas like "Arey sun, yaad hai na... Time pe dekh lena!" or "abhi free hai toh start kar de".
+- Reference: "${enrichedDefault}"
+- Keep it 1-2 natural sentences in conversational Hinglish.
 
 Output ONLY the raw text message. No markdown, no quotes, no labels.`;
 
@@ -398,22 +385,23 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
         { role: 'system', content: prompt }
       ], {
         temperature: 0.7,
-        maxTokens: 100
+        maxTokens: 120
       });
       
       let clean = result.trim();
       if (clean.startsWith('"') && clean.endsWith('"')) {
         clean = clean.substring(1, clean.length - 1);
       }
-      return clean || `Arey sun, ${text} yaad dila rahi thi!`;
+      return clean || enrichedDefault;
     } catch (err) {
-      logger.error('Failed to generate dynamic reminder message, falling back to template', { error: err instanceof Error ? err.message : String(err) });
-      const templates = [
-        `Yaar, ${text} ka dhyaan rakhna! Done ho jaye toh batana 😊`,
-        `Arre sun, ${text} yaad hai na? Aaram se dekh lena.`,
-        `Sun, ${text} ke baare me yaad dila rahi thi!`
-      ];
-      return templates[Math.floor(Math.random() * templates.length)];
+      logger.error('Failed to generate dynamic reminder message, falling back to purpose-enriched message', { error: err instanceof Error ? err.message : String(err) });
+      try {
+        const { userLifeStageEngine } = await import('./UserLifeStageEngine');
+        const stageCtx = await userLifeStageEngine.getUserLifeStageContext(reminder.user_id);
+        return userLifeStageEngine.enrichReminderMessage(text, stageCtx);
+      } catch {
+        return `Arey sun, ${text} ke baare me socha tha na? Yaad dila rahi thi!`;
+      }
     }
   }
 

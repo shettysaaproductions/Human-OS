@@ -354,7 +354,7 @@ export function clusterMemoriesIntoWardrobes(
     value: string;
     updated_at?: string;
     created_at?: string;
-  }> = []
+  }> | Record<string, any> = []
 ): {
   wardrobes: EntityWardrobe[];
   filteredMemories: Array<any>;
@@ -373,7 +373,16 @@ export function clusterMemoriesIntoWardrobes(
     allEntries.push(entry);
   }
 
-  for (const w of workingContext) {
+  const normalizedWorking = Array.isArray(workingContext)
+    ? workingContext
+    : workingContext && typeof workingContext === 'object'
+      ? Object.entries(workingContext).map(([key, value]) => ({
+          key,
+          value: typeof value === 'object' ? JSON.stringify(value) : String(value)
+        }))
+      : [];
+
+  for (const w of normalizedWorking) {
     if (!w.key || !w.value) continue;
     const entry = { ...w, isWorkingContext: true };
     if (!memMap.has(w.key.toLowerCase())) {
