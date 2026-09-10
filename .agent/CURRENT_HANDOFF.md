@@ -1,52 +1,51 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-10 — Knowledge Galaxy Google Maps Pin Scaling, Constant Screen Size & Wide Tree Spacing
+2026-09-10 — Wardrobe Memory Clustering, Neural Dot-Connecting & Watchtower Entity Consolidation
 
 ## Session / Agent
 Agent: MonkeyCode
-Task: Knowledge Galaxy Google Maps Pin Scaling & Wide Tree Spacing (Issue: Zooming caused nodes to expand into giant blobs with overlapping dots and lines)
+Branch: `agent-checkpoint/memory-wardrobe-clustering`
+Task: Wardrobe Memory Clustering, Neural Dot-Connecting, Watchtower Reflection Consolidation, and Brain Screen UI Redesign.
 
-## Current Task
-GOOGLE-MAPS-PIN-SCALING-AND-WIDE-TREE-SPACING:
-1. Converted Knowledge Galaxy nodes and midpoint badges from scaled SVG elements to GPU-accelerated `Animated.View` overlays.
-2. Implemented the Google Maps Pin Inverse-Scale Worklet: `transform: [{ scale: 1 / Math.max(0.85, scale.value) }]` so pins, icons, and text maintain a constant physical screen size when zoomed in.
-3. Expanded `WORLD_SIZE` from 1,000 to 2,000, `DEPT_ORBIT_RADIUS` to 380, `branchDist` to 260, and `stemDist` to 180, creating massive (300px-600px) clear gaps between every dot and line on zoom.
-4. Added `vectorEffect="non-scaling-stroke"` to SVG lines and paths so connection lines remain crisp 1.5px/2.5px fine vector filaments at any zoom level.
-5. Added dark translucent pill backgrounds to node labels for 100% legibility against lines and glows.
+## Implemented Work
+1. **Entity Wardrobe Clustering Engine (`backend/src/lib/memoryDomains.ts`):**
+   - Implemented `clusterMemoriesIntoWardrobes(memories, workingContext)`:
+     - Unifies fragmented memory rows into 8 rich Entity Wardrobes:
+       - 👩 **Sakshi (Wife)**: Wife role, culinary talent ("Passionate cook & signature dishes"), self-taught nail artist (with kit and beautiful design skills), and annual birthday reminder.
+       - 👶 **Shreshth (Son)**: Son role, age ("6 mahine ka old"), and milestones.
+       - 👨‍🦳 **Suresh (Father)**: Father role, undergarments distribution business.
+       - 👵 **Rajeshree (Mother)**: Mother role, tailoring and garment craftsmanship.
+       - 💼 **Conviction HR (Career)**: Recruitment agency, Monday-Saturday 11 AM - 8 PM shift, scaling goal, and 4 candidates hiring drive.
+       - 🍲 **Shetty's Dhaba (Venture)**: Cloud kitchen & dhaba food venture, 15k PF funding, and portal update task.
+       - 🧠 **Saa (Identity & Core Mindset)**: Multi-venture founder, entrepreneurship, recruitment leadership, and family passions.
+       - ⏰ **Life Rhythm & Reminders**: Annual reminders, bank tasks, daily work/family shift routines.
+     - **No-Hard-Delete Compliance**: Preserves all rows in Supabase. Identifies composite aggregate duplicates (`family_details`, redundant `important_facts`) and flags `isCompositeDuplicate: true` to suppress duplicate bubbles from the presentation layer.
+2. **Dynamic Cross-Wardrobe Neural Dot-Connecting (`memoryDomains.ts`):**
+   - Added dynamic bridges:
+     - 👩 Sakshi ⇄ 🍲 Shetty's Dhaba: Sakshi's cooking flair and recipes anchor the cloud kitchen menu.
+     - 👨‍🦳 Suresh ⇄ 👵 Rajeshree: Undergarments sales + tailoring combine into family apparel heritage.
+     - 💼 Conviction HR ⇄ 👨‍👩‍👧 Family: 8:00 PM shift logout marks daily transition into evening family time.
+     - 💼 Work ⇄ 🎯 Goals: 4 candidate interviews accelerate Conviction HR scaling.
+     - 💰 PF Funds ⇄ 🍲 Dhaba: 15k PF funds and bank update provide launch capital.
+3. **Cognitive Reasoning & Prompt Integration (`promptBuilder.ts` & `WatchtowerReflectionService.ts`):**
+   - Injected structured Entity Wardrobes into Nova's system prompt via `formatHierarchicalMemoryPrompt`.
+   - Updated Watchtower reflection critique with wardrobe context to prevent attribute confusion between entities.
+4. **Backend Analytics Endpoint (`backend/src/routes/analytics.ts`):**
+   - Enriched `GET /analytics/memories` to return `entityWardrobes`, `connectedDots`, clean `currentMemories`, and domain compartments.
+   - Refined `classifyDomain` to properly prioritize work keys over mistyped family types (e.g. Shetty's Dhaba).
+5. **Mobile Frontend Redesign (`mobile/src/screens/analytics/MemoryBrainScreen.tsx`):**
+   - Added top View Switcher tabs: **🗄️ Wardrobe Clusters** vs **📝 All Facts**.
+   - Built rich Wardrobe Cards with entity emoji avatars, domain-colored accent borders, role badges, summary descriptions, connected dots banners, and trait chips.
+   - Expandable cards with long-press trait editing.
 
-## Status
-IMPLEMENTED, TYPE-CHECKED & PUSHED to `main` (commit `8b0ce1d`).
-- Mobile TypeScript check `cd mobile && npx tsc --noEmit` exits 0 (zero errors).
-- Pushed to `origin/main` (commit `8b0ce1d`).
-- GitHub Actions workflow `Publish Production Mobile OTA` (Run `34402912653`) in progress.
-
-## Repository State
-- Current branch: `main`
-- Commit: `8b0ce1d` (*feat(mobile): google maps pin scaling and wide tree spacing in knowledge galaxy*)
-
-## Confirmed Findings & Architecture
-1. **Root Cause of Cluttered Zoom**:
-   Previously, `<Svg>` wrapped inside `Animated.View` with `transform: [{ scale: s }]` scaled all SVG `<Circle>`, `<SvgText>`, and `<Line>` elements by `s`. When zooming in ($s = 2.5$), circle radii expanded from 18px to 45px (90px diameter), font size grew to 30px, and lines grew 2.5x thicker. Because node radii scaled at the exact same rate as the distance between them, zooming in never created breathing room.
-2. **Google Maps Pin Formula**:
-   When the world canvas is scaled by `s`, any child view with `transform: [{ scale: 1 / Math.max(0.85, s) }]` maintains an invariant physical screen size ($s \cdot \frac{1}{s} = 1.0$), while the distance between node origins scales linearly with $s$.
-   - At zoom 2.5x, the distance between Sakshi (Wife) and Cooking expands to 450px, but the circle remains 28px—leaving a massive **422px gap of clean, open space** between them.
-3. **Coordinate Canvas Bounds**:
-   `WORLD_SIZE = 2000`, `CENTER = 1000`.
-   Maximum content radius: $380 + 260 + 180 = 820\text{px}$ from center ($[180, 1820]$), well within the 2000x2000 canvas with a 180px safety margin.
-
-## Test & Validation Results
-- `mobile`: `npx tsc --noEmit` -> PASS (exit code 0).
-- `git`: Committed `8b0ce1d` and pushed to `main`.
-
-## Production Deployment Verification
-- EAS Android OTA Update: Published successfully to `production` channel:
-  * Update Group ID: `ffe9abbf-b950-4231-9ee1-a86414cb6248`
-  * Android Update ID: `01a087ec-465b-7deb-ad06-1c149c61f636`
-  * Runtime Version: `1.1.0`
-  * Commit: `8b0ce1d4f42364fa8db5379f165eb96903dca150`
-  * EAS Dashboard: https://expo.dev/accounts/shettysaa/projects/mobile/updates/ffe9abbf-b950-4231-9ee1-a86414cb6248
+## Verification Status
+- `npm test -- wardrobeClustering.test.ts memoryDomains.test.ts`: 13/13 tests PASS.
+- `mobile`: `npx tsc --noEmit` exits 0 (zero TypeScript errors).
+- `backend`: `npm run build` exits 0 (zero TypeScript errors).
 
 ## NEXT ACTION
-Restart the Human-OS mobile app on the physical Android device (close completely and reopen once or twice to apply the OTA bundle), then open Knowledge Galaxy to experience the Google Maps pin scaling and vast, clean spacing!
+Await user authorization to merge and push `agent-checkpoint/memory-wardrobe-clustering` to `main` for production Render deployment.
+
+
 

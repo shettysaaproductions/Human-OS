@@ -228,6 +228,13 @@ export class BackgroundActionService {
           // Dead code — kept as tombstone for history. Do not remove the false guard.
         }
         else if (action.tool === 'NovaFollowupService' && action.action === 'queue') {
+           const q = String(action.data?.question || '').trim();
+           // Guard: Suppress premature short-term followups for annual/distant events (e.g. wife's birthday next year)
+           const isFarEvent = /\b(?:birthday|anniversary|janamdin|gift|dob|date of birth)\b/i.test(q);
+           if (isFarEvent && action.data?.delay_hours && action.data.delay_hours < 72) {
+             logger.info('[BackgroundAction] Suppressed premature short-term followup for distant/annual event', { q, delay_hours: action.data.delay_hours });
+             continue;
+           }
            const { novaFollowupService } = await import('./NovaFollowupService');
            await novaFollowupService.queueFollowup(userId, conversationId, action.data.question, action.data.delay_hours);
         }
@@ -521,6 +528,26 @@ export class BackgroundActionService {
     const phrase = String(spec.time_phrase).toLowerCase().trim();
     const title = spec.description || spec.title || spec.text || 'Reminder';
     const base: any = { title, notes: spec.notes };
+
+    // Check if phrase contains annual event / advance date or specific calendar date
+    try {
+      const { reminderIntentDetector } = require('./ReminderIntentDetector');
+      const detRes = reminderIntentDetector.parseReminderDetails(`${phrase} ${title}`, userTzOffset);
+      if (!detRes.isAmbiguous && detRes.triggerAt && (detRes.isRecurring || phrase.includes('pehle') || phrase.includes('before') || phrase.includes('birth') || phrase.includes('/'))) {
+        const localT = new Date(detRes.triggerAt.getTime() + userTzOffset * 3600000);
+        base.date = localT.toISOString().split('T')[0];
+        const h = localT.getUTCHours();
+        const m = localT.getUTCMinutes();
+        base.time_of_day = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        if (detRes.isRecurring && detRes.recurrenceType === 'years') {
+          base.recurrence_interval_value = 1;
+          base.recurrence_interval_unit = 'years';
+        }
+        return base;
+      }
+    } catch {
+      // Fall through to regex
+    }
 
     const everyMatch = phrase.match(/every\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|hour?s?|hr?s?|day?s?|week?s?|month?s?)/i);
     if (everyMatch) {

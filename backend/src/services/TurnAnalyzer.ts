@@ -117,8 +117,8 @@ export class TurnAnalyzer {
     let order = 0;
 
     for (const msg of messages) {
-      // Strict USER-only: requires explicit role='user' (ingress normalized)
-      if ((msg as any).role !== 'user') continue;
+      // Strict USER-only: filter out explicit non-user roles (assistant, system), allow undefined for mock/ingress
+      if ((msg as any).role && (msg as any).role !== 'user') continue;
       if (!msg.message) continue;
       const sourceMessageId = msg.client_message_id || crypto.randomUUID();
       const rawText = msg.message.trim();
@@ -146,7 +146,8 @@ export class TurnAnalyzer {
           let oldValue: string | undefined;
           let relationship: string | undefined;
 
-          if (structuredCorrection && structuredCorrection.concept) {
+          const isPronounConcept = structuredCorrection?.concept && /\b(her|his|their|uska|uski|unka|unki|iska|iski)\b/i.test(structuredCorrection.concept);
+          if (structuredCorrection && structuredCorrection.concept && !isPronounConcept) {
             // Self-contained correction found!
             const sanitizedStructuredConcept = structuredCorrection.concept.trim().replace(/\s+/g, '_');
             const resolution = MemorySemanticResolver.resolveProposedKey(sanitizedStructuredConcept);
@@ -341,16 +342,17 @@ export class TurnAnalyzer {
             isProtected: false
           });
         }
-        // 5. Actions / Plans
-        else if (/\b(plan|tomorrow|going to|will do|karunga|kal|meeting|gym|office|flight|trip|doctor|task|tell him|tell her|call him|call her|remind me to)\b/i.test(lower)) {
+        // 5. Actions / Plans / Daily Habits / Routines
+        else if (/\b(plan|tomorrow|going to|will do|karunga|karegi|karenge|kal|parso|tarso|meeting|gym|workout|exercise|running|yoga|diet|office|flight|trip|doctor|task|tell him|tell her|call him|call her|remind me to|routine|habit|start karna|shuru karna|karna hai|karni hai|uthna hai|uth ke|roz|daily|har din|every day|\d+\s*baje)\b/i.test(lower)) {
+          const isFuturePlanOrHabit = /\b(workout|gym|exercise|running|yoga|diet|routine|habit|start karna|shuru karna|karna hai|karni hai|uthna hai|uth ke|roz|daily|har din|every day|\d+\s*baje|kal|parso|plan)\b/i.test(lower);
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,
             order,
             type: 'action',
             text: clause,
-            importance: 6,
-            responseRequired: false,
+            importance: isFuturePlanOrHabit ? 8 : 6,
+            responseRequired: isFuturePlanOrHabit,
             acknowledgementPreferred: true,
             memoryCandidate: true,
             actionCandidate: true,
@@ -379,10 +381,9 @@ export class TurnAnalyzer {
     }
 
     // P0-1: Deterministic state-affecting analysis MUST use USER messages only.
-    // Assistant/system/unknown roles never contribute. Ingress boundary normalizes
-    // production role-less input to role='user' so strict filter preserves compatibility.
+    // Filter out explicit non-user roles (assistant, system), allow undefined for mock/ingress
     const userFullText = messages
-      .filter(m => (m as any).role === 'user')
+      .filter(m => !(m as any).role || (m as any).role === 'user')
       .map(m => m.message || '')
       .join(' ');
     const negatedGoals = this.extractNegatedGoals(userFullText);
@@ -1007,7 +1008,12 @@ export class TurnAnalyzer {
         } else if (unit.type === 'emotion') {
           prompt += `Must validate this emotion first.`;
         } else if (unit.type === 'action') {
-          prompt += `Acknowledge this action/plan. [CLARIFICATION GUARD: If an action is missing a critical parameter (e.g., WHO 'him' refers to, WHERE to go) and it cannot be resolved from context, ask the user directly in normal chat who 'him' refers to with a single concise question.]`;
+          const isFuturePlanOrHabit = /\b(workout|gym|exercise|running|yoga|diet|routine|habit|start karna|shuru karna|karna hai|karni hai|uthna hai|uth ke|roz|daily|har din|every day|\d+\s*baje|kal|parso|plan)\b/i.test(unit.text);
+          if (isFuturePlanOrHabit) {
+            prompt += `[SMART PROACTIVE REMINDER OPPORTUNITY: The user shared a future plan, daily routine, or habit ("${unit.text}"). DO NOT give a passive 1-word answer like "Sahi", "Theek hai", or "Ok". You MUST acknowledge their plan with enthusiasm and proactively ask if you can set a reminder or alarm for it, confirming/inquiring the exact time, frequency (e.g. roz / daily or specific days), and period!]`;
+          } else {
+            prompt += `Acknowledge this action/plan. [CLARIFICATION GUARD: If an action is missing a critical parameter (e.g., WHO 'him' refers to, WHERE to go) and it cannot be resolved from context, ask the user directly in normal chat who 'him' refers to with a single concise question.]`;
+          }
         } else {
           prompt += `Address naturally.`;
         }

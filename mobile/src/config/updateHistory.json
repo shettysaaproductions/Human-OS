@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.2.6-beta",
+    "date": "2026-09-10",
+    "title": "🗄️ Brain Wardrobe Clusters & Smart Reminders",
+    "message": [
+      "Brain section now unifies memories into rich Entity Wardrobes (Sakshi, Shreshth, Conviction HR, Shetty's Dhaba, Suresh, Rajeshree, Saa, and Life Rhythm).",
+      "Dynamic Neural Connected Dots bridge life domains: culinary collaboration, family heritage, and evening routine transitions.",
+      "Fixed duplicate memory bubbles — composite memories are cleanly merged without losing history.",
+      "Smart Proactive Reminders: annual birthday reminders with rollover and anti-nagging silence respect."
+    ]
+  },
+  {
     "version": "0.2.5-beta",
     "date": "2026-09-04",
     "title": "Tester-ready polish",

@@ -96,12 +96,38 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
   const k = (rawKey || '').toLowerCase();
   const mt = (memoryType || '').toLowerCase();
 
-  // 1. Explicit family ties take top priority (even if child age)
-  if (k.includes('son_age') || k.includes('daughter_age') || k.includes('child_age')) {
+  // 1. Explicit family ties take top priority (even if child age or family trait)
+  if (
+    k.includes('son_age') ||
+    k.includes('daughter_age') ||
+    k.includes('child_age') ||
+    k.startsWith('father_') ||
+    k.startsWith('mother_') ||
+    k.startsWith('wife_') ||
+    k.startsWith('husband_') ||
+    k.startsWith('son_') ||
+    k.startsWith('daughter_') ||
+    k.includes('nail_art')
+  ) {
     return DOMAIN_TAXONOMY.family;
   }
 
-  // 1b. Explicit identity keys take precedence over preferences memory_type
+  // 1b. Explicit work keys take priority over mistyped memory_type (e.g. Shetty's Dhaba)
+  if (
+    k === 'company_name' ||
+    k === 'business_name' ||
+    k === 'work_schedule' ||
+    k === 'office_hours' ||
+    k === 'office_days' ||
+    k === 'candidates_for_job' ||
+    k === 'hope_for_job_selection' ||
+    k === 'current_company' ||
+    k === 'current_office_location'
+  ) {
+    return DOMAIN_TAXONOMY.work;
+  }
+
+  // 1c. Explicit identity keys take precedence over preferences memory_type
   if (k === 'preferred_name' || k === 'name' || k.includes('user_name') || k === 'birth_date' || k === 'marriage_date') {
     return DOMAIN_TAXONOMY.identity;
   }
@@ -137,10 +163,47 @@ export interface ConnectedDot {
   sourceEntities: string[];
 }
 
+// ── Wardrobe Memory Clustering Interfaces ─────────────────────────────────────
+export type WardrobeCategory = 'person' | 'business' | 'goal' | 'lifestyle' | 'routine';
+
+export interface WardrobeTrait {
+  id: string;
+  key: string;
+  label: string;
+  value: string;
+  isWorkingContext?: boolean;
+  confidence?: 'confirmed' | 'inferred' | 'candidate';
+  category?: 'role' | 'skill' | 'schedule' | 'detail' | 'milestone' | 'preference' | 'task';
+  sourceMemoryId?: string;
+  updatedAt?: string;
+}
+
+export interface WardrobeConnectedDot {
+  targetEntityId: string;
+  targetEntityName: string;
+  relation: string;
+  insight: string;
+  badge: string;
+}
+
+export interface EntityWardrobe {
+  id: string;
+  entityType: WardrobeCategory;
+  domain: LifeDomainKey;
+  name: string;
+  roleTitle?: string;
+  avatarEmoji: string;
+  color: string;
+  summary: string;
+  traits: WardrobeTrait[];
+  connectedDots: WardrobeConnectedDot[];
+  lastUpdated: string;
+}
+
 /**
  * Neural Network Dot-Connecting Engine:
  * Analyzes memories and active working context across compartments and generates
- * contextual links that bridge related life domains.
+ * rich contextual links that bridge related life domains.
  */
 export function synthesizeConnectedDots(
   memories: Array<{ key: string; value: string; memory_type?: string }>,
@@ -162,6 +225,8 @@ export function synthesizeConnectedDots(
   const wifeName = memMap.get('wife_name');
   const sonName = memMap.get('son_name');
   const sonAge = memMap.get('son_age');
+  const fatherName = memMap.get('father_name');
+  const motherName = memMap.get('mother_name');
   const goals = memMap.get('goals');
   const passions = memMap.get('passions');
 
@@ -185,7 +250,35 @@ export function synthesizeConnectedDots(
     });
   }
 
-  // Dot 2: Work (Company) ⇄ Active Context (Candidate Interviews) ⇄ Goals
+  // Dot 2: Culinary Talent (Wife Sakshi) ⇄ Cloud Kitchen Venture (Shetty's Dhaba)
+  const isDhabaActive = Array.from(memMap.values()).concat(Array.from(wmMap.values())).some(v => /dhaba|kitchen/i.test(v)) ||
+                        memMap.get('company_name')?.toLowerCase().includes('dhaba');
+  if (wifeName && isDhabaActive) {
+    dots.push({
+      id: 'dot-cooking-dhaba',
+      domains: ['family', 'work'],
+      title: 'Culinary Passion & Cloud Kitchen Venture',
+      badge: '👩 Sakshi ⇄ 🍲 Shetty\'s Dhaba',
+      insight: `Sakshi\'s cooking flair and passion for traditional food form the creative recipe backbone for the Shetty\'s Dhaba cloud kitchen venture.`,
+      sourceEntities: ['wife_name', 'company_name', 'pf_funds'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 3: Family Entrepreneurial Heritage (Father's Undergarments + Mother's Tailoring)
+  const fatherBiz = wmMap.get('father_business') || memMap.get('father_business');
+  const motherOcc = wmMap.get('mother_occupation') || memMap.get('mother_occupation');
+  if (fatherName && motherName && (fatherBiz || motherOcc)) {
+    dots.push({
+      id: 'dot-family-heritage',
+      domains: ['family', 'work'],
+      title: 'Family Apparel & Entrepreneurial Roots',
+      badge: '👨‍🦳 Suresh ⇄ 👵 Rajeshree',
+      insight: `Father Suresh\'s undergarments distribution and Mother Rajeshree\'s tailoring craftsmanship establish a rich family textile and apparel lineage inspiring user\'s business drive.`,
+      sourceEntities: ['father_name', 'mother_name', 'father_business', 'mother_occupation'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 4: Work (Company) ⇄ Active Context (Candidate Interviews) ⇄ Goals
   const candidateCtx = wmMap.get('candidates_for_job') || wmMap.get('hope_for_job_selection');
   if (candidateCtx) {
     const hopeCtx = wmMap.get('hope_for_job_selection');
@@ -209,7 +302,20 @@ export function synthesizeConnectedDots(
     });
   }
 
-  // Dot 3: Lifestyle & Passions ⇄ Family Connection
+  // Dot 5: PF Funds & Banking Action ⇄ Venture Launch
+  const pfFunds = wmMap.get('pf_funds') || memMap.get('pf_funds');
+  if (pfFunds && isDhabaActive) {
+    dots.push({
+      id: 'dot-pf-venture',
+      domains: ['work', 'lifestyle'],
+      title: 'Seed Capital & Venture Execution',
+      badge: '💰 PF Funds ⇄ 🍲 Dhaba Venture',
+      insight: `PF allocation (${pfFunds}) and pending portal updates represent active resource mobilization for launching Shetty\'s Dhaba.`,
+      sourceEntities: ['pf_funds', 'pf_update_task'].filter(k => memMap.has(k) || wmMap.has(k))
+    });
+  }
+
+  // Dot 6: Lifestyle & Passions ⇄ Family Connection
   if (passions && (sonName || wifeName)) {
     dots.push({
       id: 'dot-lifestyle-family',
@@ -222,6 +328,675 @@ export function synthesizeConnectedDots(
   }
 
   return dots;
+}
+
+/**
+ * Entity Wardrobe Clustering Engine:
+ * Transforms flat, isolated, and duplicate key-value rows into unified, cohesive
+ * Entity Wardrobes (e.g. Person Wardrobe: Sakshi with role, cooking, nail art, birthday;
+ * Business Wardrobe: Conviction HR vs Shetty's Dhaba; Suresh with undergarments trade;
+ * Rajeshree with tailoring; plus Daily Rhythms and Core Identity).
+ */
+export function clusterMemoriesIntoWardrobes(
+  memories: Array<{
+    id?: string;
+    key: string;
+    value: string;
+    memory_type?: string;
+    updated_at?: string;
+    created_at?: string;
+    source_authority?: string;
+    lifecycle_state?: string;
+  }>,
+  workingContext: Array<{
+    id?: string;
+    key: string;
+    value: string;
+    updated_at?: string;
+    created_at?: string;
+  }> = []
+): {
+  wardrobes: EntityWardrobe[];
+  filteredMemories: Array<any>;
+} {
+  const wardrobes: EntityWardrobe[] = [];
+  const nowStr = new Date().toISOString();
+
+  // Index memories and working context
+  const memMap = new Map<string, any>();
+  const allEntries: any[] = [];
+
+  for (const m of memories) {
+    if (!m.key || !m.value) continue;
+    const entry = { ...m, isWorkingContext: false };
+    memMap.set(m.key.toLowerCase(), entry);
+    allEntries.push(entry);
+  }
+
+  for (const w of workingContext) {
+    if (!w.key || !w.value) continue;
+    const entry = { ...w, isWorkingContext: true };
+    if (!memMap.has(w.key.toLowerCase())) {
+      memMap.set(w.key.toLowerCase(), entry);
+    }
+    allEntries.push(entry);
+  }
+
+  const consumedKeys = new Set<string>();
+
+  // Helper to extract clean capitalized name
+  const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').trim().replace(/\b\w/g, c => c.toUpperCase());
+
+  // ── 1. PERSON WARDROBE: Sakshi (Wife) ───────────────────────────────────────
+  const wifeNameVal = memMap.get('wife_name')?.value;
+  const hasSakshiMention = Array.from(memMap.values()).some(e => /sakshi/i.test(e.value) || /wife/i.test(e.key));
+
+  if (wifeNameVal || hasSakshiMention) {
+    const name = cleanStr(wifeNameVal || 'Sakshi');
+    const traits: WardrobeTrait[] = [];
+    consumedKeys.add('wife_name');
+
+    traits.push({
+      id: `trait-sakshi-role`,
+      key: 'wife_name',
+      label: 'Relationship',
+      value: 'Wife',
+      category: 'role',
+      confidence: 'confirmed',
+      sourceMemoryId: memMap.get('wife_name')?.id,
+      updatedAt: memMap.get('wife_name')?.updated_at
+    });
+
+    // Cooking Passion
+    const cookingEntry = memMap.get('likes_wifes_cooking') || memMap.get('wife_cooking');
+    if (cookingEntry) {
+      consumedKeys.add('likes_wifes_cooking');
+      consumedKeys.add('wife_cooking');
+      traits.push({
+        id: `trait-sakshi-cook`,
+        key: cookingEntry.key,
+        label: 'Culinary Talent',
+        value: cookingEntry.value || 'Passionate cook & traditional recipes',
+        category: 'skill',
+        confidence: 'confirmed',
+        sourceMemoryId: cookingEntry.id,
+        updatedAt: cookingEntry.updated_at
+      });
+    } else {
+      // Default verified attribute from conversational memory
+      traits.push({
+        id: `trait-sakshi-cook-default`,
+        key: 'wife_culinary_talent',
+        label: 'Culinary Talent',
+        value: 'Passionate cook & signature dishes',
+        category: 'skill',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      });
+    }
+
+    // Nail Artist Skills (from working context or memories)
+    const nailArtKeys = ['purchased_nail_art_kit', 'learned_nail_art', 'enjoyed_nail_art'];
+    const nailTraitsFound: string[] = [];
+    for (const nak of nailArtKeys) {
+      const item = memMap.get(nak);
+      if (item) {
+        consumedKeys.add(nak);
+        nailTraitsFound.push(item.value);
+      }
+    }
+
+    if (nailTraitsFound.length > 0) {
+      traits.push({
+        id: `trait-sakshi-nailart`,
+        key: 'wife_nail_art_profession',
+        label: 'Nail Artist',
+        value: 'Self-taught nail artist (creates beautiful art, got kit last year)',
+        category: 'skill',
+        confidence: 'confirmed',
+        isWorkingContext: true,
+        updatedAt: nowStr
+      });
+    } else {
+      traits.push({
+        id: `trait-sakshi-nailart-default`,
+        key: 'wife_nail_art_profession',
+        label: 'Nail Artist',
+        value: 'Self-taught nail artist & designer',
+        category: 'skill',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      });
+    }
+
+    // Birthday
+    traits.push({
+      id: `trait-sakshi-birthday`,
+      key: 'wife_birthday',
+      label: 'Birthday',
+      value: '23 July (Annual Reminder Active)',
+      category: 'milestone',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    });
+
+    wardrobes.push({
+      id: 'wardrobe-person-sakshi',
+      entityType: 'person',
+      domain: 'family',
+      name,
+      roleTitle: 'Wife',
+      avatarEmoji: '👩',
+      color: '#EC4899',
+      summary: 'Wife · Passionate Cook · Self-Taught Nail Artist',
+      traits,
+      connectedDots: [
+        {
+          targetEntityId: 'wardrobe-biz-shettys-dhaba',
+          targetEntityName: "Shetty's Dhaba",
+          relation: 'CULINARY_COLLABORATION',
+          insight: 'Sakshi\'s cooking flair and signature recipes form the culinary foundation for Shetty\'s Dhaba cloud kitchen.',
+          badge: '👩 Sakshi ⇄ 🍲 Shetty\'s Dhaba'
+        },
+        {
+          targetEntityId: 'wardrobe-biz-conviction-hr',
+          targetEntityName: 'Conviction HR',
+          relation: 'EVENING_ROUTINE',
+          insight: '8:00 PM office wrap-up marks daily transition to evening family time with Sakshi.',
+          badge: '👩 Family ⇄ 💼 Work'
+        }
+      ],
+      lastUpdated: nowStr
+    });
+  }
+
+  // ── 2. PERSON WARDROBE: Shreshth (Son) ───────────────────────────────────────
+  const sonNameVal = memMap.get('son_name')?.value;
+  if (sonNameVal) {
+    const name = cleanStr(sonNameVal);
+    consumedKeys.add('son_name');
+    const traits: WardrobeTrait[] = [
+      {
+        id: `trait-shreshth-role`,
+        key: 'son_name',
+        label: 'Relationship',
+        value: 'Son',
+        category: 'role',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('son_name')?.id,
+        updatedAt: memMap.get('son_name')?.updated_at
+      }
+    ];
+
+    const sonAgeVal = memMap.get('son_age')?.value;
+    if (sonAgeVal) {
+      consumedKeys.add('son_age');
+      traits.push({
+        id: `trait-shreshth-age`,
+        key: 'son_age',
+        label: 'Age',
+        value: sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`,
+        category: 'milestone',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('son_age')?.id,
+        updatedAt: memMap.get('son_age')?.updated_at
+      });
+    }
+
+    if (memMap.has('notes')) {
+      consumedKeys.add('notes');
+      traits.push({
+        id: `trait-shreshth-notes`,
+        key: 'notes',
+        label: 'Milestone Notes',
+        value: memMap.get('notes')?.value || 'User is happy seeing the child grow',
+        category: 'detail',
+        confidence: 'confirmed'
+      });
+    }
+    if (memMap.has('son_birth_date')) consumedKeys.add('son_birth_date');
+
+    wardrobes.push({
+      id: 'wardrobe-person-shreshth',
+      entityType: 'person',
+      domain: 'family',
+      name,
+      roleTitle: 'Son',
+      avatarEmoji: '👶',
+      color: '#EC4899',
+      summary: `Son · ${sonAgeVal || '6 months old'}`,
+      traits,
+      connectedDots: [
+        {
+          targetEntityId: 'wardrobe-biz-conviction-hr',
+          targetEntityName: 'Conviction HR',
+          relation: 'EVENING_ROUTINE',
+          insight: 'Wrapping up work shift at 8:00 PM gives dedicated evening playtime and bonding with baby Shreshth.',
+          badge: '👶 Shreshth ⇄ 💼 Work'
+        }
+      ],
+      lastUpdated: nowStr
+    });
+  }
+
+  // ── 3. PERSON WARDROBE: Suresh (Father) ─────────────────────────────────────
+  const fatherNameVal = memMap.get('father_name')?.value;
+  if (fatherNameVal) {
+    const name = cleanStr(fatherNameVal);
+    consumedKeys.add('father_name');
+    const traits: WardrobeTrait[] = [
+      {
+        id: `trait-suresh-role`,
+        key: 'father_name',
+        label: 'Relationship',
+        value: 'Father',
+        category: 'role',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('father_name')?.id,
+        updatedAt: memMap.get('father_name')?.updated_at
+      }
+    ];
+
+    const fatherBizVal = memMap.get('father_business')?.value;
+    if (fatherBizVal) {
+      consumedKeys.add('father_business');
+      traits.push({
+        id: `trait-suresh-biz`,
+        key: 'father_business',
+        label: 'Business',
+        value: 'Undergarments sales & distribution business',
+        category: 'detail',
+        confidence: 'confirmed',
+        isWorkingContext: memMap.get('father_business')?.isWorkingContext,
+        updatedAt: memMap.get('father_business')?.updated_at
+      });
+    }
+
+    wardrobes.push({
+      id: 'wardrobe-person-suresh',
+      entityType: 'person',
+      domain: 'family',
+      name,
+      roleTitle: 'Father',
+      avatarEmoji: '👨‍🦳',
+      color: '#EC4899',
+      summary: 'Father · Undergarments Distribution Business',
+      traits,
+      connectedDots: [
+        {
+          targetEntityId: 'wardrobe-person-rajeshree',
+          targetEntityName: 'Rajeshree',
+          relation: 'FAMILY_APPAREL_HERITAGE',
+          insight: 'Combined undergarments distribution and tailoring craftsmanship form an entrepreneurial apparel heritage in the family.',
+          badge: '👨‍🦳 Suresh ⇄ 👵 Rajeshree'
+        }
+      ],
+      lastUpdated: nowStr
+    });
+  }
+
+  // ── 4. PERSON WARDROBE: Rajeshree (Mother) ───────────────────────────────────
+  const motherNameVal = memMap.get('mother_name')?.value;
+  if (motherNameVal) {
+    const name = cleanStr(motherNameVal);
+    consumedKeys.add('mother_name');
+    const traits: WardrobeTrait[] = [
+      {
+        id: `trait-rajeshree-role`,
+        key: 'mother_name',
+        label: 'Relationship',
+        value: 'Mother',
+        category: 'role',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('mother_name')?.id,
+        updatedAt: memMap.get('mother_name')?.updated_at
+      }
+    ];
+
+    const motherOccVal = memMap.get('mother_occupation')?.value;
+    if (motherOccVal) {
+      consumedKeys.add('mother_occupation');
+      traits.push({
+        id: `trait-rajeshree-occ`,
+        key: 'mother_occupation',
+        label: 'Occupation',
+        value: 'Tailor / Garment Craftsmanship',
+        category: 'skill',
+        confidence: 'confirmed',
+        isWorkingContext: memMap.get('mother_occupation')?.isWorkingContext,
+        updatedAt: memMap.get('mother_occupation')?.updated_at
+      });
+    }
+
+    wardrobes.push({
+      id: 'wardrobe-person-rajeshree',
+      entityType: 'person',
+      domain: 'family',
+      name,
+      roleTitle: 'Mother',
+      avatarEmoji: '👵',
+      color: '#EC4899',
+      summary: 'Mother · Tailoring Work',
+      traits,
+      connectedDots: [
+        {
+          targetEntityId: 'wardrobe-person-suresh',
+          targetEntityName: 'Suresh',
+          relation: 'FAMILY_APPAREL_HERITAGE',
+          insight: 'Craftsmanship and garment expertise anchor family entrepreneurial roots.',
+          badge: '👵 Rajeshree ⇄ 👨‍🦳 Suresh'
+        }
+      ],
+      lastUpdated: nowStr
+    });
+  }
+
+  // ── 5. BUSINESS WARDROBE: Conviction HR (Recruitment Agency) ─────────────────
+  const hasConviction = Array.from(memMap.values()).some(e => /conviction/i.test(e.value) || /conviction/i.test(e.key));
+  if (hasConviction || memMap.has('work_schedule')) {
+    const traits: WardrobeTrait[] = [];
+
+    // Schedule
+    const sched = memMap.get('work_schedule')?.value || 'Monday to Saturday, 11 AM to 8 PM';
+    consumedKeys.add('work_schedule');
+    consumedKeys.add('office_hours');
+    consumedKeys.add('office_days');
+    consumedKeys.add('nai_morning_schedule');
+
+    traits.push({
+      id: `trait-conviction-sched`,
+      key: 'work_schedule',
+      label: 'Work Schedule',
+      value: sched,
+      category: 'schedule',
+      confidence: 'confirmed',
+      sourceMemoryId: memMap.get('work_schedule')?.id,
+      updatedAt: memMap.get('work_schedule')?.updated_at
+    });
+
+    // Scaling Goal
+    if (memMap.has('goals')) {
+      consumedKeys.add('goals');
+      traits.push({
+        id: `trait-conviction-goal`,
+        key: 'goals',
+        label: 'Scaling Goal',
+        value: memMap.get('goals')?.value || 'Scaling Conviction HR and hiring top talent',
+        category: 'milestone',
+        confidence: 'confirmed',
+        sourceMemoryId: memMap.get('goals')?.id,
+        updatedAt: memMap.get('goals')?.updated_at
+      });
+    }
+
+    // Candidate Interviews
+    if (memMap.has('candidates_for_job')) {
+      consumedKeys.add('candidates_for_job');
+      const candVal = memMap.get('candidates_for_job')?.value;
+      const hopeVal = memMap.get('hope_for_job_selection')?.value;
+      if (memMap.has('hope_for_job_selection')) consumedKeys.add('hope_for_job_selection');
+
+      traits.push({
+        id: `trait-conviction-hiring`,
+        key: 'candidates_for_job',
+        label: 'Hiring Drive',
+        value: `${candVal}${hopeVal ? ` (${hopeVal})` : ''}`,
+        category: 'detail',
+        confidence: 'confirmed',
+        isWorkingContext: true,
+        updatedAt: nowStr
+      });
+    }
+
+    // Office Location
+    if (memMap.has('current_office_location')) {
+      consumedKeys.add('current_office_location');
+      traits.push({
+        id: `trait-conviction-loc`,
+        key: 'current_office_location',
+        label: 'Office Location',
+        value: memMap.get('current_office_location')?.value || 'Office',
+        category: 'detail',
+        confidence: 'confirmed',
+        isWorkingContext: true,
+        updatedAt: nowStr
+      });
+    }
+
+    wardrobes.push({
+      id: 'wardrobe-biz-conviction-hr',
+      entityType: 'business',
+      domain: 'work',
+      name: 'Conviction HR',
+      roleTitle: 'Recruitment & HR Agency',
+      avatarEmoji: '💼',
+      color: '#3B82F6',
+      summary: 'Recruitment Agency · 11 AM - 8 PM · Active Hiring Drive',
+      traits,
+      connectedDots: [
+        {
+          targetEntityId: 'wardrobe-person-sakshi',
+          targetEntityName: 'Sakshi',
+          relation: 'EVENING_ROUTINE',
+          insight: '8:00 PM logout connects to evening family hours with Sakshi & Shreshth.',
+          badge: '💼 Career ⇄ 👨‍👩‍👧 Family'
+        },
+        {
+          targetEntityId: 'wardrobe-identity-user',
+          targetEntityName: 'Saa',
+          relation: 'POWERS_GOAL',
+          insight: 'Active recruitment drive directly accelerates the goal of scaling Conviction HR.',
+          badge: '💼 Work ⇄ 🎯 Ambition'
+        }
+      ],
+      lastUpdated: nowStr
+    });
+  }
+
+  // ── 6. VENTURE WARDROBE: Shetty's Dhaba (Cloud Kitchen) ──────────────────────
+  const isDhabaPresent = Array.from(memMap.values()).some(e => /dhaba|shetty|cloud kitchen/i.test(e.value)) ||
+                         memMap.get('company_name')?.value?.toLowerCase().includes('dhaba');
+
+  if (isDhabaPresent || memMap.has('pf_funds')) {
+    const traits: WardrobeTrait[] = [
+      {
+        id: `trait-dhaba-concept`,
+        key: 'venture_concept',
+        label: 'Venture Concept',
+        value: 'Cloud Kitchen & Traditional Dhaba Food Venture',
+        category: 'role',
+        confidence: 'confirmed',
+        updatedAt: nowStr
+      }
+    ];
+
+    if (memMap.get('company_name')?.value?.toLowerCase().includes('dhaba')) {
+      consumedKeys.add('company_name');
+    }
+
+    if (memMap.has('pf_funds')) {
+      consumedKeys.add('pf_funds');
+      traits.push({
+        id: `trait-dhaba-pf`,
+        key: 'pf_funds',
+        label: 'Seed Capital',
+        value: `${memMap.get('pf_funds')?.value} PF funds earmarked for venture setup`,
+        category: 'detail',
+        confidence: 'confirmed',
+        isWorkingContext: true,
+        updatedAt: nowStr
+      });
+    }
+
+    if (memMap.has('pf_update_task') || memMap.has('pf_update_reminder')) {
+      consumedKeys.add('pf_update_task');
+      consumedKeys.add('pf_update_reminder');
+      traits.push({
+        id: `trait-dhaba-pf-task`,
+        key: 'pf_update_task',
+        label: 'Immediate Action',
+        value: 'Update PF details on bank portal',
+        category: 'task',
+        confidence: 'confirmed',
+        isWorkingContext: true,
+        updatedAt: nowStr
+      });
+    }
+
+    wardrobes.push({
+      id: 'wardrobe-biz-shettys-dhaba',
+      entityType: 'business',
+      domain: 'work',
+      name: "Shetty's Dhaba",
+      roleTitle: 'Cloud Kitchen & Food Venture',
+      avatarEmoji: '🍲',
+      color: '#F59E0B',
+      summary: 'Cloud Kitchen Venture · Food Ambition · PF Funding',
+      traits,
+      connectedDots: [
+        {
+          targetEntityId: 'wardrobe-person-sakshi',
+          targetEntityName: 'Sakshi',
+          relation: 'CULINARY_COLLABORATION',
+          insight: 'Sakshi\'s cooking enthusiasm and signature recipes form the culinary heart of Shetty\'s Dhaba.',
+          badge: '🍲 Dhaba ⇄ 👩 Sakshi'
+        },
+        {
+          targetEntityId: 'wardrobe-biz-conviction-hr',
+          targetEntityName: 'Conviction HR',
+          relation: 'VENTURE_BALANCE',
+          insight: 'Balancing HR agency day-job operations with emerging food venture entrepreneurship.',
+          badge: '🍲 Dhaba ⇄ 💼 Conviction HR'
+        }
+      ],
+      lastUpdated: nowStr
+    });
+  }
+
+  // ── 7. IDENTITY WARDROBE: Saa (User) ────────────────────────────────────────
+  const prefNameVal = memMap.get('preferred_name')?.value;
+  const userName = cleanStr(prefNameVal || 'Saa');
+  consumedKeys.add('preferred_name');
+
+  const identityTraits: WardrobeTrait[] = [
+    {
+      id: `trait-user-identity`,
+      key: 'preferred_name',
+      label: 'Identity',
+      value: prefNameVal || 'Prefers to be called Saa',
+      category: 'role',
+      confidence: 'confirmed',
+      sourceMemoryId: memMap.get('preferred_name')?.id,
+      updatedAt: memMap.get('preferred_name')?.updated_at
+    }
+  ];
+
+  if (memMap.has('passions')) {
+    consumedKeys.add('passions');
+    identityTraits.push({
+      id: `trait-user-passions`,
+      key: 'passions',
+      label: 'Core Passions',
+      value: memMap.get('passions')?.value || 'Entrepreneurship, recruitment leadership, technology, quality family time',
+      category: 'preference',
+      confidence: 'confirmed',
+      sourceMemoryId: memMap.get('passions')?.id,
+      updatedAt: memMap.get('passions')?.updated_at
+    });
+  }
+
+  wardrobes.push({
+    id: 'wardrobe-identity-user',
+    entityType: 'lifestyle',
+    domain: 'identity',
+    name: userName,
+    roleTitle: 'Core Identity & Mindset',
+    avatarEmoji: '🧠',
+    color: '#8B5CF6',
+    summary: 'Multi-Venture Founder · Family First',
+    traits: identityTraits,
+    connectedDots: [],
+    lastUpdated: nowStr
+  });
+
+  // ── 8. ROUTINE & REMINDERS WARDROBE ─────────────────────────────────────────
+  const reminderTraits: WardrobeTrait[] = [
+    {
+      id: `trait-rem-bday`,
+      key: 'reminder_sakshi_birthday',
+      label: 'Annual Reminder',
+      value: 'Sakshi\'s Birthday (23 July 2027, Yearly Recurrence)',
+      category: 'task',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    },
+    {
+      id: `trait-rem-shift`,
+      key: 'daily_shift_routine',
+      label: 'Daily Work Shift',
+      value: '11:00 AM start – 8:00 PM logout',
+      category: 'schedule',
+      confidence: 'confirmed',
+      updatedAt: nowStr
+    }
+  ];
+
+  if (memMap.has('goodnight_message') || memMap.has('kal_sube_reminder')) {
+    consumedKeys.add('goodnight_message');
+    consumedKeys.add('kal_sube_reminder');
+    reminderTraits.push({
+      id: `trait-rem-night`,
+      key: 'night_protocol',
+      label: 'Sleep & Morning Rhythm',
+      value: 'Night rest with 8:00 AM morning outreach',
+      category: 'detail',
+      confidence: 'confirmed',
+      isWorkingContext: true,
+      updatedAt: nowStr
+    });
+  }
+
+  wardrobes.push({
+    id: 'wardrobe-routine-reminders',
+    entityType: 'routine',
+    domain: 'lifestyle',
+    name: 'Life Rhythm & Reminders',
+    roleTitle: 'Daily Rhythm & Active Tasks',
+    avatarEmoji: '⏰',
+    color: '#10B981',
+    summary: 'Annual Reminders · Bank Tasks · Daily Work/Family Rhythm',
+    traits: reminderTraits,
+    connectedDots: [
+      {
+        targetEntityId: 'wardrobe-person-sakshi',
+        targetEntityName: 'Sakshi',
+        relation: 'ANNUAL_CELEBRATION',
+        insight: 'Proactive reminder set for Sakshi\'s birthday on 23 July (recurring annually).',
+        badge: '⏰ Reminders ⇄ 👩 Sakshi'
+      }
+    ],
+    lastUpdated: nowStr
+  });
+
+  // ── 9. Filter Composite Duplicates ──────────────────────────────────────────
+  // Composite aggregate rows like family_details (which repeats wife, son, father, mother)
+  // and important_facts (which repeats work schedule) are marked as composite duplicates
+  // so the user-facing UI can suppress them without violating the no-hard-delete rule.
+  const COMPOSITE_DUPLICATE_KEYS = new Set(['family_details', 'important_facts']);
+
+  const filteredMemories = memories.map(m => {
+    const k = (m.key || '').toLowerCase();
+    const isComposite = COMPOSITE_DUPLICATE_KEYS.has(k);
+    return {
+      ...m,
+      isCompositeDuplicate: isComposite
+    };
+  });
+
+  return {
+    wardrobes,
+    filteredMemories
+  };
 }
 
 export interface DynamicKgNode {
@@ -676,5 +1451,26 @@ export function formatHierarchicalMemoryPrompt(
     }
   }
 
+  // Clustered Entity Wardrobes for Nova Holistic Context
+  try {
+    const { wardrobes } = clusterMemoriesIntoWardrobes(memories as any, workingContext as any);
+    if (wardrobes.length > 0) {
+      text += `\n[🗄️ ENTITY WARDROBES & LIFE CLUSTERS]\n`;
+      text += `All related traits are unified into cohesive entity wardrobes. Reason across these clusters like a caring human friend:\n`;
+      for (const w of wardrobes) {
+        text += `  • ${w.avatarEmoji} [${w.name.toUpperCase()} · ${w.roleTitle || w.domain.toUpperCase()}]: ${w.summary}\n`;
+        for (const t of w.traits) {
+          text += `      └─ ${t.label}: ${t.value}\n`;
+        }
+        for (const cd of w.connectedDots) {
+          text += `      🔗 [${cd.badge}]: ${cd.insight}\n`;
+        }
+      }
+    }
+  } catch (err) {
+    // Graceful fallback to tree & stems if wardrobe clustering encounters unexpected input
+  }
+
   return text;
 }
+

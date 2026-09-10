@@ -113,14 +113,12 @@ export class NovaFollowupService {
    */
   private async _hasUnansweredFollowup(userId: string): Promise<boolean> {
     try {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      // Get the most recent assistant message
+      // Get the most recent assistant message (no arbitrary 1-hour cutoff)
       const { data: lastAssistant } = await supabaseAdmin
         .from('chat_history')
         .select('id, created_at, meta')
         .eq('user_id', userId)
         .eq('role', 'assistant')
-        .gte('created_at', oneHourAgo)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -139,15 +137,8 @@ export class NovaFollowupService {
 
       if (userReply) return false; // User replied → chain is broken
 
-      // Check if this assistant message came from a follow-up service (not the main chat)
-      const source = lastAssistant.meta?.source;
-      const isFollowupSource = source === 'NovaFollowupService' || source === 'NovaConsciousnessEngine';
-
-      // If the last assistant message was from a follow-up service and user hasn't replied,
-      // we already sent one follow-up → don't chain another
-      if (isFollowupSource) return true;
-
-      return false;
+      // If the last message was from Nova and user hasn't replied, Nova must not chain another follow-up!
+      return true;
     } catch {
       return false; // fail open
     }
@@ -413,6 +404,28 @@ export class NovaFollowupService {
       }
 
       try {
+        // Adapt language if message is purely in English and user's profile is Indian/Hinglish
+        let messageToSend = followup.message;
+        if (messageToSend && /^[a-zA-Z0-9\s.,?!'"’‘-]+$/.test(messageToSend)) {
+          try {
+            const { data: prof } = await supabaseAdmin.from('profiles').select('country').eq('id', followup.user_id).maybeSingle();
+            if (!prof || prof.country === 'IN') {
+              const isPureEnglishQuestion = /\b(?:do you|are you|have you|did you|what are|would you|how is|is there)\b/i.test(messageToSend);
+              if (isPureEnglishQuestion) {
+                const { complete } = await import('../lib/nvidia');
+                const converted = await complete('LEARNING', [
+                  { role: 'system', content: `Translate this conversational follow-up into a single warm, natural 1-line Hinglish text message from Nova to a friend on WhatsApp. Raw message: "${messageToSend}". Output ONLY the raw Hinglish text.` }
+                ], { temperature: 0.3, maxTokens: 60 });
+                if (converted && converted.trim().length > 0) {
+                  messageToSend = converted.trim().replace(/^["']|["']$/g, '');
+                }
+              }
+            }
+          } catch {
+            // Keep original on fallback
+          }
+        }
+
         const dispatchResult = await outboundDispatcherService.dispatch({
           userId: followup.user_id,
           sourceEngine: 'FOLLOWUP' as OutboundSource,
@@ -421,7 +434,7 @@ export class NovaFollowupService {
           idempotencyKey: `followup:${followup.id}`,
           context: {},
           generationStrategy: 'none',
-          proposedMessage: followup.message,
+          proposedMessage: messageToSend,
           skipQuietHoursCheck: true // Already checked above
         });
         const finalStatus = dispatchResult.status;

@@ -3,7 +3,14 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { SourceAuthority } from '../types/memory';
-import { classifyDomain, synthesizeConnectedDots, buildDynamicKnowledgeGraph, DOMAIN_TAXONOMY, LifeDomainKey } from '../lib/memoryDomains';
+import {
+  classifyDomain,
+  synthesizeConnectedDots,
+  clusterMemoriesIntoWardrobes,
+  buildDynamicKnowledgeGraph,
+  DOMAIN_TAXONOMY,
+  LifeDomainKey
+} from '../lib/memoryDomains';
 
 export const analyticsRouter = Router();
 
@@ -173,7 +180,13 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       };
     });
 
-    // ── 6. Group into Wardrobe Domain Compartments ─────────────────────────────
+    // ── 6. Group into Wardrobe Domain Compartments & Entity Wardrobes ─────────────
+    const { wardrobes: entityWardrobes, filteredMemories } = clusterMemoriesIntoWardrobes(currentMemories, workingContext);
+
+    // Suppress composite duplicate rows (family_details, redundant important_facts)
+    // from individual compartment bubbles so user never sees duplicate clutters
+    const cleanCurrentMemories = filteredMemories.filter((m: any) => !m.isCompositeDuplicate);
+
     const domainCompartments: Record<LifeDomainKey, {
       meta: any;
       memories: any[];
@@ -187,7 +200,7 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       identity: { meta: DOMAIN_TAXONOMY.identity, memories: [], workingContext: [], count: 0 },
     };
 
-    for (const mem of currentMemories) {
+    for (const mem of cleanCurrentMemories) {
       const d = (mem.domain || 'identity') as LifeDomainKey;
       if (domainCompartments[d]) {
         domainCompartments[d].memories.push(mem);
@@ -228,12 +241,16 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
     res.status(200).json({
       success: true,
       data: {
-        currentMemories,
+        entityWardrobes,
+        currentMemories: cleanCurrentMemories,
+        rawMemories: currentMemories,
         workingContext,
         domainCompartments,
         connectedDots,
         archivedMemories,
-        totalCount: currentMemories.length,
+        totalCount: cleanCurrentMemories.length,
+        rawCount: currentMemories.length,
+        wardrobeCount: entityWardrobes.length,
         categories,
         thisWeekCount,
       }

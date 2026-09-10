@@ -110,6 +110,8 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
   const [data, setData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'wardrobes' | 'facts'>('wardrobes');
+  const [expandedWardrobes, setExpandedWardrobes] = useState<Record<string, boolean>>({});
   const [historyExpanded, setHistoryExpanded] = useState(false);
 
   // Edit Modal State
@@ -131,6 +133,28 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       setLoading(false);
     }
   };
+
+  const toggleWardrobe = useCallback((id: string) => {
+    setExpandedWardrobes(prev => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const filteredWardrobes = useMemo(() => {
+    if (!data?.entityWardrobes) return [];
+    let list: any[] = data.entityWardrobes;
+    if (selectedType && selectedType !== 'all') {
+      list = list.filter((w: any) => w.domain === selectedType);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((w: any) =>
+        w.name.toLowerCase().includes(q) ||
+        w.summary.toLowerCase().includes(q) ||
+        (w.roleTitle && w.roleTitle.toLowerCase().includes(q)) ||
+        w.traits.some((t: any) => t.label.toLowerCase().includes(q) || t.value.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [data, selectedType, searchQuery]);
 
   const sections = useMemo(() => {
     const list: any[] = [];
@@ -206,6 +230,22 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     );
   }, []);
 
+  const handleLongPressTrait = useCallback((trait: any, _wardrobe: any) => {
+    if (trait.isWorkingContext) return;
+    Alert.alert(
+      'Manage Trait',
+      `What would you like to do with "${trait.label}: ${trait.value}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Edit', onPress: () => {
+            setEditMemory({ id: trait.sourceMemoryId || trait.id, key: trait.key, value: trait.value });
+            setEditValue(trait.value);
+            setEditModalVisible(true);
+        }}
+      ]
+    );
+  }, []);
+
   const confirmDelete = useCallback((item: any) => {
     Alert.alert('Delete Memory?', 'Are you sure you want to archive this memory? It will be moved to History.', [
       { text: 'Cancel', style: 'cancel' },
@@ -224,7 +264,9 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     if (!editMemory || !editValue.trim()) return;
     setIsSaving(true);
     try {
-      await api.patch(`/memories/${editMemory.id}`, { value: editValue });
+      if (editMemory.id && !editMemory.id.startsWith('trait-')) {
+        await api.patch(`/memories/${editMemory.id}`, { value: editValue });
+      }
       setEditModalVisible(false);
       fetchMemories();
     } catch (err) {
@@ -247,19 +289,41 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       {/* Stats row */}
       <View style={s.statsRow}>
         <View style={s.statCard}>
-          <Text style={s.statNum}>{data?.totalCount || 0}</Text>
-          <Text style={s.statLabel}>Total Facts</Text>
+          <Text style={s.statNum}>{data?.wardrobeCount || data?.entityWardrobes?.length || 0}</Text>
+          <Text style={s.statLabel}>Wardrobes</Text>
         </View>
         <View style={s.statCard}>
           <Text style={[s.statNum, { color: '#10B981' }]}>
-            {Object.keys(data?.domainCompartments || {}).length || 5}
+            {data?.totalCount || 0}
           </Text>
-          <Text style={s.statLabel}>Domains</Text>
+          <Text style={s.statLabel}>Total Facts</Text>
         </View>
         <View style={s.statCard}>
-          <Text style={[s.statNum, { color: '#F59E0B' }]}>{data?.thisWeekCount || 0}</Text>
-          <Text style={s.statLabel}>This Week</Text>
+          <Text style={[s.statNum, { color: '#F59E0B' }]}>{connectedDots.length}</Text>
+          <Text style={s.statLabel}>Connected Dots</Text>
         </View>
+      </View>
+
+      {/* View Switcher: Wardrobes vs All Facts */}
+      <View style={s.tabSwitch}>
+        <TouchableOpacity
+          style={[s.tabBtn, viewMode === 'wardrobes' && s.tabBtnActive]}
+          onPress={() => setViewMode('wardrobes')}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.tabBtnText, viewMode === 'wardrobes' && s.tabBtnTextActive]}>
+            🗄️ Wardrobe Clusters ({filteredWardrobes.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.tabBtn, viewMode === 'facts' && s.tabBtnActive]}
+          onPress={() => setViewMode('facts')}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.tabBtnText, viewMode === 'facts' && s.tabBtnTextActive]}>
+            📝 All Facts ({data?.totalCount || 0})
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search */}
@@ -325,86 +389,156 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         </View>
       ) : null}
 
-      {/* Memory Compartment Sections */}
-      <SectionList
-        sections={sections}
-        keyExtractor={(item, index) => item.id || `item-${index}`}
-        removeClippedSubviews
-        windowSize={10}
-        contentContainerStyle={s.listContent}
-        ListEmptyComponent={<Text style={s.emptyText}>No memories found in this compartment.</Text>}
-        renderSectionHeader={({ section }: any) => {
-          if (section.type === 'archived' || section.type === 'archived_collapsed') {
+      {/* Main Content Area */}
+      {viewMode === 'wardrobes' ? (
+        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+          {filteredWardrobes.length === 0 ? (
+            <Text style={s.emptyText}>No wardrobe clusters found in this compartment.</Text>
+          ) : (
+            filteredWardrobes.map((w: any) => {
+              const isExpanded = !!expandedWardrobes[w.id];
+              return (
+                <View key={w.id} style={[s.wardrobeCard, { borderLeftColor: w.color, borderLeftWidth: 4 }]}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => toggleWardrobe(w.id)}
+                    style={s.wardrobeHeader}
+                  >
+                    <View style={s.wardrobeHeaderLeft}>
+                      <View style={[s.wardrobeAvatar, { backgroundColor: `${w.color}20`, borderColor: `${w.color}60` }]}>
+                        <Text style={s.wardrobeAvatarText}>{w.avatarEmoji}</Text>
+                      </View>
+                      <View style={s.wardrobeTitleCol}>
+                        <View style={s.wardrobeNameRow}>
+                          <Text style={s.wardrobeName}>{w.name}</Text>
+                          <View style={[s.wardrobeRoleBadge, { backgroundColor: `${w.color}15`, borderColor: w.color }]}>
+                            <Text style={[s.wardrobeRoleText, { color: w.color }]}>
+                              {w.roleTitle || w.domain}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={s.wardrobeSummary} numberOfLines={isExpanded ? undefined : 2}>
+                          {w.summary}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.wardrobeExpandIcon}>{isExpanded ? '▲' : '▼'}</Text>
+                  </TouchableOpacity>
+
+                  {/* Connected Dots Box */}
+                  {w.connectedDots && w.connectedDots.length > 0 && (
+                    <View style={s.wardrobeDotsBox}>
+                      {w.connectedDots.map((cd: any, idx: number) => (
+                        <View key={idx} style={s.wardrobeDotRow}>
+                          <Text style={s.wardrobeDotBadge}>{cd.badge}</Text>
+                          <Text style={s.wardrobeDotInsight}>{cd.insight}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Trait Chips Grid */}
+                  <View style={s.traitsWrap}>
+                    {w.traits.map((t: any) => (
+                      <TouchableOpacity
+                        key={t.id}
+                        style={[s.traitChip, t.isWorkingContext && s.traitChipWorking]}
+                        onLongPress={() => handleLongPressTrait(t, w)}
+                        delayLongPress={400}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[s.traitLabel, { color: w.color }]}>{t.label}:</Text>
+                        <Text style={s.traitValue}>{t.value}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+      ) : (
+        /* Granular Fact Sections (SectionList) */
+        <SectionList
+          sections={sections}
+          keyExtractor={(item, index) => item.id || `item-${index}`}
+          removeClippedSubviews
+          windowSize={10}
+          contentContainerStyle={s.listContent}
+          ListEmptyComponent={<Text style={s.emptyText}>No memories found in this compartment.</Text>}
+          renderSectionHeader={({ section }: any) => {
+            if (section.type === 'archived' || section.type === 'archived_collapsed') {
+              return (
+                <View style={s.sectionHeader}>
+                  <TouchableOpacity onPress={() => setHistoryExpanded(!historyExpanded)} style={s.historyHeaderRow}>
+                    <Text style={s.sectionTitle}>{section.title} ({section.count})</Text>
+                    <Text style={s.historyHeaderIcon}>{historyExpanded ? '▼' : '▶'}</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }
+
             return (
-              <View style={s.sectionHeader}>
-                <TouchableOpacity onPress={() => setHistoryExpanded(!historyExpanded)} style={s.historyHeaderRow}>
-                  <Text style={s.sectionTitle}>{section.title} ({section.count})</Text>
-                  <Text style={s.historyHeaderIcon}>{historyExpanded ? '▼' : '▶'}</Text>
-                </TouchableOpacity>
+              <View style={[s.sectionHeader, { borderLeftColor: section.color, borderLeftWidth: 4, paddingLeft: 8 }]}>
+                <Text style={s.sectionTitle}>
+                  {section.emoji} {section.title} <Text style={[s.sectionCount, { color: section.color }]}>({section.count})</Text>
+                </Text>
               </View>
             );
-          }
+          }}
+          renderItem={({ item, section }: any) => {
+            const isArchived = section.type === 'archived';
 
-          return (
-            <View style={[s.sectionHeader, { borderLeftColor: section.color, borderLeftWidth: 4, paddingLeft: 8 }]}>
-              <Text style={s.sectionTitle}>
-                {section.emoji} {section.title} <Text style={[s.sectionCount, { color: section.color }]}>({section.count})</Text>
-              </Text>
-            </View>
-          );
-        }}
-        renderItem={({ item, section }: any) => {
-          const isArchived = section.type === 'archived';
+            if (item.isWorkingContext) {
+              const timeStr = relativeTime(item.updated_at || item.created_at);
+              return (
+                <View style={[s.card, s.cardWorking]}>
+                  <View style={s.cardHeader}>
+                    <View style={[s.badge, { backgroundColor: '#06B6D420', borderColor: '#06B6D4' }]}>
+                      <Text style={[s.badgeText, { color: '#06B6D4' }]}>⚡ Active Context</Text>
+                    </View>
+                    {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
+                  </View>
+                  <Text style={[s.cardKey, { color: '#06B6D4' }]}>{toLabel(item.key)}</Text>
+                  <Text style={s.cardVal}>{item.value}</Text>
+                </View>
+              );
+            }
 
-          if (item.isWorkingContext) {
+            const domainKey = inferDomain(item);
+            const domainMeta = DOMAIN_META_MAP[domainKey] || CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
+            const typeMeta = CATEGORY_META[item.memory_type] || domainMeta;
+            const typeLabel = MEMORY_TYPE_LABEL[item.memory_type] || domainMeta.label || 'Fact';
+            const authMeta = AUTHORITY_META[item.source_authority] || AUTHORITY_META.subconscious_inference;
             const timeStr = relativeTime(item.updated_at || item.created_at);
+
             return (
-              <View style={[s.card, s.cardWorking]}>
+              <TouchableOpacity 
+                style={[s.card, isArchived && s.cardArchived]}
+                onLongPress={() => !isArchived && handleLongPress(item)}
+                delayLongPress={400}
+                activeOpacity={isArchived ? 1 : 0.7}
+              >
                 <View style={s.cardHeader}>
-                  <View style={[s.badge, { backgroundColor: '#06B6D420', borderColor: '#06B6D4' }]}>
-                    <Text style={[s.badgeText, { color: '#06B6D4' }]}>⚡ Active Context</Text>
+                  <View style={[s.badge, { backgroundColor: `${typeMeta.color}20`, borderColor: typeMeta.color }]}>
+                    <Text style={[s.badgeText, { color: typeMeta.color }]}>
+                      {typeMeta.emoji} {typeLabel}
+                    </Text>
                   </View>
-                  {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
+                  <View style={s.cardHeaderRight}>
+                    <View style={[s.authBadge, { borderColor: authMeta.color }]}>
+                      <Text style={[s.authBadgeText, { color: authMeta.color }]}>{authMeta.label}</Text>
+                    </View>
+                    {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
+                  </View>
                 </View>
-                <Text style={[s.cardKey, { color: '#06B6D4' }]}>{toLabel(item.key)}</Text>
+                <Text style={[s.cardKey, { color: domainMeta.color }]}>{toLabel(item.key)}</Text>
                 <Text style={s.cardVal}>{item.value}</Text>
-              </View>
+              </TouchableOpacity>
             );
-          }
-
-          const domainKey = inferDomain(item);
-          const domainMeta = DOMAIN_META_MAP[domainKey] || CATEGORY_META[item.memory_type] || CATEGORY_META.uncategorized;
-          const typeMeta = CATEGORY_META[item.memory_type] || domainMeta;
-          const typeLabel = MEMORY_TYPE_LABEL[item.memory_type] || domainMeta.label || 'Fact';
-          const authMeta = AUTHORITY_META[item.source_authority] || AUTHORITY_META.subconscious_inference;
-          const timeStr = relativeTime(item.updated_at || item.created_at);
-
-          return (
-            <TouchableOpacity 
-              style={[s.card, isArchived && s.cardArchived]}
-              onLongPress={() => !isArchived && handleLongPress(item)}
-              delayLongPress={400}
-              activeOpacity={isArchived ? 1 : 0.7}
-            >
-              <View style={s.cardHeader}>
-                <View style={[s.badge, { backgroundColor: `${typeMeta.color}20`, borderColor: typeMeta.color }]}>
-                  <Text style={[s.badgeText, { color: typeMeta.color }]}>
-                    {typeMeta.emoji} {typeLabel}
-                  </Text>
-                </View>
-                <View style={s.cardHeaderRight}>
-                  <View style={[s.authBadge, { borderColor: authMeta.color }]}>
-                    <Text style={[s.authBadgeText, { color: authMeta.color }]}>{authMeta.label}</Text>
-                  </View>
-                  {timeStr ? <Text style={s.timeText}>{timeStr}</Text> : null}
-                </View>
-              </View>
-              <Text style={[s.cardKey, { color: domainMeta.color }]}>{toLabel(item.key)}</Text>
-              <Text style={s.cardVal}>{item.value}</Text>
-            </TouchableOpacity>
-          );
-        }}
-      />
+          }}
+        />
+      )}
 
       {/* Edit Modal */}
       <Modal visible={editModalVisible} transparent animationType="fade">
@@ -447,13 +581,41 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
   title: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginHorizontal: 16, marginTop: 8, marginBottom: 12 },
-  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 16, gap: 8 },
+  statsRow: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 14, gap: 8 },
   statCard: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center'
   },
   statNum: { fontSize: 22, fontWeight: 'bold', color: '#8B5CF6' },
   statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
+
+  // View Switcher (Tabs)
+  tabSwitch: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  tabBtnActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  tabBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#888',
+  },
+  tabBtnTextActive: {
+    color: '#fff',
+  },
+
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10,
@@ -490,6 +652,128 @@ const s = StyleSheet.create({
   dotInsight: { fontSize: 12, color: '#A1A1AA', lineHeight: 16 },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 32 },
+
+  // Wardrobe Cards
+  wardrobeCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  wardrobeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  wardrobeHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  wardrobeAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  wardrobeAvatarText: {
+    fontSize: 22,
+  },
+  wardrobeTitleCol: {
+    flex: 1,
+  },
+  wardrobeNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
+  wardrobeName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  wardrobeRoleBadge: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  wardrobeRoleText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  wardrobeSummary: {
+    fontSize: 12,
+    color: '#A1A1AA',
+    lineHeight: 16,
+  },
+  wardrobeExpandIcon: {
+    color: '#71717A',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  wardrobeDotsBox: {
+    backgroundColor: 'rgba(139,92,246,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.25)',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 10,
+    gap: 6,
+  },
+  wardrobeDotRow: {
+    flexDirection: 'column',
+    gap: 2,
+  },
+  wardrobeDotBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#C084FC',
+  },
+  wardrobeDotInsight: {
+    fontSize: 11,
+    color: '#D4D4D8',
+    lineHeight: 15,
+  },
+  traitsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  traitChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    gap: 4,
+  },
+  traitChipWorking: {
+    borderColor: '#06B6D440',
+    backgroundColor: '#06B6D410',
+  },
+  traitLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  traitValue: {
+    fontSize: 12,
+    color: '#E4E4E7',
+  },
+
+  // Standard Facts & Compartments
   sectionHeader: { marginTop: 14, marginBottom: 10 },
   sectionTitle: { fontSize: 17, fontWeight: 'bold', color: '#fff' },
   sectionCount: { fontSize: 14, fontWeight: '600' },

@@ -20,6 +20,8 @@ export interface ReminderDetectionResult {
   task?: string;
   triggerAt?: Date;
   formattedTime?: string;
+  isRecurring?: boolean;
+  recurrenceType?: string;
 }
 
 export class ReminderIntentDetector {
@@ -52,7 +54,41 @@ export class ReminderIntentDetector {
   }
 
   /**
-   * Deterministically parses time, date, and task from the user's message.
+   * Smart Proactive Detection: Does the message discuss a future-dated plan, upcoming activity, daily routine, or habit?
+   * e.g.:
+   * - "Sube muje roz workout start karna hai 8 baje uth ke"
+   * - "kal se gym shuru karna hai"
+   * - "roz raat ko 10 baje book padhni hai"
+   * - "parso doctor ke paas jana hai"
+   */
+  hasFuturePlanIntent(text: string): boolean {
+    if (!text || text.trim().length === 0) return false;
+    const lower = text.toLowerCase();
+
+    // Exclude explicit negatives
+    if (/\b(?:don'?t|dont|not|mat)\s*(?:karna|shuru|start|jana|karunga)\b/i.test(lower)) {
+      return false;
+    }
+
+    const hasHabitOrRoutine = /\b(?:roz|daily|har\s*din|every\s*day|subah|sube|sawere|savere|shaam|raat|dopahar)\b/i.test(lower);
+    const hasActivity = /\b(?:workout|gym|exercise|walk|running|yoga|diet|uthna|uth\s*ke|padhna|study|class|office|meeting|khana|cook|cooking|medication|dawa|doctor|client|project|kitchen|kaam)\b/i.test(lower);
+    const hasFutureIntention = /\b(?:start\s*karna|shuru\s*karna|karna\s*hai|karni\s*hai|jana\s*hai|soch\s*raha|planning|plan\s*hai|routine\s*banan[ai]|kal\s*se|parso\s*se|aaj\s*se)\b/i.test(lower);
+    const hasTimeOrDate = /\b(?:\d{1,2}\s*(?:bje|baje|am|pm)|kal|parso|tarso|tomorrow|morning|evening|night)\b/i.test(lower);
+
+    // Combination 1: Habit/routine + activity (e.g. "roz workout", "sube gym")
+    if (hasHabitOrRoutine && hasActivity) return true;
+    // Combination 2: Activity + Future intention (e.g. "workout start karna hai", "gym shuru karna hai")
+    if (hasActivity && hasFutureIntention) return true;
+    // Combination 3: Future intention + Time/date (e.g. "kal jana hai 4 baje", "8 baje uth ke start karna hai")
+    if (hasFutureIntention && hasTimeOrDate) return true;
+    // Combination 4: Specific habit with time (e.g. "roz 8 baje")
+    if (hasHabitOrRoutine && hasTimeOrDate) return true;
+
+    return false;
+  }
+
+  /**
+   * Deterministically parses time, date, recurrence, and task from the user's message.
    */
   parseReminderDetails(
     text: string,
@@ -62,8 +98,12 @@ export class ReminderIntentDetector {
     triggerAt: Date | null;
     isAmbiguous: boolean;
     formattedTime?: string;
+    isRecurring?: boolean;
+    recurrenceType?: string;
   } {
     const lower = text.toLowerCase();
+    // Current local time
+    const nowLocal = new Date(Date.now() + tzOffsetHours * 3600 * 1000);
 
     // ── 1. Relative Duration: "in 15 minutes", "10 min me", "aadhe ghante me", "1 ghante baad"
     const relMinMatch = lower.match(/\b(?:in\s+)?(\d+)\s*(?:mins?|minutes?|minut|minute)\b(?:\s*(?:me|mein|baad|after))?/i);
@@ -104,9 +144,106 @@ export class ReminderIntentDetector {
       };
     }
 
+    // ── 1.5. Annual Event / Calendar Date Parsing (Birthdays, Anniversaries, DD/MM/YYYY, "15 din pehle", "har saal")
+    const isYearlyIntent = /\b(?:har\s*saal|every\s*year|yearly|annually|har\s*year|birthday|anniversary|janamdin|date\s*of\s*birth|dob)\b/i.test(lower);
+
+    // Check for advance offset: "15 din pehle", "10 days before", "1 hafte pehle", "2 days prior"
+    let advanceDays = 0;
+    const advanceMatch = lower.match(/\b(\d+)\s*(?:din|days?)\s*(?:pehle|before|prior|ahead)\b/i);
+    if (advanceMatch) {
+      advanceDays = parseInt(advanceMatch[1], 10);
+    } else if (/\b(?:ek|1)\s*(?:hafte?|week)\s*(?:pehle|before)\b/i.test(lower)) {
+      advanceDays = 7;
+    }
+
+    // Check for calendar date: DD/MM/YYYY, DD/MM, or "7th August", "August 7"
+    let eventDay: number | null = null;
+    let eventMonth: number | null = null; // 0-indexed (0 = Jan, 7 = Aug)
+
+    const ddmmyyyyMatch = lower.match(/\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b/);
+    const monthNamesMap: Record<string, number> = {
+      jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
+      may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7,
+      sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11
+    };
+
+    if (ddmmyyyyMatch) {
+      const d = parseInt(ddmmyyyyMatch[1], 10);
+      const m = parseInt(ddmmyyyyMatch[2], 10);
+      if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        eventDay = d;
+        eventMonth = m - 1; // 0-indexed
+      }
+    } else {
+      const monthWordMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\b/i) ||
+                             lower.match(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i);
+      if (monthWordMatch) {
+        const mStr = (monthNamesMap[monthWordMatch[1].toLowerCase()] !== undefined ? monthWordMatch[1] : monthWordMatch[2]).toLowerCase();
+        const dStr = (monthNamesMap[monthWordMatch[1].toLowerCase()] !== undefined ? monthWordMatch[2] : monthWordMatch[1]);
+        eventMonth = monthNamesMap[mStr];
+        eventDay = parseInt(dStr, 10);
+      }
+    }
+
+    if (eventDay !== null && eventMonth !== null) {
+      // Default notification time if not explicitly stated: 10:00 AM local
+      let reminderHour = 10;
+      let reminderMinute = 0;
+
+      // Check if explicit time was also mentioned (e.g. "shaam 6 baje")
+      const timeNumMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(?:bje|baje|bJe|am|pm)\b/i);
+      if (timeNumMatch) {
+        let th = parseInt(timeNumMatch[1], 10);
+        reminderMinute = timeNumMatch[2] ? parseInt(timeNumMatch[2], 10) : 0;
+        if (/\bpm\b/i.test(timeNumMatch[0]) || /\b(?:shaam|sham|dopahar|evening)\b/i.test(lower)) {
+          if (th < 12) th += 12;
+        } else if (/\bam\b/i.test(timeNumMatch[0]) || /\b(?:subah|sube|morning)\b/i.test(lower)) {
+          if (th === 12) th = 0;
+        }
+        reminderHour = th;
+      }
+
+      let targetYear = nowLocal.getUTCFullYear();
+      let targetDate = new Date(Date.UTC(targetYear, eventMonth, eventDay, reminderHour, reminderMinute, 0, 0));
+
+      if (advanceDays > 0) {
+        targetDate.setUTCDate(targetDate.getUTCDate() - advanceDays);
+      }
+
+      // If the target date in the current calendar year has already passed, schedule for NEXT year!
+      if (targetDate.getTime() <= nowLocal.getTime()) {
+        targetYear += 1;
+        targetDate = new Date(Date.UTC(targetYear, eventMonth, eventDay, reminderHour, reminderMinute, 0, 0));
+        if (advanceDays > 0) {
+          targetDate.setUTCDate(targetDate.getUTCDate() - advanceDays);
+        }
+      }
+
+      const triggerAt = new Date(targetDate.getTime() - tzOffsetHours * 3600 * 1000);
+      const title = this.cleanTaskTitle(text);
+
+      const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const targetMonthName = MONTH_NAMES[targetDate.getUTCMonth()];
+      const targetDayNum = targetDate.getUTCDate();
+      const hh12 = reminderHour % 12 || 12;
+      const ampm = reminderHour >= 12 ? 'PM' : 'AM';
+      const timeFormatted = `${hh12}:${reminderMinute.toString().padStart(2, '0')} ${ampm}`;
+
+      const formattedTime = isYearlyIntent 
+        ? `Every year on ${targetMonthName} ${targetDayNum} at ${timeFormatted}`
+        : `${targetMonthName} ${targetDayNum}, ${targetDate.getUTCFullYear()} at ${timeFormatted}`;
+
+      return {
+        title,
+        triggerAt,
+        isAmbiguous: false,
+        formattedTime,
+        isRecurring: isYearlyIntent,
+        recurrenceType: isYearlyIntent ? 'years' : undefined
+      };
+    }
+
     // ── 2. Determine Target Date
-    // Current local time
-    const nowLocal = new Date(Date.now() + tzOffsetHours * 3600 * 1000);
     let targetYear = nowLocal.getUTCFullYear();
     let targetMonth = nowLocal.getUTCMonth();
     let targetDay = nowLocal.getUTCDate();
@@ -222,17 +359,37 @@ export class ReminderIntentDetector {
     const triggerAt = new Date(targetLocal.getTime() - tzOffsetHours * 3600 * 1000);
     const title = this.cleanTaskTitle(text);
 
+    const isRecurringDaily = /\b(?:roz|daily|har\s*din|every\s*day)\b/i.test(lower);
     const hh12 = hour % 12 || 12;
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const timeFormatted = `${hh12}:${minute.toString().padStart(2, '0')} ${ampm}`;
-    const formattedTime = `${dateLabel} at ${timeFormatted}`;
+    const formattedTime = isRecurringDaily ? `Every day at ${timeFormatted}` : `${dateLabel} at ${timeFormatted}`;
 
     return {
       title,
       triggerAt,
       isAmbiguous: false,
-      formattedTime
+      formattedTime,
+      isRecurring: isRecurringDaily,
+      recurrenceType: isRecurringDaily ? 'daily' : undefined
     };
+  }
+
+  /**
+   * Extracts future plan details for proactive reminder prompting.
+   */
+  extractFuturePlanDetails(
+    text: string,
+    tzOffsetHours: number = 5.5
+  ): {
+    title: string;
+    triggerAt: Date | null;
+    isRecurring?: boolean;
+    recurrenceType?: string;
+    formattedTime?: string;
+    isAmbiguous: boolean;
+  } {
+    return this.parseReminderDetails(text, tzOffsetHours);
   }
 
   /**
@@ -245,7 +402,12 @@ export class ReminderIntentDetector {
       .replace(/\b\d{1,2}(?::\d{2})?\s*(?:bje|baje|bJe|am|pm)?\b/gi, '')
       .replace(/\b(?:in\s+\d+\s*(?:mins?|minutes?|hours?)|aadhe\s*ghante\s*me)\b/gi, '')
       .replace(/\b(?:yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena)|reminder\s*(?:set|lagao|karo)|alarm\s*(?:lagao|set)|schedule\s*karo)\b/gi, '')
-      .replace(/\b(?:na|yaad\s*se|muje|mujhe|tum|mera|meri|apna|apne|bata\s*dena|bhi)\b/gi, '')
+      .replace(/\b(?:roz|daily|har\s*din|every\s*day|har\s*saal|every\s*year|yearly|annually)\b/gi, '')
+      .replace(/\b(?:start\s*karna\s*hai|shuru\s*karna\s*hai|karna\s*hai|karni\s*hai|uth\s*ke|uthna)\b/gi, '')
+      .replace(/\b\d+\s*(?:din|days?)\s*(?:pehle|before|prior|ahead)\b/gi, '')
+      .replace(/\b(?:date\s*of\s*birth|dob)\s*(?:ko\s*hai|\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?|hai)?\b/gi, '')
+      .replace(/\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b/gi, '')
+      .replace(/\b(?:na|yaad\s*se|muje|mujhe|tum|mera|meri|apna|apne|bata\s*dena|bhi|so|ko\s*hai|hai|ko)\b/gi, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
 
@@ -289,12 +451,12 @@ export class ReminderIntentDetector {
 
     const parsed = this.parseReminderDetails(message, tzOffsetHours);
 
-    if (parsed.isAmbiguous || !parsed.triggerAt) {
+    if (!parsed.triggerAt || parsed.isAmbiguous) {
       return {
         detected: true,
         scheduled: false,
         task: parsed.title,
-        note: `REMINDER_INTENT_DETECTED_BUT_TIME_AMBIGUOUS: The user asked to be reminded for "${parsed.title}", but the time was unclear. Ask them ONCE nicely: "Kab remind karna hai? (What time should I remind you?)". Do not guess a time.`
+        note: `REMINDER_CLARIFICATION_NEEDED: The user wants a reminder ("${parsed.title}"), but did not specify an exact time or day. Proactively and warmly ask them what time or date they would like to be reminded!`
       };
     }
 
@@ -327,6 +489,8 @@ export class ReminderIntentDetector {
           task: parsed.title,
           triggerAt: parsed.triggerAt,
           formattedTime: parsed.formattedTime,
+          isRecurring: parsed.isRecurring,
+          recurrenceType: parsed.recurrenceType,
           note: `REMINDER_ALREADY_PERSISTED: A reminder for "${parsed.title}" is scheduled for ${parsed.formattedTime}. Reassure the user warmly that you have noted it and will remind them at that time. NEVER say they set it in the past.`
         };
       }
@@ -340,6 +504,8 @@ export class ReminderIntentDetector {
           trigger_at: parsed.triggerAt.toISOString(),
           status: 'active',
           is_auto: false,
+          recurrence_type: parsed.recurrenceType || null,
+          recurrence_interval: parsed.isRecurring ? 1 : null,
           created_at: new Date().toISOString()
         })
         .select('*')

@@ -1347,7 +1347,20 @@ chatRouter.post(
       // Use CognitiveContext's unified turn analysis (avoids duplicate TurnAnalyzer.analyze call).
       // Falls back to a fresh analysis if CognitiveContext assembly failed.
       const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
-      const turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
+      let turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
+
+      // Smart Reminder Engine: Check if user discussed any future-dated plan, habit, or activity
+      const isFuturePlanIntent = !is_proactive && reminderIntentDetector.hasFuturePlanIntent(effectiveMessage);
+      if (isFuturePlanIntent) {
+        const planDetails = reminderIntentDetector.extractFuturePlanDetails(effectiveMessage, tzOffset);
+        if (!planDetails.isAmbiguous && planDetails.formattedTime) {
+          const futurePlanDirective = `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST warmly encourage this plan and proactively ask if you should set a reminder or alarm for it (e.g., "Mast plan hai yaar! Roz subah 8:00 AM ka reminder set kar doon tere liye, taaki miss na ho?").`;
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
+        } else {
+          const futurePlanDirective = `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST acknowledge their decision warmly and proactively ask if they want you to set a reminder, asking what time, how often (every day or specific days), and for what period they want to be reminded.`;
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
+        }
+      }
 
       // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
       // Direct high-precision reminder extraction & scheduling guard
@@ -1436,7 +1449,9 @@ chatRouter.post(
         goalCorrectedEvents: semanticEvents.filter((e: any) => e.family === 'GoalCorrected'),
         deterministicReminderCreated,
         deterministicReminderNote,
-        lengthInstruction: normalizedMessages.length > 1
+        lengthInstruction: isFuturePlanIntent
+          ? "The user shared a future plan or habit. Acknowledge it warmly and proactively offer to set a smart reminder, asking for or confirming the time and recurrence. Do NOT give a passive 1-word reply like 'Sahi'."
+          : normalizedMessages.length > 1
           ? "The user sent multiple messages in a burst. Address and acknowledge ALL their points warmly and naturally in a cohesive reply without skipping any detail."
           : primaryMessage.length < 20
           ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."

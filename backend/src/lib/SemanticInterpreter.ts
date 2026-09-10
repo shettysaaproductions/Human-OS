@@ -223,7 +223,7 @@ export function isLikelyActionable(message: string, recentContext?: string): boo
   if (message.length > 100) return true;
   if (recentContext && recentContext.trim().length > 0) return true;
   const lower = message.toLowerCase();
-  return /remind|yaad|timer|alarm|schedule|correct|nahi|galat|actually|woh nahi|naam|name|wife|biwi|patni|husband|pati|son|beta|beti|daughter|bachha|baccha|child|kid|bhai|sis|didi|bhaiya|brother|sister|mom|dad|maa|papa|mummy|family|goal|plan|remember|save|note|favourite|favorite|age|umar|mahina|month|months|saal|year|years|work|job|kaam|living|rehta|rehti|city|shehar|birthday|janamdin/.test(lower);
+  return /remind|yaad|timer|alarm|schedule|correct|nahi|galat|actually|woh nahi|naam|name|wife|biwi|patni|husband|pati|son|beta|beti|daughter|bachha|baccha|child|kid|bhai|sis|didi|bhaiya|brother|sister|mom|dad|maa|papa|mummy|family|goal|plan|workout|gym|exercise|running|yoga|diet|routine|habit|start|shuru|uthna|uth ke|roz|daily|har din|baje|sube|subah|shaam|dopahar|raat|karna hai|karni hai|remember|save|note|favourite|favorite|age|umar|mahina|month|months|saal|year|years|work|job|kaam|living|rehta|rehti|city|shehar|birthday|janamdin/.test(lower);
 }
 
 export const INTERPRETER_SYSTEM_PROMPT = `You are a semantic understanding engine for a personal AI companion called Nova.
@@ -329,7 +329,13 @@ If a reminder intent is detected but the time is ambiguous or unknown:
   → Set completenessScore < 1.0
   → Do NOT invent a time or default to any time
   → Do NOT produce a REMINDER action
-A low-confidence reminder is still a real mutation. Clarify first.`;
+A low-confidence reminder is still a real mutation. Clarify first.
+
+FUTURE PLANS & HABIT ROUTINES (SMART REMINDER ENGINE OPPORTUNITY):
+When user mentions a future routine or habit (e.g. "Sube muje roz workout start karna hai 8 baje uth ke" or "kal se gym shuru karna hai"):
+- Treat as action type: "REMINDER" or "GOAL_UPDATE".
+- Extract task (e.g. "workout"), time_of_day (e.g. "08:00"), recurrence (e.g. "daily").
+- If time is missing, set clarification.required=true, missingFields: ["exact_time"], clarification.question: "Kaunse time pe remind karun tujhe?".`;
 
 /**
  * Interprets a user message semantically using CognitiveModelRouter (Gemini / NVIDIA).

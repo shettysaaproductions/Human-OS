@@ -68,4 +68,23 @@ describe('ReminderIntentDetector — High-Precision Natural Reminder Parsing', (
     expect(detector.hasReminderIntent("don't remind me about this")).toBe(false);
     expect(detector.hasReminderIntent("mujhe yaad mat dilana")).toBe(false);
   });
+
+  it('7. Parses birthday advance reminder "Meri wife ka date of birth 7/8/2002 ko hai, so muje 15 din pehle har saal gift ke lie yaad karna"', () => {
+    const text = 'Meri wife ka date of birth 7/8/2002 ko hai, so muje 15 din pehle har saal gift ke lie yaad karna';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(false);
+    expect(parsed.triggerAt).not.toBeNull();
+    expect(parsed.isRecurring).toBe(true);
+    expect(parsed.recurrenceType).toBe('years');
+
+    // 7/8 is August 7. 15 days before is July 23!
+    const localTrigger = new Date(parsed.triggerAt!.getTime() + tzOffset * 3600 * 1000);
+    expect(localTrigger.getUTCMonth()).toBe(6); // July (0-indexed)
+    expect(localTrigger.getUTCDate()).toBe(23); // 23rd
+    expect(parsed.formattedTime).toContain('Every year on July 23');
+    // Must be in the future (next year if current year has passed)
+    expect(parsed.triggerAt!.getTime()).toBeGreaterThan(Date.now());
+  });
 });

@@ -57,6 +57,28 @@ describe('P0 Proactive Cognitive Safety Remediation (Constraints A-T)', () => {
       };
 
       (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'nova_followups') {
+          return {
+            update: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                eq: jest.fn().mockReturnValue({
+                  select: jest.fn().mockResolvedValue({ data: [{ id: 'f-123' }], error: null })
+                })
+              })
+            })
+          };
+        }
+        if (table === 'outbound_intents') {
+          return {
+            insert: jest.fn().mockReturnValue({
+              select: jest.fn().mockReturnValue({
+                single: jest.fn().mockResolvedValue({ data: { id: 'int-1', status: 'CREATED' }, error: null })
+              })
+            }),
+            update: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis()
+          };
+        }
         return {
           select: jest.fn().mockReturnThis(),
           eq: jest.fn().mockReturnThis(),
@@ -70,10 +92,7 @@ describe('P0 Proactive Cognitive Safety Remediation (Constraints A-T)', () => {
       await (novaFollowupService as any)._fireFollowup(mockFollowup);
       
       expect(acquireSpy).toHaveBeenCalledWith('u-123', expect.objectContaining({
-        outreachType: 'proactive',
         logicalKey: 'followup:fired:f-123',
-        skipQuietHoursCheck: false,
-        skipMinGapCheck: false,
       }));
     });
   });

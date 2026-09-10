@@ -18,6 +18,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import { reminderIntentDetector } from './ReminderIntentDetector';
+import { clusterMemoriesIntoWardrobes } from '../lib/memoryDomains';
 
 export interface MessageVersionEntry {
   version: number;
@@ -159,7 +160,19 @@ export class WatchtowerReflectionService {
       const workingList = (workingRes.data || [])
         .map((w: any) => `- [working] ${w.key}: ${w.value}`);
 
-      memorySummary = [...canonicalList, ...workingList].join('\n');
+      let wardrobeSection = '';
+      try {
+        const { wardrobes } = clusterMemoriesIntoWardrobes(canonicalRes.data || [], workingRes.data || []);
+        if (wardrobes.length > 0) {
+          wardrobeSection = 'Entity Wardrobes & Traits:\n' + wardrobes.map(w =>
+            `• ${w.avatarEmoji} [${w.name} (${w.roleTitle || w.domain})]: ${w.summary} | Traits: ${w.traits.map(t => `${t.label}: ${t.value}`).join('; ')}`
+          ).join('\n') + '\n\n';
+        }
+      } catch {
+        // Fallback to flat list
+      }
+
+      memorySummary = wardrobeSection + [...canonicalList, ...workingList].join('\n');
     } catch {
       memorySummary = 'No memory retrieved.';
     }
@@ -190,11 +203,12 @@ export class WatchtowerReflectionService {
     // Resolve user's local hour and time string
     let localHour = 20;
     let localTimeStr = 'evening';
+    let tzOffsetHours = 5.5;
     try {
       const { data: prof } = await supabaseAdmin.from('profiles').select('country, timezone_offset, timezone').eq('id', userId).maybeSingle();
       const { resolveUserTzOffsetHours } = await import('./ReminderEngine');
-      const tzH = resolveUserTzOffsetHours(prof || undefined);
-      const localDate = new Date(Date.now() + tzH * 3600 * 1000);
+      tzOffsetHours = resolveUserTzOffsetHours(prof || undefined);
+      const localDate = new Date(Date.now() + tzOffsetHours * 3600 * 1000);
       localHour = localDate.getUTCHours();
       const hh = localHour % 12 || 12;
       const mm = localDate.getUTCMinutes().toString().padStart(2, '0');
@@ -232,12 +246,16 @@ CRITICAL CHECKS:
    - Did Nova ask the user to perform an immediate physical activity or heavy task (e.g. "workout kar lo", "chalo exercise karein", "khana bana lo", "start kar de") at an untimely hour (such as late evening / night, local hour >= 20 or < 6)?
    - Did Nova demand or suggest an immediate action out of nowhere instead of inquiring about preferred timing or routine (e.g. asking "What time do you usually like to work out?" or "Are you interested in fitness routines?")?
    - If so, mark flaw_type: "inappropriate_situation" and provide corrected_content replacing the untimely command with a warm, natural question inquiring about their preferred timing or routine in natural WhatsApp Hinglish (1-2 sentences).
+8. MISSED FUTURE PLAN / PROACTIVE SMART REMINDER OFFER (CRITICAL):
+   - Did the user share or discuss a future-dated plan, upcoming activity, daily routine, or habit (e.g., "Sube muje roz workout start karna hai 8 baje uth ke", "kal se gym start karna hai", "roz raat ko padhna hai", waking up, cooking, meetings)?
+   - Did Nova give a lazy, passive, or dead 1-word reply (like "Sahi", "Theek hai", "Ok", "Mast"), OR fail to proactively ask if the user wants a reminder/alarm set for this?
+   - If so, mark flaw_type: "missed_future_plan_reminder" and provide corrected_content warmly acknowledging their plan/habit and proactively asking if you can set a reminder or alarm, confirming the exact time, frequency (daily or specific days), and period in natural WhatsApp Hinglish (1-2 sentences).
 
 OUTPUT FORMAT:
 Respond with ONLY valid JSON:
 {
   "has_flaw": boolean,
-  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "missed_reminder" | "inappropriate_situation" | "none",
+  "flaw_type": "entity_confusion" | "age_implausibility" | "typo" | "robotic_leak" | "monolithic_wall" | "missed_dots" | "missed_reminder" | "inappropriate_situation" | "missed_future_plan_reminder" | "none",
   "explanation": "Clear 1-sentence reason why Nova's reply was flawed or why it is good",
   "corrected_content": "The corrected, warm, natural Hinglish reply formatted like WhatsApp text (1-2 sentences) if has_flaw is true, else null"
 }`;
@@ -321,6 +339,25 @@ Critique this reply. If there is entity confusion, unconfirmed role assumptions,
           critique.corrected_content = 'Waise kal ke liye kya plan hai? Cooking aap karte ho ya aapki wife karti hai?';
         } else {
           critique.corrected_content = 'Aaram se dekh lena jab free ho! Abhi toh unwinding ka time hai 😊';
+        }
+      }
+
+      // Deterministic future plan / smart proactive reminder safety net
+      const hasFuturePlanSignal = reminderIntentDetector.hasFuturePlanIntent(userMessage);
+      const isPassiveOrOneWordReply = (content || '').trim().split(/\s+/).length <= 3 && /\b(sahi|ok|theek|mast|haan|achha|acha)\b/i.test(lowerContent);
+      const lacksReminderOffer = !/\b(remind|yaad|alarm|baje|time|bataun|laga\s*doon|set\s*kar)\b/i.test(lowerContent);
+
+      if (hasFuturePlanSignal && (isPassiveOrOneWordReply || lacksReminderOffer) && (!critique.has_flaw || critique.flaw_type === 'none')) {
+        const planDetails = reminderIntentDetector.extractFuturePlanDetails(userMessage, tzOffsetHours);
+        critique.has_flaw = true;
+        critique.flaw_type = 'missed_future_plan_reminder';
+        critique.explanation = 'Nova gave a passive acknowledgment to a future plan/habit instead of proactively offering a smart reminder.';
+
+        if (!planDetails.isAmbiguous && planDetails.formattedTime) {
+          const taskName = planDetails.title && planDetails.title.toLowerCase() !== 'reminder' ? planDetails.title : 'workout';
+          critique.corrected_content = `Mast plan hai yaar! 💪 Kya main ${planDetails.formattedTime} ka ${taskName} reminder set kar doon tere liye, taaki miss na ho?`;
+        } else {
+          critique.corrected_content = `Arey badhiya decision hai! Kaunse time pe remind karun tujhe — subah ya shaam ko, aur roz ya specific days pe?`;
         }
       }
 

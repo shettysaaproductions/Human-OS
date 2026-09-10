@@ -161,6 +161,7 @@ export class ProactiveGate {
     // ── 4. Count unreplied outreaches → escalation cooldown ─────────────────
     let ignoredCount = 0;
     let lastOutreachAt: Date | null = null;
+    let lastAssistantMsgAt: Date | null = null;
     try {
       const since = lastUserMsgAt?.toISOString() ?? new Date(0).toISOString();
       const { data: unreplied } = await supabaseAdmin
@@ -181,8 +182,37 @@ export class ProactiveGate {
       if (unreplied && unreplied.length > 0) {
         lastOutreachAt = new Date(unreplied[0].created_at);
       }
+
+      // Check last assistant message in chat_history
+      const { data: lastAssistant } = await supabaseAdmin
+        .from('chat_history')
+        .select('created_at')
+        .eq('user_id', userId)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastAssistant?.created_at) {
+        lastAssistantMsgAt = new Date(lastAssistant.created_at);
+      }
     } catch (e) {
       logger.warn('[ProactiveGate] Failed to count unreplied outreaches', { ...logCtx, error: String(e) });
+    }
+
+    // ── 4.5. Anti-Nagging Silence Respect Guard ──────────────────────────────
+    // CRITICAL: Non-reminder proactive outreaches (curiosity questions, NACE agenda check-ins, unprompted follow-ups)
+    // MUST NOT spam the user if they have not replied to Nova's prior outreach or last assistant message!
+    // Reminders (user-requested alarms) are exempt since they were explicitly scheduled by the user for a specific time.
+    const isAssistantUnanswered = !!(lastAssistantMsgAt && (!lastUserMsgAt || lastAssistantMsgAt > lastUserMsgAt));
+    if (outreachType !== 'reminder' && (ignoredCount >= 1 || isAssistantUnanswered)) {
+      logger.info('[ProactiveGate] BLOCK — unreplied previous outreach (anti-nagging guard)', {
+        ...logCtx, ignoredCount, isAssistantUnanswered
+      });
+      return {
+        allowed: false,
+        blockedBy: 'unreplied_previous_outreach',
+        detail: `User has not replied to previous assistant message / outreach (${ignoredCount} unreplied). Silence must be respected.`
+      };
     }
 
     // ── 5. Long-silence suppression: 48h absent + ignoredCount >= 4 ─────────
