@@ -20,6 +20,11 @@ Analyze the user's message and extract ONLY long-term facts, preferences, goals,
 CRITICAL: If the user mentions any important time, date, schedule, or appointment that is worth remembering for a long period (e.g., "my exam is on 15th", "I always wake up at 6 AM", "doctor appointment next Tuesday"), you MUST extract it as an 'important_dates' memory immediately.
 Do NOT extract temporary states or insignificant daily chatter.
 
+CRITICAL CONCRETE PROOF RULE (ZERO TOLERANCE):
+- Use the user's message as CONCRETE PROOF ONLY.
+- NEVER assume, extrapolate, guess, or hallucinate any facts that were not explicitly stated by the user.
+- If something is an assumption or connecting dot not explicitly confirmed by the user, DO NOT extract it as a persistent memory. Only persist facts the user clearly stated or agreed to.
+
 ATOMICITY RULE (CRITICAL — ZERO TOLERANCE):
 - Each distinct fact MUST be a SEPARATE object in the "semantic_memories" array.
 - NEVER combine two or more distinct facts into a single memory object.
