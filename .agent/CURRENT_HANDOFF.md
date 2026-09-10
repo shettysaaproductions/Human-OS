@@ -1,43 +1,36 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Personal Life Blueprint & Adaptive Progressive Curiosity Engine
+2026-09-11 — Living Memory Tree, Concrete Proof & Hypothesis Gate, Production EAS OTA
 
 ## Session / Agent
 Agent: MonkeyCode
-Branch: `agent-checkpoint/foundational-curiosity-blueprint`
-Task: Personal Life Blueprint & Progressive Adaptive Curiosity Engine (DOB, Age, Sleep/Wake Architecture, Diet, Habits & Personal Choices).
+Branch: `agent-checkpoint/living-memory-tree-ota`
+Task: Living Memory Tree presentation, Concrete Proof & Anti-Hallucination Gate, Hypothesis Confirmation Gate, and Production EAS Mobile OTA.
 
 ## Implemented Work
-1. **Life Blueprint Curiosity Engine (`backend/src/services/LifeBlueprintCuriosityEngine.ts`):**
-   - Implemented curated registry of foundational blueprint items across 5 core categories:
-     - Identity & Bio (Birth date / DOB, Age, City/Hometown, Native language).
-     - Daily Rhythm & Sleep (Sleep bedtime, Wake-up time, Morning starter tea/coffee, Dinner routine).
-     - Diet & Nutrition (Dietary preference veg/non-veg, Comfort food).
-     - Health & Stress Relief (Fitness/workout routine, Decompression/stress relief habit).
-     - Personal Choices & Recharge (Weekend recharge routine, Music taste, Daily commute mode, Core values).
-   - Zero-Interrogation Architecture: Selects exactly 1 next-best curiosity based on time-of-day affinity (e.g. sleep time at night wind-down, morning routine in morning, diet around meals).
-   - Zero Amnesia: Matches canonical keys and Entity Wardrobe traits to guarantee known facts are never re-asked.
-2. **Nova Consciousness Engine (NACE) Tier 2 Integration (`backend/src/services/NovaConsciousnessEngine.ts`):**
-   - Connected `deriveMissingMemoryCuriosities` to `lifeBlueprintCuriosityEngine.evaluateMissingBlueprintGaps` so proactive outreach targets meaningful life blueprint gaps.
-3. **Situational Awareness & Chat Prompt Injection (`backend/src/services/SituationalAwareness.ts` & `backend/src/routes/chat.ts`):**
-   - Injected `💡 COMPANION LIFE BLUEPRINT DISCOVERY` into `SituationContext` and `buildBrief`.
-   - Guides Nova to weave in the single top missing curiosity at the end of responses during casual, relaxed conversations without forcing it during task execution.
-4. **Custom Sleep & Wake Rhythm Adaptation (`UserLifeStageEngine.ts` & `TemporalAwarenessService.ts`):**
-   - Automatically parses user's custom `sleep_time` and `wake_time` from stored memories.
-   - Dynamically adapts `SLEEP_REST` quiet hours window and wind-down phases to the user's actual personal sleep schedule rather than a rigid 11:30 PM default.
+1. **Living Memory Tree Presentation (`mobile/src/screens/analytics/MemoryBrainScreen.tsx`):**
+   - Replaced disconnected, isolated cards with an organic Living Memory Tree layout.
+   - Built a continuous vertical trunk spine (`treeSpine`), branching stems (`branchStem`), glowing joint nodes (`branchJoint`), branch arms (`branchArm`), and leaf traits (`leafIcon` 🍃 for facts, 💭 for active context).
+   - Added cross-branch neural bridges (`🌿 Cross-Branch Neural Link`) linking related life compartments (e.g. Work Shift wrap-up ⇄ Evening Baby Playtime).
+   - Bumped mobile release notes in `mobile/src/config/updateHistory.json` to `0.2.7-beta`.
+2. **Concrete Proof & Anti-Hallucination Gate (`backend/src/agents/SemanticAgent.ts`):**
+   - Added zero-tolerance invariant: 21 LLM background workers must strictly use user messages as concrete proof.
+   - Prohibits assumptions, speculations, or extrapolations from being stored as durable memories unless the user explicitly stated or confirmed them.
+3. **Hypothesis Confirmation Gate (`backend/src/services/SituationalAwareness.ts` & `backend/src/lib/memoryDomains.ts`):**
+   - Injected cognitive invariant: When Nova connects dots across memories (e.g. Sakshi's culinary flair ⇄ Shetty's Dhaba cloud kitchen venture), it represents proactive autonomous thinking.
+   - Nova must introduce these connecting dots as casual thoughts, questions, or ideas ("Maine socha kya hum...", "Ek thought aaya tha...").
+   - Nova MUST NOT believe or store them as settled facts in memory until the user explicitly confirms or agrees!
+4. **Personal Life Blueprint Curiosity Engine (`backend/src/services/LifeBlueprintCuriosityEngine.ts`):**
+   - 5-domain registry for progressive organic discovery (Bedtime, Wake-up, Diet, Stress relief, Personal choices).
+   - Dynamic custom sleep/wake rhythm adaptation in `UserLifeStageEngine.ts` and `TemporalAwarenessService.ts`.
 
 ## Verification Status
-- `npm run build` in `backend`: EXIT 0 (Zero TypeScript errors).
-- Tests passed (38/38):
-  - `src/services/__tests__/LifeBlueprintCuriosityEngine.test.ts` (7 passed)
-  - `src/services/__tests__/UserLifeStageEngine.test.ts` (3 passed)
-  - `src/services/__tests__/NovaConsciousnessEngineCuriosity.test.ts` (1 passed)
-  - `src/services/__tests__/wardrobeClustering.test.ts` (7 passed)
-  - `src/services/__tests__/AntiNaggingSilenceRespect.test.ts` (3 passed)
-  - `src/services/__tests__/SmartProactiveReminderEngine.test.ts` (6 passed)
-  - `src/services/__tests__/ReminderEngine.test.ts` (11 passed)
+- `npm run build` in `backend`: EXIT 0 (Passed clean).
+- `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean).
+- `src/services/__tests__/LifeBlueprintCuriosityEngine.test.ts`: 7/7 tests PASSED.
 
 ## NEXT ACTION
-Merge `agent-checkpoint/foundational-curiosity-blueprint` to `main`, push to `origin main` to trigger Render backend deployment, and observe live progressive discovery in user conversation.
+Merge `agent-checkpoint/living-memory-tree-ota` to `main` and push to `origin main` to trigger the production GitHub Actions EAS Mobile OTA workflow and Render backend deployment.
+
 

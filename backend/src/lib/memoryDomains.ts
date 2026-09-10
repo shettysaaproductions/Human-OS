@@ -1480,6 +1480,11 @@ export function formatHierarchicalMemoryPrompt(
     // Graceful fallback to tree & stems if wardrobe clustering encounters unexpected input
   }
 
+  // Cognitive Invariant: Concrete Proof vs Candidate Hypotheses
+  text += `\n[🛡️ COGNITIVE INVARIANT: CONCRETE PROOF & HYPOTHESIS CONFIRMATION]\n`;
+  text += `1. Concrete Proof: Stored memories are proven facts from explicit user messages. Never extrapolate, assume, or hallucinate unstated assumptions.\n`;
+  text += `2. Connecting Dots & Hypotheses: Neural links (e.g. cloud kitchen venture ⇄ culinary flair) represent brilliant cognitive opportunities Nova has discovered. Introduce them casually as questions or collaborative thoughts to the user ("Maine socha...", "Ek idea tha..."). You must NOT treat them as confirmed facts in memory until the user explicitly agrees/confirms!\n`;
+
   return text;
 }
 

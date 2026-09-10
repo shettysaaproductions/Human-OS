@@ -312,7 +312,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
           activeOpacity={0.8}
         >
           <Text style={[s.tabBtnText, viewMode === 'wardrobes' && s.tabBtnTextActive]}>
-            🗄️ Wardrobe Clusters ({filteredWardrobes.length})
+            🌳 Living Memory Tree ({filteredWardrobes.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -349,7 +349,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
           style={[s.filterChip, !selectedType && s.filterChipActive]}
           onPress={() => setSelectedType(null)}
         >
-          <Text style={[s.filterText, !selectedType && s.filterTextActive]}>All Wardrobe</Text>
+          <Text style={[s.filterText, !selectedType && s.filterTextActive]}>All Branches</Text>
         </TouchableOpacity>
         {DOMAINS.map(d => {
           const isActive = selectedType === d.key;
@@ -372,7 +372,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       {connectedDots.length > 0 && !selectedType ? (
         <View style={s.dotsContainer}>
           <View style={s.dotsHeader}>
-            <Text style={s.dotsTitle}>🕸️ Neural Connected Dots</Text>
+            <Text style={s.dotsTitle}>🕸️ Cross-Branch Neural Bridges</Text>
             <Text style={s.dotsSubtitle}>Nova bridges context across your life domains</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.dotsScroll}>
@@ -393,68 +393,86 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       {viewMode === 'wardrobes' ? (
         <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
           {filteredWardrobes.length === 0 ? (
-            <Text style={s.emptyText}>No wardrobe clusters found in this compartment.</Text>
+            <Text style={s.emptyText}>No memory branches found in this compartment.</Text>
           ) : (
-            filteredWardrobes.map((w: any) => {
-              const isExpanded = !!expandedWardrobes[w.id];
-              return (
-                <View key={w.id} style={[s.wardrobeCard, { borderLeftColor: w.color, borderLeftWidth: 4 }]}>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => toggleWardrobe(w.id)}
-                    style={s.wardrobeHeader}
-                  >
-                    <View style={s.wardrobeHeaderLeft}>
-                      <View style={[s.wardrobeAvatar, { backgroundColor: `${w.color}20`, borderColor: `${w.color}60` }]}>
-                        <Text style={s.wardrobeAvatarText}>{w.avatarEmoji}</Text>
-                      </View>
-                      <View style={s.wardrobeTitleCol}>
-                        <View style={s.wardrobeNameRow}>
-                          <Text style={s.wardrobeName}>{w.name}</Text>
-                          <View style={[s.wardrobeRoleBadge, { backgroundColor: `${w.color}15`, borderColor: w.color }]}>
-                            <Text style={[s.wardrobeRoleText, { color: w.color }]}>
-                              {w.roleTitle || w.domain}
+            <View style={s.treeContainer}>
+              {/* Vertical Tree Spine */}
+              <View style={s.treeSpine} />
+
+              {filteredWardrobes.map((w: any) => {
+                const isExpanded = !!expandedWardrobes[w.id];
+                return (
+                  <View key={w.id} style={s.treeBranchRow}>
+                    {/* Branch Stem & Joint Node */}
+                    <View style={s.branchStem}>
+                      <View style={[s.branchJoint, { backgroundColor: w.color, borderColor: `${w.color}90` }]} />
+                      <View style={[s.branchArm, { backgroundColor: `${w.color}60` }]} />
+                    </View>
+
+                    {/* Branch Wardrobe Card */}
+                    <View style={[s.wardrobeCard, s.branchCard, { borderLeftColor: w.color, borderLeftWidth: 4 }]}>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => toggleWardrobe(w.id)}
+                        style={s.wardrobeHeader}
+                      >
+                        <View style={s.wardrobeHeaderLeft}>
+                          <View style={[s.wardrobeAvatar, { backgroundColor: `${w.color}20`, borderColor: `${w.color}60` }]}>
+                            <Text style={s.wardrobeAvatarText}>{w.avatarEmoji}</Text>
+                          </View>
+                          <View style={s.wardrobeTitleCol}>
+                            <View style={s.wardrobeNameRow}>
+                              <Text style={s.wardrobeName}>{w.name}</Text>
+                              <View style={[s.wardrobeRoleBadge, { backgroundColor: `${w.color}15`, borderColor: w.color }]}>
+                                <Text style={[s.wardrobeRoleText, { color: w.color }]}>
+                                  {w.roleTitle || w.domain}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={s.wardrobeSummary} numberOfLines={isExpanded ? undefined : 2}>
+                              {w.summary}
                             </Text>
                           </View>
                         </View>
-                        <Text style={s.wardrobeSummary} numberOfLines={isExpanded ? undefined : 2}>
-                          {w.summary}
-                        </Text>
+                        <Text style={s.wardrobeExpandIcon}>{isExpanded ? '▲' : '▼'}</Text>
+                      </TouchableOpacity>
+
+                      {/* Connected Dots Box */}
+                      {w.connectedDots && w.connectedDots.length > 0 && (
+                        <View style={s.wardrobeDotsBox}>
+                          <View style={s.branchBridgeHeader}>
+                            <Text style={s.branchBridgeTitle}>🌿 Cross-Branch Neural Link</Text>
+                          </View>
+                          {w.connectedDots.map((cd: any, idx: number) => (
+                            <View key={idx} style={s.wardrobeDotRow}>
+                              <Text style={s.wardrobeDotBadge}>{cd.badge}</Text>
+                              <Text style={s.wardrobeDotInsight}>{cd.insight}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Trait Leaf Chips Grid */}
+                      <View style={s.traitsWrap}>
+                        {w.traits.map((t: any) => (
+                          <TouchableOpacity
+                            key={t.id}
+                            style={[s.traitChip, t.isWorkingContext && s.traitChipWorking]}
+                            onLongPress={() => handleLongPressTrait(t, w)}
+                            delayLongPress={400}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={s.leafIcon}>{t.isWorkingContext ? '💭' : '🍃'}</Text>
+                            <Text style={[s.traitLabel, { color: w.color }]}>{t.label}:</Text>
+                            <Text style={s.traitValue}>{t.value}</Text>
+                          </TouchableOpacity>
+                        ))}
                       </View>
                     </View>
-                    <Text style={s.wardrobeExpandIcon}>{isExpanded ? '▲' : '▼'}</Text>
-                  </TouchableOpacity>
-
-                  {/* Connected Dots Box */}
-                  {w.connectedDots && w.connectedDots.length > 0 && (
-                    <View style={s.wardrobeDotsBox}>
-                      {w.connectedDots.map((cd: any, idx: number) => (
-                        <View key={idx} style={s.wardrobeDotRow}>
-                          <Text style={s.wardrobeDotBadge}>{cd.badge}</Text>
-                          <Text style={s.wardrobeDotInsight}>{cd.insight}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Trait Chips Grid */}
-                  <View style={s.traitsWrap}>
-                    {w.traits.map((t: any) => (
-                      <TouchableOpacity
-                        key={t.id}
-                        style={[s.traitChip, t.isWorkingContext && s.traitChipWorking]}
-                        onLongPress={() => handleLongPressTrait(t, w)}
-                        delayLongPress={400}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[s.traitLabel, { color: w.color }]}>{t.label}:</Text>
-                        <Text style={s.traitValue}>{t.value}</Text>
-                      </TouchableOpacity>
-                    ))}
                   </View>
-                </View>
-              );
-            })
+                );
+              })}
+            </View>
           )}
         </ScrollView>
       ) : (
@@ -652,6 +670,72 @@ const s = StyleSheet.create({
   dotInsight: { fontSize: 12, color: '#A1A1AA', lineHeight: 16 },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 32 },
+
+  // Living Memory Tree Layout
+  treeContainer: {
+    position: 'relative',
+    paddingLeft: 6,
+    paddingRight: 2,
+  },
+  treeSpine: {
+    position: 'absolute',
+    top: 14,
+    bottom: 24,
+    left: 19,
+    width: 3,
+    backgroundColor: 'rgba(139, 92, 246, 0.35)',
+    borderRadius: 2,
+    zIndex: 0,
+  },
+  treeBranchRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    position: 'relative',
+  },
+  branchStem: {
+    width: 28,
+    alignItems: 'center',
+    paddingTop: 22,
+    position: 'relative',
+  },
+  branchJoint: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    zIndex: 2,
+  },
+  branchArm: {
+    position: 'absolute',
+    top: 28,
+    left: 14,
+    width: 16,
+    height: 2,
+    zIndex: 1,
+  },
+  branchCard: {
+    flex: 1,
+    marginBottom: 0,
+    marginLeft: 6,
+  },
+  branchBridgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  branchBridgeTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#A78BFA',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  leafIcon: {
+    fontSize: 11,
+    marginRight: 2,
+  },
 
   // Wardrobe Cards
   wardrobeCard: {

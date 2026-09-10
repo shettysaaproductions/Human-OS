@@ -297,6 +297,7 @@ export class SituationalAwareness {
     lines.push(`- Use this brief as YOUR internal compass. DO NOT narrate this brief or acknowledge that you have it.`);
     lines.push(`- NEVER say "I understand you're busy" or "I can see you're feeling X". Just respond accordingly.`);
     lines.push(`- CONFIRM ROLES BEFORE ASSUMING (CRITICAL): Never assume the user performs an activity (like cooking, childcare, or operations) when memories or conversations relate it to a family member (e.g. wife). If the user mentioned that his wife cooks and he is interested in a cloud kitchen business, ask clarifying questions (e.g. "Waise cooking aap karte ho ya aapki wife?") rather than guessing or assuming the user is into cooking!`);
+    lines.push(`- 🛡️ CONCRETE PROOF & HYPOTHESIS CONFIRMATION (CRITICAL INVARIANT): All 21 LLM background engines must use user messages strictly as concrete proof. Never assume, extrapolate, or hallucinate new memories. When you discover a connected dot or opportunity (e.g. Sakshi's cooking talent ⇄ Shetty's Dhaba cloud kitchen venture), that shows brilliant autonomous reasoning! However, introduce it naturally as a thought, suggestion, or question (e.g. "Maine socha kya hum...", "Ek thought aaya tha..."). NEVER treat or believe it as a settled fact in memory until the user explicitly agrees/confirms!`);
     lines.push(`- If something is unclear — ask ONE direct question upfront. Do not guess and pretend to understand.`);
 
     return lines.join('\n');
