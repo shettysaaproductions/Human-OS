@@ -1,80 +1,64 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Front-End Chat Section Bug Fixes, SecureStore Cache Protection & Autonomous Smart Living Companion Overhaul
+2026-09-11 — Backend Chat Section Architecture Fixes: Active Reminders Truth, 30-Day Temporal Recall, Discovery Phase Onboarding & Lifestyle Awareness
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Fix critical front-end bugs in the chat section, protect SecureStore from image overflow, optimize scroll performance to 60fps, wire up missing 1-tap retry, and build the Lifestyle Onboarding Hub and Smart Quick Actions Bar.
+Task: Fix critical back-end bugs in the chat section, resolve active reminder false-negative truth collapse, restore 30-day temporal message recall, restore new-user discovery phase onboarding, clean vision image persistence in chat_history, eliminate false positive busy signals, preserve swipe-to-reply across history reloads, and inject deep lifestyle companion awareness (fitness, study, work, pet, creative, habit).
 
 ## Confirmed Findings & Root Cause Analysis
-1. **Missing 1-Tap Message Retry Handler (`ChatScreen.tsx`):**
-   - When a message failed (`status === 'error'` or `'failed'`), it displayed an un-clickable red `❌`. The stylesheet defined `s.retryButton` and `s.retryText`, and `retryMessage` was exported by `useChatStore`, but neither was wired into the message bubble.
-   - `useChatStore.ts`'s `retryMessage` only checked `m.status === 'error'`, ignoring `'failed'`.
-2. **SecureStore Size Overflow on Image Sends (`useChatStore.ts`):**
-   - Sending photos adds `image_base64` into messages. `saveMessageCache` and `savePendingQueue` serialized the entire raw base64 string into `SecureStore.setItemAsync`. On Android KeyStore / EncryptedSharedPreferences (max ~2KB), this threw `Size limit exceeded`, wiping the offline message cache on reopen.
-3. **Non-Deterministic Message Sorting & Part Scrambling (`useChatStore.ts`):**
-   - `mergedMessages.sort` only compared `timestamp`. When messages or split chunks shared the same second/millisecond timestamp, `Array.prototype.sort` scrambled chunk order (`part_2` before `part_1`) or put assistant replies before user queries.
-4. **Android Keyboard Jumping & Stuttering (`ChatScreen.tsx`):**
-   - `KeyboardAvoidingView` unconditionally used `behavior="padding"` on Android, conflicting with Expo's `softwareKeyboardLayoutMode: resize` and causing double insets.
-5. **Scroll Event Thrashing & Inline Allocation (`ChatScreen.tsx`):**
-   - `FlatList`'s `onScroll` re-instantiated `Animated.event` on every single touch frame (60-120/sec), causing garbage collection spikes. `scrollEventThrottle` was omitted.
-6. **Unsafe Date Parsing (`ChatScreen.tsx`):**
-   - `formatTime` and `formatDateSeparator` lacked `isNaN(date.getTime())` checks, outputting `NaN:NaN AM` or `NaN undefined NaN` on malformed timestamps.
-7. **Component Unmount Timeout Leak (`LiveThinkingIndicator.tsx`):**
-   - The 250ms phrase-cycling timeout in `LiveThinkingIndicator` was not stored in a ref or cleared upon unmount, causing React unmounted-state-update warnings.
-8. **Stale/Zombie Options (`ChatScreen.tsx`):**
-   - Option chips remained active across the entire chat history, allowing users to accidentally re-trigger historical prompts while scrolling.
-9. **Zero-Guidance Empty State for Diverse Lifestyles (`ChatScreen.tsx`):**
-   - Brand new users and users starting a new conversation faced a lonely text screen with zero interactive cues on how to use Nova for their personal lifestyle.
+1. **Active Reminders Truth Collapse (`chat.ts`):**
+   - `upcomingRemindersFullPromise` was created but never awaited. `const upcomingDbResult = { data: [] }` was hardcoded.
+   - Downstream, lines 1345-1352 inspected `upcomingDbResult.data`. Because it was empty, it triggered the `else` branch:
+     `[EMPTY LIST] The user currently has NO active reminders. CRITICAL ANTI-HALLUCINATION RULE: If the user asks for their reminders, you MUST tell them they have no active reminders.`
+   - This forced Nova to aggressively contradict user reality and claim they had 0 active reminders even with 10 in the database.
+2. **Temporal Amnesia on Past-Conversation Queries (`chat.ts`):**
+   - `temporalPromise` was triggered on keywords like "yesterday", "last week", "kal", "parso", but never awaited. `const temporalResult = { data: [] }` was hardcoded.
+   - `temporalContextBlock` was never populated, leaving Nova completely blind to past conversations outside the immediate 10 messages.
+3. **New User Discovery Phase Hardcoded Lockout (`chat.ts`):**
+   - `totalMemoriesPromise` was queried but discarded; `const totalMemoriesResult = { count: 15 }` was hardcoded.
+   - In `SituationalAwareness.ts`, the Discovery Phase only triggers when `totalMemoriesCount < 15`. Hardcoding 15 permanently locked brand new users out of warm get-to-know-you onboarding.
+4. **Prompt Pollution in `chat_history.content` (`chat.ts`):**
+   - In lines 710-726, `msg.message` was directly overwritten with `[User attached an image showing: ...]`.
+   - On DB insert, this injected raw prompt brackets into the user's message bubble in `chat_history`.
+   - Furthermore, lines 812-828 inserted a redundant duplicate row with `[HIDDEN_CONTEXT]`.
+5. **Swipe-to-Reply Disappearance Across Reloads (`chat.ts`):**
+   - While `reply_to_id` and `reply_to_content` were inserted on message creation, `chatRouter.get('/')` omitted them from `.select(...)`.
+   - On history refresh or app restart, quoted message banners disappeared.
+6. **False-Positive Busy Signal Matching on Substrings (`SituationalAwareness.ts`):**
+   - `BUSY_SIGNALS` contained `'gn'` (for good night) evaluated with `lower.includes(s)`.
+   - Any English word containing "gn" (`assignment`, `design`, `signal`, `campaign`, `ignore`, `align`) matched `gn` and caused Nova to assume the user was signing off / busy.
+   - In addition, `'gym'` alone was in `BUSY_SIGNALS`, muting users who shared gym workout achievements.
 
 ## Implemented Fixes
-1. **1-Tap Message Retry (`ChatScreen.tsx` & `useChatStore.ts`):**
-   - Attached retry handler to red `❌` status icon with hit slop and a dedicated `↺ Tap to retry` button below failed bubbles.
-   - Expanded `retryMessage` to support both `status === 'error'` and `status === 'failed'`.
-2. **SecureStore Cache Protection (`useChatStore.ts`):**
-   - Sanitized `imageBase64` in `savePendingQueue` and stripped `image_base64` from `saveMessageCache` before SecureStore persistence.
-3. **Deterministic Message Sorting (`useChatStore.ts`):**
-   - Implemented `compareMessagesDeterministic` enforcing timestamp order, user-before-assistant on ties, and numeric sequential ordering for split chunks (`_part_1`, `_part_2`).
-4. **60fps FlatList Scroll Optimization & Android Keyboard Fix (`ChatScreen.tsx`):**
-   - Replaced inline event allocation with a persistent `useRef` Animated listener and `scrollEventThrottle={16}`.
-   - Set `behavior={Platform.OS === 'ios' ? 'padding' : undefined}`.
-5. **Safe Date & Time Parsing (`ChatScreen.tsx`):**
-   - Added `isNaN(date.getTime())` guards to `formatTime` and `formatDateSeparator`.
-6. **LiveThinkingIndicator Memory Leak Fix (`LiveThinkingIndicator.tsx`):**
-   - Stored timeout in a ref and cleaned it up on unmount.
-7. **Interactive Lifestyle Onboarding Hub (`ChatScreen.tsx`):**
-   - Replaced empty chat state with a Lifestyle Hub supporting 6 tracks: Fitness & Health, Student & Learning, Work & Productivity, Pet Parent, Creative & Ideas, Habits & Mindset.
-   - Counter-inverted with `transform: [{ scaleY: -1 }]` to display properly in inverted FlatList.
-8. **Smart Quick Actions Bar & Input Refinements (`ChatScreen.tsx`):**
-   - Added floating horizontal Quick Action chips (`⏰ Remind`, `🎯 Goal`, `📝 Note`, `🌿 Routine`, `🧠 Brain Galaxy`).
-   - Added draft clear button `✕`, character limit warning (> 1800 chars), and instant scroll to offset 0 on send.
-9. **In-Bubble Attached Photo Rendering & Fullscreen Zoom Modal (`ChatScreen.tsx` & `useChatStore.ts`):**
-   - Fixed missing image preview in message bubbles: attached images (`image_uri`, `image_base64`, `meta.image_url`) now render with rounded borders and aspect ratio containment.
-   - Added a full-screen interactive modal with pinch-to-zoom/inspection and `✕` close button for reviewing study diagrams, workout posture, pet symptoms, and meal photos.
-   - Added `image_uri?: string` to `Message` interface; local paths survive SecureStore caching without hitting the 2KB limit.
-10. **Live In-Chat Search Toolbar (`ChatScreen.tsx`):**
-    - Added `🔍` toggle to the chat header, opening an animated search bar.
-    - Live query matching filters messages in real-time, displays match count badge, and shows clean empty state on no match.
-11. **Stop Generating (Abort) Capability (`ChatScreen.tsx` & `useChatStore.ts`):**
-    - Added `abortGeneration()` to cancel in-flight polling, reset `isTyping: false`, and clear awaiting reply.
-    - When Nova is generating and input draft is empty, Send button transforms into a glowing red Stop button (⏹️).
-12. **Double-Tap Send Debounce Guard (`ChatScreen.tsx`):**
-    - Added a 400ms debounce guard preventing duplicate message creations on fast double-taps.
-13. **Natural Keyboard Dismiss on Drag (`ChatScreen.tsx`):**
-    - Configured `keyboardDismissMode="on-drag"` on `<FlatList>`.
-14. **Floating Copy Confirmation Toast (`ChatScreen.tsx`):**
-    - Added an animated toast (`✓ Copied to clipboard`) for code blocks, markdown tables, and selected messages.
-15. **Scroll Down FAB Unread Badge (`ChatScreen.tsx`):**
-    - Added an active unread badge to the scroll-to-bottom FAB when new responses arrive while scrolled up.
-16. **Expanded Lifestyle Action Ecosystem (`ChatScreen.tsx`):**
-    - Expanded Quick Action chips to all 6 core lifestyles: `💪 Workout`, `📚 Study`, `💼 Work`, `🐾 Pet Care`, `✨ Idea`, `🌿 Routine`, `⏰ Remind`, `🎯 Goal`, `📝 Note`, `🧠 Brain Galaxy`.
+1. **Parallel DB Context Resolution & Truth Restoration (`chat.ts`):**
+   - Consolidated Tier 1 and Tier 2 context into a unified `Promise.all` across the Supabase connection pool:
+     `profilePromise, historyPromise, crossSessionPromise, wmPromise, memoriesPromise, stmPromise, searchPromise, lastMsgPromise, presencePromise, unreadPromise, remindersPromise, lifeThreadsPromise, emotionPromise, episodicPromise, reflectionPromise, behaviorPatternPromise, temporalPromise, upcomingRemindersFullPromise, totalMemoriesPromise`.
+   - `upcomingDbResult` receives real active reminders from the DB, restoring the anti-hallucination source of truth.
+   - `temporalResult` receives up to 80 archived messages over the last 30 days.
+   - `totalMemoriesResult` provides the actual count, letting new users experience the Discovery Phase.
+   - `emotionResult`, `episodicResult`, `reflectionResult`, and `behaviorPatternResult` feed authentic human context into `situationCtx`.
+2. **Clean User Message DB Insertion for Images (`chat.ts`):**
+   - Kept `msg.message` clean for user-visible DB storage; attached `image_description` to `meta`.
+   - Injected the vision description into `effectiveMessage` strictly for the LLM prompt.
+   - Removed redundant duplicate `[HIDDEN_CONTEXT]` inserts.
+3. **Swipe-to-Reply Persistence (`chat.ts`):**
+   - Added `reply_to_id, reply_to_content` to `chatRouter.get('/')` `.select(...)`.
+4. **Word-Boundary Regex for Short Busy Words (`SituationalAwareness.ts`):**
+   - Replaced substring matching for short acronyms with `SHORT_BUSY_REGEX = /\b(gn|gtg|ttyl|brb|bye|cya|later)\b/i`.
+   - Words like `assignment`, `design`, `signal` no longer trigger false-positive busy states.
+   - Replaced lone `'gym'` in `BUSY_SIGNALS` with explicit `'gym mein hoon'`, `'at the gym'`.
+5. **Lifestyle Companion Intelligence Tracks (`SituationalAwareness.ts`):**
+   - Added `FITNESS_SIGNALS`, `STUDY_SIGNALS`, `WORK_SIGNALS`, `PET_SIGNALS`, `CREATIVE_SIGNALS`, and `HABIT_SIGNALS`.
+   - Injected companion directives in `buildBrief` for workout tracking, exam partnership, work unblocking, pet care, creative brainstorming, and habit streaks.
 
 ## Verification Status
-- `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean with 0 errors).
-- `npm run build` in `backend`: EXIT 0 (Passed clean with 0 errors).
-- Full Unit Test Suite: 62/62 tests PASSED (100% across all suites).
+- `npm run build` in `backend`: EXIT 0 (Clean build, 0 errors).
+- `npx tsc --noEmit` in `mobile`: EXIT 0 (Clean build, 0 errors).
+- `npx jest src/__tests__/LifestyleSituationalAwareness.test.ts`: 10/10 PASSED.
+- `npx jest src/__tests__/BurstMessageComprehension.test.ts`: 9/9 PASSED.
 
 ## Standing Autonomous Directives
 - **Auto Implementation Plan Proceed**: ENABLED.
@@ -82,3 +66,4 @@ Task: Fix critical front-end bugs in the chat section, protect SecureStore from 
 
 ## NEXT ACTION
 Commit and push to `origin main`.
+

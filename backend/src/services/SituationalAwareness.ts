@@ -45,14 +45,17 @@ export interface SituationContext {
 
 // Social signal patterns — user is signalling they are busy/unavailable or ending the chat
 const BUSY_SIGNALS = [
-  'busy', 'not now', 'later', 'baad mein', 'baad me', 'abhi nahi', 'kuch time de',
+  'busy', 'not now', 'baad mein', 'baad me', 'abhi nahi', 'kuch time de',
   'thodi der mein', 'call kar raha hoon', 'meeting mein', 'kaam kar raha',
-  'gotta go', 'gtg', 'ttyl', 'talk later', 'in a bit', 'brb', 'occupied',
-  'driving', 'gym', 'khana kha raha', 'so raha', 'neend aa rahi', 'kal baat',
+  'gotta go', 'talk later', 'in a bit', 'occupied',
+  'driving', 'gym mein hoon', 'at the gym', 'khana kha raha', 'so raha', 'neend aa rahi', 'kal baat',
   'kal karte', 'not feeling', 'not in mood', 'mood nahi', 'thaka hua', 'rest kar raha',
-  'bye', 'good night', 'gn', 'cya', 'catch you later', 'alvida', 'soja', 'so jao',
-  '10 min', '10 mins', '5 min', '5 mins', 'goodnight', 'see ya'
+  'good night', 'catch you later', 'alvida', 'soja', 'so jao',
+  'goodnight', 'see ya'
 ];
+
+// Standalone short acronyms/words checked strictly with word boundaries so they never match substrings (e.g. assignment -> gn)
+const SHORT_BUSY_REGEX = /\b(gn|gtg|ttyl|brb|bye|cya|later)\b/i;
 
 // User signals they are in good mood / excited — Nova should match energy
 const EXCITED_SIGNALS = [
@@ -69,6 +72,42 @@ const RELATIONSHIP_SIGNALS = [
   'girlfriend', 'boyfriend', 'gf', 'bf', 'wife', 'husband', 'marriage',
   'shaadi', 'pyaar', 'love', 'feelings', 'miss kar raha', 'miss kar rahi',
   'texting', 'instagram', 'whatsapp se baat', 'dm', 'flirting', 'like karna'
+];
+
+// Lifestyle signal patterns — user is engaging in distinct daily living tracks
+const FITNESS_SIGNALS = [
+  'workout', 'gym', 'squat', 'bench', 'deadlift', 'cardio', 'running', 'calories',
+  'protein', 'macros', 'creatine', 'leg day', 'chest day', 'pull day', 'push day',
+  'exercise', 'sets', 'reps', 'bicep', 'tricep', 'muscle', 'diet plan', 'cutting', 'bulking'
+];
+
+const STUDY_SIGNALS = [
+  'exam', 'study', 'studying', 'syllabus', 'revision', 'test', 'assignment',
+  'homework', 'lecture', 'college', 'university', 'semester', 'professor',
+  'midterm', 'finals', 'formula', 'notes bana', 'quiz', 'cgpa', 'marks'
+];
+
+const WORK_SIGNALS = [
+  'client', 'deadline', 'deliverable', 'presentation', 'deploy', 'sprint',
+  'pull request', 'bug fix', 'production release', 'pitch deck', 'invoice',
+  'salary slip', 'meeting with boss', 'jira', 'backlog', 'standup', 'app release'
+];
+
+const PET_SIGNALS = [
+  'dog', 'cat', 'puppy', 'kitten', 'vet', 'vaccination', 'walk the dog',
+  'pet food', 'kibble', 'paws', 'leash', 'collar', 'vet visit', 'grooming'
+];
+
+const CREATIVE_SIGNALS = [
+  'youtube', 'script', 'recording', 'podcast', 'blog', 'editing', 'reels',
+  'thumbnail', 'photoshoot', 'video shoot', 'creative idea', 'lyrics', 'designing',
+  'art', 'painting', 'draw', 'drawing', 'sketch', 'digital art', 'canvas', 'illustration'
+];
+
+const HABIT_SIGNALS = [
+  'meditation', 'meditate', 'water intake', 'hydration', 'gratitude', 'journal',
+  'journaling', 'wake up early', 'daily routine', 'streak', 'habit tracker', 'affirmations',
+  'steps', '10k steps', 'walked', 'drank water', 'liters of water'
 ];
 
 export class SituationalAwareness {
@@ -196,7 +235,7 @@ export class SituationalAwareness {
       lines.push(`- 📬 READ STATE: The user has NOT yet seen ${ctx.unreadNovaMessages} of your recent message(s). Don't assume they read your last message — if you're reconnecting, briefly ground them in context instead of continuing a thread they never saw.`);
     }
 
-    // ── User Availability Signal ──
+    // ── User Availability & Lifestyle Signal ──
     if (ctx.lastUserMessage) {
       const availability = this.detectAvailability(ctx.lastUserMessage);
       if (availability === 'busy') {
@@ -205,6 +244,18 @@ export class SituationalAwareness {
         lines.push(`- ✨ USER ENERGY: User is excited or in a great mood. Match their energy! Be enthusiastic, lean in, ask follow-up questions.`);
       } else if (availability === 'relationship') {
         lines.push(`- 💬 RELATIONSHIP SIGNAL: User is talking about someone they're interested in or a romantic situation. This is GOLD — lean in gently, ask curious questions, be their friend who actually wants to know what's happening. Store details carefully in memory.`);
+      } else if (availability === 'fitness') {
+        lines.push(`- 🏋️ LIFESTYLE FOCUS (Fitness & Nutrition): User is logging or discussing workout/diet/macro metrics. Be an energized, encouraging fitness companion! Acknowledge their effort, track the metrics, and support recovery.`);
+      } else if (availability === 'study') {
+        lines.push(`- 🎓 LIFESTYLE FOCUS (Student & Learning): User is in study/exam mode. Act as an empathetic study partner! Keep explanations crisp, encourage them, and offer quick concept checks or memory tricks.`);
+      } else if (availability === 'work') {
+        lines.push(`- 💼 LIFESTYLE FOCUS (Deep Work & Career): User is handling work tasks, deadlines, or client deliverables. Be concise, structured, and focused on unblocking their workflow.`);
+      } else if (availability === 'pet') {
+        lines.push(`- 🐾 LIFESTYLE FOCUS (Pet Care): User is talking about their pet (dog, cat, vet, vaccination). Be an affectionate pet co-parent! Note pet names, health status, and vet schedules with care.`);
+      } else if (availability === 'creative') {
+        lines.push(`- 🎨 LIFESTYLE FOCUS (Creativity & Ideas): User is creating content, writing, or brainstorming. Be an inspiring creative sounding board! Suggest unique angles and bounce ideas.`);
+      } else if (availability === 'habit') {
+        lines.push(`- 🌿 LIFESTYLE FOCUS (Habits & Mindfulness): User is tracking daily routines, meditation, or hydration. Celebrate consistency and help them maintain their streak!`);
       }
     }
 
@@ -303,15 +354,24 @@ export class SituationalAwareness {
     return lines.join('\n');
   }
 
-  detectAvailability(message: string): 'busy' | 'excited' | 'relationship' | 'neutral' {
+  detectAvailability(message: string): 'busy' | 'excited' | 'relationship' | 'fitness' | 'study' | 'work' | 'pet' | 'creative' | 'habit' | 'neutral' {
     const lower = message.toLowerCase();
     
     // Check for explicit timeframe (e.g. "20 mins", "30 mins", "2 hours")
     if (/\b\d+\s*(min|mins|minute|minutes|hr|hrs|hour|hours)\b/i.test(lower)) return 'busy';
 
-    if (BUSY_SIGNALS.some(s => lower.includes(s))) return 'busy';
+    // Check lifestyle signals before generic busy signals so user sharing their routine/progress isn't muted
+    if (FITNESS_SIGNALS.some(s => lower.includes(s))) return 'fitness';
+    if (STUDY_SIGNALS.some(s => lower.includes(s))) return 'study';
+    if (PET_SIGNALS.some(s => lower.includes(s))) return 'pet';
+    if (CREATIVE_SIGNALS.some(s => lower.includes(s))) return 'creative';
+    if (HABIT_SIGNALS.some(s => lower.includes(s))) return 'habit';
     if (RELATIONSHIP_SIGNALS.some(s => lower.includes(s))) return 'relationship';
     if (EXCITED_SIGNALS.some(s => lower.includes(s))) return 'excited';
+
+    // Word boundary regex for short acronyms + specific busy phrases
+    if (SHORT_BUSY_REGEX.test(lower) || BUSY_SIGNALS.some(s => lower.includes(s))) return 'busy';
+    if (WORK_SIGNALS.some(s => lower.includes(s))) return 'work';
     return 'neutral';
   }
 

@@ -1,27 +1,26 @@
 # CURRENT TASK
 
 ## Task ID
-FRONTEND-CHAT-IMPACT-EXPANSION-LIFESTYLE-COMPANION
+BACKEND-CHAT-IMPACT-EXPANSION-LIFESTYLE-COMPANION
 
 ## Objective
-Find and fix high-impact front-end bugs in the chat section, implement in-bubble attached image rendering with a full-screen zoom modal, provide live in-chat keyword search, build an autonomous stop generation/abort action, prevent double-send race conditions, add floating copy feedback, enable keyboard dismissal on drag, and expand the smart lifestyle companion actions for all user personas.
+Find and fix high-impact back-end bugs in the chat section, restore truth in active reminder queries, restore 30-day temporal conversation recall, restore new user discovery phase onboarding, clean user message vision persistence, eliminate false positive busy signal matches, preserve swipe-to-reply across history reloads, and inject deep lifestyle companion awareness (fitness, study, work, pet, creative, habit).
 
 ## Scope
 - Keep `main` as the production source of truth.
-- Render attached photos (`image_uri`, `image_base64`, `meta.image_url`) inside message bubbles with a full-screen interactive zoom modal on tap.
-- Add `image_uri?: string` to `Message` in `mobile/src/store/useChatStore.ts` and ensure lightweight local paths survive cache persistence without overflowing SecureStore.
-- Build live in-chat search with keyword matching, match counter badge, and clear controls.
-- Implement `abortGeneration()` in `useChatStore.ts` and wire a glowing Stop button (⏹️) when Nova is thinking to give users instant control.
-- Prevent rapid double-tap duplicate message sends with a 400ms debounce guard.
-- Add `keyboardDismissMode="on-drag"` to `<FlatList>` for smooth natural keyboard dismissal while scrolling.
-- Add floating copy confirmation toast for code blocks, tables, and message selections.
-- Add unread message indicator badge to the scroll-to-bottom FAB when new responses arrive while scrolled up.
-- Expand `QUICK_ACTION_CHIPS` to cover all 6 core lifestyle personas (Workout, Study, Work, Pet Care, Idea, Routine, Remind, Goal, Brain Galaxy).
-- Verify 100% clean builds in both `mobile` (`npx tsc --noEmit`) and `backend` (`npm run build`).
+- Fix active reminders truth collapse in `backend/src/routes/chat.ts` by awaiting `upcomingRemindersFullPromise` concurrently in `Promise.all` and feeding real active reminders into `upcomingDbResult`.
+- Restore 30-day temporal context in `chat.ts` by awaiting `temporalPromise` in `Promise.all`.
+- Restore new user Discovery Phase onboarding by awaiting `totalMemoriesPromise` in `Promise.all` rather than hardcoding `{ count: 15 }`.
+- Clean user message image persistence in `chat_history` by storing original clean text in `content` and `image_description` in `meta`, removing prompt pollution and redundant `[HIDDEN_CONTEXT]` duplicate inserts.
+- Add `reply_to_id, reply_to_content` to `chatRouter.get('/')` `.select(...)` so quoted swipe-to-reply headers persist across app restarts and reloads.
+- Add lifestyle signal detection (`FITNESS_SIGNALS`, `STUDY_SIGNALS`, `WORK_SIGNALS`, `PET_SIGNALS`, `CREATIVE_SIGNALS`, `HABIT_SIGNALS`) and actionable lifestyle companion directives in `SituationalAwareness.ts`.
+- Fix false-positive busy signal matching using `SHORT_BUSY_REGEX` so words like `assignment`, `design`, and `signal` do not match `gn`.
+- Pass all verification gates: `cd backend && npm run build` (exit 0) and `cd mobile && npx tsc --noEmit` (exit 0).
 
 ## Approved Code
-All changes pass `cd backend && npm run build` (code 0) and `cd mobile && npx tsc --noEmit` (code 0).
+All changes pass `cd backend && npm run build` (code 0), `cd mobile && npx tsc --noEmit` (code 0), and all unit tests (code 0).
 
 ## Autonomous Deployment
 Standing user directive: automatically commit, merge, and push to `origin main`.
 Push to `main` triggers Render backend deployment and GitHub Actions Mobile EAS OTA update.
+

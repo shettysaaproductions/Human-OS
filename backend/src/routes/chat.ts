@@ -707,24 +707,31 @@ chatRouter.post(
         effectiveMessage = '[SYSTEM: The user has not messaged in a while. Open a warm, short, casual conversation. Reference something from your recent memory if possible. Do NOT say you were checking in — just talk naturally like a friend who thought of them.]';
         normalizedMessages[normalizedMessages.length - 1].message = effectiveMessage;
       } else {
+        const effectiveParts: string[] = [];
         for (const msg of normalizedMessages) {
-          let text = msg.message;
+          let text = msg.message || '';
+          let visionNote = '';
           if (msg.reply_to_content) {
             text = `[Replying to: "${msg.reply_to_content}"]\n\n${text}`;
           }
           if (msg.image_base64) {
             const imageDesc = await visionService.describeSharedImage(msg.image_base64);
             if (imageDesc) {
+              (msg as any).image_description = imageDesc;
               if (imageDesc.includes('vision analysis unavailable')) {
-                text = `[User just shared an image but vision analysis is unavailable. You MUST ask them what is in it — e.g., "Dikha na kya hai isme!" or "Kya bheja hai bhai?"]\n\n${text}`;
+                visionNote = `[User just shared an image but vision analysis is unavailable. You MUST ask them what is in it — e.g., "Dikha na kya hai isme!" or "Kya bheja hai bhai?"]`;
               } else {
-                text = `[User attached an image showing: ${imageDesc}]\n\n${text}`;
+                visionNote = `[User attached an image showing: ${imageDesc}]`;
               }
             }
           }
-          msg.message = text;
+          if (visionNote) {
+            effectiveParts.push(text ? `${visionNote}\n\n${text}` : visionNote);
+          } else {
+            effectiveParts.push(text);
+          }
         }
-        effectiveMessage = normalizedMessages.map(m => m.message).join('\n\n');
+        effectiveMessage = effectiveParts.join('\n\n');
       }
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────
@@ -787,15 +794,22 @@ chatRouter.post(
         savedMessages.push({ id: 'proactive_' + Date.now(), error: null });
       } else {
         for (const msg of normalizedMessages) {
+          const imageDesc = (msg as any).image_description;
+          const cleanContent = msg.message || (imageDesc ? '📷 [Image]' : '');
+          const metaPayload: Record<string, any> = {};
+          if (imageDesc) {
+            metaPayload.image_description = imageDesc;
+          }
           const result = await qt.track('save_user_message', 'chat_history', () =>
             supabaseAdmin.from('chat_history')
               .insert({ 
                 user_id: userId, 
                 conversation_id: activeConversationId, 
                 role: 'user', 
-                content: msg.message, 
+                content: cleanContent, 
                 reply_to_id: msg.reply_to_id, 
                 reply_to_content: msg.reply_to_content,
+                ...(Object.keys(metaPayload).length > 0 ? { meta: metaPayload } : {}),
                 ...(msg.client_message_id && UUID_REGEX.test(msg.client_message_id) ? { id: msg.client_message_id } : {})
               })
               .select('id').single()
@@ -808,24 +822,6 @@ chatRouter.post(
           
           if (result.error) {
             logger.error('[Chat] DB: Failed to save user message (continuing in memory)', { error: result.error, userId, is_proactive });
-          } else if (result.data) {
-            // 1.1 Hidden context for image
-            if (msg.image_base64 && msg.message.includes('[User attached an image showing:')) {
-              const imageDescMatch = msg.message.match(/\[User attached an image showing: (.*?)\]/);
-              if (imageDescMatch && imageDescMatch[1]) {
-                try {
-                  await supabaseAdmin.from('chat_history')
-                    .insert({
-                      user_id: userId,
-                      conversation_id: activeConversationId,
-                      role: 'user',
-                      content: `[HIDDEN_CONTEXT] User shared an image showing: ${imageDescMatch[1]}`
-                    });
-                } catch (e) {
-                  logger.warn('[Chat] Failed to save hidden image context', { error: e });
-                }
-              }
-            }
           }
         }
       }
@@ -1171,31 +1167,21 @@ chatRouter.post(
 
       const upcomingRemindersFullPromise = supabaseAdmin.from('reminders').select('*').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(10).then(res => res, _err => ({ data: [] }));
 
-      // TIER 1: CRITICAL CONTEXT (Await immediately to start LLM)
+      // Fire-and-forget session counter bump in the background
+      sessionPromise.catch(err => logger.error('[Chat] Session bump failed', { error: err }));
+
+      // Parallel context fetch across DB connection pool
       const [
         profileResult, historyResult, crossSessionResult, wmResult, memoriesResult, stmResult, searchData,
-        lastMsgResult, presenceResult, unreadResult, upcomingReminders, lifeThreadsResult
+        lastMsgResult, presenceResult, unreadResult, upcomingReminders, lifeThreadsResult,
+        emotionResult, episodicResult, reflectionResult, behaviorPatternResult,
+        temporalResult, upcomingDbResult, totalMemoriesResult
       ] = await Promise.all([
         profilePromise, historyPromise, crossSessionPromise, wmPromise, memoriesPromise, stmPromise, searchPromise,
-        lastMsgPromise, presencePromise, unreadPromise, remindersPromise, lifeThreadsPromise
+        lastMsgPromise, presencePromise, unreadPromise, remindersPromise, lifeThreadsPromise,
+        emotionPromise, episodicPromise, reflectionPromise, behaviorPatternPromise,
+        temporalPromise, upcomingRemindersFullPromise, totalMemoriesPromise
       ]);
-      
-      // TIER 2: BACKGROUND CONTEXT (Start but do not await)
-      // These will resolve asynchronously and be used later if needed, or just warm the cache/trigger actions.
-      Promise.all([
-        emotionPromise, episodicPromise, reflectionPromise, behaviorPatternPromise, 
-        temporalPromise, upcomingRemindersFullPromise, totalMemoriesPromise, sessionPromise
-      ]).catch(err => logger.error('[Chat] Background context fetch failed', { error: err }));
-      
-      // We set dummy values for non-critical context to satisfy SituationalAwareness type constraints for now
-      // This allows the LLM to start streaming ~300-500ms faster
-      const emotionResult = { data: null };
-      const episodicResult = { data: [] };
-      const reflectionResult = { data: null };
-      const behaviorPatternResult = { pattern: 'UNKNOWN', description: '' };
-      const temporalResult = { data: [] };
-      const totalMemoriesResult = { count: 15 }; // Default to avoid discovery phase block
-      const upcomingDbResult = { data: [] };
 
       const dbDuration = Date.now() - dbStartTime;
       context_ready_ms = Date.now();
@@ -2346,7 +2332,7 @@ chatRouter.get(
 
       let query = supabaseAdmin
         .from('chat_history')
-        .select('id, role, content, created_at, conversation_id, user_id, meta, user_reaction')
+        .select('id, role, content, created_at, conversation_id, user_id, meta, user_reaction, reply_to_id, reply_to_content')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
