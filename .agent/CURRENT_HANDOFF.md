@@ -1,36 +1,43 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Living Memory Tree, Concrete Proof & Hypothesis Gate, Production EAS OTA
+2026-09-11 — Watchtower Reflection Grounding, Prompt Leak Elimination & Feminine Grammar Hardening
 
 ## Session / Agent
 Agent: MonkeyCode
-Branch: `agent-checkpoint/living-memory-tree-ota`
-Task: Living Memory Tree presentation, Concrete Proof & Anti-Hallucination Gate, Hypothesis Confirmation Gate, and Production EAS Mobile OTA.
+Branch: `agent-checkpoint/watchtower-quality-grounding-fix`
+Task: Fix prompt instruction leaks (`*No Formalities: Use "tu/tum/"*`), ground Watchtower post-reply reflections with exact calendar dates, prevent premature birthday celebration hallucinations, protect infant birth year 2026 from inversion to 2006, and sanitize Hinglish grammar/typos (female Nova).
 
-## Implemented Work
-1. **Living Memory Tree Presentation (`mobile/src/screens/analytics/MemoryBrainScreen.tsx`):**
-   - Replaced disconnected, isolated cards with an organic Living Memory Tree layout.
-   - Built a continuous vertical trunk spine (`treeSpine`), branching stems (`branchStem`), glowing joint nodes (`branchJoint`), branch arms (`branchArm`), and leaf traits (`leafIcon` 🍃 for facts, 💭 for active context).
-   - Added cross-branch neural bridges (`🌿 Cross-Branch Neural Link`) linking related life compartments (e.g. Work Shift wrap-up ⇄ Evening Baby Playtime).
-   - Bumped mobile release notes in `mobile/src/config/updateHistory.json` to `0.2.7-beta`.
-2. **Concrete Proof & Anti-Hallucination Gate (`backend/src/agents/SemanticAgent.ts`):**
-   - Added zero-tolerance invariant: 21 LLM background workers must strictly use user messages as concrete proof.
-   - Prohibits assumptions, speculations, or extrapolations from being stored as durable memories unless the user explicitly stated or confirmed them.
-3. **Hypothesis Confirmation Gate (`backend/src/services/SituationalAwareness.ts` & `backend/src/lib/memoryDomains.ts`):**
-   - Injected cognitive invariant: When Nova connects dots across memories (e.g. Sakshi's culinary flair ⇄ Shetty's Dhaba cloud kitchen venture), it represents proactive autonomous thinking.
-   - Nova must introduce these connecting dots as casual thoughts, questions, or ideas ("Maine socha kya hum...", "Ek thought aaya tha...").
-   - Nova MUST NOT believe or store them as settled facts in memory until the user explicitly confirms or agrees!
-4. **Personal Life Blueprint Curiosity Engine (`backend/src/services/LifeBlueprintCuriosityEngine.ts`):**
-   - 5-domain registry for progressive organic discovery (Bedtime, Wake-up, Diet, Stress relief, Personal choices).
-   - Dynamic custom sleep/wake rhythm adaptation in `UserLifeStageEngine.ts` and `TemporalAwarenessService.ts`.
+## Confirmed Findings & Root Cause Analysis
+1. **Smoking Gun for Leak:** In `backend/src/routes/chat.ts`, the `TIMEOUT_FALLBACK` route called a fast 8B model at `temperature: 0.9` with prompt text containing `- ONLY "Tu/Tera/Tujhe" or "Tum/Tumhara/Tumko"` and no conversation history. The small model parroted `*No Formalities: Use "tu/tum/"*`.
+2. **Watchtower Temporal Blindspot:** In `WatchtowerReflectionService.ts`, reflections only received `localTimeStr: 1:22 AM` with no calendar date. Seeing `17/02/2026` at `1:22 AM`, Watchtower hallucinated that the user wanted to celebrate tomorrow morning and rewrote the bubble to: *"Arey, tu subah uthke Tiku ka bday mana sakte hai..."*.
+3. **Compound Confusion & Age Inversion:** When user expressed confusion (*"I didn't understood"*), Nova lacked graceful error recovery and hallucinated *"Tiku ka bday 17/02/2006 hai, nahin 2026!"* flipping a 6-month-old infant into a 20-year-old.
+4. **Hinglish Grammar Typos & Gender Inversion:** Typo `rata` instead of `raat`, literal masculine grammar `main samajh mein aata hoon` instead of `main samajh gayi`, and broken pronoun agreement `tu ... sakte hai` instead of `tu ... sakta hai`.
+
+## Implemented Fixes
+1. **Prompt Leak Defense (`backend/src/services/NovaBrainService.ts`):**
+   - Upgraded `isPromptLeak`: Intercepts leaked rule headers, `no formalities`, `tu/tum`, `tu/tera/tujhe`, `anti-robot`, and bracketed rule blocks.
+   - Upgraded `sanitizeReply`: Strips rule headers/fragments, fixes `rata` -> `raat`, fixes masculine literal translations to female first-person (`main samajh mein aata hoon` -> `main samajh gayi`), and repairs pronoun agreements (`tu ... sakte hai` -> `tu ... sakta hai`).
+2. **Grounded Temporal Reflection (`backend/src/services/WatchtowerReflectionService.ts`):**
+   - Injected full calendar ground truth (`localDateStr`, `localTomorrowDateStr`, month, year).
+   - Injected explicit invariants against premature birthday celebrations, infant birth year 2026 protection, prompt rule echoes, and female voice.
+   - Applied `validateAndRepairGrounding` and `sanitizeReply` as an absolute quality gate on Watchtower's own `corrected_content`.
+3. **Grounding Validator & Recovery (`backend/src/services/NovaBrainService.ts`):**
+   - `validateAndRepairGrounding`: Enforces infant birth year 2026 (never 2006), intercepts premature birthday party assumptions upon DOB statements, and ensures graceful humble recovery when user calls out mistakes.
+4. **Chat Fallback Hardening (`backend/src/routes/chat.ts`):**
+   - Replaced fragile `TIMEOUT_FALLBACK` prompt with in-voice female friend persona, lowered temperature from 0.9 to 0.65, passed recent conversation history.
+   - Applied `validateAndRepairGrounding` and `sanitizeReply` across all fallback paths.
+5. **Memory Canonical Keys (`backend/src/lib/memoryKeySchema.ts` & `SemanticInterpreter.ts`):**
+   - Added canonical keys `wife_birth_date` and `son_birth_date` with comprehensive Hindi/Hinglish aliases.
+6. **Lowered Conversational Temperature (`backend/src/services/ResponseIntelligence.ts`):**
+   - Tuned temperature from 0.9/0.85 to 0.7 for stable, grounded output.
 
 ## Verification Status
 - `npm run build` in `backend`: EXIT 0 (Passed clean).
-- `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean).
-- `src/services/__tests__/LifeBlueprintCuriosityEngine.test.ts`: 7/7 tests PASSED.
+- `npx jest src/services/__tests__/NovaBrainService.test.ts --no-coverage`: 33/33 tests PASSED (100%).
+- `npx jest src/services/__tests__/watchtowerReflection.test.ts --no-coverage`: 4/4 tests PASSED (100%).
 
 ## NEXT ACTION
-Merge `agent-checkpoint/living-memory-tree-ota` to `main` and push to `origin main` to trigger the production GitHub Actions EAS Mobile OTA workflow and Render backend deployment.
+Request user authorization to merge `agent-checkpoint/watchtower-quality-grounding-fix` into `main` and push to production to trigger the Render deployment and GitHub Actions Mobile EAS OTA.
 
 
