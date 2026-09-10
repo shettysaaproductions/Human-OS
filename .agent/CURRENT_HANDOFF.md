@@ -50,10 +50,30 @@ Task: Fix critical front-end bugs in the chat section, protect SecureStore from 
 8. **Smart Quick Actions Bar & Input Refinements (`ChatScreen.tsx`):**
    - Added floating horizontal Quick Action chips (`⏰ Remind`, `🎯 Goal`, `📝 Note`, `🌿 Routine`, `🧠 Brain Galaxy`).
    - Added draft clear button `✕`, character limit warning (> 1800 chars), and instant scroll to offset 0 on send.
+9. **In-Bubble Attached Photo Rendering & Fullscreen Zoom Modal (`ChatScreen.tsx` & `useChatStore.ts`):**
+   - Fixed missing image preview in message bubbles: attached images (`image_uri`, `image_base64`, `meta.image_url`) now render with rounded borders and aspect ratio containment.
+   - Added a full-screen interactive modal with pinch-to-zoom/inspection and `✕` close button for reviewing study diagrams, workout posture, pet symptoms, and meal photos.
+   - Added `image_uri?: string` to `Message` interface; local paths survive SecureStore caching without hitting the 2KB limit.
+10. **Live In-Chat Search Toolbar (`ChatScreen.tsx`):**
+    - Added `🔍` toggle to the chat header, opening an animated search bar.
+    - Live query matching filters messages in real-time, displays match count badge, and shows clean empty state on no match.
+11. **Stop Generating (Abort) Capability (`ChatScreen.tsx` & `useChatStore.ts`):**
+    - Added `abortGeneration()` to cancel in-flight polling, reset `isTyping: false`, and clear awaiting reply.
+    - When Nova is generating and input draft is empty, Send button transforms into a glowing red Stop button (⏹️).
+12. **Double-Tap Send Debounce Guard (`ChatScreen.tsx`):**
+    - Added a 400ms debounce guard preventing duplicate message creations on fast double-taps.
+13. **Natural Keyboard Dismiss on Drag (`ChatScreen.tsx`):**
+    - Configured `keyboardDismissMode="on-drag"` on `<FlatList>`.
+14. **Floating Copy Confirmation Toast (`ChatScreen.tsx`):**
+    - Added an animated toast (`✓ Copied to clipboard`) for code blocks, markdown tables, and selected messages.
+15. **Scroll Down FAB Unread Badge (`ChatScreen.tsx`):**
+    - Added an active unread badge to the scroll-to-bottom FAB when new responses arrive while scrolled up.
+16. **Expanded Lifestyle Action Ecosystem (`ChatScreen.tsx`):**
+    - Expanded Quick Action chips to all 6 core lifestyles: `💪 Workout`, `📚 Study`, `💼 Work`, `🐾 Pet Care`, `✨ Idea`, `🌿 Routine`, `⏰ Remind`, `🎯 Goal`, `📝 Note`, `🧠 Brain Galaxy`.
 
 ## Verification Status
-- `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean).
-- `npm run build` in `backend`: EXIT 0 (Passed clean).
+- `npx tsc --noEmit` in `mobile`: EXIT 0 (Passed clean with 0 errors).
+- `npm run build` in `backend`: EXIT 0 (Passed clean with 0 errors).
 - Full Unit Test Suite: 62/62 tests PASSED (100% across all suites).
 
 ## Standing Autonomous Directives

@@ -505,8 +505,13 @@ const LIFESTYLE_TRACKS: LifestylePrompt[] = [
 const QUICK_ACTION_CHIPS = [
   { id: 'remind', icon: '⏰', label: 'Remind', prefix: 'Remind me to ' },
   { id: 'goal', icon: '🎯', label: 'Goal', prefix: 'My goal is: ' },
-  { id: 'note', icon: '📝', label: 'Note', prefix: 'Note: ' },
+  { id: 'workout', icon: '💪', label: 'Workout', prefix: 'Log workout / nutrition: ' },
+  { id: 'study', icon: '📚', label: 'Study', prefix: 'Explain simply & quiz me on: ' },
+  { id: 'work', icon: '💼', label: 'Work', prefix: 'Action items & plan for: ' },
+  { id: 'pet', icon: '🐾', label: 'Pet Care', prefix: 'Log pet routine / symptom: ' },
+  { id: 'creative', icon: '✨', label: 'Idea', prefix: 'Brainstorm 5 creative ideas for: ' },
   { id: 'routine', icon: '🌿', label: 'Routine', prefix: 'My routine today is: ' },
+  { id: 'note', icon: '📝', label: 'Note', prefix: 'Note: ' },
   { id: 'brain', icon: '🧠', label: 'Brain Galaxy', isNavigation: true },
 ];
 
@@ -653,11 +658,17 @@ function SwipeableBubble({ item, children, onReply }: { item: Message, children:
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
-  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo, updateMessageReaction, switchMessageVersion, regenerateBranch } = useChatStore();
+  const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, abortGeneration, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo, updateMessageReaction, switchMessageVersion, regenerateBranch } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [versionModalMessage, setVersionModalMessage] = useState<Message | null>(null);
+  const [fullScreenImageUri, setFullScreenImageUri] = useState<string | null>(null);
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [copyToastText, setCopyToastText] = useState<string | null>(null);
+  const [newMessagesWhileScrolled, setNewMessagesWhileScrolled] = useState(0);
+  const lastSendTimestampRef = useRef(0);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
@@ -667,6 +678,19 @@ export function ChatScreen() {
   const [isOffline, setIsOffline] = useState(false);
 
   const isSelectionMode = selectedMessageIds.length > 0;
+
+  const showCopyToast = useCallback((msg: string = 'Copied to clipboard') => {
+    setCopyToastText(msg);
+    setTimeout(() => setCopyToastText(null), 2200);
+  }, []);
+
+  const displayedMessages = useMemo(() => {
+    if (!isSearchActive || !searchQuery.trim()) {
+      return reversedMessages;
+    }
+    const q = searchQuery.toLowerCase().trim();
+    return reversedMessages.filter(m => m.content && m.content.toLowerCase().includes(q));
+  }, [reversedMessages, isSearchActive, searchQuery]);
   
   const toggleSelectMessage = useCallback((id: string) => {
     setSelectedMessageIds(prev => {
@@ -695,6 +719,9 @@ export function ChatScreen() {
           const y = e.nativeEvent?.contentOffset?.y ?? 0;
           currentOffsetRef.current = y;
           isNearBottomRef.current = y < 100;
+          if (y < 100) {
+            setNewMessagesWhileScrolled(0);
+          }
           const shouldShow = y > 250;
           if (shouldShow !== showScrollDownRef.current) {
             showScrollDownRef.current = shouldShow;
@@ -712,6 +739,9 @@ export function ChatScreen() {
 
   useEffect(() => {
     logEvent('MESSAGES_COUNT');
+    if (!isNearBottomRef.current && messages.length > 0) {
+      setNewMessagesWhileScrolled(prev => prev + 1);
+    }
   }, [messages.length]);
 
   useEffect(() => {
@@ -829,6 +859,13 @@ export function ChatScreen() {
   }, [isFocused]);
 
   const handleSend = useCallback((overrideText?: string) => {
+    const now = Date.now();
+    if (now - lastSendTimestampRef.current < 400) {
+      console.log('[CHAT] Discarding rapid duplicate send');
+      return;
+    }
+    lastSendTimestampRef.current = now;
+
     const textToEvaluate = typeof overrideText === 'string' ? overrideText : inputText;
     if (!textToEvaluate.trim() && !selectedImage) return;
     
@@ -836,12 +873,13 @@ export function ChatScreen() {
     
     // If only image is sent with no text, use a meaningful placeholder so backend min(1) passes
     const textToSend = textToEvaluate.trim() || '📷 (image attached)';
-    sendMessage(textToSend, selectedImage?.base64);
+    sendMessage(textToSend, selectedImage?.base64, selectedImage?.uri);
     if (typeof overrideText !== 'string') {
       setInputText('');
     }
     setSelectedImage(null);
     isNearBottomRef.current = true;
+    setNewMessagesWhileScrolled(0);
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, [inputText, selectedImage, sendMessage]);
 
@@ -970,6 +1008,29 @@ export function ChatScreen() {
                 </Text>
               </View>
             )}
+            {/* Attached Image Preview */}
+            {(() => {
+              const imageUri = item.image_uri 
+                || (item.image_base64 ? (item.image_base64.startsWith('data:') ? item.image_base64 : `data:image/jpeg;base64,${item.image_base64}`) : undefined)
+                || item.meta?.image_url;
+              if (!imageUri) return null;
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={() => setFullScreenImageUri(imageUri)}
+                  style={s.bubbleImageWrapper}
+                >
+                  <Image
+                    source={{ uri: imageUri }}
+                    style={s.bubbleAttachedImage}
+                    resizeMode="cover"
+                  />
+                  <View style={s.bubbleImageZoomPill}>
+                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>🔍 Tap to zoom</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })()}
             {item.isSystemMessage ? (
               <Text style={{ color: '#888', fontSize: 13, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 8, paddingVertical: 4 }}>
                 {item.content}
@@ -1012,7 +1073,10 @@ export function ChatScreen() {
                           <Text style={s.fenceLanguage}>{isCopyable ? 'Content' : (language || 'Code')}</Text>
                           <TouchableOpacity
                             style={s.copyButton}
-                            onPress={async () => { await Clipboard.setStringAsync(content); }}
+                            onPress={async () => {
+                              await Clipboard.setStringAsync(content);
+                              showCopyToast('Code copied to clipboard');
+                            }}
                           >
                             <Text style={s.copyButtonText}>Copy</Text>
                           </TouchableOpacity>
@@ -1049,21 +1113,23 @@ export function ChatScreen() {
                 }}
               />
             ) : (
-              <Pressable
-                onLongPress={() => toggleSelectMessage(item.id)}
-                onPress={() => {
-                  if (isSelectionMode) {
-                    toggleSelectMessage(item.id);
-                  }
-                }}
-              >
-                <Text style={[
-                  s.messageText,
-                  { color: colors.buttonText }
-                ]}>
-                  {item.content}
-                </Text>
-              </Pressable>
+              (item.content !== '📷 (image attached)' || !item.image_base64 && !item.image_uri) && (
+                <Pressable
+                  onLongPress={() => toggleSelectMessage(item.id)}
+                  onPress={() => {
+                    if (isSelectionMode) {
+                      toggleSelectMessage(item.id);
+                    }
+                  }}
+                >
+                  <Text style={[
+                    s.messageText,
+                    { color: colors.buttonText }
+                  ]}>
+                    {item.content}
+                  </Text>
+                </Pressable>
+              )
             )}
             <View style={s.timestampContainer}>
               {!isUser && (item.meta?.is_corrected || (item.meta?.versions && item.meta.versions.length > 1)) && (
@@ -1173,7 +1239,9 @@ export function ChatScreen() {
                   .join('\n\n');
                 if (selectedMsgs) {
                   await Clipboard.setStringAsync(selectedMsgs);
+                  const count = selectedMessageIds.length;
                   setSelectedMessageIds([]);
+                  showCopyToast(`${count} ${count === 1 ? 'message' : 'messages'} copied`);
                 }
               }} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>📋</Text>
@@ -1227,6 +1295,16 @@ export function ChatScreen() {
               </View>
             </View>
             <View style={s.headerRight}>
+              <TouchableOpacity
+                onPress={() => {
+                  setIsSearchActive(prev => !prev);
+                  if (isSearchActive) setSearchQuery('');
+                }}
+                style={[s.headerBtn, isSearchActive && { backgroundColor: 'rgba(139, 92, 246, 0.2)', borderRadius: 8 }]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={s.headerBtnText}>🔍</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => {
                 Alert.alert(
                   "New Chat",
@@ -1246,6 +1324,47 @@ export function ChatScreen() {
                 <Text style={s.headerBtnText}>⚙️</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        )}
+
+        {/* Live In-Chat Search Bar */}
+        {isSearchActive && (
+          <View style={[s.searchBarContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <Text style={{ fontSize: 14, marginRight: 6 }}>🔍</Text>
+            <TextInput
+              style={[s.searchInput, { color: colors.textPrimary }]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search chat (workout, notes, schedule)..."
+              placeholderTextColor={colors.placeholder}
+              autoFocus
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={[s.searchBadge, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+                  <Text style={{ fontSize: 11, color: '#8B5CF6', fontWeight: '700' }}>
+                    {displayedMessages.length} {displayedMessages.length === 1 ? 'match' : 'matches'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setSearchQuery('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ padding: 4 }}
+                >
+                  <Text style={{ fontSize: 14, color: colors.textSecondary }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            <TouchableOpacity
+              onPress={() => {
+                setIsSearchActive(false);
+                setSearchQuery('');
+              }}
+              style={{ marginLeft: 8, paddingVertical: 4, paddingHorizontal: 6 }}
+            >
+              <Text style={{ fontSize: 13, color: '#8B5CF6', fontWeight: '600' }}>Close</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -1272,9 +1391,10 @@ export function ChatScreen() {
           <FlatList
             ref={flatListRef}
             inverted
-            data={reversedMessages}
+            data={displayedMessages}
             showsVerticalScrollIndicator={false}
-            extraData={messages.length + (selectedMessageIds.length > 0 ? selectedMessageIds[0] : '') + (isTyping ? '1' : '0')}
+            keyboardDismissMode="on-drag"
+            extraData={displayedMessages.length + (selectedMessageIds.length > 0 ? selectedMessageIds[0] : '') + (isTyping ? '1' : '0')}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
@@ -1305,7 +1425,7 @@ export function ChatScreen() {
             updateCellsBatchingPeriod={50}
             onEndReached={() => {
               // In an inverted list, "end" is visually the TOP = oldest messages
-              if (hasMoreMessages && !isLoadingMore) {
+              if (hasMoreMessages && !isLoadingMore && !isSearchActive) {
                 loadOlderMessages();
               }
             }}
@@ -1320,14 +1440,26 @@ export function ChatScreen() {
             }
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
-              <LifestyleOnboardingHub
-                colors={colors}
-                onSelectPrompt={(prompt) => handleSend(prompt)}
-                onCustomize={(prompt) => {
-                  setInputText(prompt);
-                  inputRef.current?.focus();
-                }}
-              />
+              isSearchActive && searchQuery.trim() ? (
+                <View style={{ transform: [{ scaleY: -1 }], padding: 32, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 32, marginBottom: 8 }}>🔍</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>
+                    No messages found
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+                    No messages matching "{searchQuery}". Try another keyword or clear search.
+                  </Text>
+                </View>
+              ) : (
+                <LifestyleOnboardingHub
+                  colors={colors}
+                  onSelectPrompt={(prompt) => handleSend(prompt)}
+                  onCustomize={(prompt) => {
+                    setInputText(prompt);
+                    inputRef.current?.focus();
+                  }}
+                />
+              )
             }
           />
 
@@ -1366,31 +1498,23 @@ export function ChatScreen() {
 
           {/* Scroll to Bottom FAB */}
           {showScrollDown && (
-            <Animated.View style={{
-              position: 'absolute',
-              bottom: 12,
-              right: 16,
-              zIndex: 100,
-            }}>
+            <Animated.View style={s.scrollDownFabContainer}>
               <TouchableOpacity
-                onPress={() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 22,
-                  backgroundColor: colors.background === '#1A1A1A' ? '#2A2A2A' : '#FFFFFF',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 6,
-                  elevation: 5,
-                  borderWidth: 1,
-                  borderColor: colors.border
+                onPress={() => {
+                  setNewMessagesWhileScrolled(0);
+                  flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
                 }}
+                style={[s.scrollDownFab, { backgroundColor: colors.background === '#1A1A1A' ? '#2A2A2A' : '#FFFFFF', borderColor: colors.border }]}
+                activeOpacity={0.85}
               >
                 <Text style={{ fontSize: 20, color: colors.textSecondary, marginTop: -2 }}>↓</Text>
+                {newMessagesWhileScrolled > 0 && (
+                  <View style={s.fabNewBadge}>
+                    <Text style={s.fabNewBadgeText}>
+                      {newMessagesWhileScrolled > 9 ? '9+' : newMessagesWhileScrolled}
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </Animated.View>
           )}
@@ -1503,13 +1627,24 @@ export function ChatScreen() {
                 {inputText.length}/2000
               </Text>
             )}
-            <TouchableOpacity
-              style={[s.sendBtn, !inputText.trim() && !selectedImage && s.sendBtnDisabled]}
-              onPress={() => handleSend()}
-              disabled={!inputText.trim() && !selectedImage}
-            >
-              <Text style={s.sendBtnText}>↑</Text>
-            </TouchableOpacity>
+            {isTyping && !inputText.trim() && !selectedImage ? (
+              <TouchableOpacity
+                style={[s.sendBtn, s.stopBtn]}
+                onPress={() => abortGeneration()}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <View style={s.stopIconSquare} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[s.sendBtn, !inputText.trim() && !selectedImage && s.sendBtnDisabled]}
+                onPress={() => handleSend()}
+                disabled={!inputText.trim() && !selectedImage}
+              >
+                <Text style={s.sendBtnText}>↑</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -1650,6 +1785,46 @@ export function ChatScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Full-Screen Image Viewer Modal ── */}
+      <Modal
+        visible={!!fullScreenImageUri}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setFullScreenImageUri(null)}
+      >
+        <View style={s.fullScreenImageOverlay}>
+          <SafeAreaView style={{ flex: 1, width: '100%' }}>
+            <View style={s.fullScreenImageHeader}>
+              <TouchableOpacity
+                onPress={() => setFullScreenImageUri(null)}
+                style={s.fullScreenImageCloseBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              {fullScreenImageUri && (
+                <Image
+                  source={{ uri: fullScreenImageUri }}
+                  style={{ width: '92%', height: '82%', borderRadius: 12 }}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* ── Floating Copy Confirmation Toast ── */}
+      {copyToastText && (
+        <View pointerEvents="none" style={s.floatingToastContainer}>
+          <View style={s.floatingToastInner}>
+            <Text style={s.floatingToastText}>✓ {copyToastText}</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -2154,6 +2329,138 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   trackCustomizeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  bubbleImageWrapper: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 6,
+    position: 'relative',
+  },
+  bubbleAttachedImage: {
+    width: 220,
+    height: 180,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  bubbleImageZoomPill: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  fullScreenImageOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  fullScreenImageCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  searchInput: {
+    flex: 1,
+    height: 36,
+    fontSize: 14,
+    paddingHorizontal: 8,
+  },
+  searchBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  stopBtn: {
+    backgroundColor: '#EF4444',
+  },
+  stopIconSquare: {
+    width: 14,
+    height: 14,
+    backgroundColor: '#fff',
+    borderRadius: 2,
+  },
+  scrollDownFabContainer: {
+    position: 'absolute',
+    bottom: 12,
+    right: 16,
+    zIndex: 100,
+  },
+  scrollDownFab: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 1,
+  },
+  fabNewBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#8B5CF6',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  fabNewBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  floatingToastContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  floatingToastInner: {
+    backgroundColor: '#1E1E2E',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#8B5CF6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  floatingToastText: {
+    color: '#E0E7FF',
     fontSize: 13,
     fontWeight: '600',
   },

@@ -44,6 +44,7 @@ export interface Message {
   options?: string[];
   user_reaction?: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null;
   image_base64?: string;
+  image_uri?: string;
   hasThoughts?: boolean;
   thoughts?: Array<{ engine: string; type: string; detail: string; data?: any }>;
   isSystemMessage?: boolean; // soft-error or system-generated messages (not from LLM or user)
@@ -70,14 +71,15 @@ interface ChatState {
   oldestMessageId: string | null;
   replyingTo: Message | null;
   setReplyingTo: (msg: Message | null) => void;
-  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string, imageBase64?: string }[];
+  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string, imageBase64?: string, imageUri?: string }[];
   diagnostics: ChatDiagnostics | null;
   developerMode: boolean;
   setDeveloperMode: (val: boolean) => void;
   
   hydrateMessages: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
-  sendMessage: (content: string, imageBase64?: string) => Promise<void>;
+  sendMessage: (content: string, imageBase64?: string, imageUri?: string) => Promise<void>;
+  abortGeneration: () => void;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
   startNewConversation: () => Promise<void>;
@@ -188,9 +190,10 @@ function startQueueWatchdog(processQueueFn: () => Promise<void>) {
 
 // ── Pending queue persistence (survives app swipe-away) ─────────────────────
 const QUEUE_KEY = 'humanOs_pendingQueue';
-async function savePendingQueue(queue: { id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string; }[]) {
+async function savePendingQueue(queue: { id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string; imageUri?: string; }[]) {
   try {
     // Strip heavy base64 image data to prevent exceeding Android SecureStore limits (< 2KB)
+    // imageUri is a small local path (< 100 bytes) and is safe to persist
     const sanitized = queue.map(item => {
       const { imageBase64, ...rest } = item;
       return rest;
@@ -200,7 +203,7 @@ async function savePendingQueue(queue: { id: string; content: string; replyToId?
     console.warn('[QUEUE] Failed to persist queue:', e);
   }
 }
-async function loadPendingQueue(): Promise<{ id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string; }[]> {
+async function loadPendingQueue(): Promise<{ id: string; content: string; replyToId?: string; replyToContent?: string; imageBase64?: string; imageUri?: string; }[]> {
   try {
     const raw = await SecureStore.getItemAsync(QUEUE_KEY);
     return raw ? JSON.parse(raw) : [];
@@ -833,7 +836,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    sendMessage: async (content: string, imageBase64?: string) => {
+    sendMessage: async (content: string, imageBase64?: string, imageUri?: string) => {
+      // If previous reply polling was active, cancel it before dispatching new turn
+      stopReplyPolling();
       const replyingTo = get().replyingTo;
       const userMsg: Message = {
         id: Crypto.randomUUID(),
@@ -843,7 +848,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         timestamp: new Date().toISOString(),
         reply_to_id: replyingTo?.id,
         reply_to_content: replyingTo?.content,
-        image_base64: imageBase64
+        image_base64: imageBase64,
+        image_uri: imageUri,
       };
 
       const newQueue = [...get().pendingQueue, { 
@@ -851,7 +857,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         content,
         replyToId: replyingTo?.id,
         replyToContent: replyingTo?.content,
-        imageBase64
+        imageBase64,
+        imageUri,
       }];
       set((state) => ({ 
         messages: [...state.messages, userMsg],
@@ -872,6 +879,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       _queueTimeout = setTimeout(() => {
         get().processQueue();
       }, 500);
+    },
+
+    abortGeneration: () => {
+      console.log('[USER_ABORT] Cancelling reply wait and generation');
+      stopReplyPolling();
+      clearAwaitingReply();
+      _isProcessing = false;
+      _lockTimestamp = 0;
+      set({ isTyping: false });
     },
 
     retryMessage: async (messageId: string) => {
