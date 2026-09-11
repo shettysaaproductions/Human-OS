@@ -65,6 +65,20 @@ async function trackEvent(event_type: string, event_data?: object) {
   } catch {}
 }
 
+// Helper to clean up raw markdown tokens for quoted reply previews
+const cleanPreviewText = (text?: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/^#+\s+/gm, '') // strip markdown headings
+    .replace(/^[\s]*[-*•]\s+/gm, '') // strip bullet markers
+    .replace(/```[\s\S]*?```/g, '[Code]') // shorten code blocks
+    .replace(/`([^`]+)`/g, '$1') // inline code
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+    .replace(/\*([^*]+)\*/g, '$1') // italic
+    .replace(/\s+/g, ' ') // collapse multi-lines
+    .trim();
+};
+
 // Custom text rule to robustly handle bold text even if linebreaks break the parser, 
 // or if AI forgets to close the bold tags in narrow table cells.
 const customTextRule = (node: any, children: any, parent: any, styles: any) => {
@@ -366,8 +380,8 @@ function sanitizeContent(raw: string): string {
       }
       return line
         .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<[a-zA-Z/][^>]*/g, '') // catches unclosed HTML too
-        .replace(/>/g, '')
+        .replace(/<[a-zA-Z\/][^>]*>/g, '') // catches valid HTML tags safely without stripping bare '>'
+        .replace(/<[a-zA-Z\/][^>]*$/g, '') // catches trailing unclosed HTML tags
         .replace(/\\\|/g, '|');
     })
     .join('\n');
@@ -552,6 +566,8 @@ function LifestyleOnboardingHub({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={s.categoryScrollContent}
         style={s.categoryScroll}
       >
@@ -679,9 +695,16 @@ export function ChatScreen() {
 
   const isSelectionMode = selectedMessageIds.length > 0;
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showCopyToast = useCallback((msg: string = 'Copied to clipboard') => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setCopyToastText(msg);
-    setTimeout(() => setCopyToastText(null), 2200);
+    toastTimerRef.current = setTimeout(() => {
+      setCopyToastText(null);
+      toastTimerRef.current = null;
+    }, 2200);
   }, []);
 
   const displayedMessages = useMemo(() => {
@@ -1004,7 +1027,7 @@ export function ChatScreen() {
                 borderLeftColor: '#8B5CF6'
               }}>
                 <Text style={{ color: isUser ? colors.buttonText : colors.assistantText, fontSize: 13, opacity: 0.9, fontWeight: '500' }} numberOfLines={1}>
-                  {'↩ '}{item.reply_to_content.length > 60 ? item.reply_to_content.substring(0, 60) + '...' : item.reply_to_content}
+                  {'↩ '}{cleanPreviewText(item.reply_to_content)}
                 </Text>
               </View>
             )}
@@ -1113,23 +1136,38 @@ export function ChatScreen() {
                 }}
               />
             ) : (
-              (item.content !== '📷 (image attached)' || !item.image_base64 && !item.image_uri) && (
-                <Pressable
-                  onLongPress={() => toggleSelectMessage(item.id)}
-                  onPress={() => {
-                    if (isSelectionMode) {
-                      toggleSelectMessage(item.id);
-                    }
-                  }}
-                >
-                  <Text style={[
-                    s.messageText,
-                    { color: colors.buttonText }
-                  ]}>
-                    {item.content}
-                  </Text>
-                </Pressable>
-              )
+              (() => {
+                const isImageOnlyPlaceholder = (
+                  item.content === '📷 (image attached)' ||
+                  item.content === '📷 [Photo]' ||
+                  item.content === '📷 [Image]' ||
+                  item.content.trim() === ''
+                );
+                const hasImage = !!(
+                  item.image_uri ||
+                  item.image_base64 ||
+                  item.meta?.image_url
+                );
+                if (hasImage && isImageOnlyPlaceholder) return null;
+
+                return (
+                  <Pressable
+                    onLongPress={() => toggleSelectMessage(item.id)}
+                    onPress={() => {
+                      if (isSelectionMode) {
+                        toggleSelectMessage(item.id);
+                      }
+                    }}
+                  >
+                    <Text style={[
+                      s.messageText,
+                      { color: colors.buttonText }
+                    ]}>
+                      {item.content}
+                    </Text>
+                  </Pressable>
+                );
+              })()
             )}
             <View style={s.timestampContainer}>
               {!isUser && (item.meta?.is_corrected || (item.meta?.versions && item.meta.versions.length > 1)) && (
@@ -1541,7 +1579,7 @@ export function ChatScreen() {
                 Replying to {replyingTo.role === 'user' ? 'Yourself' : 'Nova'}
               </Text>
               <Text style={{ color: colors.textPrimary, fontSize: 13, opacity: 0.8 }} numberOfLines={1}>
-                {replyingTo.content}
+                {cleanPreviewText(replyingTo.content)}
               </Text>
             </View>
             <TouchableOpacity onPress={() => setReplyingTo(null)} style={{ padding: 8 }}>
@@ -1566,6 +1604,7 @@ export function ChatScreen() {
                     navigation.navigate('Brain');
                   } else if (chip.prefix) {
                     setInputText(chip.prefix);
+                    presenceService.onTypingStart();
                     inputRef.current?.focus();
                   }
                 }}
@@ -1582,15 +1621,33 @@ export function ChatScreen() {
         <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>
           {selectedImage && (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: 8 }}>
-              <View style={{ position: 'relative' }}>
-                <Image source={{ uri: selectedImage.uri }} style={{ width: 60, height: 60, borderRadius: 8 }} />
-                <TouchableOpacity
-                  style={{ position: 'absolute', top: -5, right: -5, backgroundColor: 'red', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}
-                  onPress={() => setSelectedImage(null)}
-                >
-                  <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>✕</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setFullScreenImageUri(selectedImage.uri)}
+                style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: '#8B5CF6' }}
+              >
+                <Image source={{ uri: selectedImage.uri }} style={{ width: 68, height: 68, borderRadius: 9 }} />
+                <View style={{ position: 'absolute', bottom: 2, right: 2, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 }}>
+                  <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>🔍 Preview</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  marginLeft: 10,
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => setSelectedImage(null)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={{ color: '#EF4444', fontSize: 11, fontWeight: 'bold' }}>✕ Remove</Text>
+              </TouchableOpacity>
             </View>
           )}
           <View style={[s.inputContainer, { borderTopColor: colors.border }]}>

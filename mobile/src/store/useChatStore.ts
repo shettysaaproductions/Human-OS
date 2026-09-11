@@ -597,6 +597,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           content: q.content,
           status: 'sending' as const,
           timestamp: new Date().toISOString(),
+          image_uri: q.imageUri,
+          image_base64: q.imageBase64,
+          reply_to_id: q.replyToId,
+          reply_to_content: q.replyToContent,
         }));
         set({
           messages: [...filteredCachedMessages, ...restoredPending],
@@ -671,13 +675,17 @@ export const useChatStore = create<ChatState>((set, get) => {
           // Restore pending messages that aren't in history yet and not delivered
           const savedIds = new Set(history.map((m: any) => m.id));
           const savedContents = new Set(history.filter((m: any) => m.role === 'user').map((m: any) => m.content.trim()));
-          const pendingToRestore = filteredQueue.filter(q => !savedIds.has(q.id) && !savedContents.has(q.content.trim()));
+          const pendingToRestore = filteredQueue.filter(q => !savedIds.has(q.id) && (q.content.trim() ? !savedContents.has(q.content.trim()) : true));
           const restoredMessages: Message[] = pendingToRestore.map(q => ({
             id: q.id,
             role: 'user' as const,
             content: q.content,
             status: 'sending' as const,
             timestamp: new Date().toISOString(),
+            image_uri: q.imageUri,
+            image_base64: q.imageBase64,
+            reply_to_id: q.replyToId,
+            reply_to_content: q.replyToContent,
           }));
 
           const oldestRawId = history[0]?.id || null;
@@ -750,7 +758,10 @@ export const useChatStore = create<ChatState>((set, get) => {
             content: q.content,
             status: 'sending' as const,
             timestamp: new Date().toISOString(),
+            image_uri: q.imageUri,
             image_base64: q.imageBase64,
+            reply_to_id: q.replyToId,
+            reply_to_content: q.replyToContent,
           }));
           set({
             isHydrated: true,

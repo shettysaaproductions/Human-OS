@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import { useTheme } from '../theme/ThemeContext';
 
 const THOUGHT_STEPS = [
   { icon: '🧠', text: "Nova is thinking..." },
@@ -9,6 +10,7 @@ const THOUGHT_STEPS = [
 ];
 
 export const LiveThinkingIndicator: React.FC = () => {
+  const { colors, isDark } = useTheme();
   const [stepIndex, setStepIndex] = useState(0);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -105,13 +107,24 @@ export const LiveThinkingIndicator: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.bubble}>
+      <View style={[
+        styles.bubble,
+        {
+          backgroundColor: isDark ? 'rgba(139, 92, 246, 0.12)' : 'rgba(139, 92, 246, 0.08)',
+          borderColor: isDark ? 'rgba(139, 92, 246, 0.3)' : 'rgba(139, 92, 246, 0.25)',
+        }
+      ]}>
         <Animated.Text style={[styles.icon, { transform: [{ scale: pulseAnim }] }]}>
           {currentStep.icon}
         </Animated.Text>
         
         <Animated.View style={[styles.textWrapper, { opacity: fadeAnim }]}>
-          <Text style={styles.thinkingText}>{currentStep.text}</Text>
+          <Text style={[
+            styles.thinkingText,
+            { color: isDark ? '#DDD6FE' : '#6D28D9' }
+          ]}>
+            {currentStep.text}
+          </Text>
         </Animated.View>
 
         <View style={styles.dotsRow}>
