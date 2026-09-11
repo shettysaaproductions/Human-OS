@@ -1879,7 +1879,7 @@ function toGraphLabel(key: string, value: string): string {
   if (k === 'venture_name' || k === 'business_venture' || k === 'cloud_kitchen_business' || k === 'dhaba_venture') return `${v} (Venture)`;
   if (k === 'work_schedule') {
     if (v.includes('11') && (v.includes('8') || v.includes('8 PM'))) return '11am - 8pm (Work Hours)';
-    return v.length > 22 ? `${v.slice(0, 20)}... (Hours)` : `${v} (Hours)`;
+    return `${v} (Hours)`;
   }
   if (k === 'office_hours') return `${v} (Office Hours)`;
   if (k === 'current_office_location') return `${v} (Office)`;
@@ -1894,7 +1894,7 @@ function toGraphLabel(key: string, value: string): string {
 
   // Goals
   if (k === 'goals') {
-    return v.length > 25 ? v.slice(0, 22) + '... (Goal)' : `${v} (Goal)`;
+    return `${v} (Goal)`;
   }
   if (k === 'passions') {
     return 'Passions & Leadership';
@@ -1912,19 +1912,16 @@ function toGraphLabel(key: string, value: string): string {
   const parts = key.split('_');
   if (parts.length >= 3) {
     const trait = parts.slice(2).join(' ').replace(/\b\w/g, c => c.toUpperCase());
-    const shortVal = v.length > 22 ? v.slice(0, 19) + '...' : v;
-    return `${shortVal} (${trait})`;
+    return `${v} (${trait})`;
   }
   if (parts.length === 2) {
     const trait = parts[1].replace(/\b\w/g, c => c.toUpperCase());
-    const shortVal = v.length > 22 ? v.slice(0, 19) + '...' : v;
-    return `${shortVal} (${trait})`;
+    return `${v} (${trait})`;
   }
 
   // Fallback
   const cleanKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const shortVal = v.length > 18 ? v.slice(0, 15) + '...' : v;
-  return shortVal ? `${shortVal} (${cleanKey})` : cleanKey;
+  return v ? `${v} (${cleanKey})` : cleanKey;
 }
 
 /**
@@ -2021,7 +2018,17 @@ export function buildDynamicKnowledgeGraph(
   const allItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
   const seenCanonicalConcepts = new Map<string, { id: string; key: string; isContext?: boolean }>();
 
+  const hasFamilyEntities = rawItems.some(r =>
+    ['wife_name', 'son_name', 'father_name', 'mother_name', 'sakshi', 'shreshth'].includes(r.key.toLowerCase())
+  );
+
   for (const item of rawItems) {
+    const kLower = item.key.toLowerCase();
+    // When individual family members are present, skip composite family_details summary
+    if (kLower === 'family_details' && hasFamilyEntities) {
+      continue;
+    }
+
     const canon = canonicalizeKey(item.key).canonical;
     const existing = seenCanonicalConcepts.get(canon);
     if (existing) {

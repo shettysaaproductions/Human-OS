@@ -139,8 +139,8 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   }
   if (k === 'father_name') return { title: v || 'Father', sub: 'Father' };
   if (k === 'mother_name') return { title: v || 'Mother', sub: 'Mother' };
-  if (k === 'mother_occupation' || k === 'mother_job') return { title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || 'Tailor'), sub: 'Mother Occupation' };
-  if (k === 'father_business' || k === 'father_job') return { title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || 'Business'), sub: 'Father Business' };
+  if (k === 'mother_occupation' || k === 'mother_job') return { title: v || 'Tailor', sub: 'Mother Occupation' };
+  if (k === 'father_business' || k === 'father_job') return { title: v || 'Business', sub: 'Father Business' };
   if (k === 'daughter_name') return { title: v || 'Daughter', sub: 'Daughter' };
   if (k === 'sister_name') return { title: v || 'Sister', sub: 'Sister' };
   if (k === 'brother_name') return { title: v || 'Brother', sub: 'Brother' };
@@ -150,7 +150,7 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   if (k === 'current_office_location') return { title: v || 'Location', sub: 'Office Location' };
   if (k === 'candidates_for_job') return { title: v || 'Interviews', sub: 'Candidate Pipeline' };
   if (k === 'hope_for_job_selection') return { title: 'Target: 2', sub: 'Selections' };
-  if (k === 'goals' || k === 'primary_goal') return { title: v.length > 20 ? v.slice(0, 18) + '...' : (v || 'Ambition'), sub: 'Primary Goal' };
+  if (k === 'goals' || k === 'primary_goal') return { title: v || 'Ambition', sub: 'Primary Goal' };
   if (k === 'passions') return { title: 'Passions', sub: 'Core Driver' };
   if (k === 'preferred_name') {
     const clean = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
@@ -171,7 +171,7 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     const entity = parts[1].replace(/\b\w/g, c => c.toUpperCase());
     const trait = parts.slice(2).join(' ').replace(/\b\w/g, c => c.toUpperCase());
     return {
-      title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || trait),
+      title: v || trait,
       sub: `${trait} (${entity})`
     };
   }
@@ -179,14 +179,14 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     const entity = parts[0].replace(/\b\w/g, c => c.toUpperCase());
     const trait = parts[1].replace(/\b\w/g, c => c.toUpperCase());
     return {
-      title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || trait),
+      title: v || trait,
       sub: `${trait}`
     };
   }
 
   const cleanKey = (key || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   return {
-    title: v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey || 'Memory'),
+    title: v || cleanKey || 'Memory',
     sub: cleanKey || 'Attribute'
   };
 }
@@ -296,6 +296,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       const parts = cleanK.split('_');
 
       if (d === 'family') {
+        if (cleanK === 'family_details' || cleanK.includes('family_details')) {
+          // Composite summary - skip so individual family member entities are authoritative
+          continue;
+        }
         if (k === 'family_nickname' || k.includes('family_nick') || k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
           mem.hierarchyLevel = 3;
           mem.parentEntityId = 'mem-son_name';
@@ -384,6 +388,7 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     for (const b of rawBranchItems) {
       const bKey = (b.raw_key || b.name || '').toLowerCase();
       let norm = bKey;
+      if (norm.includes('family_details') || norm === 'family_details') continue;
       if (norm.includes('sakshi') || norm.includes('wife')) norm = 'sakshi';
       if (norm.includes('shreshth') || norm.includes('son')) norm = 'shreshth';
       if (norm.includes('tiku') || norm.includes('tuku') || norm.includes('family_nickname') || norm.includes('son_nickname')) {
@@ -419,8 +424,8 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
     // Position Level 2 Branches: Fanning outward from Department Hub (hx, hy)
     const branchCount = branchItems.length;
-    const branchDist = 260;
-    const branchSpread = Math.min(Math.PI * 0.75, Math.max(0.5, (branchCount - 1) * 0.42));
+    const branchDist = 330;
+    const branchSpread = Math.min(Math.PI * 0.85, Math.max(0.55, (branchCount - 1) * 0.46));
 
     branchItems.forEach((bMem, bIdx) => {
       const names = toDisplayNames(bMem.raw_key, bMem.value, bMem.name);
@@ -520,16 +525,18 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         : angle;
 
       const sCount = stems.length;
-      const stemDist = 180;
-      const stemSpread = Math.min(Math.PI * 0.65, Math.max(0.45, (sCount - 1) * 0.46));
+      const stemDist = 240;
+      const stemSpread = Math.min(Math.PI * 0.95, Math.max(0.55, (sCount - 1) * 0.44));
 
       stems.forEach((sMem, sIdx) => {
         const names = toDisplayNames(sMem.raw_key, sMem.value, sMem.name);
         const sFrac = sCount === 1 ? 0 : (sIdx / (sCount - 1) - 0.5);
         const sAngle = baseStemAngle + sFrac * stemSpread;
 
-        const sx = Math.round(px + stemDist * Math.cos(sAngle));
-        const sy = Math.round(py + stemDist * Math.sin(sAngle));
+        // Radial staggering provides comfortable breathing room for full text badges
+        const effectiveStemDist = stemDist + (sIdx % 2 === 0 ? 0 : 70);
+        const sx = Math.round(px + effectiveStemDist * Math.cos(sAngle));
+        const sy = Math.round(py + effectiveStemDist * Math.sin(sAngle));
 
         const treePath = sMem.treePath || (parentNode ? [...(parentNode.treePath || []), names.title] : [coreName, meta.short, names.title]);
 
@@ -698,6 +705,10 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
 
     // Family Stems
     if (d === 'family') {
+      if (k === 'family_details' || k.includes('family_details')) {
+        // Skip composite summary so individual family member entities are authoritative
+        continue;
+      }
       if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sakshi', 'shreshth'].includes(k)) {
         hierarchyLevel = 2;
         relation = 'FAMILY_MEMBER';
@@ -1751,12 +1762,11 @@ function KgExplorerContent() {
                             isSelected && styles.labelTextSelected,
                             n.isDepartment && { color: n.color }
                           ]}
-                          numberOfLines={1}
                         >
                           {n.name}
                         </Text>
                         {n.subLabel ? (
-                          <Text style={styles.subLabelText} numberOfLines={1}>
+                          <Text style={styles.subLabelText}>
                             {n.subLabel}
                           </Text>
                         ) : null}
@@ -2140,11 +2150,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.14)',
     borderWidth: 1,
     borderRadius: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     marginTop: 4,
     alignItems: 'center',
-    maxWidth: 130,
+    maxWidth: 340,
+    minWidth: 48,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.4,

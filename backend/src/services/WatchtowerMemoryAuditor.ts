@@ -460,6 +460,32 @@ export class WatchtowerMemoryAuditor {
       }
     }
 
+    // ── AUDIT 8: Composite Family Details Supersession ───────────────────────
+    // When individual family members (wife_name, son_name, etc.) exist,
+    // supersede the composite summary "family_details" to prevent duplicate bubbles in Neural Galaxy.
+    if (memMap.has('family_details') && (memMap.has('wife_name') || memMap.has('son_name'))) {
+      findings.push({
+        entity: 'Family & Relationships',
+        flaw: `Composite family_details memory causes duplicate entities because individual family members (Wife Sakshi, Son Shreshth) are already present.`,
+        flawType: 'SEMANTIC_CONTRADICTION',
+        provenChatTruth: `Family members are individually established.`,
+        action: 'AUTO_RECONCILE',
+        updates: []
+      });
+      try {
+        await supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            lifecycle_state: 'SUPERSEDED',
+            supersession_reason: 'Decomposed into individual family member entities by Watchtower Memory Auditor',
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', _userId)
+          .eq('key', 'family_details');
+      } catch {}
+    }
+
     return findings;
   }
 
