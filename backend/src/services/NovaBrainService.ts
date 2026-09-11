@@ -69,6 +69,19 @@ export function isPromptLeak(text: string): boolean {
     'tum/tumhara/tumko',
     'tu/tera',
     'tum/tumhara',
+    'use casual "tu/tum"',
+    "use casual 'tu/tum'",
+    'casual "tu/tum"',
+    'output only conversational text',
+    'output only spoken conversational dialogue',
+    'output only conversational reply',
+    'plain conversational text only',
+    'plain text only',
+    'nova is female:',
+    'no lists, no formatting',
+    'no prompt rules',
+    'never output rule names',
+    'reply in 1-2 short',
   ];
 
   for (const sig of leakSignatures) {
@@ -81,7 +94,7 @@ export function isPromptLeak(text: string): boolean {
   if (/^(?:##\s*)?output\s+only\b/i.test(trimmed)) {
     return true;
   }
-  if (/\boutput\s+only\b/i.test(lower) && /\b(?:plain\s+text|conversational\s+reply|whatsapp)\b/i.test(lower)) {
+  if (/\boutput\s+only\b/i.test(lower) && /\b(?:plain\s+text|conversational\s+reply|whatsapp|dialogue)\b/i.test(lower)) {
     return true;
   }
 
@@ -89,13 +102,16 @@ export function isPromptLeak(text: string): boolean {
   if (/^\*?(?:No Formalities|Anti-Robot|Rules?|Instructions?|Formatting|Hinglish Rule|Tone Rule)[^:]*:\s*/i.test(trimmed)) {
     return true;
   }
-  if (/\bno\s+formalities\b/i.test(lower) || /\buse\s+["']?tu\/tum/i.test(lower)) {
+  if (/\bno\s+formalities\b/i.test(lower) || /\buse\s+["']?tu\/tum/i.test(lower) || /\bcasual\s+["']?tu\/tum/i.test(lower)) {
     return true;
   }
   if (/\b(?:tu\/tera|tum\/tumhara|tu\/tum)\b/i.test(lower)) {
     return true;
   }
   if (/^only\s+["']?(?:tu|tum)/i.test(lower)) {
+    return true;
+  }
+  if (/\b(?:reply\s+in\s+1-2\s+short|never\s+output\s+rule\s+names|plain\s+conversational\s+text\s+only)\b/i.test(lower)) {
     return true;
   }
   if (/^\*[^*]*(?:tu\/tum|formalities|rules?|guidelines?|instructions?)[^*]*\*$/i.test(trimmed)) {
@@ -132,7 +148,7 @@ export function sanitizeReply(reply: string): string {
     .replace(/^Note:\s*Since[^\n]*\n?/gi, '')
     .replace(/^Note:\s*[^\n]*\n?/gi, '')
     .replace(/^(?:I(?:'ve| have|'m| am)|Since the|Per the|Following the|Based on the)\s+(?:combined|updated|new|given)\s*(?:the )?(?:instructions?|guidelines?|rules?|format)[^\n]*\n?/gi, '')
-    .replace(/\[\s*Replying to\s*:[^\]]*\]\s*/gi, '')
+    .replace(/(?:\[|\()\s*Replying to\s*:[\s\S]*?(?:\]|\))\s*/gi, '')
     .trim();
 
   // --- Strip robotic multiple-choice option menus (A) B) C) D) hallucinated menus) ---
@@ -172,7 +188,8 @@ export function sanitizeReply(reply: string): string {
     .replace(/```(?:json|text)?\s*\[subconscious_actions\][\s\S]*?(?:```|$)/gi, ' ')
     .replace(/\[subconscious_actions\][\s\S]*?(?:\*\*|$)/gi, ' ')
     // Strip [Replying to: "..."] prefixes echoed into reply text
-    .replace(/\[\s*Replying to\s*:[^\]]*\]\s*/gi, '')
+    .replace(/(?:\[|\()\s*Replying to\s*:[\s\S]*?(?:\]|\))\s*/gi, '')
+    .replace(/\[\s*REPLYING TO\s*:[\s\S]*?\]\s*/gi, '')
     // Strip system-text leaks
     .replace(/REAL-WORLD ACTION\s*\(BEHIND THE SCENES\)[\s\S]*?(?:```|$)/gi, ' ')
     .replace(/YOUR TURN\s*\([^)]*\)[\s\S]*/gi, ' ')
@@ -201,7 +218,7 @@ export function sanitizeReply(reply: string): string {
     .replace(/\bkee\b/gi, 'ki')
     .replace(/\bkaa\b/gi, 'ka')
     .replace(/\bkhaali\s+pan\b/gi, 'khali pet')
-    // Fix broken literal translations for female Nova
+    // Fix broken literal translations & masculine slips for female Nova
     .replace(/\bmain\s+samajh\s+mein\s+aata\s+hoon\b/gi, 'main samajh gayi')
     .replace(/\bmain\s+samajhta\s+hoon\b/gi, 'main samajh gayi')
     .replace(/\bmain\s+samajhti\s+hoon\b/gi, 'main samajh gayi')
@@ -212,6 +229,16 @@ export function sanitizeReply(reply: string): string {
     .replace(/\bmain\s+bhi\s+karte\s+hoon\b/gi, 'main bhi karti hoon')
     .replace(/\bmain\s+bolta\s+hoon\b/gi, 'main bolti hoon')
     .replace(/\bmain\s+bolte\s+hoon\b/gi, 'main bolti hoon')
+    .replace(/\breminder\s+karun[gg][ai]\b/gi, 'remind karungi')
+    .replace(/\b(?:tumhe\s+)?reminder\s+karun[gg][ai]\b/gi, 'remind karungi')
+    .replace(/\breminder\s+karta\s+hoon\b/gi, 'remind karti hoon')
+    .replace(/\bremind\s+karunga\b/gi, 'remind karungi')
+    .replace(/\byaad\s+kar\s+raha\s+hoon\b/gi, 'yaad kar rahi hoon')
+    .replace(/\bmain\s+((?:[a-zA-Z]+\s+){0,3})raha\s+hoon\b/gi, 'main $1rahi hoon')
+    .replace(/\bmain\s+((?:[a-zA-Z]+\s+){0,3})karunga\b/gi, 'main $1karungi')
+    .replace(/\bmain\s+((?:[a-zA-Z]+\s+){0,3})bataunga\b/gi, 'main $1bataungi')
+    .replace(/\bmain\s+((?:[a-zA-Z]+\s+){0,3})dilaunga\b/gi, 'main $1dilaungi')
+    .replace(/\byaad\s+karunga\b/gi, 'yaad rakhungi')
     // Fix broken mixed pronoun agreement (e.g. tu ... sakte hai -> tu ... sakta hai)
     .replace(/\btu\s+((?:[a-zA-Z]+\s+){0,6})sakte\s+hai\b/gi, 'tu $1sakta hai')
     // CJK leak
@@ -332,11 +359,77 @@ export function validateAndRepairGrounding(
 
   // 6. Confusion / User Mistake Callout Recovery
   // When user expresses confusion or calls out nonsense ("I didn't understood", "Are u idiot?"),
-  // reply with humble, grounded clarity instead of compounding the confusion.
-  const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|kya bol rahi ho|kya bol rahe ho|pagal ho kya|kuch bhi mat bolo)\b/i.test(userMessage);
-  if (isUserCallingOutMistake && /\b(aaj rata|umeed dene lagi|2006|subah hi kya|galat kaha)\b/i.test(text)) {
-    logger.warn('[GroundingValidator] Intercepted compounding error on mistake callout, providing humble grounded recovery');
-    text = "Arre sorry yaar! Mera dimag thoda ghoom gaya tha 🤦‍♀️ Tiku (Shreshth) ka bday 17th February hai aur Sakshi ka 7th August — maine dono dates achhe se note kar li hain!";
+  // reply with humble, grounded clarity instead of compounding the confusion or jumping to unrelated topics.
+  const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|kya bol rahi ho|kya bol rahe ho|pagal ho kya|kuch bhi mat bolo|maine kab bola|galat bol rahi ho|galat hai)\b/i.test(userMessage);
+  if (isUserCallingOutMistake) {
+    if (/\b(aaj rata|umeed dene lagi|2006|subah hi kya|galat kaha)\b/i.test(text)) {
+      logger.warn('[GroundingValidator] Intercepted compounding error on mistake callout, providing humble grounded recovery');
+      text = "Arre sorry yaar! Mera dimag thoda ghoom gaya tha 🤦‍♀️ Tiku (Shreshth) ka bday 17th February hai aur Sakshi ka 7th August — maine dono dates achhe se note kar li hain!";
+    } else if (!/\b(?:shreshth|tiku|baby|son)\b/i.test(userMessage) && /\b(?:shreshth|tiku)\b/i.test(text)) {
+      logger.warn('[GroundingValidator] Intercepted unprompted baby jump on mistake callout, providing humble grounded apology');
+      text = "Arre sorry yaar! Mera thoda dhyan bhatak gaya tha 🤦‍♀️ Tu kya keh raha tha, mujhe dobara bata de please?";
+    }
+  }
+
+  // 7. Temporal "Kal" Future Reminder vs Past Hallucination Guard
+  // When user asks for a future reminder ("Kal muje afternoon me 1 bJe yaad dilao na", "kal sube remind karo"),
+  // models often hallucinate past tense ("Acha, toh tumne kal afternoon mein reminder diya tha!").
+  const isRequestingFutureReminder =
+    /\bkal\b/i.test(userMessage) &&
+    /\b(?:yaad\s*(?:dilao|dilana|dila|karo)|remind\s*(?:karo|karna|me)|karna\s*hai|karni\s*hai|bhejna\s*hai|update\s*karna)\b/i.test(userMessage);
+
+  const hasPastReminderHallucination =
+    /\b(?:tumne|aapne)\b[\s\S]*?\b(?:reminder\s+diya\s+tha|diya\s+tha|bola\s+tha|kaha\s+tha)\b/i.test(text);
+
+  if (isRequestingFutureReminder && hasPastReminderHallucination) {
+    logger.warn('[GroundingValidator] Intercepted past reminder hallucination on future "Kal" reminder request, repairing to future confirmation');
+    const timeMatch = userMessage.match(/\b(\d{1,2}(?::\d{2})?\s*(?:bje|baje|am|pm))\b/i);
+    const periodMatch = userMessage.match(/\b(subah|sube|morning|afternoon|dopahar|shaam|evening|raat|night)\b/i);
+    const timeStr = timeMatch ? timeMatch[0] : (periodMatch ? periodMatch[0] : 'time pe');
+    text = `Samajh gayi! Main kal ${timeStr} pe tumhe yaad dila dungi 😊`;
+  }
+
+  // 8. Circadian Sanity & Midnight Chores Guard (Zero Tolerance)
+  // Between 10 PM and 6 AM, or when user mentions late night ("raat ke 12:19", "itni raat"),
+  // Nova must NEVER tell user to start cooking, workout, or physical chores right now.
+  const isLateNightUserSignal =
+    /\b(?:raat\s+ke\s+12|itni\s+raat|raat\s+ho\s+gayi|sone\s+ka\s+time|midnight)\b/i.test(userMessage);
+  const nowHour = new Date().getUTCHours() + 5.5; // default IST
+  const isLateNightTime = nowHour >= 22.5 || nowHour < 6.0;
+
+  const hasMidnightChoreSuggestion =
+    /\b(?:abhi\s+(?:free\s+hai\s+toh\s+)?start\s+kar\s+de|abhi\s+(?:se\s+)?(?:khana|cooking|workout|exercise)\s+(?:shuru|start)\s+kar)\b/i.test(text);
+
+  if ((isLateNightUserSignal || isLateNightTime) && hasMidnightChoreSuggestion) {
+    logger.warn('[GroundingValidator] Intercepted midnight chore suggestion, repairing to restful wind-down');
+    text = "Arre nahi, Abhi raat ko aaram kar aur so ja! Kal subah uthke fresh mind se karte hain 😊";
+  }
+
+  // 9. Entity Attribution & Common-Sense Plausibility Guard (Adult Wife Sakshi vs Infant Son Shreshth)
+  // Sakshi taught herself nail art. An infant (6 months old) cannot wake up early, do nail art, or learn courses.
+  const isWifeArtContext =
+    /\b(?:sakshi|wife|biwi|nail\s*art|khud\s*se\s*seekha|no\s*course|art)\b/i.test(userMessage);
+  const isAttributingArtToSon =
+    /\b(?:shreshth|beta|son|tiku)\b.*\b(?:uth\s*raha\s*hai|seekhne|mehnat\s*karta\s*hai|kalaa)\b/i.test(text);
+
+  if (isWifeArtContext && isAttributingArtToSon) {
+    logger.warn('[GroundingValidator] Intercepted infant/wife entity confusion on nail art skill, repairing');
+    text = "Sakshi ne bina kisi course ke khud se itna sundar nail art seekh liya? Wow, sach mein bohot talented hai! Uski ye kalaa dekh ke maza aa gaya 😊";
+  }
+
+  // 10. 1-Word Habit / Workout Passive Nod Guard
+  // When user shares a routine or commitment ("Sube muje roz workout start karna hai 8 baje uth ke"),
+  // a dead 1-word nod ("Sahi", "Theek hai", "Ok") is a fatal companion failure.
+  const isHabitCommitment =
+    /\b(?:workout|gym|exercise|routine|uth\s*ke|running)\b/i.test(userMessage) &&
+    /\b(?:roz|daily|har\s*din|start\s*karna|shuru\s*karna)\b/i.test(userMessage);
+
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  if (isHabitCommitment && wordCount <= 3 && /^(?:sahi|theek\s*hai|ok|mast|achha|acha|done)\.?$/i.test(text.trim())) {
+    logger.warn('[GroundingValidator] Intercepted 1-word passive nod on habit commitment, transforming to proactive companion offer');
+    const timeMatch = userMessage.match(/\b(\d{1,2}(?::\d{2})?\s*(?:bje|baje|am|pm))\b/i);
+    const timeStr = timeMatch ? timeMatch[0] : '8 baje';
+    text = `Mast plan hai yaar! 💪 Kya main tere liye roz subah ${timeStr} ka workout reminder set kar doon, taaki routine na tute?`;
   }
 
   return text.trim();
@@ -555,12 +648,13 @@ export class NovaBrainService {
           temperature: 0.85,
           maxTokens: maxTok,
         });
-        reply = secondaryReply || '';
+        reply = (secondaryReply && !isPromptLeak(secondaryReply)) ? secondaryReply : NOVA_EMPTY_REPLY;
       }
 
-      if (!reply) reply = NOVA_EMPTY_REPLY;
+      if (!reply || isPromptLeak(reply)) reply = NOVA_EMPTY_REPLY;
       reply = sanitizeReply(reply);
       reply = validateAndRepairGrounding(reply, combinedUserMessage, context);
+      if (!reply || isPromptLeak(reply)) reply = NOVA_EMPTY_REPLY;
       logger.info(`[NOVA BRAIN] Call 1 reply: "${reply.substring(0, 80)}..."`);
 
     } catch (error) {

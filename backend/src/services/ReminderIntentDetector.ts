@@ -491,7 +491,7 @@ export class ReminderIntentDetector {
           formattedTime: parsed.formattedTime,
           isRecurring: parsed.isRecurring,
           recurrenceType: parsed.recurrenceType,
-          note: `REMINDER_ALREADY_PERSISTED: A reminder for "${parsed.title}" is scheduled for ${parsed.formattedTime}. Reassure the user warmly that you have noted it and will remind them at that time. NEVER say they set it in the past.`
+          note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" is scheduled for ${parsed.formattedTime}. This is a FUTURE reminder. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi". NEVER use past tense or say they gave the reminder in the past ("diya tha").`
         };
       }
 
@@ -535,7 +535,7 @@ export class ReminderIntentDetector {
         task: parsed.title,
         triggerAt: parsed.triggerAt,
         formattedTime: parsed.formattedTime,
-        note: `REMINDER_ALREADY_PERSISTED: A reminder for "${parsed.title}" has been successfully scheduled for ${parsed.formattedTime}. Reassure the user warmly that you have noted it and will remind them at that time. NEVER say they set it in the past.`
+        note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" has been successfully scheduled for ${parsed.formattedTime}. This is a FUTURE reminder. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi". NEVER use past tense or say they gave the reminder in the past ("diya tha").`
       };
     } catch (err: any) {
       logger.error('[ReminderIntentDetector] Exception during reminder persistence', { error: err.message });

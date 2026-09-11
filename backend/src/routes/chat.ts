@@ -758,10 +758,23 @@ chatRouter.post(
           }
         }
 
-        const messagesResponse = parseLLMResponse(sanitizeMarkdown(convertNovaTable(rawReply)));
-        const reply = messagesResponse.join('\n\n');
+        // Sanitize and validate degraded reply to prevent prompt leaks and hallucinated grounding
+        let cleanDegradedReply = rawReply;
+        if (isPromptLeak(cleanDegradedReply) || !cleanDegradedReply.trim()) {
+          cleanDegradedReply = NOVA_EMPTY_REPLY;
+        } else {
+          cleanDegradedReply = sanitizeReply(cleanDegradedReply);
+          cleanDegradedReply = validateAndRepairGrounding(cleanDegradedReply, primaryMessage, { recentMessages });
+          if (isPromptLeak(cleanDegradedReply) || !cleanDegradedReply.trim()) {
+            cleanDegradedReply = NOVA_EMPTY_REPLY;
+          }
+        }
 
-        const textChunks = messagesResponse.flatMap(m => chunkResponse(m));
+        const messagesResponse = parseLLMResponse(sanitizeMarkdown(convertNovaTable(cleanDegradedReply)))
+          .filter(msg => !isPromptLeak(msg));
+        const reply = messagesResponse.join('\n\n') || NOVA_EMPTY_REPLY;
+
+        const textChunks = (messagesResponse.length > 0 ? messagesResponse : [reply]).flatMap(m => chunkResponse(m));
         const totalChunks = textChunks.length;
         const chunks = textChunks.map((content, idx) => ({
           index: idx + 1,
@@ -781,7 +794,7 @@ chatRouter.post(
           res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
           res.end();
         } else {
-          res.status(200).json({ reply, messages: messagesResponse, chunks, conversation_id: activeConversationId, meta: { degraded: true } });
+          res.status(200).json({ reply, messages: (messagesResponse.length > 0 ? messagesResponse : [reply]), chunks, conversation_id: activeConversationId, meta: { degraded: true } });
         }
         return;
       }
@@ -1699,9 +1712,12 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
                 });
                 if (fastReply && !isPromptLeak(fastReply)) {
                   rawReply = validateAndRepairGrounding(sanitizeReply(fastReply), primaryMessage, brainContext);
+                } else {
+                  rawReply = FALLBACK_REPLY;
                 }
               } catch (e: any) {
                 logger.error('[Chat] Fast retry on prompt leak failed', { error: e.message });
+                rawReply = FALLBACK_REPLY;
               }
             }
             if (result.subconscious_actions && result.subconscious_actions.length > 0) {
@@ -1857,28 +1873,9 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
       // If no valid bubbles were generated (e.g. LLM returned blank), safely abort.
       // Streaming: the 'done' event was already flushed above — writing again after
       // res.end() would throw. Non-streaming: send an empty 200 so the client never
-      // hangs waiting for a reply that will never arrive.
       if (finalBubbles.length === 0) {
-        logger.info('[Chat] LLM returned a blank reply (likely Subconscious only). No bubbles generated.');
-        if (!isStreaming && !async_mode) {
-          res.status(200).json({
-            reply: '',
-            messages: [],
-            chunks: [],
-            conversation_id: activeConversationId,
-            user_message_id: userMessageId,
-            meta: { blank_reply: true, degraded: false, coverage_repair_invoked: false }
-          });
-          return;
-        }
-        
-        if (async_mode) {
-          // Force a fallback reply so the UI doesn't hang waiting forever
-          logger.warn('[Chat] Forcing FALLBACK_REPLY in async_mode because final bubbles were empty', { userId });
-          finalBubbles = [FALLBACK_REPLY];
-        } else {
-          return;
-        }
+        logger.info('[Chat] LLM returned a blank reply or leaks were stripped. Forcing friendly fallback bubble.', { userId });
+        finalBubbles = [FALLBACK_REPLY];
       }
       const reply = finalBubbles.join('\n\n');
 

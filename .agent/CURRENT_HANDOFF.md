@@ -1,60 +1,47 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Frontend Chat Section Architecture Phase 3: Markdown Blockquote Preservation, Pending Image Hydration, Single-Line Clean Quote Previews, Typing Presence on Quick Chips, Theme-Adaptive LiveThinkingIndicator & Android Gesture Safety
+2026-09-11 — Backend Chat Architecture & Living Companion Intelligence Phase 4: Degraded Mode Leak Sanitization, Hinglish Temporal "Kal" Disambiguation, Circadian Midnight Chore Ban, Entity Wardrobe Invariants, 1-Word Dead Nod Habit Transformation & Memory Label Sanity
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Fix critical frontend chat bugs and enhance lifestyle companion experience: blockquote and inequality preservation, pending image hydration, clean single-line quoted reply previews, typing presence on lifestyle chips, nested scroll conflict prevention, enhanced image thumbnail preview with zoom, and dynamic theme colors for LiveThinkingIndicator.
+Task: Resolve critical backend failure modes from real user screenshots: prompt instruction leaks, "Kal" past vs future reminder hallucinations, midnight cooking directives, infant vs wife entity attribution confusion, dead 1-word habit nods, unprompted baby milestones during confusion callouts, and memory age label formatting.
 
-## Confirmed Findings & Root Cause Analysis
-1. **Frontend `sanitizeContent` Destroys Blockquotes & Inequalities (`ChatScreen.tsx:370`):**
-   - `.replace(/>/g, '')` wiped out all greater-than symbols, breaking markdown quote blocks (`> Note: ...`), nutritional macro constraints (`Protein > 140g`), and step transition arrows (`Draft -> Review -> Publish`).
-2. **Pending Queue Image Preview Loss on Restart (`useChatStore.ts:594`):**
-   - `restoredPending` failed to assign `image_uri: q.imageUri` and `image_base64: q.imageBase64`. Messages queued during weak network lost their image thumbnail preview on app reload.
-3. **Redundant & Cluttered Image Placeholder Text Bubble (`ChatScreen.tsx:1116`):**
-   - The user bubble rendered an awkward text bubble saying `📷 [Photo]` or `📷 [Image]` right below the attached photo.
-4. **Raw Markdown Ingress into Quoted Reply Previews (`ChatScreen.tsx:1007` & `1544`):**
-   - Quoting an assistant reply with markdown headers (`# Summary`), bullet points (`* Item`), or code fences showed raw syntax characters in the single-line reply banner.
-5. **Quick Action Lifestyle Chips Bypassed Typing Presence (`ChatScreen.tsx:1568`):**
-   - Tapping lifestyle chips (`Remind`, `Workout`, `Study`, `Work`, `Pet Care`, `Routine`) set input text without notifying `presenceService.onTypingStart()`.
-6. **Inverted FlatList Gesture Conflict in Lifestyle Onboarding Hub (`ChatScreen.tsx:552`):**
-   - Horizontal category scrollview lacked `nestedScrollEnabled` and `keyboardShouldPersistTaps`, causing touch stutter on Android.
-7. **Attached Image Thumbnail Lacks Preview & Touch Margin (`ChatScreen.tsx:1583`):**
-   - Remove button had a tiny 20x20 hit target and thumbnail could not be tapped to inspect clarity before sending.
-8. **LiveThinkingIndicator Inverted Contrast in Light Mode (`LiveThinkingIndicator.tsx:153`):**
-   - Thinking text hardcoded white font `rgba(255, 255, 255, 0.85)` which washed out against light mode backgrounds.
-9. **Floating Toast Premature Dismissal (`ChatScreen.tsx:682`):**
-   - Rapidly copying code snippets caused overlapping `setTimeout` calls and toast flicker.
-
-## Implemented Fixes
-1. **Blockquote, Inequality & Arrow Preservation (`ChatScreen.tsx`):**
-   - Replaced naive `>` removal with safe HTML tag regex (`/<[a-zA-Z\/][^>]*>/g` and `/<[a-zA-Z\/][^>]*$/g`), preserving `> Tip`, `Protein > 140g`, and `->`.
-2. **Pending Queue Image Hydration Repair (`useChatStore.ts`):**
-   - Preserved `image_uri: q.imageUri`, `image_base64: q.imageBase64`, `reply_to_id: q.replyToId`, and `reply_to_content: q.replyToContent` across all queue restoration points.
-3. **Image Placeholder Cleanup (`ChatScreen.tsx`):**
-   - Suppressed redundant text bubbles when image attachments are present with placeholder strings.
-4. **Sleek Single-Line Quoted Reply Previews (`ChatScreen.tsx`):**
-   - Added `cleanPreviewText` helper to strip markdown headers, bullet stars, and code fences from quoted reply headers and banners.
-5. **Quick Action Chip Typing Presence (`ChatScreen.tsx`):**
-   - Triggered `presenceService.onTypingStart()` on chip selection.
-6. **Inverted FlatList Touch Safety (`ChatScreen.tsx`):**
-   - Added `nestedScrollEnabled={true}` and `keyboardShouldPersistTaps="handled"`.
-7. **Enhanced Thumbnail Preview (`ChatScreen.tsx`):**
-   - Added tap-to-zoom modal preview and enlarged dismiss button with `hitSlop`.
-8. **Theme Adaptability in `LiveThinkingIndicator.tsx`:**
-   - Integrated `useTheme()` for crisp readability in both Light and Dark themes.
-9. **Stable Copy Toast Timer (`ChatScreen.tsx`):**
-   - Added `toastTimerRef` to cancel existing timers on rapid copy actions.
+## Confirmed Findings & Implemented Fixes
+1. **Degraded Mode & Fast Retry Prompt Leak Elimination (`chat.ts` & `NovaBrainService.ts`):**
+   - Degraded mode bypassed `sanitizeReply` and `isPromptLeak`, allowing raw instructions (`No Formalities: Use "tu/tum/"`) into `chat_history`.
+   - Fast retry on prompt leak left `rawReply` untouched if the retry also failed or leaked.
+   - Fixed degraded mode with full sanitization and validation pipeline, and guaranteed fast retry falls back to `FALLBACK_REPLY`.
+2. **Hinglish Temporal "Kal" Past vs Future Disambiguation (`promptBuilder.ts`, `ReminderIntentDetector.ts`, `NovaBrainService.ts`):**
+   - User saying *"Kal muje afternoon me 1 bJe yaad dilao na"* caused Nova to hallucinate that the user set a reminder yesterday (*"Acha, toh tumne kal afternoon mein reminder diya tha!"*), exacerbated by the token `REMINDER_ALREADY_PERSISTED`.
+   - Replaced internal token with `NEW_REMINDER_SCHEDULED_FOR_FUTURE`, added explicit prompt invariant, and added Grounding Rule 7 intercepting and repairing past reminder hallucinations on future requests.
+3. **Circadian Sanity & Midnight Chores Ban (`promptBuilder.ts` & `NovaBrainService.ts`):**
+   - At 12:23 AM midnight, Nova told user to start cooking meals right now (*"Abhi free hai toh start kar de!"*).
+   - Added Rule 8 in `validateAndRepairGrounding` and circadian invariant in `promptBuilder.ts` prohibiting midnight chore suggestions and redirecting to restful sleep.
+4. **Entity Wardrobe & Common-Sense Plausibility (`promptBuilder.ts` & `NovaBrainService.ts`):**
+   - Nova attributed wife Sakshi's self-taught nail art to 6-month infant son Shreshth with male pronouns (*"woh khud se seekhne ke liye bahut jaldi uth raha hai"*).
+   - Added Rule 9 grounding adult skills to Sakshi and preventing infant attribution confusion.
+5. **1-Word Habit Dead Nod Transformation (`NovaBrainService.ts`):**
+   - User saying *"Sube muje roz workout start karna hai 8 baje uth ke"* received a lifeless 1-word nod: *"Sahi"*.
+   - Added Rule 10 transforming dead nods into proactive companion habit engagement offering recurring reminders.
+6. **Mistake Callout & Clarification Guard (`NovaBrainService.ts`):**
+   - User expressing confusion (*"I didn't understood"*) caused Nova to make an unprompted topic jump to Shreshth's development and false hope.
+   - Enforced grounded apology and clarification without unprompted family jumps.
+7. **Memory Browser Age Label Sanity (`memoryManagement.ts`):**
+   - Storing "6 months" under `key: 'birth_date'` rendered as *"Birth date: 6 months"*.
+   - Dynamically adjusted label to `"Age"` when value represents an age duration.
+8. **Female Hinglish Grammatical Gender Agreement (`NovaBrainService.ts`):**
+   - Hardened `sanitizeReply` with feminine regex conjugations (`yaad kar rahi hoon`, `remind karungi`, `bataungi`, `dilaungi`).
 
 ## Verification Status
-- `npx tsc --noEmit` in `mobile`: EXIT 0 (0 errors).
-- `npm run build` in `backend`: EXIT 0 (0 errors).
-- `ChatIngressAndFormatting.test.ts`: 11/11 PASSED.
-- `LifestyleSituationalAwareness.test.ts`: 10/10 PASSED.
-- `BurstMessageComprehension.test.ts`: 9/9 PASSED.
-- Total Automated Assertions: 30/30 PASSED (100%).
+- `npm run build` in `backend`: **EXIT 0** (0 errors).
+- `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).
+- `BackendChatCompanionHardening.test.ts`: **10/10 PASSED** (100%).
+- `NovaBrainService.test.ts`: **39/39 PASSED** (100%).
+- `ReminderIntentDetector.test.ts`: **7/7 PASSED** (100%).
+- `memoryManagement.test.ts`: **35/35 PASSED** (100%).
+- Total Automated Assertions: **91/91 PASSED** (100%).
 
 ## Standing Autonomous Directives
 - **Auto Implementation Plan Proceed**: ENABLED.

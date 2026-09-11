@@ -1,25 +1,29 @@
 # CURRENT TASK
 
 ## Task ID
-FRONTEND-CHAT-IMPACT-PHASE3-COMPANION-INTELLIGENCE
+BACKEND-CHAT-COMPANION-INVARIANTS-PHASE4
 
 ## Objective
-Fix critical high-impact frontend chat bugs and enhance lifestyle companion user experience: markdown blockquote preservation (`>`), pending image queue hydration, image-only placeholder cleanup, clean single-line quoted reply previews, quick chip typing presence, inverted lifestyle onboarding touch conflicts, image attachment zoom preview with larger touch targets, dynamic theme styling for LiveThinkingIndicator, and toast timer deduplication.
+Forensically audit real Nova interaction screenshots, identify all root causes of wrong/unprompted responses, and harden backend chat architecture into an autonomous, smartest living companion across diverse lifestyles:
+1. Degraded mode & fast retry prompt leak prevention (`No Formalities: Use "tu/tum/"`).
+2. Hinglish temporal "Kal" past vs future disambiguation (eliminating past reminder hallucination and updating directive phrasing).
+3. Circadian sanity & midnight chores ban (preventing 12:20 AM cooking / workout suggestions).
+4. Entity wardrobe & plausibility grounding (preventing wife Sakshi's nail art from being attributed to 6-month infant son Shreshth).
+5. 1-word habit dead-nod transformation (converting "Sahi" into proactive companion reminder offers).
+6. Mistake callout unprompted topic jump guard (preventing random baby milestones when user says "I didn't understood").
+7. Memory Browser age label sanity (`key: 'birth_date'` with `"6 months"` value displays as `"Age"`).
+8. Female Hinglish grammatical gender agreement hardening.
 
 ## Scope
-- Keep `main` as the production source of truth.
-- Update `ChatScreen.tsx` to preserve `>` in markdown blockquotes, math inequalities, and transition arrows.
-- Add `cleanPreviewText` helper to strip raw markdown syntax from swipe-to-reply headers and reply preview banners.
-- Suppress redundant `📷 [Photo]` text bubbles when image attachments are present.
-- Enrich image attachment thumbnail preview with tap-to-zoom modal and enlarged dismiss touch target.
-- Trigger `presenceService.onTypingStart()` on quick action lifestyle chip taps.
-- Enable `nestedScrollEnabled={true}` and `keyboardShouldPersistTaps="handled"` on `LifestyleOnboardingHub`.
-- Integrate `useTheme()` in `LiveThinkingIndicator.tsx` for Light and Dark theme readability.
-- Fix pending queue hydration in `useChatStore.ts` so `image_uri` and `image_base64` are preserved across app restarts.
-- Pass all verification gates: `cd mobile && npx tsc --noEmit` (exit 0), `cd backend && npm run build` (exit 0), and 30/30 unit tests passing.
+- Modify `backend/src/routes/chat.ts` (degraded mode sanitization, leak retry fallback, bubble fallback).
+- Modify `backend/src/services/NovaBrainService.ts` (isPromptLeak expansion, sanitizeReply quote & gender hardening, validateAndRepairGrounding rules 7-10).
+- Modify `backend/src/services/promptBuilder.ts` (temporal reasoning, circadian sanity, entity plausibility invariants).
+- Modify `backend/src/services/ReminderIntentDetector.ts` (directive phrasing update).
+- Modify `backend/src/routes/memoryManagement.ts` (label formatting for duration values).
+- Pass all verification gates: `cd backend && npm run build` (exit 0), `cd mobile && npx tsc --noEmit` (exit 0), and 91/91 unit tests passing.
 
 ## Approved Code
-All changes pass `cd mobile && npx tsc --noEmit` (code 0), `cd backend && npm run build` (code 0), and all unit tests (code 0).
+All changes pass `cd backend && npm run build` (code 0), `cd mobile && npx tsc --noEmit` (code 0), and all 91 automated unit tests (code 0).
 
 ## Autonomous Deployment
 Standing user directive: automatically commit, merge, and push to `origin main`.

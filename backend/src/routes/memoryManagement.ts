@@ -76,7 +76,10 @@ const KEY_CATEGORIES: Record<string, 'Personal' | 'Family' | 'Work' | 'Preferenc
   education_degree: 'Work',
 };
 
-function getLabel(canonicalKey: string): string {
+function getLabel(canonicalKey: string, value?: string): string {
+  if (canonicalKey === 'birth_date' && value && /^\s*\d+\s*(?:months?|mahine|years?|saal|yo|days?|old)\b/i.test(value)) {
+    return 'Age';
+  }
   return KEY_LABELS[canonicalKey] || canonicalKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
@@ -171,7 +174,7 @@ memoryManagementRouter.get('/', async (req: Request, res: Response, next: NextFu
     const displayMemories = paginated.map(m => ({
       id: m.id,
       canonicalKey: m.key,
-      label: getLabel(m.key),
+      label: getLabel(m.key, m.value),
       category: getCategory(m.key),
       value: m.value,
       memoryType: m.memory_type,

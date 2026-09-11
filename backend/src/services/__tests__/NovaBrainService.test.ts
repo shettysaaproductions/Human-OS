@@ -375,6 +375,14 @@ describe('NovaBrainService', () => {
       expect(sanitizeReply('aaj rata mein kya chal raha hai')).toBe('aaj raat mein kya chal raha hai');
       expect(sanitizeReply('main samajh mein aata hoon')).toBe('main samajh gayi');
       expect(sanitizeReply('tu bday mana sakte hai')).toBe('tu bday mana sakta hai');
+      expect(sanitizeReply('abhi main tumhare reminder ko yaad kar raha hoon')).toBe('abhi main tumhare reminder ko yaad kar rahi hoon');
+      expect(sanitizeReply('aur main tumhe reminder karunga!')).toBe('aur main tumhe remind karungi!');
+      expect(sanitizeReply('main kal subah bataunga')).toBe('main kal subah bataungi');
+    });
+
+    it('strips multiline [Replying to: ...] echoes cleanly', () => {
+      const textWithQuote = '[Replying to: "Usne ye sab khud se sekha\nno course but beautiful art"]\nSakshi bohot talented hai!';
+      expect(sanitizeReply(textWithQuote)).toBe('Sakshi bohot talented hai!');
     });
   });
 
@@ -407,6 +415,56 @@ describe('NovaBrainService', () => {
       );
       expect(repaired).toContain('Arre sorry yaar!');
       expect(repaired).toContain('Tiku (Shreshth) ka bday 17th February');
+    });
+
+    it('intercepts past reminder hallucination when user requests future reminder with "Kal"', () => {
+      const repaired = validateAndRepairGrounding(
+        'Acha, toh tumne kal afternoon mein bank details update karne ka reminder diya tha!',
+        'Kal muje afternoon me 1 bJe yaad dilao na PF ke lie bank details update karna hai',
+        {}
+      );
+      expect(repaired).toContain('Samajh gayi! Main kal 1 bJe pe tumhe yaad dila dungi');
+      expect(repaired).not.toContain('reminder diya tha');
+    });
+
+    it('intercepts midnight chore suggestion and redirects to restful wind-down', () => {
+      const repaired = validateAndRepairGrounding(
+        'Arey sun, kal sube khana banane ka plan tha na? Abhi free hai toh start kar de!',
+        'Abhi raat ke 12:19 hue hai, ye koi exercise karne ka time thodi na hai',
+        {}
+      );
+      expect(repaired).toContain('Abhi raat ko aaram kar aur so ja!');
+      expect(repaired).not.toContain('start kar de');
+    });
+
+    it('intercepts infant vs adult entity confusion for wife nail art', () => {
+      const repaired = validateAndRepairGrounding(
+        'Shreshth khud se seekhne ke liye bahut jaldi uth raha hai, aur apni kalaa ko badhane ke liye kitne mehnat karta hai',
+        'Usne ye sab khud se sekha no course but beautiful art',
+        {}
+      );
+      expect(repaired).toContain('Sakshi ne bina kisi course ke khud se itna sundar nail art seekh liya?');
+      expect(repaired).not.toContain('Shreshth');
+    });
+
+    it('transforms 1-word dead nod on workout habit into proactive companion offer', () => {
+      const repaired = validateAndRepairGrounding(
+        'Sahi',
+        'Sube muje roz workout start karna hai 8 baje uth ke',
+        {}
+      );
+      expect(repaired).toContain('Mast plan hai yaar! 💪');
+      expect(repaired).toContain('workout reminder set kar doon');
+    });
+
+    it('intercepts unprompted baby jump on general mistake callout', () => {
+      const repaired = validateAndRepairGrounding(
+        'Shreshth ka kya plan hai kal subah?',
+        "I didn't understood",
+        {}
+      );
+      expect(repaired).toContain('Arre sorry yaar! Mera thoda dhyan bhatak gaya tha');
+      expect(repaired).not.toContain('Shreshth');
     });
   });
 });
