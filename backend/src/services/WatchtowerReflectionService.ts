@@ -20,6 +20,7 @@ import { complete } from '../lib/nvidia';
 import { reminderIntentDetector } from './ReminderIntentDetector';
 import { clusterMemoriesIntoWardrobes } from '../lib/memoryDomains';
 import { watchtowerInspector } from './WatchtowerInspector';
+import { watchtowerMemoryAuditor } from './WatchtowerMemoryAuditor';
 
 export interface MessageVersionEntry {
   version: number;
@@ -857,6 +858,10 @@ Inspect and provide green seal clearance or repaired text. Return JSON.`;
           }).eq('id', foundFragments[i].id);
         }
       }
+
+      // 3. Autonomous Comprehensive Memory & Wardrobe Truth Auditor
+      // Runs deterministic invariant checks and semantic verification against chat history truths
+      await watchtowerMemoryAuditor.auditAndReconcileUser(userId);
     } catch (err: any) {
       logger.warn('[WATCHTOWER HARMONIZER] Harmonization scan skipped or error', { error: err.message });
     }

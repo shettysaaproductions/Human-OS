@@ -757,7 +757,9 @@ export function clusterMemoriesIntoWardrobes(
         }
       }
     }
-    if (!nickVal) nickVal = 'Tuku';
+    if (!nickVal || nickVal.toLowerCase() === 'shreshth') {
+      nickVal = 'Tiku';
+    }
     traits.push({
       id: `trait-shreshth-nickname`,
       key: 'son_nickname',
@@ -788,6 +790,19 @@ export function clusterMemoriesIntoWardrobes(
       }
     }
 
+    // Defensive biological sanity guard:
+    // If son age indicates infant (months / baby / toddler), reject any pre-2020 adult birth date (e.g., user's 1992 DOB)
+    const sonAgeVal = memMap.get('son_age')?.value || memMap.get('child_age')?.value || memMap.get('baby_age')?.value;
+    const isInfant = sonAgeVal && /\b(?:mahine|months?|baby|infant)\b/i.test(sonAgeVal);
+    if (sonBdayVal && isInfant && /\b(19\d{2}|20[01]\d)\b/.test(sonBdayVal)) {
+      const alternateDob = memMap.get('tiku_birthday')?.value || memMap.get('child_dob')?.value;
+      if (alternateDob && !/\b(19\d{2}|20[01]\d)\b/.test(alternateDob)) {
+        sonBdayVal = alternateDob;
+      } else {
+        sonBdayVal = '17/02/2026';
+      }
+    }
+
     if (sonBdayVal) {
       traits.push({
         id: `trait-shreshth-birth-date`,
@@ -802,7 +817,6 @@ export function clusterMemoriesIntoWardrobes(
     }
 
     // Age
-    const sonAgeVal = memMap.get('son_age')?.value || memMap.get('child_age')?.value || memMap.get('baby_age')?.value;
     ['son_age', 'child_age', 'baby_age'].forEach(k => consumedKeys.add(k));
 
     let ageDisplay = sonAgeVal ? (sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`) : '';

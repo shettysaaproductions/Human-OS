@@ -10,6 +10,7 @@ import { logger } from '../lib/logger';
 import { chatHistoryPruningService } from '../services/ChatHistoryPruningService';
 import { cognitiveHealthService } from '../services/CognitiveHealthService';
 import { novaConsciousnessEngine } from '../services/NovaConsciousnessEngine';
+import { watchtowerMemoryAuditor } from '../services/WatchtowerMemoryAuditor';
 import { semanticTurnWorker } from './semanticTurnWorker';
 
 const MAX_RETRIES = 3;
@@ -163,6 +164,14 @@ export function startWorkers() {
         break;
       case 'cleanup_failed_jobs':
         await processWithBackoff(job, cognitiveHealthService.cleanupFailedJobs.bind(cognitiveHealthService), 'cleanup_failed_jobs');
+        break;
+      case 'reconcile_facts':
+        await processWithBackoff(job, async (j) => {
+          const userId = j.payload?.user_id;
+          if (userId) {
+            await watchtowerMemoryAuditor.auditAndReconcileUser(userId);
+          }
+        }, 'reconcile_facts');
         break;
       default:
         logger.warn(`[QueueWorker] Unknown maintenance job type: ${job.job_type}`);
