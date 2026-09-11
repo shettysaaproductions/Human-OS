@@ -836,6 +836,30 @@ export class CognitiveContextService {
       }
     }
 
+    // 1b. Multi-hop possessive entity introduction (e.g. "Ijaz's father", "Sushant ki biwi")
+    const possessivePatterns = [
+      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(father|papa|pitaji|dad|brother|bhai|husband|pati|son|beta)\b/i, gender: 'masculine' as const, pronouns: ['he', 'him', 'his', 'wo', 'usne', 'uska', 'unka'] },
+      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(mother|mom|mummy|sister|didi|behen|wife|biwi|patni|daughter|beti)\b/i, gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski', 'unki'] },
+    ];
+
+    for (const pp of possessivePatterns) {
+      const pMatch = allRecentText.match(pp.regex);
+      if (pMatch && pMatch[1] && pMatch[2]) {
+        const owner = pMatch[1].trim();
+        const rel = pMatch[2].trim().toLowerCase();
+        const combined = `${owner}'s ${rel}`;
+        if (!antecedents.some(a => a.entity.toLowerCase() === combined.toLowerCase())) {
+          antecedents.push({
+            entity: combined,
+            relation: `${owner.toLowerCase()}_${rel}`,
+            gender: pp.gender,
+            pronounCandidates: pp.pronouns,
+            sourceMessage: pMatch[0]
+          });
+        }
+      }
+    }
+
     // 2. Match known family member formal names and nicknames from memories
     if (rawMemories && rawMemories.length > 0 && effectiveMessage) {
       const lowerEffective = effectiveMessage.toLowerCase();

@@ -20,7 +20,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: mother ──────────────────────────────────────────────────────────
   mother_name: [
     'mothers_name', 'moms_name', 'mom_name', 'maa_name', 'maa', 'mom',
-    'mother', 'mummy_name', 'mata_name', 'maa_ka_naam', 'mother_real_name',
+    'mother', 'mummy_name', 'mata_name', 'maa_ka_naam', 'mummy_ka_naam', 'mom_ka_naam', 'mother_ka_naam', 'mother_real_name',
   ],
   mother_nickname: [
     'mothers_nickname', 'mom_nickname', 'moms_nickname', 'maa_ka_nickname', 'mummy_ka_nickname',
@@ -29,7 +29,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: father ──────────────────────────────────────────────────────────
   father_name: [
     'fathers_name', 'dads_name', 'dad_name', 'papa_name', 'pita_name',
-    'dad', 'father', 'papa', 'baap_name', 'father_real_name',
+    'dad', 'father', 'papa', 'baap_name', 'papa_ka_naam', 'father_ka_naam', 'pita_ka_naam', 'father_real_name',
   ],
   father_nickname: [
     'fathers_nickname', 'dad_nickname', 'dads_nickname', 'papa_ka_nickname',
@@ -39,6 +39,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   wife_name: [
     'wives_name', 'wife', 'biwi', 'patni', 'biwi_name', 'patni_name',
     'spouse_name', 'wife_real_name', 'sakshi', 'wife_sakshi', 'biwi_sakshi',
+    'wife_ka_naam', 'biwi_ka_naam', 'patni_ka_naam',
   ],
   wife_nickname: [
     'wives_nickname', 'wife_nick_name', 'biwi_ka_nickname', 'patni_ka_nickname',
@@ -55,6 +56,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: husband ─────────────────────────────────────────────────────────
   husband_name: [
     'husbands_name', 'husband', 'pati', 'shauhar', 'pati_name', 'shauhar_name',
+    'husband_ka_naam', 'pati_ka_naam', 'shauhar_ka_naam',
     'husband_real_name',
   ],
   husband_nickname: [
@@ -62,7 +64,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── Family: son ─────────────────────────────────────────────────────────────
   son_name: [
-    'sons_name', 'son', 'beta', 'beta_name', 'bete_ka_naam', 'son_real_name',
+    'sons_name', 'son', 'beta', 'beta_name', 'bete_ka_naam', 'son_ka_naam', 'beta_ka_naam', 'son_real_name',
     'shreshth', 'shresth',
   ],
   son_nickname: [
@@ -76,7 +78,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── Family: daughter ────────────────────────────────────────────────────────
   daughter_name: [
-    'daughters_name', 'daughter', 'beti', 'beti_name', 'daughter_real_name',
+    'daughters_name', 'daughter', 'beti', 'beti_name', 'daughter_ka_naam', 'beti_ka_naam', 'daughter_real_name',
   ],
   daughter_nickname: [
     'daughters_nickname', 'daughter_nick_name', 'beti_ka_nickname', 'beti_ka_pyar_ka_naam',
@@ -86,7 +88,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── Family: sister ──────────────────────────────────────────────────────────
   sister_name: [
-    'sisters_name', 'sister', 'behen', 'behen_name', 'didi_name', 'sister_real_name',
+    'sisters_name', 'sister', 'behen', 'behen_name', 'didi_name', 'sister_ka_naam', 'behen_ka_naam', 'didi_ka_naam', 'sister_real_name',
   ],
   sister_nickname: [
     'sisters_nickname', 'sister_nick_name', 'behen_ka_nickname', 'didi_ka_nickname',
@@ -96,7 +98,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'brothers_name', 'bhai_name',
     // Bare 'brother' / 'bhai' ARE canonicalized to brother_name for key
     // normalization, but the value layer still blocks generic vocatives.
-    'brother', 'bhai', 'brother_real_name',
+    'brother', 'bhai', 'brother_ka_naam', 'bhai_ka_naam', 'bhaiya_ka_naam', 'brother_real_name',
   ],
   brother_nickname: [
     'brothers_nickname', 'brother_nick_name', 'bhai_ka_nickname', 'bhaiya_ka_nickname',

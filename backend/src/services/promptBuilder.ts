@@ -499,6 +499,19 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
         }
         const body = text ? `: ${text}` : '';
         const importance = (mem.importance || 0) >= 7 ? ' (IMPORTANT)' : '';
+
+        if (mem.key && mem.key.startsWith('entity:')) {
+          const parts = mem.key.slice(7).split(':');
+          const subjectRaw = parts[0] || '';
+          const attr = (parts[1] || 'detail').replace(/_/g, ' ');
+          const subjectTitle = subjectRaw
+            .replace(/^person_/, '')
+            .split('_')
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+          return `- [THIRD-PARTY ENTITY: ${subjectTitle}] ${attr}${body}${importance} (NOTE: Belongs to ${subjectTitle}, NOT the user)`;
+        }
+
         return `- ${(mem.key || 'fact').replace(/_/g, ' ')}${body}${importance}`;
       };
 
