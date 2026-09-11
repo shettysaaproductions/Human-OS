@@ -3,6 +3,7 @@ import { cognitiveRouter } from '../lib/cognitiveRouter';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 import { backgroundActions } from './BackgroundActionService';
+import { watchtowerInspector } from './WatchtowerInspector';
 
 
 
@@ -431,6 +432,10 @@ export function validateAndRepairGrounding(
     const timeStr = timeMatch ? timeMatch[0] : '8 baje';
     text = `Mast plan hai yaar! 💪 Kya main tere liye roz subah ${timeStr} ka workout reminder set kar doon, taaki routine na tute?`;
   }
+
+  // 11. Watchtower Deterministic Quality & Voice Inspector (Feminine Grammar, Tone, Coherence)
+  const inspected = watchtowerInspector.inspectAndRepair(text, userMessage, context);
+  text = inspected.cleanText;
 
   return text.trim();
 }

@@ -1,27 +1,32 @@
 # CURRENT TASK
 
 ## Task ID
-BRAIN-SECTION-FRONTEND-BUG-FIXES-AND-LIFESTYLE-UX-HARDENING-PHASE7
+WATCHTOWER-INSPECTOR-QUALITY-AND-REPLY-COHERENCE-ENGINE-PHASE8
 
 ## Objective
-Find and fix high-impact bugs and loopholes across the frontend Brain section screens:
-1. `MemoryBrainScreen.tsx`: Add trait delete/archive in tree view, fix synthetic ID update resolution, upgrade `inferDomain`, auto-expand search matches.
-2. `KgExplorerScreen.tsx`: Eliminate hardcoded "Saa" fallback name for fresh users, support dynamic multi-segment keys and family members in 3D Galaxy tree partitioner and fallback synthesizer, upgrade `inferDomain`.
-3. `GoalBrainScreen.tsx`: Eliminate `📅 Invalid Date` rendering bug for conversational deadlines.
-4. `EmotionalBrainScreen.tsx`: Eliminate cluttered zero-data charts and orphaned headers on empty state; show clean lifestyle guidance.
-5. `LifeTimelineScreen.tsx`: Add missing `reflection` filter tab and stats card.
+Act as a strict Quality Inspector in Watchtower:
+1. Inspect Nova's replies (both Version 1 pre-delivery and Version 2 reflection) for coherence, grammar, and sense.
+2. Eliminate ungrammatical Hindi ("Maine samajh gaya", "purn karna", "main samajh mein aata hoon") and enforce 100% feminine first-person Hindi ("main samajh gayi", "karti hoon", "sochti hoon").
+3. Eliminate contradictory conversational logic (e.g. telling a user working at the office on a target "kuch mat karo").
+4. Eliminate physical meeting hallucinations ("milne ke liye wait karta hoon").
+5. Eliminate multi-bubble duplication in `chat_history` by passing only individual bubble text to `scheduleReflection`.
+6. Decouple hardcoded scenario prompts in Pass 2 and Pass 3 of `WatchtowerReflectionService`.
+7. Remediate corrupted historical messages in the database.
 
 ## Scope
-- `mobile/src/screens/analytics/MemoryBrainScreen.tsx`
-- `mobile/src/screens/analytics/KgExplorerScreen.tsx`
-- `mobile/src/screens/analytics/GoalBrainScreen.tsx`
-- `mobile/src/screens/analytics/EmotionalBrainScreen.tsx`
-- `mobile/src/screens/analytics/LifeTimelineScreen.tsx`
+- `backend/src/services/WatchtowerInspector.ts` (NEW)
+- `backend/src/services/__tests__/WatchtowerInspector.test.ts` (NEW)
+- `backend/src/services/NovaBrainService.ts`
+- `backend/src/services/WatchtowerReflectionService.ts`
+- `backend/src/routes/chat.ts`
+- `backend/scripts/remediate_corrupted_versions.ts`
 
 ## Verification Gates Passed
 - `npm run build` in `backend`: EXIT 0 (0 errors).
 - `npx tsc --noEmit` in `mobile`: EXIT 0 (0 errors).
-- Memory Unit Test Suites: 30/30 PASSED (100%).
+- `WatchtowerInspector` Unit Test Suite: 10/10 PASSED (100%).
+- Existing backend test suites (`BackendChatCompanionHardening.test.ts`, `watchtowerReflection.test.ts`, `NovaBrainService.test.ts`): 53/53 PASSED (100%).
+- Live historical database remediation executed cleanly.
 
 ## Autonomous Deployment
 Standing user directive: automatically commit, merge, and push to `origin main`.

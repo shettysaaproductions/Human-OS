@@ -19,6 +19,7 @@ import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import { reminderIntentDetector } from './ReminderIntentDetector';
 import { clusterMemoriesIntoWardrobes } from '../lib/memoryDomains';
+import { watchtowerInspector } from './WatchtowerInspector';
 
 export interface MessageVersionEntry {
   version: number;
@@ -346,6 +347,22 @@ export class WatchtowerReflectionService {
         return;
       }
 
+      const inspection = watchtowerInspector.inspectAndRepair(finalCandidate, userMessage, {
+        memories: canonicalData,
+        workingMemories: workingData,
+        calendarContext
+      });
+
+      if (!inspection.passed || inspection.isNonsensical || inspection.hasHallucination) {
+        logger.warn('[WATCHTOWER REFLECTION] Final candidate rejected by Watchtower Inspector, aborting correction', {
+          flaws: inspection.flaws,
+          score: inspection.score,
+          candidateSnippet: finalCandidate.substring(0, 60),
+        });
+        return;
+      }
+      finalCandidate = inspection.cleanText;
+
       // If reply is unchanged from original, it has passed all 3 passes with green seal!
       if (finalCandidate.trim() === (content || '').trim()) {
         logger.info('[WATCHTOWER REFLECTION] Initial reply verified clean across all 3 passes with Green Seal', {
@@ -548,14 +565,15 @@ Check domain memories, typos, spelling ("kee", "kaa", "rata"), feminine grammar 
     if (signal.aborted) return { candidate, hasChanges: false };
 
     const systemPrompt = `You are Pass 2 (Deep Cross-Memory Neural Mesh Worker) of the Watchtower Autonomous Pipeline for Nova.
-Your job is to inspect the refined candidate against multi-hop connections across the user's life compartments:
-1. Ground truth dates & baby age:
-   - Baby Tiku / Shreshth was born on 17 February 2026 (an infant, 6-7 months old). NEVER invert to 2006!
-   - Today is ${calendarContext.localDateStr}. February 17 is months away. Stating a birth date is NOT asking to celebrate tomorrow morning!
-2. Entity attribution & connecting dots:
-   - If connecting dots between two memories (e.g. wife cooking ⇄ cloud kitchen venture, or 8 AM wake-up ⇄ evening routine), phrase it as an autonomous thought, question, or curious idea ("Maine socha kya...", "Waise ek thought aaya tha...").
-   - NEVER assume or state unconfirmed connections as settled facts.
-3. Keep it warm, concise (1-2 sentences), natural WhatsApp Hinglish.
+Your job is to inspect the candidate reply against the user's actual life context and memories:
+1. Calendar Ground Truth & Temporal Distance:
+   - Today is ${calendarContext.localDateStr}, Time: ${calendarContext.localTimeStr}.
+   - Stating a past date of birth or future date is factual knowledge, NEVER an instruction to celebrate tomorrow morning.
+   - Do NOT inject unprompted family/birthday comments if the user's message is about work, office targets, or everyday tasks.
+2. Entity Attribution & Common Sense:
+   - Never confuse people, ages, or roles from the memories.
+   - If connecting dots between memories, phrase it as a curious thought ("Maine socha kya...", "Waise ek thought aaya tha..."), NEVER as an assumption.
+3. Keep it warm, concise (1-2 sentences), and natural WhatsApp Hinglish. Only make corrections if there is a genuine factual or coherence defect.
 
 Return ONLY a JSON object:
 {
@@ -569,7 +587,7 @@ Recent Conversation Context:\n${recentChat}
 User Memories:\n${memorySummary}
 Candidate Reply from Pass 1:\n"${candidate}"
 
-Verify deep cross-memory links, baby birth year 2026, calendar distance for birthdays, and hypothesis framing. Return JSON.`;
+Verify deep cross-memory links, temporal calendar consistency, and natural conversational flow. Return JSON.`;
 
     try {
       const res = await complete('LEARNING', [
@@ -615,10 +633,10 @@ Verify deep cross-memory links, baby birth year 2026, calendar distance for birt
 
       const systemPrompt = `You are Pass 3 (Final Green-Check Seal & Repair Provider) of the Watchtower Autonomous Pipeline for Nova.
 Your job is the final green-check clearance. Inspect the candidate against this strict 5-point checklist:
-1. Zero typos or phonetic slips (no "kee", "kaa", "rata", "khaali pan" for "khali pet").
-2. Strictly female first-person Hindi ("main karti hoon", "main bolti hoon", "main samajh gayi").
-3. 100% mathematically grounded dates, times, and baby birth year (2026, never 2006).
-4. No premature birthday celebration hallucinations (stating a DOB is not a plan for tomorrow morning).
+1. Zero typos, phonetic slips, or unnatural Hindi (e.g. no "purn karna", use "poora karna").
+2. Strictly female first-person Hindi ("main karti hoon", "main bolti hoon", "main samajh gayi", NEVER "Maine samajh gaya" or male verbs).
+3. 100% mathematically grounded dates, times, and calendar awareness.
+4. No unprompted birthday celebration hallucinations or contradictions with active user focus (e.g. telling a working user "kuch mat karo").
 5. Warm, natural, concise WhatsApp friend voice (1-2 sentences).
 
 If ALL 5 points pass with flying colors, set green_seal: true.
@@ -648,7 +666,13 @@ Inspect and provide green seal clearance or repaired text. Return JSON.`;
         if (match) {
           const parsed = JSON.parse(match[0]);
           if (parsed.green_seal) {
-            return { candidate: (parsed.final_text || currentCandidate).trim(), greenSeal: true, iterations };
+            const inspectedCandidate = (parsed.final_text || currentCandidate).trim();
+            const passCheck = watchtowerInspector.inspectAndRepair(inspectedCandidate, userMessage, { calendarContext });
+            return {
+              candidate: passCheck.cleanText,
+              greenSeal: passCheck.passed,
+              iterations
+            };
           } else if (parsed.final_text && parsed.final_text.trim()) {
             currentCandidate = parsed.final_text.trim();
             // Loop will verify this repaired candidate on next iteration
@@ -662,7 +686,12 @@ Inspect and provide green seal clearance or repaired text. Return JSON.`;
       }
     }
 
-    return { candidate: currentCandidate, greenSeal: true, iterations };
+    const finalInspection = watchtowerInspector.inspectAndRepair(currentCandidate, userMessage, { calendarContext });
+    return {
+      candidate: finalInspection.cleanText,
+      greenSeal: finalInspection.passed,
+      iterations
+    };
   }
 
   /**

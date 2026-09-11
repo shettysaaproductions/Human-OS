@@ -117,3 +117,14 @@ Format:
   4. Automatically group multi-segment dynamic keys (`<prefix>_<entity>_<trait>`) into subordinate Level 3 attribute stems across 3D and 2D visualizations.
 - **Reason:** Fresh users from diverse walks of life (students, fitness enthusiasts, pet parents, creatives) require immediate, accurate reflection of their unique world without glitches or hardcoded assumptions.
 - **Consequence:** Clean, premium first impression and frictionless management of life facts across all Brain tabs.
+
+### D-011: Watchtower Inspector Quality, Coherence & Feminine Voice Gate
+- **Decision:** Every Nova reply—both Version 1 (pre-delivery in `validateAndRepairGrounding`) and Version 2 (post-reflection in `WatchtowerReflectionService`)—must pass through the deterministic `WatchtowerInspector`:
+  1. Enforces 100% feminine first-person Hindi conjugation (e.g. `main samajh gayi`, `karti hoon`, `sochti hoon`, `bolti hoon`, eliminating ungrammatical `Maine samajh gaya` and male verbs).
+  2. Eliminates contradictory advice when user is focused on work/targets (replaces `kuch mat karo` with cheerleading).
+  3. Eliminates offline physical presence hallucinations (`milne ke liye wait karta hoon`).
+  4. Decouples hardcoded scenarios from generic reflection prompts (allowing multi-tenancy for all user personas).
+  5. Isolates multi-bubble reflections by passing only the specific bubble text to `scheduleReflection`.
+  6. Rejects corrupted candidates from being saved as Version 2 unless cleared with a programmatic Green Seal.
+- **Reason:** Generative LLMs and reflection passes can introduce grammatical slips, unprompted scenario leaks, and contradictory advice if left unchecked by deterministic invariants.
+- **Consequence:** Zero grammar slips, zero duplicate bubbles, and guaranteed coherence across all conversational exchanges.

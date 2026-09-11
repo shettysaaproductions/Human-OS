@@ -1,34 +1,39 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Brain Section Frontend Bug Fixes, Lifestyle UX Hardening, and Universal Persona Alignment (Phase 7)
+2026-09-11 — Watchtower Inspector Engine, Reply Coherence, Feminine Grammar Invariant, and Version 2 Repair (Phase 8)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: High-impact bug fixes and UX improvements across all 5 screens in the mobile Brain section (`MemoryBrainScreen`, `KgExplorerScreen`, `GoalBrainScreen`, `EmotionalBrainScreen`, and `LifeTimelineScreen`).
+Task: Implement Watchtower Inspector to audit and repair Nova's replies, eliminate Hinglish grammar and gender slips, remove contradictory advice, fix multi-bubble reflection duplication, decouple hardcoded prompt leaks, and remediate corrupted historical messages.
 
 ## Confirmed Findings & Implemented Fixes
-1. **Memory Tree Trait Management & Domain Categorization (`MemoryBrainScreen.tsx`):**
-   - Added long-press "Delete" action on trait leaf chips in tree view with UUID resolution via `trait.sourceMemoryId` or key lookup.
-   - Fixed `saveEdit` ID resolution to safely resolve the underlying memory UUID.
-   - Upgraded `inferDomain` with full dynamic prefixes (`pet_*`, `friend_*`, `project_*`, `car_*`, `guitar_*`, `marathon_*`, `gym_*`, `doctor_*`).
-   - Auto-expand wardrobes whose traits match active search queries.
-2. **Knowledge Galaxy Core User Dynamic Name & Dynamic Stems (`KgExplorerScreen.tsx`):**
-   - Eliminated hardcoded `'Saa'` Sun node fallback, dynamically pulling user profile from `useAuthStore`.
-   - Upgraded 3D Galaxy tree partitioner and `synthesizeGalaxy` to detect multi-segment keys (`parts.length >= 3`) and family members (`daughter_`, `father_`, `mother_`, `husband_`, `partner_`), clustering them as Level 3 attribute stems under their parent entity branch.
-   - Upgraded `inferDomain` with dynamic prefixes.
-3. **Goal Deadline Formatting Bug Fix (`GoalBrainScreen.tsx`):**
-   - Fixed `📅 Invalid Date` rendering bug for descriptive deadlines (e.g., `"Q4 2026 launch"`, `"Dec 2026"`). Added `formatGoalDeadline` and `formatGoalCreated`.
-4. **Clean Emotional Well-Being Empty State (`EmotionalBrainScreen.tsx`):**
-   - Empty 7-day bar chart and 28-day grid are hidden when `states.length === 0`, displaying a clean lifestyle card with conversational mood prompts.
-5. **Timeline Reflection Filter Expansion (`LifeTimelineScreen.tsx`):**
-   - Added `'reflection'` filter tab with cyan styling (`#06B6D4`) in stats row and filter tabs.
+1. **Dedicated Watchtower Inspector Service (`backend/src/services/WatchtowerInspector.ts`):**
+   - Built a comprehensive quality and coherence inspector.
+   - Enforces 100% feminine first-person Hindi ("main samajh gayi", "karti hoon", "sochti hoon", "bolti hoon").
+   - Fixes ungrammatical Hindi ("Maine samajh gaya" -> "main samajh gayi", "purn karna" -> "poora karna", "sakaratmak soch" -> "positive mindset").
+   - Removes rude or blunt phrases ("Ab kya chahiye? 😄" -> "Aur bata, sab theek chal raha hai? 😊").
+   - Eliminates contradictory conversational advice when user is at work or focusing on a target (replaces "kuch mat karo" with active cheerleading).
+   - Eliminates physical meeting hallucinations ("subah milne ke liye wait karta hoon" -> "subah baat karte hain!").
+   - Deduplicates identical repeated sentences within the candidate text.
+2. **Synchronous Pre-Delivery Gate (`NovaBrainService.ts`):**
+   - Wired `watchtowerInspector.inspectAndRepair` directly into `validateAndRepairGrounding` so that Version 1 is clean before it is ever sent to the user or saved to the database.
+3. **Decoupled Hardcoded Prompts in Reflection Passes (`WatchtowerReflectionService.ts`):**
+   - Removed hardcoded scenarios ("Baby Tiku / Shreshth was born on 17 February 2026... NEVER invert to 2006!") from Pass 2 and Pass 3 generic system prompts.
+   - Replaced with dynamic contextual awareness from user memories and calendar grounding.
+   - Tied Pass 3 "Green Seal" strictly to `watchtowerInspector.inspectAndRepair` passing with 0 critical flaws.
+   - In `runReflection`, candidates that fail inspection are rejected rather than polluting chat with a corrupted Version 2.
+4. **Multi-Bubble Isolation Bug Fix (`backend/src/routes/chat.ts`):**
+   - Fixed `scheduleReflection` to pass `content: msgText` for the specific bubble's row ID, preventing previous bubbles from being duplicated into subsequent bubbles.
+5. **Historical Database Remediation (`scripts/remediate_corrupted_versions.ts`):**
+   - Cleaned up corrupted messages (`990d66c1`, `4fe08f1d`, `6bc7be86`, `7c33b2fc`) in the active conversation in `chat_history`.
 
 ## Verification Status
 - `npm run build` in `backend`: **EXIT 0** (0 errors).
 - `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).
-- Memory Unit Test Suites: **30/30 PASSED** (100%).
+- `WatchtowerInspector` Unit Test Suite: **10/10 PASSED** (100%).
+- Existing backend test suites (`BackendChatCompanionHardening.test.ts`, `watchtowerReflection.test.ts`, `NovaBrainService.test.ts`): **53/53 PASSED** (100%).
 
 ## Standing Autonomous Directives
 - **Auto Implementation Plan Proceed**: ENABLED.

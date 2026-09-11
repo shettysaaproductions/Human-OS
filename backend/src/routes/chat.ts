@@ -2129,7 +2129,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
                 userId,
                 conversationId: activeConversationId,
                 messageId: savedMsg.id,
-                content: reply,
+                content: msgText,
                 userMessage: primaryMessage,
               });
             }
