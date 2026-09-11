@@ -68,11 +68,11 @@ describe('EntityResolutionService — 360° Semantic Entity & Reference Resoluti
     it('correctly attributes Dubai location to Friend\'s brother, NOT user\'s brother', () => {
       const result = entityResolutionService.resolveTurn("My friend's brother lives in Dubai.");
 
-      expect(result.primarySubjectId).toBe('entity:friend_unnamed_brother');
+      expect(result.primarySubjectId).toBe('entity:person_friend_brother');
       const fact = result.facts[0];
       expect(fact.predicate).toBe('location');
       expect(fact.value).toBe('Dubai');
-      expect(fact.canonicalKey).toBe('entity:friend_unnamed_brother:location');
+      expect(fact.canonicalKey).toBe('entity:person_friend_brother:location');
 
       const userBrother = result.entities.find(e => e.id === 'user:brother');
       expect(userBrother).toBeUndefined();
@@ -80,7 +80,7 @@ describe('EntityResolutionService — 360° Semantic Entity & Reference Resoluti
 
     it('handles Hinglish variant "Mere dost ka bhai Dubai me rehta hai"', () => {
       const result = entityResolutionService.resolveTurn('Mere dost ka bhai Dubai me rehta hai');
-      expect(result.primarySubjectId).toBe('entity:friend_unnamed_brother');
+      expect(result.primarySubjectId).toBe('entity:person_friend_brother');
       expect(result.facts[0].value).toBe('Dubai');
     });
   });

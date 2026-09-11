@@ -131,4 +131,16 @@ describe('P0 Proactive Hallucination Fix - Grounding Gate', () => {
     expect(result.allowed).toBe(false);
     expect(result.claimClass).toBe('UNKNOWN');
   });
+
+  test('TEST 13: Third-party entity fact (Navy) must not be proactively attributed to user father', () => {
+    const ctx: ProactiveAuthoritativeContext = {
+      ...emptyContext,
+      memories: [{ key: 'entity:person_ijaz_father:occupation', value: 'Navy' }],
+    };
+
+    // Nova attempts to proactively ask if the user's father was in the navy
+    const result = proactiveFactGroundingGate.validate('Tumhare papa Navy me the na?', ctx);
+    expect(result.allowed).toBe(false);
+    expect(result.claimsBlocked.some(c => c.includes('entity_misattribution'))).toBe(true);
+  });
 });

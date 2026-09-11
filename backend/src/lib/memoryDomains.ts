@@ -527,7 +527,7 @@ export function selectDynamicDrawerRole(_entityName: string, prefixType: string,
 }
 
 // Helper to extract clean capitalized name across wardrobes and graph engines
-export const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').trim().replace(/\b\w/g, c => c.toUpperCase());
+export const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').replace(/_/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase());
 
 // Composite aggregate rows like family_details (which repeats wife, son, father, mother)
 // and important_facts (which repeats work schedule) are marked as composite duplicates

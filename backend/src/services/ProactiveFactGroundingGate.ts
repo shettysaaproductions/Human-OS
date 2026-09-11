@@ -164,6 +164,10 @@ export class ProactiveFactGroundingGate {
     const negationBlocked = this._detectNegatedClaims(trimmed, ctx);
     blockedClaims.push(...negationBlocked);
 
+    // 1d. Entity ownership misattributions (attributing third-party fact to user)
+    const entityMisattributed = this._detectEntityOwnershipMisattributions(trimmed, ctx);
+    blockedClaims.push(...entityMisattributed);
+
     if (blockedClaims.length === 0) {
       // No unsupported claims detected — allow
       return {
@@ -268,6 +272,46 @@ export class ProactiveFactGroundingGate {
         blocked.push(`negated_claim:${negatedTopic}`);
       }
     }
+    return blocked;
+  }
+
+  /**
+   * Detect if the message attributes a third-party fact (e.g. Navy service, banking job)
+   * to the user or user's direct relatives without a user-scoped memory row.
+   */
+  private _detectEntityOwnershipMisattributions(
+    message: string,
+    ctx: ProactiveAuthoritativeContext,
+  ): string[] {
+    const blocked: string[] = [];
+    const msgLower = message.toLowerCase();
+
+    // Check for "your father was in <X>", "tumhare papa <X> me the", "your wife works in <X>"
+    const userKinshipClaim = msgLower.match(/\b(?:your|tumhare|tumhari|aapke|aapki)\s+(father|papa|pitaji|dad|mother|mom|mummy|wife|biwi|husband|pati|brother|bhai|sister|behen)\b.{1,40}?\b([a-z0-9_]{3,})\b/i);
+    if (userKinshipClaim) {
+      const relToken = userKinshipClaim[1].toLowerCase();
+      const claimedVal = userKinshipClaim[2].toLowerCase();
+
+      // Check if this claimedVal exists in entity-scoped memory for a third party
+      const thirdPartyEntityMatch = ctx.memories.find(m =>
+        m.key.startsWith('entity:person_') &&
+        (m.value || '').toLowerCase().includes(claimedVal)
+      );
+
+      if (thirdPartyEntityMatch) {
+        // Now check if user actually has their OWN confirmed memory with this value
+        const userHasDirectFact = ctx.memories.some(m =>
+          !m.key.startsWith('entity:person_') &&
+          m.key.includes(relToken.replace(/papa|pitaji|dad/, 'father').replace(/mom|mummy/, 'mother').replace(/biwi/, 'wife')) &&
+          (m.value || '').toLowerCase().includes(claimedVal)
+        );
+
+        if (!userHasDirectFact) {
+          blocked.push(`entity_misattribution:${relToken}_${claimedVal}_belongs_to_${thirdPartyEntityMatch.key}`);
+        }
+      }
+    }
+
     return blocked;
   }
 

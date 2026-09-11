@@ -57,10 +57,10 @@ export class AdaptiveRiskScorer {
     if (isCorrection) {
       factors.push({
         name: 'EXPLICIT_CORRECTION',
-        weight: 35,
+        weight: 70,
         description: 'User explicitly correcting previous assistant assumption or memory'
       });
-      score += 35;
+      score += 70;
     }
 
     // 2. Multiple Named Persons or Kinship References (+30)

@@ -593,9 +593,9 @@ describe('BUG-03: extractReminderIntent', () => {
 
       const keys = turn.units.map(u => u.factKey);
       expect(keys).not.toContain('brother_name');
-      expect(keys).toContain('entity:friend_unnamed_brother:location');
+      expect(keys).toContain('entity:person_friend_brother:location');
 
-      const locUnit = turn.units.find(u => u.factKey === 'entity:friend_unnamed_brother:location');
+      const locUnit = turn.units.find(u => u.factKey === 'entity:person_friend_brother:location');
       expect(locUnit?.factValue).toBe('Dubai');
     });
   });

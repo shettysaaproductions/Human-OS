@@ -41,6 +41,7 @@ export interface ResolvedFact {
   groundedInTurn: boolean;
   rawQuote: string;
   sourceMessageId?: string;
+  isDirectUserFact: boolean;
 }
 
 export interface EntityResolutionResult {
@@ -121,8 +122,8 @@ export class EntityResolutionService {
       const relation = this.normalizeRelation(nestedFriendMatch[1]);
       const rest = nestedFriendMatch[2]?.trim() || '';
 
-      const friendEntityId = `entity:friend_unnamed`;
-      const derivedEntityId = `${friendEntityId}_${relation}`;
+      const friendEntityId = `entity:person_friend`;
+      const derivedEntityId = `entity:person_friend_${relation}`;
       const derivedEntityName = `Friend's ${relation}`;
 
       entitiesById.set(friendEntityId, {
@@ -242,6 +243,20 @@ export class EntityResolutionService {
         entitiesById.set(userRelEntityId, relEntity);
         result.primarySubjectId = userRelEntityId;
 
+        // Check if another named person was mentioned in the predicate (e.g. "met Ejaz", "Ejaz se mila")
+        const metPersonMatch = rest.match(/\b(?:met|se\s+mila|spoke\s+to|with)\s+([A-Za-z]+)\b/i);
+        if (metPersonMatch && !/^(?:yesterday|today|tomorrow|pehle|him|her|them)$/i.test(metPersonMatch[1])) {
+          const personName = this.capitalize(metPersonMatch[1]);
+          const otherEntityId = `entity:person_${personName.toLowerCase()}`;
+          entitiesById.set(otherEntityId, {
+            id: otherEntityId,
+            name: personName,
+            entityType: 'person',
+            relationToUser: 'associate_or_friend',
+            isDirectUserRelation: false,
+          });
+        }
+
         const fact = this.extractFactFromPredicate(userRelEntityId, userRelEntityName, relation, rest, cleanMsg, context?.sourceMessageId, true);
         if (fact) {
           result.facts.push(fact);
@@ -283,6 +298,55 @@ export class EntityResolutionService {
           const fact = this.extractFactFromPredicate(derivedEntityId, derivedEntityName, relation, rest, cleanMsg, context?.sourceMessageId);
           if (fact) {
             result.facts.push(fact);
+          }
+        } else {
+          // ── 4. Direct First-Person Statements (Career, Ventures, Plans) ────────
+          const pastWorkMatch = cleanMsg.match(/\b(?:i\s+used\s+to\s+work\s+at|pehle\s+kaam\s+karta\s+tha|i\s+worked\s+at)\s+([A-Za-z0-9\s]+)/i);
+          const curWorkMatch = cleanMsg.match(/\b(?:i\s+work\s+at|main\s+kaam\s+karta\s+hu|i\s+am\s+working\s+at)\s+([A-Za-z0-9\s]+)/i);
+          const futurePlanMatch = cleanMsg.match(/\b(?:i\s+will\s+open|i\s+am\s+planning\s+to\s+open|planning\s+to\s+start|shuru\s+karne\s+ka\s+plan\s+hai)\s+([A-Za-z0-9\s]+)/i);
+
+          if (pastWorkMatch) {
+            const company = this.capitalize(pastWorkMatch[1].replace(/\.$/, '').trim());
+            result.facts.push({
+              subjectEntityId: 'user:self',
+              subjectEntityName: 'User',
+              predicate: 'past_company',
+              value: company,
+              rawQuote: cleanMsg,
+              canonicalKey: 'past_company',
+              confidence: 0.95,
+              groundedInTurn: true,
+              temporalState: 'PAST',
+              isDirectUserFact: true,
+            });
+          } else if (curWorkMatch) {
+            const company = this.capitalize(curWorkMatch[1].replace(/\.$/, '').trim());
+            result.facts.push({
+              subjectEntityId: 'user:self',
+              subjectEntityName: 'User',
+              predicate: 'company_name',
+              value: company,
+              rawQuote: cleanMsg,
+              canonicalKey: 'company_name',
+              confidence: 0.95,
+              groundedInTurn: true,
+              temporalState: 'CURRENT',
+              isDirectUserFact: true,
+            });
+          } else if (futurePlanMatch) {
+            const plan = this.capitalize(futurePlanMatch[1].replace(/\.$/, '').trim());
+            result.facts.push({
+              subjectEntityId: 'user:self',
+              subjectEntityName: 'User',
+              predicate: 'future_venture',
+              value: plan,
+              rawQuote: cleanMsg,
+              canonicalKey: 'venture_name',
+              confidence: 0.90,
+              groundedInTurn: true,
+              temporalState: 'FUTURE',
+              isDirectUserFact: true,
+            });
           }
         }
       }
@@ -386,7 +450,8 @@ export class EntityResolutionService {
       confidence: 0.95,
       groundedInTurn: true,
       rawQuote: fullMessage,
-      sourceMessageId
+      sourceMessageId,
+      isDirectUserFact: isDirectUserRelation
     };
   }
 
