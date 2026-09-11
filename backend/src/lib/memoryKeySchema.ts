@@ -69,6 +69,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam', 'bete_ka_nick_name',
     'tiku', 'tiku_nickname', 'son_tiku', 'tuku', 'tuku_nickname', 'son_tuku', 'shreshth_tuku', 'tuku_shreshth',
     'shreshth_nickname', 'shreshth_nick_name', 'son_shreshth_nickname', 'baby_nickname', 'child_nickname',
+    'family_nickname',
   ],
   son_age: [
     'sons_age', 'beta_age', 'bete_ki_umar', 'bete_ki_age', 'child_age',
@@ -102,12 +103,18 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   // ── Work: company ───────────────────────────────────────────────────────────
   company_name: [
-    'business_name', 'company', 'business', 'startup_name', 'firm_name',
+    'business_name', 'company', 'business', 'firm_name',
     'office_name', 'workplace_name', 'current_company',
+  ],
+  // ── Work: business venture ──────────────────────────────────────────────────
+  venture_name: [
+    'business_venture', 'cloud_kitchen_business', 'cloud_kitchen', 'food_venture',
+    'side_venture', 'side_business', 'entrepreneurial_venture', 'dhaba_venture',
+    'shettys_dhaba_venture'
   ],
   // ── Dates: birthday ─────────────────────────────────────────────────────────
   birth_date: [
-    'birthday', 'date_of_birth', 'dob', 'bday', 'janam_din',
+    'birthday', 'date_of_birth', 'dob', 'bday', 'janam_din', 'user_birth_date', 'user_dob', 'my_birthday', 'my_dob',
     'child_birthdate',  // generic child birthdate — we preserve the value
   ],
   wife_birth_date: [

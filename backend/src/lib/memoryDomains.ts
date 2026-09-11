@@ -12,6 +12,8 @@
  * across compartments (e.g. Work schedule 11am-8pm ⇄ Evening family time with Sakshi and baby Shreshth).
  */
 
+import { canonicalizeKey } from './memoryKeySchema';
+
 export type LifeDomainKey = 'family' | 'work' | 'goals' | 'lifestyle' | 'identity';
 
 export interface DomainMeta {
@@ -743,7 +745,7 @@ export function clusterMemoriesIntoWardrobes(
     const nickKeys = [
       'son_nickname', 'tuku', 'tuku_nickname', 'son_tuku', 'shreshth_tuku', 'tuku_shreshth',
       'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'shreshth_nick_name', 'son_shreshth_nickname',
-      'baby_nickname', 'child_nickname'
+      'baby_nickname', 'child_nickname', 'family_nickname'
     ];
     let nickVal = '';
     let nickSourceId: string | undefined;
@@ -1099,7 +1101,8 @@ export function clusterMemoriesIntoWardrobes(
 
   // ── 6. VENTURE WARDROBE: Shetty's Dhaba (Cloud Kitchen) ──────────────────────
   const isDhabaPresent = Array.from(memMap.values()).some(e => /dhaba|shetty|cloud kitchen/i.test(e.value)) ||
-                         memMap.get('company_name')?.value?.toLowerCase().includes('dhaba');
+                         memMap.get('company_name')?.value?.toLowerCase().includes('dhaba') ||
+                         memMap.has('venture_name');
 
   if (isDhabaPresent || memMap.has('pf_funds')) {
     const traits: WardrobeTrait[] = [
@@ -1113,6 +1116,10 @@ export function clusterMemoriesIntoWardrobes(
         updatedAt: nowStr
       }
     ];
+
+    if (memMap.has('venture_name')) {
+      consumedKeys.add('venture_name');
+    }
 
     if (memMap.get('company_name')?.value?.toLowerCase().includes('dhaba')) {
       consumedKeys.add('company_name');
@@ -1194,6 +1201,31 @@ export function clusterMemoriesIntoWardrobes(
       updatedAt: memMap.get('preferred_name')?.updated_at
     }
   ];
+
+  // User's own Date of Birth (never orphaned into rogue "User" or "Birth" cupboards)
+  const userBdayVal = memMap.get('birth_date')?.value || memMap.get('user_birth_date')?.value || memMap.get('user_dob')?.value;
+  if (userBdayVal) {
+    consumedKeys.add('birth_date');
+    consumedKeys.add('user_birth_date');
+    consumedKeys.add('user_dob');
+    consumedKeys.add('dob');
+    consumedKeys.add('birthday');
+    identityTraits.push({
+      id: `trait-user-birthdate`,
+      key: 'birth_date',
+      label: 'Birth Date',
+      value: userBdayVal,
+      category: 'milestone',
+      confidence: 'confirmed',
+      sourceMemoryId: memMap.get('birth_date')?.id || memMap.get('user_birth_date')?.id,
+      updatedAt: memMap.get('birth_date')?.updated_at || nowStr
+    });
+  }
+
+  // Consume aggregate family_details key so it doesn't create a phantom cupboard
+  if (memMap.has('family_details')) {
+    consumedKeys.add('family_details');
+  }
 
   if (memMap.has('passions')) {
     consumedKeys.add('passions');
@@ -1821,15 +1853,19 @@ export interface DynamicKgResult {
 
 function toGraphLabel(key: string, value: string): string {
   const k = key.toLowerCase();
-  const v = value.trim();
+  // Strip repeated consecutive words (e.g. "old old" -> "old")
+  const v = (value || '').trim().replace(/\b(\w+)\s+\1\b/gi, '$1');
 
   // Family
   if (k === 'wife_name') return `${v} (Wife)`;
   if (k === 'son_name') return `${v} (Son)`;
-  if (k === 'son_nickname' || k.includes('tiku') || k.includes('tuku')) return `${v || 'Tuku'} (Nickname)`;
+  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) return `${v || 'Tuku'} (Nickname)`;
   if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob')) return `${v || '17 Feb 2026'} (Birthday)`;
   if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return `${v || '23 July'} (Birthday)`;
-  if (k === 'son_age') return `${v} old (Son Age)`;
+  if (k === 'son_age' || k === 'child_age' || k === 'baby_age') {
+    const cleanAge = v.replace(/(\s*old)+$/i, '').trim();
+    return cleanAge ? `${cleanAge} old (Son Age)` : 'Son Age';
+  }
   if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) return 'Nail Artist (Skill)';
   if (k === 'father_name') return `${v} (Father)`;
   if (k === 'mother_name') return `${v} (Mother)`;
@@ -1838,8 +1874,9 @@ function toGraphLabel(key: string, value: string): string {
   if (k === 'partner_name') return `${v} (Partner)`;
   if (k === 'pet_name' || k.includes('dog_name') || k.includes('cat_name')) return `${v} (Pet)`;
 
-  // Work
-  if (k === 'company_name') return `${v} (Company)`;
+  // Work & Ventures
+  if (k === 'company_name' || k === 'current_company') return `${v} (Company)`;
+  if (k === 'venture_name' || k === 'business_venture' || k === 'cloud_kitchen_business' || k === 'dhaba_venture') return `${v} (Venture)`;
   if (k === 'work_schedule') {
     if (v.includes('11') && (v.includes('8') || v.includes('8 PM'))) return '11am - 8pm (Work Hours)';
     return v.length > 22 ? `${v.slice(0, 20)}... (Hours)` : `${v} (Hours)`;
@@ -1868,7 +1905,7 @@ function toGraphLabel(key: string, value: string): string {
     const cleanName = v.replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '');
     return `${cleanName} (Name)`;
   }
-  if (k === 'birth_date') return `${v} (Birthday)`;
+  if (k === 'birth_date' || k === 'user_birth_date' || k === 'user_dob' || k === 'dob') return `${v} (Birthday)`;
   if (k === 'marriage_date') return `${v} (Anniversary)`;
 
   // Dynamic Open-Ended Keys: <prefix>_<entity>_<trait> or <entity>_<trait>
@@ -1970,14 +2007,40 @@ export function buildDynamicKnowledgeGraph(
   }
 
   // Pre-index items for tree hierarchy detection
-  const allItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
+  const rawItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
   for (const m of memories) {
     if (!m.key || !m.value) continue;
-    allItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value, memory_type: m.memory_type });
+    rawItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value, memory_type: m.memory_type });
   }
   for (const w of workingContext) {
     if (!w.key || !w.value) continue;
-    allItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
+    rawItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
+  }
+
+  // Deduplicate items so aliases or duplicate concepts don't generate twin nodes in Neural Galaxy
+  const allItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
+  const seenCanonicalConcepts = new Map<string, { id: string; key: string; isContext?: boolean }>();
+
+  for (const item of rawItems) {
+    const canon = canonicalizeKey(item.key).canonical;
+    const existing = seenCanonicalConcepts.get(canon);
+    if (existing) {
+      // If we already have a persisted memory for this canonical concept, ignore workingContext duplicate
+      if (!existing.isContext && item.isContext) continue;
+      // If current item is persisted and existing was workingContext, replace it
+      if (existing.isContext && !item.isContext) {
+        const idx = allItems.findIndex(i => i.id === existing.id);
+        if (idx !== -1) {
+          allItems[idx] = item;
+          seenCanonicalConcepts.set(canon, { id: item.id, key: item.key, isContext: item.isContext });
+          continue;
+        }
+      }
+      // If both are memories or both are context, skip duplicate alias (e.g. user_birth_date when birth_date is present)
+      continue;
+    }
+    seenCanonicalConcepts.set(canon, { id: item.id, key: item.key, isContext: item.isContext });
+    allItems.push(item);
   }
 
   // Detect Primary Entity Nodes (Level 2)
@@ -2013,7 +2076,7 @@ export function buildDynamicKnowledgeGraph(
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Wife (Sakshi) in Family Tree`;
       } else if (
-        (k.startsWith('son_') || k.startsWith('child_') || k.startsWith('baby_') || k.includes('tiku') || k.includes('tuku') || k.includes('shreshth')) &&
+        (k.startsWith('son_') || k.startsWith('child_') || k.startsWith('baby_') || k.includes('tiku') || k.includes('tuku') || k.includes('shreshth') || k === 'family_nickname') &&
         (allKeys.has('son_name') || allKeys.has('shreshth'))
       ) {
         parentId = allKeys.has('son_name') ? 'mem-son_name' : (allItems.find(i => i.key.toLowerCase().includes('shreshth'))?.id || 'dept-family');
@@ -2065,13 +2128,29 @@ export function buildDynamicKnowledgeGraph(
 
     // Work / Career Tree Stems
     if (meta.domain === 'work') {
-      if (['company_name', 'business_name', 'cloud_kitchen_business'].includes(k)) {
+      const isCompanyBranch = ['company_name', 'current_company', 'office_name'].includes(k);
+      const isVentureBranch = ['venture_name', 'business_venture', 'cloud_kitchen_business', 'dhaba_venture'].includes(k);
+
+      if (isCompanyBranch) {
         hierarchyLevel = 2;
-        relation = 'ORGANIZATION';
+        relation = 'EMPLOYMENT_ORGANIZATION';
         edgeType = 'ENTITY_BRANCH';
-        explanation = `Primary organization / business in Career Tree`;
-      } else if (allKeys.has('company_name')) {
-        parentId = 'mem-company_name';
+        explanation = `Primary employment organization in Career Tree`;
+      } else if (isVentureBranch) {
+        hierarchyLevel = 2;
+        relation = 'ENTREPRENEURIAL_VENTURE';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = `Independent business venture in Career & Professional`;
+      } else if (['pf_funds', 'kitchen', 'dhaba', 'cloud_kitchen', 'venture_funding'].some(vk => k.includes(vk)) && (allKeys.has('venture_name') || allKeys.has('cloud_kitchen_business'))) {
+        const ventureKey = allKeys.has('venture_name') ? 'mem-venture_name' : (allItems.find(i => i.key.toLowerCase().includes('venture') || i.key.toLowerCase().includes('dhaba'))?.id || 'dept-work');
+        parentId = ventureKey;
+        hierarchyLevel = 3;
+        edgeType = 'ATTRIBUTE_STEM';
+        relation = 'VENTURE_DETAIL';
+        explanation = `Detail stem of Business Venture`;
+      } else if (allKeys.has('company_name') || allKeys.has('current_company')) {
+        const compKey = allKeys.has('company_name') ? 'mem-company_name' : (allItems.find(i => i.key.toLowerCase().includes('company'))?.id || 'dept-work');
+        parentId = compKey;
         hierarchyLevel = 3;
         edgeType = 'ATTRIBUTE_STEM';
         if (k.includes('schedule') || k.includes('hours') || k.includes('timing')) {

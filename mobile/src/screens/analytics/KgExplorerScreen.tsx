@@ -123,15 +123,20 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
 
   if (k === 'wife_name' || k === 'sakshi') return { title: v || 'Sakshi', sub: 'Wife' };
   if (k === 'son_name' || k === 'shreshth') return { title: v || 'Shreshth', sub: 'Son' };
-  if (k === 'son_nickname' || k.includes('tiku') || k.includes('tuku')) return { title: v || 'Tuku', sub: 'Nickname' };
+  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) return { title: v || 'Tuku', sub: 'Nickname' };
   if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) {
     return { title: 'Nail Artist', sub: 'Creative Skill' };
   }
   if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('child_b') || k.includes('child_dob')) return { title: v || '17 Feb 2026', sub: 'Birthday' };
   if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return { title: v || '23 July', sub: 'Birthday' };
-  if (k === 'son_age' || k === 'child_age' || k === 'baby_age') return { title: `${v} old`, sub: 'Age' };
+  if (k === 'son_age' || k === 'child_age' || k === 'baby_age') {
+    const cleanAge = (v || '').replace(/(\s*old)+$/i, '').trim();
+    return { title: cleanAge ? `${cleanAge} old` : 'Age', sub: 'Age' };
+  }
   if (k === 'likes_wifes_cooking') return { title: "Wife's Cooking", sub: 'Hobby / Food' };
-  if (k === 'cloud_kitchen_business') return { title: 'Cloud Kitchen', sub: 'Business Plan' };
+  if (k === 'venture_name' || k === 'business_venture' || k === 'cloud_kitchen_business' || k === 'dhaba_venture') {
+    return { title: v || "Shetty's Dhaba", sub: 'Venture' };
+  }
   if (k === 'father_name') return { title: v || 'Father', sub: 'Father' };
   if (k === 'mother_name') return { title: v || 'Mother', sub: 'Mother' };
   if (k === 'mother_occupation' || k === 'mother_job') return { title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || 'Tailor'), sub: 'Mother Occupation' };
@@ -291,7 +296,7 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       const parts = cleanK.split('_');
 
       if (d === 'family') {
-        if (k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
+        if (k === 'family_nickname' || k.includes('family_nick') || k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
           mem.hierarchyLevel = 3;
           mem.parentEntityId = 'mem-son_name';
           rawStemItems.push(mem);
@@ -335,6 +340,29 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         }
       }
 
+      if (d === 'work') {
+        const isCompanyBranch = cleanK === 'company_name' || cleanK === 'current_company' || cleanK === 'office_name';
+        const isVentureBranch = cleanK === 'venture_name' || cleanK === 'business_venture' || cleanK === 'cloud_kitchen_business' || cleanK === 'dhaba_venture';
+
+        if (isCompanyBranch || isVentureBranch) {
+          mem.hierarchyLevel = 2;
+          rawBranchItems.push(mem);
+          continue;
+        }
+        if (cleanK.includes('pf_') || cleanK.includes('kitchen') || cleanK.includes('dhaba') || cleanK.includes('venture')) {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-venture_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+        if (cleanK.includes('schedule') || cleanK.includes('hours') || cleanK.includes('timing') || cleanK.includes('location') || cleanK.includes('candidate') || cleanK.includes('interview') || cleanK.includes('office') || cleanK.includes('target') || cleanK.includes('selection')) {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-company_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+      }
+
       // Dynamic multi-segment keys (e.g. pet_coco_breed, project_helios_stack, friend_rohit_job)
       if (parts.length >= 3) {
         mem.hierarchyLevel = 3;
@@ -358,6 +386,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       let norm = bKey;
       if (norm.includes('sakshi') || norm.includes('wife')) norm = 'sakshi';
       if (norm.includes('shreshth') || norm.includes('son')) norm = 'shreshth';
+      if (norm.includes('tiku') || norm.includes('tuku') || norm.includes('family_nickname') || norm.includes('son_nickname')) {
+        // Redundant nickname in branch list - should never be an entity branch
+        continue;
+      }
       if (seenBranchKeys.has(norm)) continue;
       seenBranchKeys.add(norm);
       branchItems.push(b);
@@ -456,6 +488,18 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         if (found) pId = found.id;
       } else if (pId === 'mem-partner_name') {
         const found = branchItems.find(b => (b.raw_key || b.name || '').toLowerCase().includes('partner'));
+        if (found) pId = found.id;
+      } else if (pId === 'mem-venture_name') {
+        const found = branchItems.find(b => {
+          const bk = (b.raw_key || b.name || '').toLowerCase();
+          return bk.includes('venture') || bk.includes('dhaba') || bk.includes('kitchen');
+        });
+        if (found) pId = found.id;
+      } else if (pId === 'mem-company_name') {
+        const found = branchItems.find(b => {
+          const bk = (b.raw_key || b.name || '').toLowerCase();
+          return bk.includes('company') || bk.includes('conviction');
+        });
         if (found) pId = found.id;
       } else if (pId) {
         const foundBranch = branchItems.find(b => b.id === pId || b.raw_key === pId || (b.raw_key && pId.includes(b.raw_key)));

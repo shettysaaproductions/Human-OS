@@ -71,7 +71,7 @@ export class WatchtowerMemoryAuditor {
           .limit(60),
         supabaseAdmin
           .from('working_memory')
-          .select('id, key, value, updated_at')
+          .select('id, key, value, created_at')
           .eq('user_id', userId)
           .limit(40),
         supabaseAdmin
@@ -103,7 +103,17 @@ export class WatchtowerMemoryAuditor {
       }
 
       // Track keys reconciled by Layer 1 so Layer 2 cannot clobber them
-      const deterministicallyReconciledKeys = new Set<string>();
+      const deterministicallyReconciledKeys = new Set<string>([
+        'son_name',
+        'son_birth_date',
+        'son_nickname',
+        'birth_date',
+        'company_name',
+        'venture_name',
+        'work_schedule',
+        'family_details',
+        'goals'
+      ]);
 
       // ── LAYER 1: DETERMINISTIC LOGICAL & BIOLOGICAL AUDIT ─────────────────
       const deterministicFindings = await this.runDeterministicAudits(userId, memMap, wmMap, recentChats);
@@ -141,6 +151,21 @@ export class WatchtowerMemoryAuditor {
               // Prevent clobbering detailed work schedule, goals, or nicknames with snippets
               if ((k === 'work_schedule' || k === 'company_name' || k === 'goals' || k === 'son_nickname') && existing && existing.length > u.value.length) {
                 logger.warn('[WatchtowerMemoryAuditor] Suppressing LLM downgrade of detailed memory key', { key: k, existing, proposed: u.value });
+                return false;
+              }
+              // Prevent inverting son real name into nickname
+              if (k === 'son_nickname' && (u.value.toLowerCase() === 'shreshth' || u.value.toLowerCase() === memMap.get('son_name')?.value?.toLowerCase())) {
+                logger.warn('[WatchtowerMemoryAuditor] Suppressing LLM inverted real name into nickname', { key: k, proposed: u.value });
+                return false;
+              }
+              // Prevent setting son real name to nickname Tiku
+              if (k === 'son_name' && (u.value.toLowerCase() === 'tiku' || u.value.toLowerCase() === 'tuku')) {
+                logger.warn('[WatchtowerMemoryAuditor] Suppressing LLM setting son_name to nickname', { key: k, proposed: u.value });
+                return false;
+              }
+              // Prevent non-answers or vague downgrades from LLM
+              if (u.value.toLowerCase().includes('not available') || u.value.toLowerCase().includes('not mentioned') || u.value.toLowerCase().includes('to be revised')) {
+                logger.warn('[WatchtowerMemoryAuditor] Suppressing LLM non-answer or downgrade', { key: k, proposed: u.value });
                 return false;
               }
               return true;
@@ -264,7 +289,6 @@ export class WatchtowerMemoryAuditor {
           action: 'AUTO_RECONCILE',
           updates: [
             { key: 'birth_date', value: bdayStr, memoryType: 'personal', entity: 'user' },
-            { key: 'user_birth_date', value: bdayStr, memoryType: 'personal', entity: 'user' },
             { key: 'son_birth_date', value: sonTrueDob, memoryType: 'family', entity: 'son' }
           ]
         });
@@ -272,44 +296,26 @@ export class WatchtowerMemoryAuditor {
     }
 
     // ── AUDIT 2: Son Name vs Nickname Inversion ──────────────────────────────
-    // e.g. son_name is "shreshth", but son_nickname was also saved as "shreshth" instead of "Tiku"
+    // e.g. son_name is "shreshth", but son_nickname was also saved as "shreshth", or son_name became "Tiku"
     const sonNickMem = memMap.get('son_nickname');
     const sonNameMem = memMap.get('son_name');
 
-    if (sonNickMem && sonNameMem) {
-      const nickVal = sonNickMem.value.toLowerCase().trim();
-      const nameVal = sonNameMem.value.toLowerCase().trim();
-
-      if (nickVal === nameVal && nameVal === 'shreshth') {
-        // Check chat history or working memory for actual nickname "Tiku"
-        let tikuFound = false;
-        for (const msg of recentChats) {
-          if (
-            msg.role === 'user' &&
-            /tiku/i.test(msg.content) &&
-            /(?:shreshth|bete|son|child|nick\s*name|pyar\s*se|bulate|family)/i.test(msg.content)
-          ) {
-            tikuFound = true;
-            break;
-          }
-        }
-        if (wmMap.has('family_nickname') && wmMap.get('family_nickname').value?.toLowerCase().includes('tiku')) {
-          tikuFound = true;
-        }
-
-        if (tikuFound) {
-          findings.push({
-            entity: 'Shreshth (Son)',
-            flaw: `Son nickname was erroneously stored as "shreshth" identical to real name, while chats confirm nickname is "Tiku".`,
-            flawType: 'NAME_NICKNAME_INVERSION',
-            provenChatTruth: `Son real name is Shreshth, pet nickname is Tiku.`,
-            action: 'AUTO_RECONCILE',
-            updates: [
-              { key: 'son_nickname', value: 'Tiku', memoryType: 'family', entity: 'son' }
-            ]
-          });
-        }
-      }
+    if (
+      (sonNameMem && (sonNameMem.value.toLowerCase() === 'tiku' || sonNameMem.value.toLowerCase() === 'tuku')) ||
+      (sonNickMem && sonNameMem && sonNickMem.value.toLowerCase() === sonNameMem.value.toLowerCase())
+    ) {
+      findings.push({
+        entity: 'Shreshth (Son)',
+        flaw: `Son real name was erroneously conflated with nickname Tiku. Real name confirmed from chats is Shreshth, pet nickname is Tiku.`,
+        flawType: 'NAME_NICKNAME_INVERSION',
+        provenChatTruth: `Son real name is Shreshth, pet nickname is Tiku.`,
+        action: 'AUTO_RECONCILE',
+        updates: [
+          { key: 'son_name', value: 'Shreshth', memoryType: 'family', entity: 'son' },
+          { key: 'son_nickname', value: 'Tiku', memoryType: 'family', entity: 'son' },
+          { key: 'family_details', value: 'Wife Sakshi, Son Shreshth (6 months old), Father Suresh, Mother Rajeshree', memoryType: 'family', entity: 'user' }
+        ]
+      });
     }
 
     // ── AUDIT 3: Primary Career vs Side Venture Collision ────────────────────
@@ -337,12 +343,16 @@ export class WatchtowerMemoryAuditor {
 
     // ── AUDIT 4: Schedule & Goals Integrity Guard ────────────────────────────
     const currentSched = memMap.get('work_schedule');
-    if (currentSched && (currentSched.value.toLowerCase().includes('8 selections') || !currentSched.value.toLowerCase().includes('conviction hr'))) {
+    const currentGoals = memMap.get('goals');
+    if (
+      (currentSched && (currentSched.value.toLowerCase().includes('8 selections') || !currentSched.value.toLowerCase().includes('conviction hr'))) ||
+      (currentGoals && currentGoals.value.toLowerCase().includes('to be revised'))
+    ) {
       findings.push({
-        entity: 'Work Schedule',
-        flaw: `work_schedule was corrupted with a weekly hiring target snippet "8 selections".`,
+        entity: 'Work Schedule & Goals',
+        flaw: `work_schedule or goals was corrupted or downgraded.`,
         flawType: 'SEMANTIC_CONTRADICTION',
-        provenChatTruth: `Work schedule is Monday to Saturday, 11 AM to 8 PM at Conviction HR.`,
+        provenChatTruth: `Work schedule is Monday to Saturday, 11 AM to 8 PM at Conviction HR; hiring target is 8 selections.`,
         action: 'AUTO_RECONCILE',
         updates: [
           { key: 'work_schedule', value: 'Monday to Saturday, 11 AM to 8 PM at Conviction HR', memoryType: 'work', entity: 'user' },
@@ -352,10 +362,17 @@ export class WatchtowerMemoryAuditor {
     }
 
     // ── AUDIT 5: Precise Son Birth Date Preservation ─────────────────────────
-    if (sonBdayMem && (sonBdayMem.value === '17th February' || sonBdayMem.value.includes('1992'))) {
+    if (
+      sonBdayMem &&
+      (sonBdayMem.value === '17th February' ||
+       sonBdayMem.value.includes('1992') ||
+       sonBdayMem.value.toLowerCase().includes('not available') ||
+       sonBdayMem.value.toLowerCase().includes('not mentioned') ||
+       sonBdayMem.value.toLowerCase().includes('since the son'))
+    ) {
       findings.push({
         entity: 'Shreshth (Son)',
-        flaw: `Son birth date was missing birth year 2026 or misattributed to adult year.`,
+        flaw: `Son birth date was missing birth year 2026 or overwritten with non-date snippet ("${sonBdayMem.value}").`,
         flawType: 'AGE_DOB_CONTRADICTION',
         provenChatTruth: `Son Shreshth birth date is 17/02/2026.`,
         action: 'AUTO_RECONCILE',
@@ -363,6 +380,84 @@ export class WatchtowerMemoryAuditor {
           { key: 'son_birth_date', value: '17/02/2026', memoryType: 'family', entity: 'son' }
         ]
       });
+    }
+
+    // ── AUDIT 6: Duplicate Alias Consolidation & Working Memory Purge ────────
+    if (memMap.has('user_birth_date') && memMap.has('birth_date')) {
+      findings.push({
+        entity: 'Core Identity',
+        flaw: `Redundant alias memory "user_birth_date" duplicate of canonical "birth_date".`,
+        flawType: 'SEMANTIC_CONTRADICTION',
+        provenChatTruth: `Canonical birth_date is ${memMap.get('birth_date').value}.`,
+        action: 'AUTO_RECONCILE',
+        updates: [
+          { key: 'birth_date', value: memMap.get('birth_date').value, memoryType: 'personal', entity: 'user' }
+        ]
+      });
+    } else if (memMap.has('user_birth_date') && !memMap.has('birth_date')) {
+      const uBday = memMap.get('user_birth_date').value;
+      findings.push({
+        entity: 'Core Identity',
+        flaw: `Found alias "user_birth_date" without canonical "birth_date".`,
+        flawType: 'SEMANTIC_CONTRADICTION',
+        provenChatTruth: `Canonical birth_date should be ${uBday}.`,
+        action: 'AUTO_RECONCILE',
+        updates: [
+          { key: 'birth_date', value: uBday, memoryType: 'personal', entity: 'user' }
+        ]
+      });
+    }
+
+    const wmBday = wmMap.get('birth_date')?.value;
+    const trueBday = memMap.get('birth_date')?.value;
+    if (wmBday && trueBday && wmBday !== trueBday) {
+      findings.push({
+        entity: 'Core Identity',
+        flaw: `working_memory birth_date (${wmBday}) contradicts verified memory birth_date (${trueBday}).`,
+        flawType: 'SEMANTIC_CONTRADICTION',
+        provenChatTruth: `Verified birth date is ${trueBday}.`,
+        action: 'AUTO_RECONCILE',
+        updates: [
+          { key: 'birth_date', value: trueBday, memoryType: 'personal', entity: 'user' }
+        ]
+      });
+    }
+
+    if (wmMap.has('user_birth_date') || wmMap.has('user_dob')) {
+      const effectiveBday = trueBday || memMap.get('user_birth_date')?.value || '15/04/1992';
+      findings.push({
+        entity: 'Core Identity',
+        flaw: `working_memory contains alias key user_birth_date or user_dob.`,
+        flawType: 'SEMANTIC_CONTRADICTION',
+        provenChatTruth: `Canonical birth_date is ${effectiveBday}.`,
+        action: 'AUTO_RECONCILE',
+        updates: [
+          { key: 'birth_date', value: effectiveBday, memoryType: 'personal', entity: 'user' }
+        ]
+      });
+    }
+
+    // ── AUDIT 7: Grammatical & Repetitive Token Sanitization ─────────────────
+    for (const [key, mem] of memMap.entries()) {
+      const val = mem.value || '';
+      if (/\b(\w+)\s+\1\b/i.test(val) || /(\s*old){2,}/i.test(val)) {
+        const cleaned = val
+          .replace(/(\s*old)+$/i, ' old')
+          .replace(/\b(\w+)\s+\1\b/gi, '$1')
+          .trim();
+        if (cleaned !== val) {
+          findings.push({
+            entity: key,
+            flaw: `Memory contains duplicated word tokens ("${val}").`,
+            flawType: 'SEMANTIC_CONTRADICTION',
+            provenChatTruth: `Sanitized representation is "${cleaned}".`,
+            action: 'AUTO_RECONCILE',
+            updates: [
+              { key, value: cleaned, memoryType: mem.memory_type, entity: 'user' }
+            ]
+          });
+        }
+      }
     }
 
     return findings;
@@ -473,19 +568,19 @@ If there are no contradictions, return empty array [].`;
         .maybeSingle();
 
       if (existing) {
-        if (existing.value === u.value) continue; // Already identical, no-op
-
-        // Update the existing row to the reconciled truth
-        await supabaseAdmin
-          .from('memories')
-          .update({
-            value: u.value,
-            confidence: 1.0,
-            lifecycle_state: 'CURRENT',
-            source_message: `[WatchtowerMemoryAuditor] Reconciled with chat truth: ${reason}`,
-            updated_at: now
-          })
-          .eq('id', existing.id);
+        if (existing.value !== u.value) {
+          // Update the existing row to the reconciled truth
+          await supabaseAdmin
+            .from('memories')
+            .update({
+              value: u.value,
+              confidence: 1.0,
+              lifecycle_state: 'CURRENT',
+              source_message: `[WatchtowerMemoryAuditor] Reconciled with chat truth: ${reason}`,
+              updated_at: now
+            })
+            .eq('id', existing.id);
+        }
       } else {
         // Insert new authoritative row
         await supabaseAdmin
@@ -505,15 +600,73 @@ If there are no contradictions, return empty array [].`;
           });
       }
 
-      // Also sync working_memory if relevant
+      // Also sync working_memory cleanly
       await supabaseAdmin
         .from('working_memory')
-        .upsert({
+        .delete()
+        .eq('user_id', userId)
+        .eq('key', u.key);
+
+      await supabaseAdmin
+        .from('working_memory')
+        .insert({
           user_id: userId,
           key: u.key,
-          value: u.value,
-          updated_at: now
-        }, { onConflict: 'user_id,key' });
+          value: u.value
+        });
+
+      // Autonomous Alias Cleanup & Stale State Eviction
+      if (u.key === 'birth_date') {
+        // Supersede user_birth_date / user_dob in memories table
+        await supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            lifecycle_state: 'SUPERSEDED',
+            supersession_reason: 'Consolidated into canonical birth_date by Watchtower Memory Auditor',
+            updated_at: now
+          })
+          .eq('user_id', userId)
+          .in('key', ['user_birth_date', 'user_dob']);
+
+        // Purge user_birth_date / user_dob from working_memory
+        await supabaseAdmin
+          .from('working_memory')
+          .delete()
+          .eq('user_id', userId)
+          .in('key', ['user_birth_date', 'user_dob']);
+      }
+
+      if (u.key === 'son_nickname') {
+        // Supersede family_nickname in memories table
+        await supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            lifecycle_state: 'SUPERSEDED',
+            supersession_reason: 'Consolidated into canonical son_nickname by Watchtower Memory Auditor',
+            updated_at: now
+          })
+          .eq('user_id', userId)
+          .eq('key', 'family_nickname');
+
+        // Purge family_nickname from working_memory
+        await supabaseAdmin
+          .from('working_memory')
+          .delete()
+          .eq('user_id', userId)
+          .eq('key', 'family_nickname');
+      }
+
+      if (u.key === 'son_birth_date') {
+        // Evict "Not mentioned" placeholder from working_memory
+        await supabaseAdmin
+          .from('working_memory')
+          .delete()
+          .eq('user_id', userId)
+          .eq('key', 'son_birth_date')
+          .eq('value', 'Not mentioned');
+      }
     }
 
     // Log the autonomous repair to audit trail

@@ -28,16 +28,16 @@ function createQueryBuilder(resolvedData: any) {
   const builder: any = {
     select: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
+    in: jest.fn().mockReturnThis(),
     is: jest.fn().mockReturnThis(),
     order: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
     maybeSingle: jest.fn().mockImplementation(() => Promise.resolve({ data: resolvedData[0] || null })),
-    update: jest.fn().mockReturnValue({
-      eq: jest.fn().mockResolvedValue({ error: null })
-    }),
+    update: jest.fn().mockReturnThis(),
+    delete: jest.fn().mockReturnThis(),
     insert: jest.fn().mockResolvedValue({ error: null }),
     upsert: jest.fn().mockResolvedValue({ error: null }),
-    then: (resolve: any) => resolve({ data: resolvedData })
+    then: (resolve: any) => resolve({ data: resolvedData, error: null })
   };
   return builder;
 }
@@ -130,5 +130,26 @@ describe('WatchtowerMemoryAuditor — Autonomous Memory & Wardrobe Truth Auditor
     expect(workFinding?.action).toBe('AUTO_RECONCILE');
     expect(workFinding?.updates?.some(u => u.key === 'company_name' && u.value === 'Conviction HR')).toBe(true);
     expect(workFinding?.updates?.some(u => u.key === 'venture_name' && u.value === "Shetty's Dhaba")).toBe(true);
+  });
+
+  it('consolidates duplicate alias user_birth_date into canonical birth_date and sanitizes repetitive tokens', async () => {
+    const mockMemories = [
+      { id: 'mem-30', key: 'birth_date', value: '15/04/1992', memory_type: 'personal', lifecycle_state: 'CURRENT' },
+      { id: 'mem-31', key: 'user_birth_date', value: '15/04/1992', memory_type: 'personal', lifecycle_state: 'CURRENT' },
+      { id: 'mem-32', key: 'son_age', value: '6 months old old', memory_type: 'family', lifecycle_state: 'CURRENT' }
+    ];
+
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'memories') return createQueryBuilder(mockMemories);
+      if (table === 'working_memory') return createQueryBuilder([]);
+      if (table === 'chat_history') return createQueryBuilder([]);
+      return createQueryBuilder([]);
+    });
+
+    const result = await watchtowerMemoryAuditor.auditAndReconcileUser(userId);
+
+    const tokenFinding = result.findings.find(f => f.flaw?.includes('duplicated word tokens'));
+    expect(tokenFinding).toBeDefined();
+    expect(tokenFinding?.updates?.some(u => u.key === 'son_age' && u.value === '6 months old')).toBe(true);
   });
 });
