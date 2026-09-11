@@ -1,35 +1,34 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Open Cupboard Dynamic Memory Architecture (Drawers & Stems), Parallel Context Routing, and Frontend Bug Fixes (Phase 6)
+2026-09-11 — Brain Section Frontend Bug Fixes, Lifestyle UX Hardening, and Universal Persona Alignment (Phase 7)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Open Cupboard Dynamic Memory Architecture with 100s of dynamic drawers and stems across 5 Life Domain Compartments, parallel context routing across worker agents, and mobile chat state bug fixes.
+Task: High-impact bug fixes and UX improvements across all 5 screens in the mobile Brain section (`MemoryBrainScreen`, `KgExplorerScreen`, `GoalBrainScreen`, `EmotionalBrainScreen`, and `LifeTimelineScreen`).
 
 ## Confirmed Findings & Implemented Fixes
-1. **Open-Ended Dynamic Drawer Synthesizer (`memoryDomains.ts`):**
-   - Section G automatically groups unconsumed facts for friends, mentors, doctors, pets, projects, instruments, vehicles, sports, and hobbies into rich `EntityWardrobe` drawers.
-   - Dynamic emoji selector with word boundary regex protection (`selectDynamicDrawerEmoji`) and dynamic role title synthesizer (`selectDynamicDrawerRole`).
-2. **True Dynamic Tree & Stems Hierarchy (`memoryDomains.ts`):**
-   - `buildDynamicKnowledgeGraph` dynamically synthesizes Level 2 Entity Branches (e.g. `mem-pet_coco`, `mem-project_helios`) linked to their Life Domain trunk, and attaches traits as Level 3 Attribute Stems (`ATTRIBUTE_STEM` edges).
-   - Cleaned `cleanStr` and `COMPOSITE_DUPLICATE_KEYS` to module scope.
-3. **Parallel Domain Routing across Workers (`FactAssertionConsumer.ts`, `DeterministicFactAgent.ts`, `SemanticInterpreter.ts`, `memoryManagement.ts`):**
-   - `classifyDomain` routes multi-segment keys dynamically to `'family' | 'work' | 'goals' | 'lifestyle' | 'identity'`.
-   - `SemanticInterpreter` system prompt instructs workers to extract scoped entity keys (`pet_<name>_<attr>`, `project_<name>_<attr>`, `friend_<name>_<attr>`).
-4. **Mobile UX & Knowledge Graph Alignment (`ChatScreen.tsx`, `KgExplorerScreen.tsx`):**
-   - Reset search, selection, and quote-reply states on New Chat in `ChatScreen.tsx`.
-   - `KgExplorerScreen.tsx` dynamically parses multi-segment entity keys into title and sub-labels.
+1. **Memory Tree Trait Management & Domain Categorization (`MemoryBrainScreen.tsx`):**
+   - Added long-press "Delete" action on trait leaf chips in tree view with UUID resolution via `trait.sourceMemoryId` or key lookup.
+   - Fixed `saveEdit` ID resolution to safely resolve the underlying memory UUID.
+   - Upgraded `inferDomain` with full dynamic prefixes (`pet_*`, `friend_*`, `project_*`, `car_*`, `guitar_*`, `marathon_*`, `gym_*`, `doctor_*`).
+   - Auto-expand wardrobes whose traits match active search queries.
+2. **Knowledge Galaxy Core User Dynamic Name & Dynamic Stems (`KgExplorerScreen.tsx`):**
+   - Eliminated hardcoded `'Saa'` Sun node fallback, dynamically pulling user profile from `useAuthStore`.
+   - Upgraded 3D Galaxy tree partitioner and `synthesizeGalaxy` to detect multi-segment keys (`parts.length >= 3`) and family members (`daughter_`, `father_`, `mother_`, `husband_`, `partner_`), clustering them as Level 3 attribute stems under their parent entity branch.
+   - Upgraded `inferDomain` with dynamic prefixes.
+3. **Goal Deadline Formatting Bug Fix (`GoalBrainScreen.tsx`):**
+   - Fixed `📅 Invalid Date` rendering bug for descriptive deadlines (e.g., `"Q4 2026 launch"`, `"Dec 2026"`). Added `formatGoalDeadline` and `formatGoalCreated`.
+4. **Clean Emotional Well-Being Empty State (`EmotionalBrainScreen.tsx`):**
+   - Empty 7-day bar chart and 28-day grid are hidden when `states.length === 0`, displaying a clean lifestyle card with conversational mood prompts.
+5. **Timeline Reflection Filter Expansion (`LifeTimelineScreen.tsx`):**
+   - Added `'reflection'` filter tab with cyan styling (`#06B6D4`) in stats row and filter tabs.
 
 ## Verification Status
 - `npm run build` in `backend`: **EXIT 0** (0 errors).
 - `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).
-- `DynamicCupboardMemory.test.ts`: **4/4 PASSED** (100%).
-- `wardrobeClustering.test.ts`: **13/13 PASSED** (100%).
-- `memoryDomains.test.ts`: **2/2 PASSED** (100%).
-- `SonNicknameAndDobAlignment.test.ts`: **11/11 PASSED** (100%).
-- Total: **30/30 PASSED** across targeted suites.
+- Memory Unit Test Suites: **30/30 PASSED** (100%).
 
 ## Standing Autonomous Directives
 - **Auto Implementation Plan Proceed**: ENABLED.

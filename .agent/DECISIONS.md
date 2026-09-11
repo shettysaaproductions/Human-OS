@@ -108,3 +108,12 @@ Format:
 - **Reason:** Users talk about arbitrary aspects of life. Flat, hardcoded schemas led to orphan memories, misclassifications, and hallucinations.
 - **Alternatives considered:** rigid static schemas for every possible topic (unsustainable); completely flat unstructured vector store (loses relational knowledge graph cohesion).
 - **Consequence:** Zero orphan memories; seamless personalization for any user lifestyle; backward compatibility preserved for canonical entities (Sakshi, Shreshth, Suresh, Rajeshree).
+
+### D-010: Brain Section Frontend Persona Resilience & Date Parsing
+- **Decision:** All Brain section analytics screens must:
+  1. Dynamically resolve the core user profile from `useAuthStore` without static placeholder name fallbacks.
+  2. Parse conversational deadlines and milestones flexibly (handling text strings like "Q4 2026 launch" gracefully without rendering "Invalid Date").
+  3. Support full CRUD (including Delete/Archive) on both flat memory rows and grouped wardrobe trait chips.
+  4. Automatically group multi-segment dynamic keys (`<prefix>_<entity>_<trait>`) into subordinate Level 3 attribute stems across 3D and 2D visualizations.
+- **Reason:** Fresh users from diverse walks of life (students, fitness enthusiasts, pet parents, creatives) require immediate, accurate reflection of their unique world without glitches or hardcoded assumptions.
+- **Consequence:** Clean, premium first impression and frictionless management of life facts across all Brain tabs.

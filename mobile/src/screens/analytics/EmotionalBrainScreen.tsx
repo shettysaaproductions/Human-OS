@@ -213,37 +213,47 @@ export const EmotionalBrainScreen = React.memo(function EmotionalBrainScreen() {
           </View>
         )}
 
-        <WeeklyGraph states={states} />
-        <EmotionHeatmap states={states} />
+        {states.length > 0 ? (
+          <>
+            <WeeklyGraph states={states} />
+            <EmotionHeatmap states={states} />
 
-        {/* Recent Moods */}
-        <Text style={[sg.sectionTitle, { marginHorizontal: 16 }]}>Recent Moods</Text>
-        {states.slice(0, 10).map((item: any) => {
-          const dateStr = item?.created_at ? new Date(item.created_at).toLocaleDateString() : '';
-          return (
-            <View key={item.id} style={[sg.card, { borderColor: `${getMoodColor(item.mood)}33` }]}>
-              <View style={sg.cardRow}>
-                <Text style={[sg.moodText, { color: getMoodColor(item.mood) }]}>{item.mood}</Text>
-                <View style={sg.intensityBar}>
-                  <View style={[sg.intensityFill, { width: `${(Math.min(10, item.intensity || 0) / 10) * 100}%`, backgroundColor: getMoodColor(item.mood) }]} />
+            {/* Recent Moods */}
+            <Text style={[sg.sectionTitle, { marginHorizontal: 16 }]}>Recent Moods</Text>
+            {states.slice(0, 10).map((item: any) => {
+              const dateStr = item?.created_at ? new Date(item.created_at).toLocaleDateString() : '';
+              return (
+                <View key={item.id} style={[sg.card, { borderColor: `${getMoodColor(item.mood)}33` }]}>
+                  <View style={sg.cardRow}>
+                    <Text style={[sg.moodText, { color: getMoodColor(item.mood) }]}>{item.mood}</Text>
+                    <View style={sg.intensityBar}>
+                      <View style={[sg.intensityFill, { width: `${(Math.min(10, item.intensity || 0) / 10) * 100}%`, backgroundColor: getMoodColor(item.mood) }]} />
+                    </View>
+                    <Text style={sg.intensityNum}>{item.intensity || 0}/10</Text>
+                  </View>
+                  {item.notes ? <Text style={sg.notes}>{item.notes}</Text> : null}
+                  {dateStr ? <Text style={sg.dateText}>{dateStr}</Text> : null}
                 </View>
-                <Text style={sg.intensityNum}>{item.intensity || 0}/10</Text>
-              </View>
-              {item.notes ? <Text style={sg.notes}>{item.notes}</Text> : null}
-              {dateStr ? <Text style={sg.dateText}>{dateStr}</Text> : null}
-            </View>
-          );
-        })}
-
-        {states.length === 0 && (
+              );
+            })}
+          </>
+        ) : (
           <View style={sg.lifestyleCard}>
             <View style={sg.lifestyleIconWrap}>
               <Text style={sg.lifestyleEmoji}>🌱</Text>
             </View>
             <Text style={sg.lifestyleTitle}>Emotional Well-being Tracking</Text>
             <Text style={sg.lifestyleSubtitle}>
-              Nova observes tone, gratitude, and stress cues from your conversations to build an emotional rhythm graph and protect your work-life harmony.
+              Nova observes tone, gratitude, and stress cues from your natural conversations to build an emotional rhythm graph and protect your work-life harmony.
             </Text>
+
+            <View style={sg.lifestyleQuoteBox}>
+              <Text style={sg.lifestyleQuoteLabel}>💡 TRY EXPRESSING YOUR FEELINGS IN CHAT:</Text>
+              <Text style={sg.lifestyleQuoteText}>• "Feeling super energized after morning workout and cold shower!"</Text>
+              <Text style={sg.lifestyleQuoteText}>• "Work was quite overwhelming today with back-to-back calls."</Text>
+              <Text style={sg.lifestyleQuoteText}>• "Really grateful for a calm evening with my family."</Text>
+            </View>
+
             <TouchableOpacity
               style={sg.lifestyleChatBtn}
               onPress={() => navigation.navigate('Chat')}
@@ -339,6 +349,28 @@ const sg = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     marginBottom: 16,
+  },
+  lifestyleQuoteBox: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    width: '100%',
+  },
+  lifestyleQuoteLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: '#EC4899',
+    marginBottom: 6,
+  },
+  lifestyleQuoteText: {
+    fontSize: 12,
+    color: '#D4D4D8',
+    lineHeight: 17,
+    marginBottom: 4,
   },
   lifestyleChatBtn: {
     backgroundColor: '#EC4899',

@@ -21,6 +21,24 @@ interface Goal {
   created_at: string;
 }
 
+function formatGoalDeadline(deadlineStr?: string): string {
+  if (!deadlineStr) return '';
+  const parsed = new Date(deadlineStr);
+  if (!isNaN(parsed.getTime()) && /^\d{4}/.test(deadlineStr)) {
+    return parsed.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  return deadlineStr;
+}
+
+function formatGoalCreated(createdStr?: string): string {
+  if (!createdStr) return '';
+  const parsed = new Date(createdStr);
+  if (!isNaN(parsed.getTime())) {
+    return `Added ${parsed.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}`;
+  }
+  return `Added ${createdStr}`;
+}
+
 function ProgressRing({ progress, color, size = 60 }: { progress: number; color: string; size?: number }) {
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
@@ -152,10 +170,10 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
 
               <View style={gr.goalFooter}>
                 {deadline ? (
-                  <Text style={gr.deadline}>📅 {new Date(deadline).toLocaleDateString()}</Text>
+                  <Text style={gr.deadline}>📅 {formatGoalDeadline(deadline)}</Text>
                 ) : <View />}
                 {item.created_at ? (
-                  <Text style={gr.addedDate}>Added {new Date(item.created_at).toLocaleDateString()}</Text>
+                  <Text style={gr.addedDate}>{formatGoalCreated(item.created_at)}</Text>
                 ) : null}
               </View>
             </View>

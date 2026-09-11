@@ -147,10 +147,22 @@ function inferDomain(item: any): string {
   if (item.domain && DOMAIN_META_MAP[item.domain]) return item.domain;
   const k = (item.key || '').toLowerCase();
   const mt = (item.memory_type || '').toLowerCase();
-  if (mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family/.test(k)) return 'family';
-  if (mt === 'work' || /company|office|schedule|hours|days|timing|candidate|job|work/.test(k)) return 'work';
-  if (mt === 'goals' || /goal|target|passion|vision|ambition/.test(k)) return 'goals';
-  if (mt === 'preferences' || mt === 'lifestyle' || /favourite|food|drink|beverage|color|routine/.test(k)) return 'lifestyle';
+  if (
+    mt === 'family' ||
+    /wife|son|mother|father|daughter|sister|brother|baby|child|family|husband|partner|pet|dog|cat|bird|puppy|kitten|cousin|uncle|aunt/.test(k)
+  ) return 'family';
+  if (
+    mt === 'work' ||
+    /company|office|schedule|hours|days|timing|candidate|job|work|project|repo|app|software|client|stack|career|colleague|coworker|mentor/.test(k)
+  ) return 'work';
+  if (
+    mt === 'goals' ||
+    /goal|target|passion|vision|ambition|marathon|milestone|deadline|aim|sprint/.test(k)
+  ) return 'goals';
+  if (
+    mt === 'preferences' || mt === 'lifestyle' ||
+    /favourite|food|drink|beverage|color|routine|habit|gym|workout|fitness|diet|sleep|car|bike|vehicle|guitar|piano|music|travel|trip|doctor|health|hobby|sport/.test(k)
+  ) return 'lifestyle';
   return 'identity';
 }
 
@@ -194,6 +206,24 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
   const toggleWardrobe = useCallback((id: string) => {
     setExpandedWardrobes(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
+
+  // Auto-expand wardrobes whose traits match active search query
+  useEffect(() => {
+    if (searchQuery.trim() && data?.entityWardrobes) {
+      const q = searchQuery.toLowerCase();
+      const autoExp: Record<string, boolean> = {};
+      data.entityWardrobes.forEach((w: any) => {
+        const hasTrait = (w.traits || []).some((t: any) =>
+          String(t.label || '').toLowerCase().includes(q) ||
+          String(t.value || '').toLowerCase().includes(q)
+        );
+        if (hasTrait) autoExp[w.id] = true;
+      });
+      if (Object.keys(autoExp).length > 0) {
+        setExpandedWardrobes(prev => ({ ...prev, ...autoExp }));
+      }
+    }
+  }, [searchQuery, data]);
 
   const filteredWardrobes = useMemo(() => {
     if (!data?.entityWardrobes) return [];
@@ -277,6 +307,20 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
     return list;
   }, [data, searchQuery, selectedType, historyExpanded]);
 
+  const confirmDelete = useCallback((item: any) => {
+    Alert.alert('Delete Memory?', 'Are you sure you want to archive this memory? It will be moved to History.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+         try {
+           await api.delete(`/memories/${item.id}`);
+           fetchMemories();
+         } catch (err) {
+           Alert.alert('Error', 'Failed to delete memory.');
+         }
+      }}
+    ]);
+  }, []);
+
   const handleLongPress = useCallback((item: any) => {
     if (item.isWorkingContext) return; // Working context managed ephemerally
     Alert.alert(
@@ -292,7 +336,7 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
         { text: 'Delete', style: 'destructive', onPress: () => confirmDelete(item) }
       ]
     );
-  }, []);
+  }, [confirmDelete]);
 
   const handleLongPressTrait = useCallback((trait: any, _wardrobe: any) => {
     if (trait.isWorkingContext) return;
@@ -302,42 +346,49 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Edit', onPress: () => {
-            setEditMemory({ id: trait.sourceMemoryId || trait.id, key: trait.key, value: trait.value });
+            setEditMemory({
+              id: trait.sourceMemoryId || trait.id,
+              sourceMemoryId: trait.sourceMemoryId,
+              key: trait.key,
+              value: trait.value
+            });
             setEditValue(trait.value);
             setEditModalVisible(true);
+        }},
+        { text: 'Delete', style: 'destructive', onPress: () => {
+            const memoryId = trait.sourceMemoryId || (data?.currentMemories?.find((m: any) => m.key?.toLowerCase() === trait.key?.toLowerCase())?.id);
+            if (memoryId) {
+              confirmDelete({ id: memoryId, key: trait.key, label: trait.label });
+            } else {
+              Alert.alert('Notice', 'This trait is part of an integrated wardrobe. You can edit its value instead.');
+            }
         }}
       ]
     );
-  }, []);
-
-  const confirmDelete = useCallback((item: any) => {
-    Alert.alert('Delete Memory?', 'Are you sure you want to archive this memory? It will be moved to History.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-         try {
-           await api.delete(`/memories/${item.id}`);
-           fetchMemories();
-         } catch (err) {
-           Alert.alert('Error', 'Failed to delete memory.');
-         }
-      }}
-    ]);
-  }, []);
+  }, [data, confirmDelete]);
 
   const saveEdit = async () => {
     if (!editMemory || !editValue.trim()) return;
     setIsSaving(true);
     try {
-      if (editMemory.id && !editMemory.id.startsWith('trait-')) {
-        await api.patch(`/memories/${editMemory.id}`, { value: editValue.trim() });
-      } else if (editMemory.key) {
-        const match = data?.currentMemories?.find((m: any) => m.key === editMemory.key);
+      let targetId = editMemory.sourceMemoryId;
+      if (!targetId && editMemory.id && !String(editMemory.id).startsWith('trait-')) {
+        targetId = editMemory.id;
+      }
+      if (!targetId && editMemory.key) {
+        const match = data?.currentMemories?.find((m: any) => m.key?.toLowerCase() === editMemory.key?.toLowerCase());
         if (match?.id) {
-          await api.patch(`/memories/${match.id}`, { value: editValue.trim() });
+          targetId = match.id;
         }
       }
-      setEditModalVisible(false);
-      fetchMemories();
+
+      if (targetId) {
+        await api.patch(`/memories/${targetId}`, { value: editValue.trim() });
+        setEditModalVisible(false);
+        fetchMemories();
+      } else {
+        Alert.alert('Error', 'Unable to resolve memory record for update.');
+      }
     } catch (err) {
       Alert.alert('Error', 'Failed to update memory.');
     } finally {

@@ -43,7 +43,7 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<TimelineItem[]>([]);
-  const [filter, setFilter] = useState<'all' | 'moment' | 'episodic'>('all');
+  const [filter, setFilter] = useState<'all' | 'moment' | 'episodic' | 'reflection'>('all');
 
   useEffect(() => { fetchTimeline(); }, []);
 
@@ -100,21 +100,21 @@ export const LifeTimelineScreen = React.memo(function LifeTimelineScreen() {
           <Text style={lt.statLabel}>🧠 Memories</Text>
         </View>
         <View style={lt.statCard}>
-          <Text style={[lt.statNum, { color: '#06B6D4' }]}>{data.length}</Text>
-          <Text style={lt.statLabel}>📅 Total</Text>
+          <Text style={[lt.statNum, { color: '#06B6D4' }]}>{data.filter(d => d.type === 'reflection').length}</Text>
+          <Text style={lt.statLabel}>📖 Reflections</Text>
         </View>
       </View>
 
       {/* Filter tabs */}
       <View style={lt.filterRow}>
-        {(['all', 'moment', 'episodic'] as const).map(f => (
+        {(['all', 'moment', 'episodic', 'reflection'] as const).map(f => (
           <TouchableOpacity
             key={f}
             style={[lt.filterBtn, filter === f && lt.filterBtnActive]}
             onPress={() => setFilter(f)}
           >
             <Text style={[lt.filterText, filter === f && lt.filterTextActive]}>
-              {f === 'all' ? 'All' : f === 'moment' ? 'Moments' : 'Memories'}
+              {f === 'all' ? 'All' : f === 'moment' ? 'Moments' : f === 'episodic' ? 'Memories' : 'Reflections'}
             </Text>
           </TouchableOpacity>
         ))}

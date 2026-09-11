@@ -11,6 +11,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, Easing
 } from 'react-native-reanimated';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../store/useAuthStore';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const GRAPH_HEIGHT = SCREEN_HEIGHT - 170;
@@ -89,10 +90,22 @@ const DEPT_ANGLES: Record<string, number> = {
 function inferDomain(rawKey?: string, memoryType?: string): string {
   const k = (rawKey || '').toLowerCase();
   const mt = (memoryType || '').toLowerCase();
-  if (k.includes('son_age') || k.includes('child_age') || k.includes('baby') || mt === 'family' || /wife|son|mother|father|daughter|sister|brother|baby|child|family|cook/.test(k)) return 'family';
-  if (mt === 'work' || /company|office|schedule|hours|days|timing|candidate|job|work|business|kitchen/.test(k)) return 'work';
-  if (mt === 'goals' || /goal|target|passion|vision|ambition/.test(k)) return 'goals';
-  if (mt === 'preferences' || mt === 'lifestyle' || /favourite|food|drink|beverage|color|routine/.test(k)) return 'lifestyle';
+  if (
+    mt === 'family' ||
+    /wife|son|mother|father|daughter|sister|brother|baby|child|family|husband|partner|pet|dog|cat|bird|puppy|kitten|cousin|uncle|aunt|cook/.test(k)
+  ) return 'family';
+  if (
+    mt === 'work' ||
+    /company|office|schedule|hours|days|timing|candidate|job|work|business|kitchen|project|repo|app|software|client|stack|career|colleague|coworker|mentor/.test(k)
+  ) return 'work';
+  if (
+    mt === 'goals' ||
+    /goal|target|passion|vision|ambition|marathon|milestone|deadline|aim|sprint/.test(k)
+  ) return 'goals';
+  if (
+    mt === 'preferences' || mt === 'lifestyle' ||
+    /favourite|food|drink|beverage|color|routine|habit|gym|workout|fitness|diet|sleep|car|bike|vehicle|guitar|piano|music|travel|trip|doctor|health|hobby|sport/.test(k)
+  ) return 'lifestyle';
   return 'identity';
 }
 
@@ -184,7 +197,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
   // 1. Central Sun (Core User)
   const rawCore = rawNodes.find(n => n && (n.id === 'user-core' || n.entity_type === 'self'));
-  const coreName = rawCore?.name || 'Saa';
+  const user = useAuthStore.getState().user;
+  const coreName = (rawCore?.name && rawCore.name !== 'Saa')
+    ? rawCore.name
+    : (user?.preferred_name || user?.name || rawCore?.name || 'You');
   const coreNode: GraphNode = {
     id: 'user-core',
     name: coreName,
@@ -271,8 +287,11 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     // Partition members with domain-aware entity linking
     for (const mem of members) {
       const k = (mem.raw_key || mem.id || '').toLowerCase();
+      const cleanK = k.replace(/^mem-|^wm-/, '');
+      const parts = cleanK.split('_');
+
       if (d === 'family') {
-        if (k.includes('tiku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
+        if (k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
           mem.hierarchyLevel = 3;
           mem.parentEntityId = 'mem-son_name';
           rawStemItems.push(mem);
@@ -284,7 +303,46 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
           rawStemItems.push(mem);
           continue;
         }
+        if (cleanK.startsWith('daughter_') && cleanK !== 'daughter_name') {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-daughter_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+        if (cleanK.startsWith('father_') && cleanK !== 'father_name') {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-father_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+        if (cleanK.startsWith('mother_') && cleanK !== 'mother_name') {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-mother_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+        if (cleanK.startsWith('husband_') && cleanK !== 'husband_name') {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-husband_name';
+          rawStemItems.push(mem);
+          continue;
+        }
+        if (cleanK.startsWith('partner_') && cleanK !== 'partner_name') {
+          mem.hierarchyLevel = 3;
+          mem.parentEntityId = 'mem-partner_name';
+          rawStemItems.push(mem);
+          continue;
+        }
       }
+
+      // Dynamic multi-segment keys (e.g. pet_coco_breed, project_helios_stack, friend_rohit_job)
+      if (parts.length >= 3) {
+        mem.hierarchyLevel = 3;
+        mem.parentEntityId = `mem-${parts[0]}_${parts[1]}`;
+        rawStemItems.push(mem);
+        continue;
+      }
+
       if (mem.hierarchyLevel === 3 || (mem.parentEntityId && mem.parentEntityId !== hubId && mem.parentEntityId !== 'user-core')) {
         rawStemItems.push(mem);
       } else {
@@ -384,6 +442,21 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
           return bk.includes('wife') || bk.includes('sakshi');
         });
         if (foundWife) pId = foundWife.id;
+      } else if (pId === 'mem-daughter_name') {
+        const found = branchItems.find(b => (b.raw_key || b.name || '').toLowerCase().includes('daughter'));
+        if (found) pId = found.id;
+      } else if (pId === 'mem-father_name') {
+        const found = branchItems.find(b => (b.raw_key || b.name || '').toLowerCase().includes('father'));
+        if (found) pId = found.id;
+      } else if (pId === 'mem-mother_name') {
+        const found = branchItems.find(b => (b.raw_key || b.name || '').toLowerCase().includes('mother'));
+        if (found) pId = found.id;
+      } else if (pId === 'mem-husband_name') {
+        const found = branchItems.find(b => (b.raw_key || b.name || '').toLowerCase().includes('husband'));
+        if (found) pId = found.id;
+      } else if (pId === 'mem-partner_name') {
+        const found = branchItems.find(b => (b.raw_key || b.name || '').toLowerCase().includes('partner'));
+        if (found) pId = found.id;
       } else if (pId) {
         const foundBranch = branchItems.find(b => b.id === pId || b.raw_key === pId || (b.raw_key && pId.includes(b.raw_key)));
         if (foundBranch) pId = foundBranch.id;
@@ -616,7 +689,71 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
         relation = (k.includes('occupat') || k.includes('job')) ? 'OCCUPATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = "Detail stem of Mother";
+      } else if (k.startsWith('daughter_') && allKeys.has('daughter_name')) {
+        parentId = 'mem-daughter_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Daughter";
+      } else if (k.startsWith('husband_') && allKeys.has('husband_name')) {
+        parentId = 'mem-husband_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Husband";
+      } else if (k.startsWith('partner_') && allKeys.has('partner_name')) {
+        parentId = 'mem-partner_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Partner";
+      } else if (k.startsWith('sister_') && allKeys.has('sister_name')) {
+        parentId = 'mem-sister_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Sister";
+      } else if (k.startsWith('brother_') && allKeys.has('brother_name')) {
+        parentId = 'mem-brother_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = "Detail stem of Brother";
       }
+    }
+
+    // Dynamic multi-segment keys (e.g. pet_coco_breed, project_helios_stack, friend_rohit_job)
+    const cleanKey = k.replace(/^mem-|^wm-/, '');
+    const parts = cleanKey.split('_');
+    if (parts.length >= 3) {
+      const dynEntityKey = `mem-${parts[0]}_${parts[1]}`;
+      if (!ids.has(dynEntityKey)) {
+        const entityName = parts[1].replace(/\b\w/g, c => c.toUpperCase());
+        rawNodes.push({
+          id: dynEntityKey,
+          raw_key: `${parts[0]}_${parts[1]}`,
+          name: entityName,
+          value: `${entityName} · Entity Branch`,
+          department: d,
+          entity_type: parts[0],
+          parentEntityId: `dept-${d}`,
+          hierarchyLevel: 2
+        });
+        ids.add(dynEntityKey);
+        rawEdges.push({
+          id: `edge-dept-${d}-${dynEntityKey}`,
+          source: `dept-${d}`,
+          target: dynEntityKey,
+          relation: 'ENTITY_BRANCH',
+          edgeType: 'ENTITY_BRANCH',
+          explanation: `Entity branch for ${entityName}`
+        });
+      }
+      parentId = dynEntityKey;
+      hierarchyLevel = 3;
+      edgeType = 'ATTRIBUTE_STEM';
+      relation = parts.slice(2).join('_').toUpperCase();
+      explanation = `Detail stem of ${parts[1]}`;
     }
 
     // Work Stems
