@@ -191,7 +191,7 @@ function shouldExtractShortTermMemory(message: string): boolean {
 export const chatRouter: import('express').Router = Router();
 
 const ChatMessageSchema = z.object({
-  message: z.string().min(1).max(4000),
+  message: z.string().max(4000).optional().default(''),
   client_message_id: z.string().optional(),
   reply_to_id: z.string().optional(),
   reply_to_content: z.string().optional(),
@@ -209,7 +209,7 @@ export interface ChatMessageInput {
 }
 
 const ChatSchema = z.object({
-  message: z.string().min(1).max(4000).optional(),
+  message: z.string().max(4000).optional().default(''),
   messages: z.array(ChatMessageSchema).optional(),
   conversation_id: z.string().uuid().optional(),
   language: z.enum(['en', 'hi', 'auto']).optional().default('auto'),
@@ -219,8 +219,8 @@ const ChatSchema = z.object({
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
   client_message_id: z.string().optional(),
-}).refine(data => data.message || (data.messages && data.messages.length > 0), {
-  message: "Either 'message' or 'messages' must be provided",
+}).refine(data => (data.message && data.message.trim().length > 0) || (data.messages && data.messages.length > 0) || !!data.image_base64, {
+  message: "Either 'message', 'messages', or an attached image must be provided",
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -548,10 +548,9 @@ function sanitizeMarkdown(raw: string): string {
     processed = processed.replace(p, '');
   }
 
-  // ── Strip leaked code blocks (e.g., ```json) ──────────────────────────────
-  // In WhatsApp mode, Nova should never send code blocks. These are usually
-  // internal monologues or JSON tool calls that leaked out.
-  processed = processed.replace(/```[a-z]*\s*[\s\S]*?(?:```|$)/gi, '');
+  // ── Strip leaked internal tool blocks (e.g., ```json with subconscious_actions) ─
+  // Genuine programming code blocks (python, js, sql, etc.) are preserved intact.
+  processed = processed.replace(/```(?:json|thought|internal|action|subconscious_actions)?\s*\{[\s\S]*?"(?:subconscious_actions|action|tool)"[\s\S]*?\}(?:```|$)/gi, '');
 
   const lines = processed.split('\n');
   const cleaned = lines.map(line => {
@@ -567,11 +566,11 @@ function sanitizeMarkdown(raw: string): string {
       result = '| ' + sanitizedParts.filter((_, i) => i > 0 && i < parts.length - 1).join(' | ') + ' |';
       return result;
     }
-    // Non-table lines: strip HTML (including unclosed) and fix escaped pipes
+    // Non-table lines: strip HTML tags and fix escaped pipes, preserving blockquotes (>) and mathematical inequalities
     return line
       .replace(/<br\s*\/?>\s*/gi, '\n')
-      .replace(/<[a-zA-Z\/][^>]*/g, '')
-      .replace(/>/g, '')
+      .replace(/<[a-zA-Z\/][^>]*>/g, '')
+      .replace(/<[a-zA-Z\/][^>]*$/g, '')
       .replace(/\\\|/g, '|');
   });
   return cleaned.join('\n');
@@ -604,16 +603,16 @@ chatRouter.post(
       let normalizedMessages: ChatMessageInput[] = [];
       if (messages && messages.length > 0) {
         normalizedMessages = messages;
-      } else if (message) {
+      } else if ((message && message.trim().length > 0) || image_base64) {
         normalizedMessages = [{
-          message,
+          message: message || '',
           client_message_id,
           reply_to_id,
           reply_to_content,
           image_base64
         }];
       } else {
-        throw new ValidationError("Either 'message' or 'messages' must be provided");
+        throw new ValidationError("Either 'message', 'messages', or an attached image must be provided");
       }
 
       for (const msg of normalizedMessages) {
@@ -1074,7 +1073,13 @@ chatRouter.post(
         }
       
       // ── UNIFIED PARALLEL FETCH (Phase 1 Latency Optimization) ──
-      const keywords = extractKeywords(effectiveMessage);
+      // Clean effectiveMessage of prompt decorations so memory keyword search targets actual user message
+      const cleanMsgForKeywords = effectiveMessage
+        .replace(/\[User attached an image showing:[\s\S]*?\]/gi, '')
+        .replace(/\[Replying to:[\s\S]*?\]/gi, '')
+        .replace(/\[SYSTEM:[\s\S]*?\]/gi, '')
+        .trim();
+      const keywords = extractKeywords(cleanMsgForKeywords || effectiveMessage);
       const profileCacheKey = `profile:${userId}`;
       const wmCacheKey = `working_memory:${userId}`;
       const cachedProfile = cache.get<{ preferred_name: string; companion_personality: string; country?: string; push_token?: string; current_visual_context?: string; timezone_offset?: number }>(profileCacheKey);
@@ -1910,11 +1915,9 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
         'Yaar, thoda technical glitch',
         'kuch technical issue aa gaya',
         'Yaar, thoda slow chal raha hai server',
-        'Thodi der mein phir try karo',
-        'Hmm... mujhe thoda sochne de'
-        // NOTE: the content-policy reply ('Acha, is topic par main jyada bol nahi sakti...')
-        // is intentionally NOT in this list — it is a legitimate user-facing reply and
-        // must be SAVED+pushed in async mode so the user always gets a bubble (zero-drop).
+        'Thodi der mein phir try karo'
+        // NOTE: FALLBACK_REPLY ('Hmm... mujhe thoda sochne de...') must NOT be in this list
+        // so it gets saved to chat_history and shown in the app when the provider times out.
       ];
       const isFallbackReply = REJECT_PREFIXES.some(p => rawReply.includes(p));
 
@@ -2036,7 +2039,6 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
           // 'proactive_<ts>' id (it is not a uuid and the reply_to_id column is uuid),
           // which otherwise makes every insert fail and fall into the emergency path.
           const replyTargetId = is_proactive ? null : userMessageId;
-          const replyTargetContent = is_proactive ? null : primaryMessage.substring(0, 100);
 
           const rowData = {
             user_id: userId,
@@ -2044,7 +2046,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
             role: 'assistant',
             content: msgText,
             reply_to_id: idx === 0 ? replyTargetId : null,
-            reply_to_content: idx === 0 ? replyTargetContent : null,
+            reply_to_content: null,
             // P0-C: causal attribution — this is a direct conversational reply
             source_type: 'conversational',
             meta: idx === finalBubbles.length - 1 ? {

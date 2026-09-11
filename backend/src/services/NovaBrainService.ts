@@ -135,15 +135,10 @@ export function sanitizeReply(reply: string): string {
     .replace(/\[\s*Replying to\s*:[^\]]*\]\s*/gi, '')
     .trim();
 
-  // --- Nuke entire reply if it is clearly a structured menu/report ---------------
-  // If the reply has 3+ lines that are bullet/numbered/lettered menu items,
-  // it is a structured report, NOT a human text. Kill everything after the first
-  // sentence and force the user to get at most one human line.
-  const menuLineCount = (text.match(/^[\s]*(?:[-•*]|\d+[.)]\s|[A-D][.)]\s)/gm) || []).length;
-  if (menuLineCount >= 3) {
-    // Keep only the first real sentence (before any list starts)
-    const firstSentenceMatch = text.match(/^[^•\n*\-\d\[A-D][^\n]{10,}[.!?]/);
-    text = firstSentenceMatch ? firstSentenceMatch[0] : text.split('\n')[0];
+  // --- Strip robotic multiple-choice option menus (A) B) C) D) hallucinated menus) ---
+  const letteredMenuMatches = text.match(/^[\s]*[A-D][.)]\s+[^\n]*/gm);
+  if (letteredMenuMatches && letteredMenuMatches.length >= 3) {
+    text = text.replace(/^[\s]*[A-D][.)]\s+[^\n]*/gm, '').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   text = text

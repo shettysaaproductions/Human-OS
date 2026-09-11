@@ -25,6 +25,8 @@ export class MessageFormatter {
   static addEmoji(text: string, emotion: string): string {
     // Don't add emoji if text already has emoji
     if (/[\u{1F600}-\u{1F64F}]/u.test(text)) return text;
+    // Don't inject emojis into code blocks, markdown tables, or URLs
+    if (text.includes('```') || text.trim().startsWith('|') || /https?:\/\//i.test(text)) return text;
     
     const emojiMap: Record<string, string[]> = {
       joy: ['😊', '✨', '🎉', '💫', '😄'],
