@@ -16,12 +16,17 @@ const KEY_LABELS: Record<string, string> = {
   father_nickname: "Father's nickname",
   wife_name: "Wife's name",
   wife_nickname: "Wife's nickname",
+  wife_birth_date: "Wife's birth date",
   husband_name: "Husband's name",
   husband_nickname: "Husband's nickname",
   son_name: "Son's name",
   son_nickname: "Son's nickname",
+  son_birth_date: "Son's birth date",
+  son_age: "Son's age",
   daughter_name: "Daughter's name",
   daughter_nickname: "Daughter's nickname",
+  daughter_birth_date: "Daughter's birth date",
+  daughter_age: "Daughter's age",
   sister_name: "Sister's name",
   sister_nickname: "Sister's nickname",
   brother_name: "Brother's name",
@@ -50,12 +55,17 @@ const KEY_CATEGORIES: Record<string, 'Personal' | 'Family' | 'Work' | 'Preferenc
   father_nickname: 'Family',
   wife_name: 'Family',
   wife_nickname: 'Family',
+  wife_birth_date: 'Family',
   husband_name: 'Family',
   husband_nickname: 'Family',
   son_name: 'Family',
   son_nickname: 'Family',
+  son_birth_date: 'Family',
+  son_age: 'Family',
   daughter_name: 'Family',
   daughter_nickname: 'Family',
+  daughter_birth_date: 'Family',
+  daughter_age: 'Family',
   sister_name: 'Family',
   sister_nickname: 'Family',
   brother_name: 'Family',
@@ -77,7 +87,7 @@ const KEY_CATEGORIES: Record<string, 'Personal' | 'Family' | 'Work' | 'Preferenc
 };
 
 function getLabel(canonicalKey: string, value?: string): string {
-  if (canonicalKey === 'birth_date' && value && /^\s*\d+\s*(?:months?|mahine|years?|saal|yo|days?|old)\b/i.test(value)) {
+  if ((canonicalKey === 'birth_date' || canonicalKey === 'son_birth_date' || canonicalKey === 'daughter_birth_date') && value && /^\s*\d+\s*(?:months?|mahine|years?|saal|yo|days?|old)\b/i.test(value)) {
     return 'Age';
   }
   return KEY_LABELS[canonicalKey] || canonicalKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());

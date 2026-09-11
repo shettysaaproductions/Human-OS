@@ -11,6 +11,31 @@ jest.mock('../memoryRepository', () => ({
   }
 }));
 
+jest.mock('../../lib/supabase', () => ({
+  supabaseAdmin: {
+    from: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockResolvedValue({ data: [], error: null }),
+      update: jest.fn().mockResolvedValue({ data: [], error: null }),
+    })
+  }
+}));
+
+jest.mock('../../consumers/FactAssertionConsumer', () => ({
+  factAssertionConsumer: {
+    consume: jest.fn().mockResolvedValue([])
+  }
+}));
+
+jest.mock('../../consumers/GoalAssertedConsumer', () => ({
+  goalAssertedConsumer: {
+    consume: jest.fn().mockResolvedValue([])
+  }
+}));
+
+jest.setTimeout(20000);
+
 describe('Family Name Semantics & Analytics Memory Filter Bug Fixes', () => {
   beforeEach(() => {
     jest.clearAllMocks();

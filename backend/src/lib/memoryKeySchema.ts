@@ -66,8 +66,9 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'shreshth', 'shresth',
   ],
   son_nickname: [
-    'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam',
-    'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'baby_nickname', 'child_nickname',
+    'sons_nickname', 'son_nick_name', 'bete_ka_nickname', 'bete_ka_pyar_ka_naam', 'bete_ka_nick_name',
+    'tiku', 'tiku_nickname', 'son_tiku', 'tuku', 'tuku_nickname', 'son_tuku', 'shreshth_tuku', 'tuku_shreshth',
+    'shreshth_nickname', 'shreshth_nick_name', 'son_shreshth_nickname', 'baby_nickname', 'child_nickname',
   ],
   son_age: [
     'sons_age', 'beta_age', 'bete_ki_umar', 'bete_ki_age', 'child_age',
@@ -116,9 +117,11 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   son_birth_date: [
     'son_dob', 'sons_birthday', 'sons_birth_date', 'son_birthday',
-    'sons_dob', 'child_birth_date', 'child_dob', 'tiku_birthday',
-    'tiku_dob', 'tiku_birth_date', 'shreshth_birthday', 'shreshth_dob',
-    'shreshth_birth_date', 'bete_ka_bday', 'son_bday',
+    'sons_dob', 'child_birth_date', 'child_dob', 'child_birthday',
+    'tiku_birthday', 'tiku_dob', 'tiku_birth_date',
+    'tuku_birthday', 'tuku_dob', 'tuku_birth_date',
+    'shreshth_birthday', 'shreshth_dob', 'shreshth_birth_date', 'shreshth_bday',
+    'bete_ka_bday', 'bete_ka_birthday', 'bete_ki_date_of_birth', 'son_bday', 'son_date_of_birth',
   ],
   // ── Dates: marriage ─────────────────────────────────────────────────────────
   marriage_date: [

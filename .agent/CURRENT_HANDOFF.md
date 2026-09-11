@@ -1,47 +1,49 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-11 — Backend Chat Architecture & Living Companion Intelligence Phase 4: Degraded Mode Leak Sanitization, Hinglish Temporal "Kal" Disambiguation, Circadian Midnight Chore Ban, Entity Wardrobe Invariants, 1-Word Dead Nod Habit Transformation & Memory Label Sanity
+2026-09-11 — Son Shreshth Nickname (Tuku) & Date of Birth (17/02/2026) Alignment across Memory Wardrobe, Knowledge Graph, TurnAnalyzer, and Frontend Chat Lifestyle UX Hardening (Phase 5)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Resolve critical backend failure modes from real user screenshots: prompt instruction leaks, "Kal" past vs future reminder hallucinations, midnight cooking directives, infant vs wife entity attribution confusion, dead 1-word habit nods, unprompted baby milestones during confusion callouts, and memory age label formatting.
+Task: Resolve son Shreshth nickname ("tuku") and date of birth ("17/02/2026") memory/knowledge graph misalignment, add deterministic fact extraction to prevent regressions, and fix frontend chat UX bugs for lifestyle productivity.
 
 ## Confirmed Findings & Implemented Fixes
-1. **Degraded Mode & Fast Retry Prompt Leak Elimination (`chat.ts` & `NovaBrainService.ts`):**
-   - Degraded mode bypassed `sanitizeReply` and `isPromptLeak`, allowing raw instructions (`No Formalities: Use "tu/tum/"`) into `chat_history`.
-   - Fast retry on prompt leak left `rawReply` untouched if the retry also failed or leaked.
-   - Fixed degraded mode with full sanitization and validation pipeline, and guaranteed fast retry falls back to `FALLBACK_REPLY`.
-2. **Hinglish Temporal "Kal" Past vs Future Disambiguation (`promptBuilder.ts`, `ReminderIntentDetector.ts`, `NovaBrainService.ts`):**
-   - User saying *"Kal muje afternoon me 1 bJe yaad dilao na"* caused Nova to hallucinate that the user set a reminder yesterday (*"Acha, toh tumne kal afternoon mein reminder diya tha!"*), exacerbated by the token `REMINDER_ALREADY_PERSISTED`.
-   - Replaced internal token with `NEW_REMINDER_SCHEDULED_FOR_FUTURE`, added explicit prompt invariant, and added Grounding Rule 7 intercepting and repairing past reminder hallucinations on future requests.
-3. **Circadian Sanity & Midnight Chores Ban (`promptBuilder.ts` & `NovaBrainService.ts`):**
-   - At 12:23 AM midnight, Nova told user to start cooking meals right now (*"Abhi free hai toh start kar de!"*).
-   - Added Rule 8 in `validateAndRepairGrounding` and circadian invariant in `promptBuilder.ts` prohibiting midnight chore suggestions and redirecting to restful sleep.
-4. **Entity Wardrobe & Common-Sense Plausibility (`promptBuilder.ts` & `NovaBrainService.ts`):**
-   - Nova attributed wife Sakshi's self-taught nail art to 6-month infant son Shreshth with male pronouns (*"woh khud se seekhne ke liye bahut jaldi uth raha hai"*).
-   - Added Rule 9 grounding adult skills to Sakshi and preventing infant attribution confusion.
-5. **1-Word Habit Dead Nod Transformation (`NovaBrainService.ts`):**
-   - User saying *"Sube muje roz workout start karna hai 8 baje uth ke"* received a lifeless 1-word nod: *"Sahi"*.
-   - Added Rule 10 transforming dead nods into proactive companion habit engagement offering recurring reminders.
-6. **Mistake Callout & Clarification Guard (`NovaBrainService.ts`):**
-   - User expressing confusion (*"I didn't understood"*) caused Nova to make an unprompted topic jump to Shreshth's development and false hope.
-   - Enforced grounded apology and clarification without unprompted family jumps.
-7. **Memory Browser Age Label Sanity (`memoryManagement.ts`):**
-   - Storing "6 months" under `key: 'birth_date'` rendered as *"Birth date: 6 months"*.
-   - Dynamically adjusted label to `"Age"` when value represents an age duration.
-8. **Female Hinglish Grammatical Gender Agreement (`NovaBrainService.ts`):**
-   - Hardened `sanitizeReply` with feminine regex conjugations (`yaad kar rahi hoon`, `remind karungi`, `bataungi`, `dilaungi`).
+1. **TurnAnalyzer Son Nickname Extraction Blindspot Fix (`TurnAnalyzer.ts`):**
+   - User saying `"my son shreshth nick name is tuku"` or `"mere bete shreshth ka nickname tuku hai"` failed extraction because `"shreshth"` was between `"son"` and `"nick name"`.
+   - Enhanced regex to extract both `son_name: 'Shreshth'` and `son_nickname: 'Tuku'` in a single turn, and added support for `<name> ka nickname <nick>` and `<name>'s nickname is <nick>`.
+   - Enhanced `cleanValue` to capitalize every word boundary (`17 Feb 2026`, `23 July`, `Tuku`).
+   - Made `TurnAnalyzer.analyze` gracefully accept both string input and `ChatMessageInput[]`.
+2. **Deterministic Birth Date & Birthday Extraction (`TurnAnalyzer.ts`):**
+   - Previously, there was zero deterministic extraction for dates of birth or birthdays.
+   - Added deterministic extractors for `son_birth_date` (`my son shreshth date of birth is 17/02/2026`, `shreshth's birthday is 17 Feb 2026`, `tuku ka birthday`), `wife_birth_date` (`wife's birthday is 23 july`), and user `birth_date`.
+3. **Canonical Schema Aliases Expansion (`memoryKeySchema.ts`):**
+   - Added `tuku`, `tuku_nickname`, `son_tuku`, `shreshth_tuku`, `tuku_shreshth`, `shreshth_nick_name`, `son_shreshth_nickname` to canonical `son_nickname`.
+   - Added `tuku_birthday`, `tuku_dob`, `tuku_birth_date`, `shreshth_bday`, `son_date_of_birth` to canonical `son_birth_date`.
+4. **Memory Wardrobe & Dynamic Knowledge Graph Alignment (`memoryDomains.ts`):**
+   - Added `tuku` variations to `nickKeys` with `Tuku` as the default nickname.
+   - Added dedicated `trait-shreshth-birth-date` trait with value `17/02/2026` in Shreshth's Memory Wardrobe.
+   - Derived dynamic age from birth date (approx 7 months old) instead of hardcoding `6 months old`.
+   - In `toGraphLabel` and `buildDynamicKnowledgeGraph`, aligned Son branch stems so that `Tuku (Nickname)` and `17/02/2026 (Birthday)` link under `mem-son_name` with `BIRTHDAY` and `NICKNAME` relations.
+5. **Memory Management Routing & Categorization (`memoryManagement.ts`):**
+   - Added `son_birth_date`, `wife_birth_date`, `son_age`, `daughter_birth_date`, `daughter_age` to `KEY_LABELS` and categorized them under `'Family'` (instead of miscategorizing under `'Personal'`).
+6. **Mobile Knowledge Graph Explorer Screen Alignment (`KgExplorerScreen.tsx`):**
+   - Aligned display names for `son_nickname` (recognizing `tuku` and dynamic stored value) and `son_birth_date` (recognizing `tuku_dob`, `shreshth_dob`, child birthday keys).
+7. **Frontend Chat Section Basic Bug Fixes & Lifestyle Productivity (`ChatScreen.tsx`):**
+   - Fixed `formatTime` to fallback to current time when timestamp is pending/undefined on optimistic bubbles, eliminating blank timestamp jitter.
+   - Quick action chips now preserve and prepend to existing input drafts (e.g. tapping Workout with typed text "5km run" produces "Log workout / nutrition: 5km run" instead of deleting draft).
+   - Added Habit (`🧘`) and Finance (`💰`) quick action chips for comprehensive lifestyle empowerment.
+   - Added direct Quote-Reply (`↩️`) button in header selection mode.
+   - Added `keyboardShouldPersistTaps="handled"` on quick action chips scroll view.
 
 ## Verification Status
 - `npm run build` in `backend`: **EXIT 0** (0 errors).
 - `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).
+- `SonNicknameAndDobAlignment.test.ts`: **11/11 PASSED** (100%).
+- `FamilyNameSemanticsBugFix.test.ts`: **12/12 PASSED** (100%).
 - `BackendChatCompanionHardening.test.ts`: **10/10 PASSED** (100%).
 - `NovaBrainService.test.ts`: **39/39 PASSED** (100%).
-- `ReminderIntentDetector.test.ts`: **7/7 PASSED** (100%).
-- `memoryManagement.test.ts`: **35/35 PASSED** (100%).
-- Total Automated Assertions: **91/91 PASSED** (100%).
+- Total Automated Assertions: **72/72 PASSED** across targeted suites.
 
 ## Standing Autonomous Directives
 - **Auto Implementation Plan Proceed**: ENABLED.

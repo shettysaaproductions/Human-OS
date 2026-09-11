@@ -1,29 +1,39 @@
 # CURRENT TASK
 
 ## Task ID
-BACKEND-CHAT-COMPANION-INVARIANTS-PHASE4
+SON-NICKNAME-DOB-ALIGNMENT-AND-FRONTEND-CHAT-UX-PHASE5
 
 ## Objective
-Forensically audit real Nova interaction screenshots, identify all root causes of wrong/unprompted responses, and harden backend chat architecture into an autonomous, smartest living companion across diverse lifestyles:
-1. Degraded mode & fast retry prompt leak prevention (`No Formalities: Use "tu/tum/"`).
-2. Hinglish temporal "Kal" past vs future disambiguation (eliminating past reminder hallucination and updating directive phrasing).
-3. Circadian sanity & midnight chores ban (preventing 12:20 AM cooking / workout suggestions).
-4. Entity wardrobe & plausibility grounding (preventing wife Sakshi's nail art from being attributed to 6-month infant son Shreshth).
-5. 1-word habit dead-nod transformation (converting "Sahi" into proactive companion reminder offers).
-6. Mistake callout unprompted topic jump guard (preventing random baby milestones when user says "I didn't understood").
-7. Memory Browser age label sanity (`key: 'birth_date'` with `"6 months"` value displays as `"Age"`).
-8. Female Hinglish grammatical gender agreement hardening.
+1. Eliminate memory and Knowledge Graph misalignment for son Shreshth (Nickname: Tuku, Date of Birth: 17/02/2026):
+   - TurnAnalyzer deterministic fact extraction for both `son_name` and `son_nickname` from `"my son shreshth nick name is tuku"`, Hinglish variations, and `<name> ka nickname <nick>`.
+   - Deterministic birth date & birthday extraction for son (`son_birth_date`), wife (`wife_birth_date`), and user (`birth_date`).
+   - Add all `tuku` and date of birth aliases to `backend/src/lib/memoryKeySchema.ts`.
+   - Dedicated `trait-shreshth-birth-date` trait in Shreshth's Memory Wardrobe and dynamic age derivation in `memoryDomains.ts`.
+   - Dynamic Knowledge Graph tree alignment (`Tuku (Nickname)` and `17/02/2026 (Birthday)` under Son branch with `BIRTHDAY` relation).
+   - Memory Management route: add `son_birth_date`, `wife_birth_date`, `son_age` under `'Family'` category.
+   - Mobile Knowledge Graph Explorer: align display names and birthday keys.
+2. Frontend Chat Section Basic Bug Fixes & Lifestyle UX:
+   - Optimistic message timestamp stability (instant current time instead of blank jitter).
+   - Quick action chip safety (preserves & prepends to existing input drafts).
+   - Expand lifestyle productivity with Habit (`🧘`) and Finance (`💰`) quick chips.
+   - Header selection bar quote-reply (`↩️`) button.
 
 ## Scope
-- Modify `backend/src/routes/chat.ts` (degraded mode sanitization, leak retry fallback, bubble fallback).
-- Modify `backend/src/services/NovaBrainService.ts` (isPromptLeak expansion, sanitizeReply quote & gender hardening, validateAndRepairGrounding rules 7-10).
-- Modify `backend/src/services/promptBuilder.ts` (temporal reasoning, circadian sanity, entity plausibility invariants).
-- Modify `backend/src/services/ReminderIntentDetector.ts` (directive phrasing update).
-- Modify `backend/src/routes/memoryManagement.ts` (label formatting for duration values).
-- Pass all verification gates: `cd backend && npm run build` (exit 0), `cd mobile && npx tsc --noEmit` (exit 0), and 91/91 unit tests passing.
+- `backend/src/lib/memoryKeySchema.ts` (aliases for `tuku` and son birth date).
+- `backend/src/services/TurnAnalyzer.ts` (son name + nick extraction, deterministic birth date extraction, cleanValue word capitalization).
+- `backend/src/lib/memoryDomains.ts` (Shreshth wardrobe dedicated birth date, dynamic age, KG labels and tree branches).
+- `backend/src/routes/memoryManagement.ts` (KEY_LABELS and KEY_CATEGORIES for family birth dates and age).
+- `mobile/src/screens/analytics/KgExplorerScreen.tsx` (tuku nickname and birth date display alignment).
+- `mobile/src/screens/ChatScreen.tsx` (optimistic timestamp stability, quick action draft prepending, habit/finance chips, header quote-reply).
+- `backend/src/services/__tests__/SonNicknameAndDobAlignment.test.ts` (11 unit tests).
 
-## Approved Code
-All changes pass `cd backend && npm run build` (code 0), `cd mobile && npx tsc --noEmit` (code 0), and all 91 automated unit tests (code 0).
+## Verification Gates Passed
+- `npm run build` in `backend`: EXIT 0 (0 errors).
+- `npx tsc --noEmit` in `mobile`: EXIT 0 (0 errors).
+- `SonNicknameAndDobAlignment.test.ts`: 11/11 PASSED (100%).
+- `FamilyNameSemanticsBugFix.test.ts`: 12/12 PASSED (100%).
+- `BackendChatCompanionHardening.test.ts`: 10/10 PASSED (100%).
+- `NovaBrainService.test.ts`: 39/39 PASSED (100%).
 
 ## Autonomous Deployment
 Standing user directive: automatically commit, merge, and push to `origin main`.

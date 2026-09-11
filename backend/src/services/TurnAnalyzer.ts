@@ -112,11 +112,16 @@ const MASCULINE_RELATIONS = ['father_name', 'father_nickname', 'brother_name', '
 const ALL_PERSON_RELATIONS = [...FEMININE_RELATIONS, ...MASCULINE_RELATIONS];
 
 export class TurnAnalyzer {
-  public static analyze(messages: ChatMessageInput[], context?: TurnContext): TurnAnalysisResult {
+  public static analyze(messages: ChatMessageInput[] | string, context?: TurnContext): TurnAnalysisResult {
     const units: SemanticUnit[] = [];
     let order = 0;
+    const msgList: ChatMessageInput[] = typeof messages === 'string'
+      ? [{ message: messages }]
+      : Array.isArray(messages)
+      ? messages
+      : [];
 
-    for (const msg of messages) {
+    for (const msg of msgList) {
       // Strict USER-only: filter out explicit non-user roles (assistant, system), allow undefined for mock/ingress
       if ((msg as any).role && (msg as any).role !== 'user') continue;
       if (!msg.message) continue;
@@ -382,7 +387,7 @@ export class TurnAnalyzer {
 
     // P0-1: Deterministic state-affecting analysis MUST use USER messages only.
     // Filter out explicit non-user roles (assistant, system), allow undefined for mock/ingress
-    const userFullText = messages
+    const userFullText = msgList
       .filter(m => !(m as any).role || (m as any).role === 'user')
       .map(m => m.message || '')
       .join(' ');
@@ -840,15 +845,63 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
-    // Son nickname
-    m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
-        lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)\s+ko\s+pyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulate|bulati|rakha|bolte|hai)\b/i);
-    if (m) facts.push({ key: 'son_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    // Son nickname & Son name combined extraction
+    // Supports:
+    // - "my son shreshth nick name is tuku"
+    // - "mere bete shreshth ka nickname tuku hai"
+    // - "my son's nickname is tuku"
+    // - "shreshth ka nickname tuku hai"
+    const sonWithBothMatch = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+([a-zA-Z]+)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|to\s+|rakha\s+hai\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (sonWithBothMatch) {
+      const sName = this.cleanValue(sonWithBothMatch[1]);
+      const sNick = this.cleanValue(sonWithBothMatch[2]);
+      if (sName && !this.isStopPronoun(sName)) {
+        facts.push({ key: 'son_name', value: sName, text, isProtected: isExplicitRemember, factClass });
+      }
+      if (sNick && !this.isStopPronoun(sNick)) {
+        facts.push({ key: 'son_nickname', value: sNick, text, isProtected: isExplicitRemember, factClass });
+      }
+    }
 
-    // Son name
+    // Direct son nickname if not yet extracted
     if (facts.every(f => f.key !== 'son_nickname')) {
+      const namedSonNickMatch = lower.match(/\b(shreshth|shresth)\s*(?:'s|ka|ki)?\s*(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|to\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (namedSonNickMatch) {
+        facts.push({ key: 'son_nickname', value: this.cleanValue(namedSonNickMatch[2]), text, isProtected: isExplicitRemember, factClass });
+      } else {
+        m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+            lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)\s+ko\s+pyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulate|bulati|rakha|bolte|hai)\b/i);
+        if (m) facts.push({ key: 'son_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // Son name (if not yet extracted)
+    if (facts.every(f => f.key !== 'son_name' && f.key !== 'son_nickname')) {
       m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
       if (m) facts.push({ key: 'son_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // ── Birth Dates & Anniversaries ──────────────────────────────────────────
+    // 1. Son / Shreshth / Tuku / Tiku birth date
+    const sonBdayMatch = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)?\s*(?:shreshth|shresth|tuku|tiku)?(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|kab\s+hai\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+|-)[0-9]{2,4}))(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+        lower.match(/\b(?:beta|bete|son|child|shreshth|shresth|tuku|tiku)\s+(?:was\s+)?born\s+(?:on\s+)?([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+|-)[0-9]{2,4}))(?:\s+ko|[.,;!]|$)/i);
+    if (sonBdayMatch && /\b(beta|bete|son|child|shreshth|shresth|tuku|tiku)\b/i.test(lower)) {
+      facts.push({ key: 'son_birth_date', value: this.cleanValue(sonBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 2. Wife / Sakshi birth date
+    const wifeBdayMatch = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)?\s*(?:sakshi)?(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (wifeBdayMatch && /\b(biwi|wife|patni|sakshi)\b/i.test(lower)) {
+      facts.push({ key: 'wife_birth_date', value: this.cleanValue(wifeBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 3. User birth date
+    if (facts.every(f => f.key !== 'son_birth_date' && f.key !== 'wife_birth_date')) {
+      const userBdayMatch = lower.match(/\b(?:mera|my)\s+(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+          lower.match(/\b(?:i\s+was|mai)\s+born\s+(?:on\s+)?([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))/i);
+      if (userBdayMatch) {
+        facts.push({ key: 'birth_date', value: this.cleanValue(userBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
 
     // Daughter nickname
@@ -973,7 +1026,7 @@ export class TurnAnalyzer {
 
   private static cleanValue(val: string): string {
     const trimmed = val.trim().replace(/[.,;!?]+$/, '');
-    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    return trimmed.replace(/\b[a-z]/g, c => c.toUpperCase());
   }
 
   public static buildTurnAnalysisPrompt(analysis: TurnAnalysisResult): string {

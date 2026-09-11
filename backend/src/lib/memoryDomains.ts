@@ -625,16 +625,25 @@ export function clusterMemoriesIntoWardrobes(
       }
     ];
 
-    // Nickname Tiku (Stem linked to Shreshth, never orphaned!)
-    const nickKeys = ['son_nickname', 'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'baby_nickname', 'child_nickname'];
-    let nickVal = 'Tiku';
+    // Nickname Tuku / Tiku (Stem linked to Shreshth, never orphaned!)
+    const nickKeys = [
+      'son_nickname', 'tuku', 'tuku_nickname', 'son_tuku', 'shreshth_tuku', 'tuku_shreshth',
+      'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'shreshth_nick_name', 'son_shreshth_nickname',
+      'baby_nickname', 'child_nickname'
+    ];
+    let nickVal = '';
+    let nickSourceId: string | undefined;
     for (const nk of nickKeys) {
       if (memMap.has(nk)) {
         consumedKeys.add(nk);
         const v = memMap.get(nk)?.value;
-        if (v && v.length < 30) nickVal = v;
+        if (v && v.length < 30) {
+          nickVal = v;
+          nickSourceId = memMap.get(nk)?.id;
+        }
       }
     }
+    if (!nickVal) nickVal = 'Tuku';
     traits.push({
       id: `trait-shreshth-nickname`,
       key: 'son_nickname',
@@ -642,19 +651,63 @@ export function clusterMemoriesIntoWardrobes(
       value: nickVal,
       category: 'detail',
       confidence: 'confirmed',
+      sourceMemoryId: nickSourceId,
       updatedAt: nowStr
     });
 
-    // Age / Birth Date
+    // Dedicated Birth Date Trait
+    const bdayKeys = [
+      'son_birth_date', 'son_dob', 'son_birthday', 'child_birth_date', 'child_dob', 'child_birthday',
+      'tuku_birthday', 'tuku_dob', 'tuku_birth_date', 'tiku_birthday', 'tiku_dob', 'tiku_birth_date',
+      'shreshth_birthday', 'shreshth_dob', 'shreshth_birth_date', 'shreshth_bday'
+    ];
+    let sonBdayVal: string | undefined;
+    let sonBdaySourceId: string | undefined;
+    for (const bk of bdayKeys) {
+      if (memMap.has(bk)) {
+        consumedKeys.add(bk);
+        const v = memMap.get(bk)?.value;
+        if (v) {
+          sonBdayVal = v;
+          sonBdaySourceId = memMap.get(bk)?.id;
+        }
+      }
+    }
+
+    if (sonBdayVal) {
+      traits.push({
+        id: `trait-shreshth-birth-date`,
+        key: 'son_birth_date',
+        label: 'Birth Date',
+        value: sonBdayVal,
+        category: 'milestone',
+        confidence: 'confirmed',
+        sourceMemoryId: sonBdaySourceId,
+        updatedAt: nowStr
+      });
+    }
+
+    // Age
     const sonAgeVal = memMap.get('son_age')?.value || memMap.get('child_age')?.value || memMap.get('baby_age')?.value;
     ['son_age', 'child_age', 'baby_age'].forEach(k => consumedKeys.add(k));
-    const sonBdayVal = memMap.get('son_birth_date')?.value || memMap.get('son_dob')?.value;
-    consumedKeys.add('son_birth_date');
-    consumedKeys.add('son_dob');
 
-    const ageDisplay = sonBdayVal
-      ? `6 months old (Born ${sonBdayVal})`
-      : (sonAgeVal ? (sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`) : '6 months old');
+    let ageDisplay = sonAgeVal ? (sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`) : '';
+    if (!ageDisplay && sonBdayVal) {
+      try {
+        let bDate: Date | null = null;
+        if (sonBdayVal.includes('/')) {
+          const [d, m, y] = sonBdayVal.split('/');
+          bDate = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        } else {
+          bDate = new Date(sonBdayVal);
+        }
+        if (bDate && !isNaN(bDate.getTime())) {
+          const diffMonths = Math.max(1, Math.round((new Date().getTime() - bDate.getTime()) / (1000 * 60 * 60 * 24 * 30.4375)));
+          ageDisplay = `${diffMonths} months old`;
+        }
+      } catch {}
+    }
+    if (!ageDisplay) ageDisplay = '6 months old';
 
     traits.push({
       id: `trait-shreshth-age`,
@@ -1477,7 +1530,9 @@ function toGraphLabel(key: string, value: string): string {
   // Family
   if (k === 'wife_name') return `${v} (Wife)`;
   if (k === 'son_name') return `${v} (Son)`;
-  if (k === 'son_nickname' || k.includes('tiku')) return `${v || 'Tiku'} (Nickname)`;
+  if (k === 'son_nickname' || k.includes('tiku') || k.includes('tuku')) return `${v || 'Tuku'} (Nickname)`;
+  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob')) return `${v || '17 Feb 2026'} (Birthday)`;
+  if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return `${v || '23 July'} (Birthday)`;
   if (k === 'son_age') return `${v} old (Son Age)`;
   if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) return 'Nail Artist (Skill)';
   if (k === 'father_name') return `${v} (Father)`;
@@ -1646,14 +1701,14 @@ export function buildDynamicKnowledgeGraph(
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Wife (Sakshi) in Family Tree`;
       } else if (
-        (k.startsWith('son_') || k === 'child_age' || k.startsWith('baby_') || k.includes('tiku') || k.includes('shreshth')) &&
+        (k.startsWith('son_') || k.startsWith('child_') || k.startsWith('baby_') || k.includes('tiku') || k.includes('tuku') || k.includes('shreshth')) &&
         (allKeys.has('son_name') || allKeys.has('shreshth'))
       ) {
         parentId = allKeys.has('son_name') ? 'mem-son_name' : (allItems.find(i => i.key.toLowerCase().includes('shreshth'))?.id || 'dept-family');
         hierarchyLevel = 3;
-        relation = k.includes('age') ? 'AGE' : k.includes('nick') || k.includes('tiku') ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
+        relation = (k.includes('birth') || k.includes('bday') || k.includes('dob')) ? 'BIRTHDAY' : k.includes('age') ? 'AGE' : (k.includes('nick') || k.includes('tiku') || k.includes('tuku')) ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = `Detail stem of Son (Shreshth / Tiku) in Family Tree`;
+        explanation = `Detail stem of Son (Shreshth / Tuku) in Family Tree`;
       } else if (k.startsWith('father_') && allKeys.has('father_name')) {
         parentId = 'mem-father_name';
         hierarchyLevel = 3;

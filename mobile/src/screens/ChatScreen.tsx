@@ -25,8 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
-  if (!dateString) return '';
-  const date = new Date(dateString);
+  const date = dateString ? new Date(dateString) : new Date();
   if (isNaN(date.getTime())) return '';
   let hours = date.getHours();
   const minutes = date.getMinutes();
@@ -522,6 +521,8 @@ const QUICK_ACTION_CHIPS = [
   { id: 'workout', icon: '💪', label: 'Workout', prefix: 'Log workout / nutrition: ' },
   { id: 'study', icon: '📚', label: 'Study', prefix: 'Explain simply & quiz me on: ' },
   { id: 'work', icon: '💼', label: 'Work', prefix: 'Action items & plan for: ' },
+  { id: 'habit', icon: '🧘', label: 'Habit', prefix: 'Track habit / streak: ' },
+  { id: 'finance', icon: '💰', label: 'Finance', prefix: 'Log expense / budget: ' },
   { id: 'pet', icon: '🐾', label: 'Pet Care', prefix: 'Log pet routine / symptom: ' },
   { id: 'creative', icon: '✨', label: 'Idea', prefix: 'Brainstorm 5 creative ideas for: ' },
   { id: 'routine', icon: '🌿', label: 'Routine', prefix: 'My routine today is: ' },
@@ -1285,6 +1286,18 @@ export function ChatScreen() {
                 <Text style={s.headerBtnText}>📋</Text>
               </TouchableOpacity>
               {selectedMessageIds.length === 1 && (
+                <TouchableOpacity onPress={() => {
+                  const msg = messages.find(m => m.id === selectedMessageIds[0]);
+                  if (msg) {
+                    setReplyingTo(msg);
+                    inputRef.current?.focus();
+                  }
+                  setSelectedMessageIds([]);
+                }} style={s.headerBtn}>
+                  <Text style={s.headerBtnText}>↩️</Text>
+                </TouchableOpacity>
+              )}
+              {selectedMessageIds.length === 1 && (
                 <View style={{ flexDirection: 'row', marginLeft: 8 }}>
                   {['👍', '👎', '❤️'].map(reaction => (
                     <TouchableOpacity
@@ -1593,6 +1606,7 @@ export function ChatScreen() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={s.quickActionsScroll}
           >
             {QUICK_ACTION_CHIPS.map(chip => (
@@ -1603,7 +1617,11 @@ export function ChatScreen() {
                   if (chip.isNavigation) {
                     navigation.navigate('Brain');
                   } else if (chip.prefix) {
-                    setInputText(chip.prefix);
+                    setInputText(prev => {
+                      if (!prev.trim()) return chip.prefix;
+                      if (prev.startsWith(chip.prefix)) return prev;
+                      return `${chip.prefix}${prev.trim()}`;
+                    });
                     presenceService.onTypingStart();
                     inputRef.current?.focus();
                   }

@@ -110,12 +110,12 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
 
   if (k === 'wife_name' || k === 'sakshi') return { title: v || 'Sakshi', sub: 'Wife' };
   if (k === 'son_name' || k === 'shreshth') return { title: v || 'Shreshth', sub: 'Son' };
-  if (k === 'son_nickname' || k.includes('tiku')) return { title: v || 'Tiku', sub: 'Nickname' };
+  if (k === 'son_nickname' || k.includes('tiku') || k.includes('tuku')) return { title: v || 'Tuku', sub: 'Nickname' };
   if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) {
     return { title: 'Nail Artist', sub: 'Creative Skill' };
   }
-  if (k === 'son_birth_date' || k === 'son_dob') return { title: v || '17 Feb 2026', sub: 'Birthday' };
-  if (k === 'wife_birth_date' || k === 'wife_birthday') return { title: v || '23 July', sub: 'Birthday' };
+  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('child_b') || k.includes('child_dob')) return { title: v || '17 Feb 2026', sub: 'Birthday' };
+  if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return { title: v || '23 July', sub: 'Birthday' };
   if (k === 'son_age' || k === 'child_age' || k === 'baby_age') return { title: `${v} old`, sub: 'Age' };
   if (k === 'likes_wifes_cooking') return { title: "Wife's Cooking", sub: 'Hobby / Food' };
   if (k === 'cloud_kitchen_business') return { title: 'Cloud Kitchen', sub: 'Business Plan' };
