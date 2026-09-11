@@ -28,6 +28,7 @@ import { factAssertionConsumer } from '../consumers/FactAssertionConsumer';
 import { goalAssertedConsumer } from '../consumers/GoalAssertedConsumer';
 import type { FactCorrectedEvent, SemanticEvent } from '../types/semanticEvent';
 import { isFactAsserted, isRelationshipAsserted, isGoalAsserted, isFactCorrected } from '../types/semanticEvent';
+import { classifyDomain } from '../lib/memoryDomains';
 
 // ── Legacy key→type routing (kept for backward compat with facts[] payloads) ─
 function getMemoryTypeForKey(key: string): MemoryType {
@@ -43,12 +44,11 @@ function getMemoryTypeForKey(key: string): MemoryType {
   ].includes(key)) {
     return 'family';
   }
-  if (['company_name', 'job_title', 'workplace', 'profession'].includes(key)) {
-    return 'work';
-  }
-  if (['goals', 'target', 'objective'].includes(key)) {
-    return 'goals';
-  }
+  const domainMeta = classifyDomain(key);
+  if (domainMeta.domain === 'family') return 'family';
+  if (domainMeta.domain === 'work') return 'work';
+  if (domainMeta.domain === 'goals') return 'goals';
+  if (domainMeta.domain === 'lifestyle') return 'preferences';
   return 'personal';
 }
 

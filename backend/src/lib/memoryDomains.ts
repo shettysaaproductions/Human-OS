@@ -64,31 +64,39 @@ export const DOMAIN_TAXONOMY: Record<LifeDomainKey, DomainMeta> = {
 const FAMILY_PATTERNS = [
   'wife', 'husband', 'spouse', 'partner', 'fiance', 'fiancee', 'son', 'daughter',
   'child', 'baby', 'kid', 'mother', 'father', 'mom', 'dad', 'sister', 'brother',
-  'family', 'parents', 'pet', 'dog', 'cat', 'puppy', 'kitten',
-  'bhai', 'behen', 'maa', 'papa', 'beta', 'beti', 'biwi', 'patni'
+  'family', 'parents', 'pet', 'dog', 'cat', 'puppy', 'kitten', 'bird', 'parrot', 'vet',
+  'bhai', 'behen', 'maa', 'papa', 'beta', 'beti', 'biwi', 'patni',
+  'friend', 'dost', 'mentor', 'advisor', 'doctor', 'relative', 'cousin', 'uncle', 'aunt', 'nephew', 'niece'
 ];
 
 const WORK_PATTERNS = [
   'company', 'office', 'work', 'job', 'profession', 'workplace', 'schedule',
   'timing', 'candidate', 'interview', 'hiring', 'shift', 'boss', 'client',
-  'business', 'startup', 'conviction', 'login', 'logout', 'colleague',
-  'college', 'university', 'degree', 'course', 'study', 'education', 'project', 'freelance'
+  'business', 'startup', 'conviction', 'login', 'logout', 'colleague', 'manager', 'coworker',
+  'college', 'university', 'degree', 'course', 'study', 'education', 'project', 'freelance',
+  'tech', 'stack', 'repo', 'code', 'database', 'server', 'app', 'venture', 'saas'
 ];
 
 const GOALS_PATTERNS = [
   'goal', 'target', 'objective', 'ambition', 'dream', 'passion', 'milestone',
-  'scaling', 'vision', 'future_plan', 'aspire'
+  'scaling', 'vision', 'future_plan', 'aspire', 'resolution', 'aim', 'marathon'
 ];
 
 const LIFESTYLE_PATTERNS = [
   'favourite', 'favorite', 'food', 'beverage', 'drink', 'color', 'colour',
   'street_food', 'hobby', 'hobbies', 'gym', 'workout', 'fitness', 'exercise',
-  'sleep', 'morning_routine', 'evening_routine', 'habit', 'diet', 'tea', 'coffee'
+  'sleep', 'morning_routine', 'evening_routine', 'habit', 'diet', 'tea', 'coffee',
+  'guitar', 'piano', 'instrument', 'music', 'song', 'car', 'bike', 'vehicle', 'drive',
+  'trip', 'travel', 'vacation', 'flight', 'hotel', 'destination', 'city', 'place',
+  'sport', 'badminton', 'cricket', 'football', 'running', 'cycling', 'swimming',
+  'plant', 'bonsai', 'garden', 'book', 'read', 'movie', 'film', 'cinema', 'game', 'gaming',
+  'health', 'medical', 'medicine', 'allergy', 'recipe', 'cooking'
 ];
 
 const IDENTITY_PATTERNS = [
   'name', 'preferred_name', 'birth_date', 'birthday', 'dob', 'marriage_date',
-  'anniversary', 'gender', 'age', 'important_facts', 'bio', 'identity'
+  'anniversary', 'gender', 'age', 'important_facts', 'bio', 'identity',
+  'blood_group', 'height', 'weight', 'hometown', 'nationality', 'languages'
 ];
 
 /**
@@ -98,7 +106,7 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
   const k = (rawKey || '').toLowerCase();
   const mt = (memoryType || '').toLowerCase();
 
-  // 1. Explicit family ties take top priority (even if child age or family trait)
+  // 1. Explicit family ties & personal relations take top priority (even if child age or family trait)
   if (
     k.includes('son_age') ||
     k.includes('daughter_age') ||
@@ -108,17 +116,24 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     k.startsWith('wife_') ||
     k.startsWith('husband_') ||
     k.startsWith('partner_') ||
+    k.startsWith('friend_') ||
+    k.startsWith('mentor_') ||
+    k.startsWith('doctor_') ||
     k.startsWith('pet_') ||
+    k.startsWith('dog_') ||
+    k.startsWith('cat_') ||
     k.includes('dog_') ||
     k.includes('cat_') ||
     k.startsWith('son_') ||
     k.startsWith('daughter_') ||
+    k.startsWith('sister_') ||
+    k.startsWith('brother_') ||
     k.includes('nail_art')
   ) {
     return DOMAIN_TAXONOMY.family;
   }
 
-  // 1b. Explicit work & study keys take priority over mistyped memory_type
+  // 1b. Explicit work, study & project keys take priority over mistyped memory_type
   if (
     k === 'company_name' ||
     k === 'business_name' ||
@@ -129,6 +144,11 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     k === 'hope_for_job_selection' ||
     k === 'current_company' ||
     k === 'current_office_location' ||
+    k.startsWith('project_') ||
+    k.startsWith('venture_') ||
+    k.startsWith('startup_') ||
+    k.startsWith('client_') ||
+    k.startsWith('colleague_') ||
     k.startsWith('education_') ||
     k.startsWith('university_') ||
     k.startsWith('college_')
@@ -136,30 +156,44 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     return DOMAIN_TAXONOMY.work;
   }
 
-  // 1c. Explicit lifestyle & wellness keys
+  // 1c. Explicit lifestyle, hobbies, vehicles, & wellness keys
   if (
     k.startsWith('workout_') ||
     k.startsWith('gym_') ||
     k.startsWith('diet_') ||
-    k.startsWith('sleep_')
+    k.startsWith('sleep_') ||
+    k.startsWith('guitar_') ||
+    k.startsWith('piano_') ||
+    k.startsWith('instrument_') ||
+    k.startsWith('car_') ||
+    k.startsWith('bike_') ||
+    k.startsWith('vehicle_') ||
+    k.startsWith('hobby_') ||
+    k.startsWith('sport_') ||
+    k.startsWith('plant_') ||
+    k.startsWith('book_') ||
+    k.startsWith('movie_') ||
+    k.startsWith('travel_') ||
+    k.startsWith('trip_') ||
+    k.startsWith('health_') ||
+    k.startsWith('medical_')
   ) {
     return DOMAIN_TAXONOMY.lifestyle;
   }
+
+  // 1d. Explicit goals & ambitions
   if (
-    k === 'company_name' ||
-    k === 'business_name' ||
-    k === 'work_schedule' ||
-    k === 'office_hours' ||
-    k === 'office_days' ||
-    k === 'candidates_for_job' ||
-    k === 'hope_for_job_selection' ||
-    k === 'current_company' ||
-    k === 'current_office_location'
+    k.startsWith('goal_') ||
+    k.startsWith('target_') ||
+    k.startsWith('milestone_') ||
+    k.startsWith('marathon_') ||
+    k === 'goals' ||
+    k === 'primary_goal'
   ) {
-    return DOMAIN_TAXONOMY.work;
+    return DOMAIN_TAXONOMY.goals;
   }
 
-  // 1c. Explicit identity keys take precedence over preferences memory_type
+  // 1e. Explicit identity keys take precedence over preferences memory_type
   if (k === 'preferred_name' || k === 'name' || k.includes('user_name') || k === 'birth_date' || k === 'marriage_date') {
     return DOMAIN_TAXONOMY.identity;
   }
@@ -415,11 +449,94 @@ export function synthesizeConnectedDots(
 }
 
 /**
+ * Infers the trait category for dynamic drawer attributes (sub-drawers / stems).
+ */
+export function inferTraitCategory(key: string, _value?: string): WardrobeTrait['category'] {
+  const k = (key || '').toLowerCase();
+  if (k.includes('role') || k.includes('relation') || k.includes('who') || k.endsWith('_name') || k === 'name') return 'role';
+  if (k.includes('skill') || k.includes('tech') || k.includes('stack') || k.includes('language') || k.includes('tool') || k.includes('framework')) return 'skill';
+  if (k.includes('schedule') || k.includes('time') || k.includes('hour') || k.includes('day') || k.includes('routine') || k.includes('shift') || k.includes('timing')) return 'schedule';
+  if (k.includes('goal') || k.includes('target') || k.includes('milestone') || k.includes('deadline') || k.includes('bday') || k.includes('birth') || k.includes('anniversary') || k.includes('age') || k.includes('umar')) return 'milestone';
+  if (k.includes('like') || k.includes('fav') || k.includes('pref') || k.includes('diet') || k.includes('hobby') || k.includes('passion') || k.includes('color') || k.includes('beverage') || k.includes('food')) return 'preference';
+  if (k.includes('task') || k.includes('todo') || k.includes('action') || k.includes('reminder') || k.includes('pending')) return 'task';
+  return 'detail';
+}
+
+/**
+ * Selects an aesthetic single-codepoint emoji for dynamic entity drawers based on context.
+ */
+export function selectDynamicDrawerEmoji(entityName: string, prefixType: string, key: string, value: string): string {
+  const combined = `${entityName} ${prefixType} ${key} ${value}`.toLowerCase();
+  if (/\b(dog|puppy|retriever|labrador|shepherd|hound|poodle|husky|bark)\b/i.test(combined)) return '🐶';
+  if (/\b(cat|kitten|feline|meow|persian|siamese)\b/i.test(combined)) return '🐱';
+  if (/\b(bird|parrot|cockatoo|sparrow)\b/i.test(combined)) return '🦜';
+  if (/\b(fish|aquarium|goldfish)\b/i.test(combined)) return '🐠';
+  if (/\b(pet|pets|animal|animals)\b/i.test(combined)) return '🐾';
+  if (/\b(guitar|stratocaster|telecaster|gibson|fender|acoustic|electric_guitar)\b/i.test(combined)) return '🎸';
+  if (/\b(piano|keyboard|synthesizer)\b/i.test(combined)) return '🎹';
+  if (/\b(drum|drums|percussion)\b/i.test(combined)) return '🥁';
+  if (/\b(violin|cello|flute|saxophone|trumpet|instrument|music)\b/i.test(combined)) return '🎵';
+  if (/\b(marathon|running|run|jog|sprint|athletic|runner)\b/i.test(combined)) return '🏃';
+  if (/\b(gym|workout|fitness|bench|squat|deadlift|bicep|weights|crossfit)\b/i.test(combined)) return '🏋️';
+  if (/\b(swim|swimming|pool)\b/i.test(combined)) return '🏊';
+  if (/\b(football|soccer)\b/i.test(combined)) return '⚽';
+  if (/\b(cricket)\b/i.test(combined)) return '🏏';
+  if (/\b(badminton|tennis|racquet|squash)\b/i.test(combined)) return '🏸';
+  if (/\b(car|cars|civic|bmw|audi|honda|tesla|toyota|sedan|suv|mercedes|porsche|vehicle|vehicles)\b/i.test(combined)) return '🚗';
+  if (/\b(bike|bikes|motorcycle|motorcycles|scooter|bullet|enfield|yamaha|harley|ducati)\b/i.test(combined)) return '🏍️';
+  if (/\b(bicycle|cycling|cycle)\b/i.test(combined)) return '🚲';
+  if (/\b(project|projects|app|software|stack|fastapi|react|nextjs|next|backend|repo|github|\bai\b|machine learning)\b/i.test(combined)) return '💻';
+  if (/\b(book|books|author|read|reading|novel|literature|library)\b/i.test(combined)) return '📚';
+  if (/\b(movie|movies|film|films|cinema|actor|director|series|netflix)\b/i.test(combined)) return '🎬';
+  if (/\b(camera|photo|photography|lens)\b/i.test(combined)) return '📷';
+  if (/\b(art|paint|painting|drawing|illustration|sketch)\b/i.test(combined)) return '🎨';
+  if (/\b(plant|plants|bonsai|garden|gardening|flower|tree|botanical)\b/i.test(combined)) return '🪴';
+  if (/\b(travel|trip|flight|hotel|vacation|tour|destination|resort)\b/i.test(combined)) return '✈️';
+  if (/\b(doctor|medical|health|clinic|hospital|medicine|surgeon|physician)\b/i.test(combined)) return '🩺';
+  if (/\b(student|study|studying|college|university|exam|degree|course|school)\b/i.test(combined)) return '🎓';
+  if (/\b(friend|friends|dost|pal|buddy|colleague|colleagues|coworker|coworkers|mentor|advisor)\b/i.test(combined)) return '👥';
+  if (/\b(food|restaurant|dhaba|cafe|coffee|tea|recipe)\b/i.test(combined)) return '🍲';
+  return '📦'; // Default cupboard drawer box
+}
+
+/**
+ * Assigns an authoritative human-readable role title for dynamic drawers.
+ */
+export function selectDynamicDrawerRole(_entityName: string, prefixType: string, entityType: WardrobeCategory): string {
+  const p = prefixType.toLowerCase();
+  if (['pet', 'dog', 'cat', 'bird', 'puppy', 'kitten'].includes(p)) return 'Companion Pet';
+  if (['friend', 'dost'].includes(p)) return 'Close Friend';
+  if (['mentor', 'advisor'].includes(p)) return 'Mentor & Guide';
+  if (['doctor', 'medical'].includes(p)) return 'Healthcare Advisor';
+  if (['colleague', 'coworker', 'manager'].includes(p)) return 'Professional Colleague';
+  if (['project', 'venture', 'app', 'startup', 'repo', 'software'].includes(p)) return 'Project & Venture';
+  if (['car', 'bike', 'vehicle', 'motorcycle', 'auto'].includes(p)) return 'Vehicle & Mobility';
+  if (['guitar', 'piano', 'drums', 'instrument', 'music'].includes(p)) return 'Musical Instrument';
+  if (['marathon', 'sport', 'running', 'cycling', 'race'].includes(p)) return 'Sport & Athletic Pursuit';
+  if (['book', 'author', 'novel'].includes(p)) return 'Reading & Literature';
+  if (['plant', 'garden', 'bonsai'].includes(p)) return 'Plant & Gardening';
+  if (['travel', 'trip', 'place', 'city', 'destination'].includes(p)) return 'Travel & Destinations';
+  if (entityType === 'person') return 'Personal Connection';
+  if (entityType === 'business') return 'Professional Focus';
+  if (entityType === 'goal') return 'Active Milestone';
+  if (entityType === 'routine') return 'Daily Routine';
+  return 'Lifestyle Focus';
+}
+
+// Helper to extract clean capitalized name across wardrobes and graph engines
+export const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').trim().replace(/\b\w/g, c => c.toUpperCase());
+
+// Composite aggregate rows like family_details (which repeats wife, son, father, mother)
+// and important_facts (which repeats work schedule) are marked as composite duplicates
+// so the user-facing UI can suppress them without violating the no-hard-delete rule.
+export const COMPOSITE_DUPLICATE_KEYS = new Set(['family_details', 'important_facts']);
+
+/**
  * Entity Wardrobe Clustering Engine:
  * Transforms flat, isolated, and duplicate key-value rows into unified, cohesive
  * Entity Wardrobes (e.g. Person Wardrobe: Sakshi with role, cooking, nail art, birthday;
  * Business Wardrobe: Conviction HR vs Shetty's Dhaba; Suresh with undergarments trade;
- * Rajeshree with tailoring; plus Daily Rhythms and Core Identity).
+ * Rajeshree with tailoring; plus Daily Rhythms, Core Identity, and Open-Ended Dynamic Drawers).
  */
 export function clusterMemoriesIntoWardrobes(
   memories: Array<{
@@ -476,9 +593,6 @@ export function clusterMemoriesIntoWardrobes(
   }
 
   const consumedKeys = new Set<string>();
-
-  // Helper to extract clean capitalized name
-  const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').trim().replace(/\b\w/g, c => c.toUpperCase());
 
   // ── 1. PERSON WARDROBE: Sakshi (Wife) ───────────────────────────────────────
   const wifeNameVal = memMap.get('wife_name')?.value || memMap.get('sakshi')?.value;
@@ -1458,11 +1572,179 @@ export function clusterMemoriesIntoWardrobes(
     });
   }
 
+  // ── G. DYNAMIC DRAWER SYNTHESIZER (Open Cupboard: 100s of arbitrary Drawers & Sub-drawers) ──
+  // Any unconsumed facts for friends, mentors, doctors, pets, projects, instruments,
+  // vehicles, hobbies, sports, health, and custom lifestyle domains are dynamically
+  // grouped into rich Entity Wardrobe Drawers with nested traits (stems).
+  const unconsumedMemories = Array.from(memMap.entries()).filter(([k, entry]) =>
+    !consumedKeys.has(k) &&
+    !COMPOSITE_DUPLICATE_KEYS.has(k) &&
+    !entry.isCompositeDuplicate &&
+    Boolean(entry.value && String(entry.value).trim().length > 0)
+  );
+
+  if (unconsumedMemories.length > 0) {
+    const KNOWN_ENTITY_PREFIXES = new Set([
+      'pet', 'dog', 'cat', 'bird', 'parrot', 'puppy', 'kitten',
+      'friend', 'dost', 'colleague', 'coworker', 'mentor', 'advisor', 'doctor', 'relative', 'cousin', 'sister', 'brother', 'uncle', 'aunt',
+      'project', 'venture', 'app', 'startup', 'repo', 'software',
+      'car', 'bike', 'vehicle', 'motorcycle', 'auto',
+      'guitar', 'piano', 'drums', 'violin', 'instrument',
+      'hobby', 'sport', 'game', 'running', 'marathon', 'cycling', 'swimming',
+      'book', 'author', 'movie', 'film', 'anime',
+      'plant', 'garden', 'bonsai',
+      'health', 'medical', 'allergy', 'medication',
+      'travel', 'trip', 'place', 'city', 'destination'
+    ]);
+
+    const dynamicGroups = new Map<string, {
+      groupKey: string;
+      entityName: string;
+      prefixType: string;
+      domain: LifeDomainKey;
+      entityType: WardrobeCategory;
+      avatarEmoji: string;
+      roleTitle: string;
+      entries: Array<{ key: string; value: string; id?: string; memory_type?: string; updated_at?: string; isWorkingContext?: boolean }>;
+    }>();
+
+    for (const [k, entry] of unconsumedMemories) {
+      const parts = k.split('_');
+      let prefixType = 'lifestyle';
+      let entitySlug = '';
+      if (parts.length >= 3 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
+        prefixType = parts[0];
+        entitySlug = parts[1];
+      } else if (parts.length === 2 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
+        prefixType = parts[0];
+        entitySlug = parts[0];
+      } else if (parts.length >= 2) {
+        prefixType = parts[0];
+        entitySlug = parts[0];
+      } else {
+        const domainClass = classifyDomain(k, entry.memory_type);
+        prefixType = domainClass.domain;
+        entitySlug = domainClass.domain;
+      }
+
+      const groupKey = `${prefixType}_${entitySlug}`;
+      if (!dynamicGroups.has(groupKey)) {
+        const domainMeta = classifyDomain(k, entry.memory_type);
+        const entityName = cleanStr(entitySlug);
+
+        let entityType: WardrobeCategory = 'lifestyle';
+        if (['friend', 'dost', 'colleague', 'coworker', 'mentor', 'advisor', 'doctor', 'relative', 'cousin', 'sister', 'brother'].includes(prefixType)) {
+          entityType = 'person';
+        } else if (['project', 'venture', 'app', 'startup', 'repo', 'software'].includes(prefixType) || domainMeta.domain === 'work') {
+          entityType = 'business';
+        } else if (['marathon', 'race', 'goal', 'target'].includes(prefixType) || domainMeta.domain === 'goals') {
+          entityType = 'goal';
+        } else if (['routine', 'daily', 'sleep'].includes(prefixType)) {
+          entityType = 'routine';
+        }
+
+        const avatarEmoji = selectDynamicDrawerEmoji(entityName, prefixType, k, entry.value);
+        const roleTitle = selectDynamicDrawerRole(entityName, prefixType, entityType);
+
+        dynamicGroups.set(groupKey, {
+          groupKey,
+          entityName,
+          prefixType,
+          domain: domainMeta.domain,
+          entityType,
+          avatarEmoji,
+          roleTitle,
+          entries: []
+        });
+      }
+
+      dynamicGroups.get(groupKey)!.entries.push({
+        key: k,
+        value: entry.value,
+        id: entry.id,
+        memory_type: entry.memory_type,
+        updated_at: entry.updated_at,
+        isWorkingContext: entry.isWorkingContext
+      });
+    }
+
+    for (const group of dynamicGroups.values()) {
+      const traits: WardrobeTrait[] = [];
+      const slug = group.entityName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+
+      for (const item of group.entries) {
+        consumedKeys.add(item.key);
+        const parts = item.key.split('_');
+        let label = item.key;
+        if (parts.length >= 3 && (parts[0] === group.prefixType || parts[1].toLowerCase() === group.entityName.toLowerCase())) {
+          label = parts.slice(2).join(' ');
+        } else if (parts.length >= 2 && parts[0] === group.prefixType) {
+          label = parts.slice(1).join(' ');
+        }
+        const cleanLabel = label.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+        traits.push({
+          id: `trait-dyn-${slug}-${item.key.replace(/_/g, '-')}`,
+          key: item.key,
+          label: cleanLabel || 'Detail',
+          value: item.value,
+          category: inferTraitCategory(item.key, item.value),
+          confidence: 'confirmed',
+          sourceMemoryId: item.id,
+          isWorkingContext: item.isWorkingContext,
+          updatedAt: item.updated_at || nowStr
+        });
+      }
+
+      const dynConnectedDots: WardrobeConnectedDot[] = [];
+      if (group.entityType === 'person') {
+        dynConnectedDots.push({
+          targetEntityId: 'wardrobe-identity-user',
+          targetEntityName: userName,
+          relation: 'PERSONAL_CONNECTION',
+          insight: `Close personal and relational connection with ${group.entityName}.`,
+          badge: `🤝 ${group.entityName} ⇄ 🧠 ${userName}`
+        });
+      } else if (group.prefixType === 'pet' || group.prefixType === 'dog' || group.prefixType === 'cat') {
+        dynConnectedDots.push({
+          targetEntityId: 'wardrobe-routine-reminders',
+          targetEntityName: 'Life Rhythm',
+          relation: 'COMPANION_CARE',
+          insight: `Daily care, feeding, and companionship routine for ${group.entityName}.`,
+          badge: `🐾 ${group.entityName} ⇄ ⏰ Routine`
+        });
+      } else if (group.domain === 'work' || group.entityType === 'business') {
+        dynConnectedDots.push({
+          targetEntityId: 'wardrobe-identity-user',
+          targetEntityName: userName,
+          relation: 'PROJECT_DRIVE',
+          insight: `${group.entityName} drives key technical and professional momentum.`,
+          badge: `💼 ${group.entityName} ⇄ 🎯 Focus`
+        });
+      }
+
+      const topTraitsSummary = traits.slice(0, 3).map(t => `${t.label}: ${t.value.length > 25 ? t.value.slice(0, 22) + '...' : t.value}`).join(' · ');
+
+      wardrobes.push({
+        id: `wardrobe-${group.entityType}-${slug}`,
+        entityType: group.entityType,
+        domain: group.domain,
+        name: group.entityName,
+        roleTitle: group.roleTitle,
+        avatarEmoji: group.avatarEmoji,
+        color: DOMAIN_TAXONOMY[group.domain].color,
+        summary: `${group.roleTitle} · ${topTraitsSummary || group.entityName}`,
+        traits,
+        connectedDots: dynConnectedDots,
+        lastUpdated: nowStr
+      });
+    }
+  }
+
   // ── 9. Filter Composite Duplicates ──────────────────────────────────────────
   // Composite aggregate rows like family_details (which repeats wife, son, father, mother)
   // and important_facts (which repeats work schedule) are marked as composite duplicates
   // so the user-facing UI can suppress them without violating the no-hard-delete rule.
-  const COMPOSITE_DUPLICATE_KEYS = new Set(['family_details', 'important_facts']);
 
   const filteredMemories = memories.map(m => {
     const k = (m.key || '').toLowerCase();
@@ -1544,7 +1826,10 @@ function toGraphLabel(key: string, value: string): string {
 
   // Work
   if (k === 'company_name') return `${v} (Company)`;
-  if (k === 'work_schedule') return v.length > 22 ? `${v.slice(0, 20)}... (Hours)` : `${v} (Hours)`;
+  if (k === 'work_schedule') {
+    if (v.includes('11') && (v.includes('8') || v.includes('8 PM'))) return '11am - 8pm (Work Hours)';
+    return v.length > 22 ? `${v.slice(0, 20)}... (Hours)` : `${v} (Hours)`;
+  }
   if (k === 'office_hours') return `${v} (Office Hours)`;
   if (k === 'current_office_location') return `${v} (Office)`;
   if (k === 'candidates_for_job') return `${v} (Interviews)`;
@@ -1571,6 +1856,19 @@ function toGraphLabel(key: string, value: string): string {
   }
   if (k === 'birth_date') return `${v} (Birthday)`;
   if (k === 'marriage_date') return `${v} (Anniversary)`;
+
+  // Dynamic Open-Ended Keys: <prefix>_<entity>_<trait> or <entity>_<trait>
+  const parts = key.split('_');
+  if (parts.length >= 3) {
+    const trait = parts.slice(2).join(' ').replace(/\b\w/g, c => c.toUpperCase());
+    const shortVal = v.length > 22 ? v.slice(0, 19) + '...' : v;
+    return `${shortVal} (${trait})`;
+  }
+  if (parts.length === 2) {
+    const trait = parts[1].replace(/\b\w/g, c => c.toUpperCase());
+    const shortVal = v.length > 22 ? v.slice(0, 19) + '...' : v;
+    return `${shortVal} (${trait})`;
+  }
 
   // Fallback
   const cleanKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -1686,7 +1984,7 @@ export function buildDynamicKnowledgeGraph(
 
     // Family Tree Stems
     if (meta.domain === 'family') {
-      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'sakshi', 'shreshth'].includes(k)) {
+      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'partner_name', 'husband_name', 'sakshi', 'shreshth'].includes(k)) {
         hierarchyLevel = 2;
         relation = 'FAMILY_MEMBER';
         edgeType = 'ENTITY_BRANCH';
@@ -1721,6 +2019,33 @@ export function buildDynamicKnowledgeGraph(
         relation = 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Mother in Family Tree`;
+      } else if (k.startsWith('daughter_') && allKeys.has('daughter_name')) {
+        parentId = 'mem-daughter_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Daughter in Family Tree`;
+      } else if (k.startsWith('sister_') && allKeys.has('sister_name')) {
+        parentId = 'mem-sister_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Sister in Family Tree`;
+      } else if (k.startsWith('brother_') && allKeys.has('brother_name')) {
+        parentId = 'mem-brother_name';
+        hierarchyLevel = 3;
+        relation = 'MEMBER_ATTRIBUTE';
+        edgeType = 'ATTRIBUTE_STEM';
+        explanation = `Detail stem of Brother in Family Tree`;
+      } else if ((k.startsWith('pet_') || k.startsWith('dog_') || k.startsWith('cat_')) && (allKeys.has('pet_name') || allKeys.has('dog_name') || allKeys.has('cat_name'))) {
+        const petKey = allKeys.has('pet_name') ? 'mem-pet_name' : allKeys.has('dog_name') ? 'mem-dog_name' : 'mem-cat_name';
+        if (item.id !== petKey) {
+          parentId = petKey;
+          hierarchyLevel = 3;
+          relation = 'PET_ATTRIBUTE';
+          edgeType = 'ATTRIBUTE_STEM';
+          explanation = `Detail stem of Pet in Family Tree`;
+        }
       }
     }
 
@@ -1764,6 +2089,119 @@ export function buildDynamicKnowledgeGraph(
         relation = 'MILESTONE_TARGET';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Milestone stem under Core Goal`;
+      }
+    }
+
+    // Open-ended dynamic entity detection (pets, friends, projects, instruments, cars, etc.)
+    // If key has format <prefix>_<entity>_<trait> e.g. pet_coco_breed, friend_rohit_job, project_helios_stack
+    const keyParts = k.split('_');
+    if (hierarchyLevel === 2 && parentId.startsWith('dept-')) {
+      const KNOWN_DYN_PREFIXES = new Set([
+        'pet', 'dog', 'cat', 'bird', 'parrot', 'puppy', 'kitten',
+        'friend', 'dost', 'colleague', 'coworker', 'mentor', 'advisor', 'doctor', 'relative', 'cousin',
+        'project', 'venture', 'app', 'startup', 'repo', 'software',
+        'car', 'bike', 'vehicle', 'motorcycle', 'auto',
+        'guitar', 'piano', 'drums', 'violin', 'instrument',
+        'hobby', 'sport', 'game', 'running', 'marathon', 'cycling', 'swimming',
+        'book', 'author', 'movie', 'film',
+        'plant', 'garden', 'bonsai',
+        'health', 'medical', 'allergy',
+        'travel', 'trip'
+      ]);
+
+      if (keyParts.length >= 3 && KNOWN_DYN_PREFIXES.has(keyParts[0])) {
+        const dynPrefix = keyParts[0];
+        const dynEntity = keyParts[1];
+        const dynTrait = keyParts.slice(2).join('_');
+        const entityKey = `${dynPrefix}_${dynEntity}`;
+        const entityNodeId = `mem-${entityKey}`;
+
+        // Ensure the Level 2 entity branch exists
+        if (!nodeIds.has(entityNodeId)) {
+          const entityNameClean = cleanStr(dynEntity);
+          const entityRole = selectDynamicDrawerRole(entityNameClean, dynPrefix, 'lifestyle');
+          const entityEmoji = selectDynamicDrawerEmoji(entityNameClean, dynPrefix, k, item.value);
+
+          const branchEntityNode: DynamicKgNode = {
+            id: entityNodeId,
+            name: `${entityNameClean} (${entityRole})`,
+            entity_type: dynPrefix,
+            department: meta.domain,
+            color: DOMAIN_TAXONOMY[meta.domain].color,
+            radius: 18,
+            value: `${entityNameClean} · ${entityRole}`,
+            raw_key: entityKey,
+            emoji: entityEmoji,
+            parentEntityId: `dept-${meta.domain}`,
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, deptTitle, entityNameClean]
+          };
+          nodes.push(branchEntityNode);
+          nodeIds.add(entityNodeId);
+          deptCounts[meta.domain]++;
+
+          edges.push({
+            id: `edge-dept-${meta.domain}-${entityNodeId}`,
+            source: `dept-${meta.domain}`,
+            target: entityNodeId,
+            relation: 'ENTITY_BRANCH',
+            color: DOMAIN_TAXONOMY[meta.domain].color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Entity branch for ${entityNameClean} in ${deptTitle}`
+          });
+        }
+
+        parentId = entityNodeId;
+        hierarchyLevel = 3;
+        edgeType = 'ATTRIBUTE_STEM';
+        relation = dynTrait.toUpperCase();
+        explanation = `Detail stem of ${cleanStr(dynEntity)}`;
+      } else if (keyParts.length === 2 && KNOWN_DYN_PREFIXES.has(keyParts[0])) {
+        const dynPrefix = keyParts[0];
+        const dynTrait = keyParts[1];
+        const entityNodeId = `mem-${dynPrefix}`;
+
+        if (!nodeIds.has(entityNodeId)) {
+          const entityNameClean = cleanStr(dynPrefix);
+          const entityRole = selectDynamicDrawerRole(entityNameClean, dynPrefix, 'lifestyle');
+          const entityEmoji = selectDynamicDrawerEmoji(entityNameClean, dynPrefix, k, item.value);
+
+          const branchEntityNode: DynamicKgNode = {
+            id: entityNodeId,
+            name: `${entityNameClean} (${entityRole})`,
+            entity_type: dynPrefix,
+            department: meta.domain,
+            color: DOMAIN_TAXONOMY[meta.domain].color,
+            radius: 18,
+            value: `${entityNameClean} · ${entityRole}`,
+            raw_key: dynPrefix,
+            emoji: entityEmoji,
+            parentEntityId: `dept-${meta.domain}`,
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, deptTitle, entityNameClean]
+          };
+          nodes.push(branchEntityNode);
+          nodeIds.add(entityNodeId);
+          deptCounts[meta.domain]++;
+
+          edges.push({
+            id: `edge-dept-${meta.domain}-${entityNodeId}`,
+            source: `dept-${meta.domain}`,
+            target: entityNodeId,
+            relation: 'ENTITY_BRANCH',
+            color: DOMAIN_TAXONOMY[meta.domain].color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Entity branch for ${entityNameClean} in ${deptTitle}`
+          });
+        }
+
+        parentId = entityNodeId;
+        hierarchyLevel = 3;
+        edgeType = 'ATTRIBUTE_STEM';
+        relation = dynTrait.toUpperCase();
+        explanation = `Detail stem of ${cleanStr(dynPrefix)}`;
       }
     }
 

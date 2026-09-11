@@ -1361,8 +1361,13 @@ export function ChatScreen() {
                   "New Chat",
                   "Start a fresh conversation? Your old messages are safely saved.",
                   [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Start", onPress: () => useChatStore.getState().startNewConversation() }
+                    { text: "Start", onPress: () => {
+                      setIsSearchActive(false);
+                      setSearchQuery('');
+                      setSelectedMessageIds([]);
+                      setReplyingTo(null);
+                      useChatStore.getState().startNewConversation();
+                    }}
                   ]
                 );
               }} style={s.headerBtn}>

@@ -147,6 +147,25 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     }
   }
 
+  // Dynamic multi-segment keys: <prefix>_<entity>_<trait> or <entity>_<trait>
+  const parts = (key || '').split('_');
+  if (parts.length >= 3) {
+    const entity = parts[1].replace(/\b\w/g, c => c.toUpperCase());
+    const trait = parts.slice(2).join(' ').replace(/\b\w/g, c => c.toUpperCase());
+    return {
+      title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || trait),
+      sub: `${trait} (${entity})`
+    };
+  }
+  if (parts.length === 2) {
+    const entity = parts[0].replace(/\b\w/g, c => c.toUpperCase());
+    const trait = parts[1].replace(/\b\w/g, c => c.toUpperCase());
+    return {
+      title: v.length > 18 ? `${v.slice(0, 16)}...` : (v || trait),
+      sub: `${trait}`
+    };
+  }
+
   const cleanKey = (key || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   return {
     title: v.length > 16 ? `${v.slice(0, 14)}...` : (v || cleanKey || 'Memory'),
@@ -365,6 +384,9 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
           return bk.includes('wife') || bk.includes('sakshi');
         });
         if (foundWife) pId = foundWife.id;
+      } else if (pId) {
+        const foundBranch = branchItems.find(b => b.id === pId || b.raw_key === pId || (b.raw_key && pId.includes(b.raw_key)));
+        if (foundBranch) pId = foundBranch.id;
       }
       if (!stemsByParent.has(pId)) stemsByParent.set(pId, []);
       stemsByParent.get(pId)!.push(stem);

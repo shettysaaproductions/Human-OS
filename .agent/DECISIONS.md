@@ -99,3 +99,12 @@ Format:
   doc change.
 - **Consequence:** Validation is fast and meaningful. When a task touches
   runtime code, that task's cycle runs the runtime suites instead.
+
+### D-009: Open Cupboard Dynamic Drawers and Stems Architecture
+- **Decision:** Rather than constraining memory extraction and wardrobes to fixed schemas, Nova memory operates as a 3-tier Cupboard:
+  1. Level 1: 5 Life Domain Compartments (`family`, `work`, `goals`, `lifestyle`, `identity`).
+  2. Level 2: Dynamically synthesized Entity Drawers (`EntityWardrobe` clusters and `ENTITY_BRANCH` graph nodes) generated for arbitrary user entities (pets, friends, mentors, ventures, instruments, sports, travel).
+  3. Level 3: Attribute Stems (`WardrobeTrait` and `ATTRIBUTE_STEM` edges) linked strictly to their owning entity branch.
+- **Reason:** Users talk about arbitrary aspects of life. Flat, hardcoded schemas led to orphan memories, misclassifications, and hallucinations.
+- **Alternatives considered:** rigid static schemas for every possible topic (unsustainable); completely flat unstructured vector store (loses relational knowledge graph cohesion).
+- **Consequence:** Zero orphan memories; seamless personalization for any user lifestyle; backward compatibility preserved for canonical entities (Sakshi, Shreshth, Suresh, Rajeshree).

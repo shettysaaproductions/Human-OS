@@ -5,6 +5,7 @@ import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
 import { invalidateAnalyticsCache } from './analytics';
+import { classifyDomain } from '../lib/memoryDomains';
 
 export const memoryManagementRouter = Router();
 
@@ -90,11 +91,35 @@ function getLabel(canonicalKey: string, value?: string): string {
   if ((canonicalKey === 'birth_date' || canonicalKey === 'son_birth_date' || canonicalKey === 'daughter_birth_date') && value && /^\s*\d+\s*(?:months?|mahine|years?|saal|yo|days?|old)\b/i.test(value)) {
     return 'Age';
   }
-  return KEY_LABELS[canonicalKey] || canonicalKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  if (KEY_LABELS[canonicalKey]) {
+    return KEY_LABELS[canonicalKey];
+  }
+
+  // Dynamic open-ended keys formatting
+  const parts = canonicalKey.split('_');
+  if (parts.length >= 3) {
+    const entity = parts[1].replace(/\b\w/g, c => c.toUpperCase());
+    const trait = parts.slice(2).join(' ').replace(/\b\w/g, c => c.toUpperCase());
+    return `${entity}'s ${trait}`;
+  }
+  if (parts.length === 2) {
+    const entity = parts[0].replace(/\b\w/g, c => c.toUpperCase());
+    const trait = parts[1].replace(/\b\w/g, c => c.toUpperCase());
+    return `${entity}'s ${trait}`;
+  }
+
+  return canonicalKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function getCategory(canonicalKey: string): 'Personal' | 'Family' | 'Work' | 'Preferences' {
-  return KEY_CATEGORIES[canonicalKey] || 'Personal';
+  if (KEY_CATEGORIES[canonicalKey]) {
+    return KEY_CATEGORIES[canonicalKey];
+  }
+  const domainMeta = classifyDomain(canonicalKey);
+  if (domainMeta.domain === 'family') return 'Family';
+  if (domainMeta.domain === 'work') return 'Work';
+  if (domainMeta.domain === 'lifestyle' || domainMeta.domain === 'goals') return 'Preferences';
+  return 'Personal';
 }
 
 // GET /memories — list user's memories with search + filter (canonicalized for trust layer)

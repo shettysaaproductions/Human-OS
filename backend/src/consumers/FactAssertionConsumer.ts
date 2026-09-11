@@ -23,6 +23,7 @@ import { memoryPolicyService } from '../services/MemoryPolicyService';
 import type { FactAssertedEvent, RelationshipAssertedEvent, SemanticEvent } from '../types/semanticEvent';
 import { isFactAsserted, isRelationshipAsserted } from '../types/semanticEvent';
 import type { MemoryType } from '../types/memory';
+import { classifyDomain } from '../lib/memoryDomains';
 
 // ── Memory type routing ─────────────────────────────────────────────────────
 const FAMILY_KEY_MAP: Record<string, MemoryType> = {
@@ -38,8 +39,11 @@ const FAMILY_KEY_MAP: Record<string, MemoryType> = {
 
 function memoryTypeForKey(key: string): MemoryType {
   if (FAMILY_KEY_MAP[key]) return FAMILY_KEY_MAP[key];
-  if (['company_name', 'job_title', 'workplace', 'profession'].includes(key)) return 'work';
-  if (['goals', 'target', 'objective'].includes(key)) return 'goals';
+  const domainMeta = classifyDomain(key);
+  if (domainMeta.domain === 'family') return 'family';
+  if (domainMeta.domain === 'work') return 'work';
+  if (domainMeta.domain === 'goals') return 'goals';
+  if (domainMeta.domain === 'lifestyle') return 'preferences';
   return 'personal';
 }
 

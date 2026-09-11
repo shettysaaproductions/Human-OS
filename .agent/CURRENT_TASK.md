@@ -1,39 +1,38 @@
 # CURRENT TASK
 
 ## Task ID
-SON-NICKNAME-DOB-ALIGNMENT-AND-FRONTEND-CHAT-UX-PHASE5
+OPEN-CUPBOARD-DYNAMIC-MEMORY-ARCHITECTURE-DRAWERS-AND-STEMS-PHASE6
 
 ## Objective
-1. Eliminate memory and Knowledge Graph misalignment for son Shreshth (Nickname: Tuku, Date of Birth: 17/02/2026):
-   - TurnAnalyzer deterministic fact extraction for both `son_name` and `son_nickname` from `"my son shreshth nick name is tuku"`, Hinglish variations, and `<name> ka nickname <nick>`.
-   - Deterministic birth date & birthday extraction for son (`son_birth_date`), wife (`wife_birth_date`), and user (`birth_date`).
-   - Add all `tuku` and date of birth aliases to `backend/src/lib/memoryKeySchema.ts`.
-   - Dedicated `trait-shreshth-birth-date` trait in Shreshth's Memory Wardrobe and dynamic age derivation in `memoryDomains.ts`.
-   - Dynamic Knowledge Graph tree alignment (`Tuku (Nickname)` and `17/02/2026 (Birthday)` under Son branch with `BIRTHDAY` relation).
-   - Memory Management route: add `son_birth_date`, `wife_birth_date`, `son_age` under `'Family'` category.
-   - Mobile Knowledge Graph Explorer: align display names and birthday keys.
-2. Frontend Chat Section Basic Bug Fixes & Lifestyle UX:
-   - Optimistic message timestamp stability (instant current time instead of blank jitter).
-   - Quick action chip safety (preserves & prepends to existing input drafts).
-   - Expand lifestyle productivity with Habit (`🧘`) and Finance (`💰`) quick chips.
-   - Header selection bar quote-reply (`↩️`) button.
+1. Transform Human-OS / Nova memory management system into an open-ended Cupboard Architecture:
+   - 5 Life Domain Compartments (`family`, `work`, `goals`, `lifestyle`, `identity`).
+   - Dynamically synthesize 100s of Entity Drawers (Level 2 Branches) for arbitrary topics (pets, friends, mentors, tech ventures, instruments, vehicles, sports, health, travel).
+   - Dynamically attach Sub-drawers / Stems (Level 3 Attributes) to owning entity branches (`ATTRIBUTE_STEM` edges).
+2. Parallel Worker & Consumer Alignment:
+   - `SemanticInterpreter`, `FactAssertionConsumer`, and `DeterministicFactAgent` route arbitrary multi-segment keys dynamically to life domain compartments via `classifyDomain`.
+   - `memoryManagement.ts` routes and formats dynamic keys for frontend views.
+3. Frontend Bug Fixes & UX Stability:
+   - `ChatScreen.tsx`: Reset search, selection, and quote-reply states on New Chat.
+   - `KgExplorerScreen.tsx`: Dynamically format and group arbitrary entity branches and attribute stems.
 
 ## Scope
-- `backend/src/lib/memoryKeySchema.ts` (aliases for `tuku` and son birth date).
-- `backend/src/services/TurnAnalyzer.ts` (son name + nick extraction, deterministic birth date extraction, cleanValue word capitalization).
-- `backend/src/lib/memoryDomains.ts` (Shreshth wardrobe dedicated birth date, dynamic age, KG labels and tree branches).
-- `backend/src/routes/memoryManagement.ts` (KEY_LABELS and KEY_CATEGORIES for family birth dates and age).
-- `mobile/src/screens/analytics/KgExplorerScreen.tsx` (tuku nickname and birth date display alignment).
-- `mobile/src/screens/ChatScreen.tsx` (optimistic timestamp stability, quick action draft prepending, habit/finance chips, header quote-reply).
-- `backend/src/services/__tests__/SonNicknameAndDobAlignment.test.ts` (11 unit tests).
+- `backend/src/lib/memoryDomains.ts` (Dynamic Drawer Synthesizer Section G, word boundary emoji regex, Level 2 Entity Branches & Level 3 Stems).
+- `backend/src/routes/memoryManagement.ts` (Dynamic domain categorization and title formatting).
+- `backend/src/consumers/FactAssertionConsumer.ts` (Dynamic domain routing).
+- `backend/src/agents/DeterministicFactAgent.ts` (Dynamic domain routing).
+- `backend/src/lib/SemanticInterpreter.ts` (Open cupboard extraction prompt instructions).
+- `mobile/src/screens/analytics/KgExplorerScreen.tsx` (Dynamic branch & stem hierarchy rendering).
+- `mobile/src/screens/ChatScreen.tsx` (New Chat state reset).
+- `backend/src/services/__tests__/DynamicCupboardMemory.test.ts` (4 unit tests).
 
 ## Verification Gates Passed
 - `npm run build` in `backend`: EXIT 0 (0 errors).
 - `npx tsc --noEmit` in `mobile`: EXIT 0 (0 errors).
+- `DynamicCupboardMemory.test.ts`: 4/4 PASSED (100%).
+- `wardrobeClustering.test.ts`: 13/13 PASSED (100%).
+- `memoryDomains.test.ts`: 2/2 PASSED (100%).
 - `SonNicknameAndDobAlignment.test.ts`: 11/11 PASSED (100%).
-- `FamilyNameSemanticsBugFix.test.ts`: 12/12 PASSED (100%).
-- `BackendChatCompanionHardening.test.ts`: 10/10 PASSED (100%).
-- `NovaBrainService.test.ts`: 39/39 PASSED (100%).
+- Total Memory Suite: 30/30 PASSED (100%).
 
 ## Autonomous Deployment
 Standing user directive: automatically commit, merge, and push to `origin main`.

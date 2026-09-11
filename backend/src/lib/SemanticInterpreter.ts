@@ -308,6 +308,17 @@ Use the recent context to resolve any pronouns (e.g. "uska", "uski", "unka", "he
 - Example: Preceding: "Hum shreshth ko pyar se ghr pe tiku bulate hai" | Current: "And tiku ka bday 17/02/2026 hai"
   → Concept: "son_birth_date", Value: "17/02/2026", groundedInTurn: true
 
+OPEN CUPBOARD MEMORY EXTRACTION (BRANCHES, DRAWERS & STEMS):
+Nova's memory functions like an open cupboard with compartments, drawers, and sub-drawers for anything the user discusses randomly.
+Extract clean, snake_case scoped concept keys for entities and their traits:
+- Pets: e.g. "My dog Coco is a golden retriever" → Concept: "pet_name", Value: "Coco" AND Concept: "pet_coco_breed", Value: "Golden Retriever"
+- Friends & Mentors: e.g. "My friend Rohit is an architect in Berlin" → Concept: "friend_rohit_job", Value: "Architect in Berlin"
+- Projects & Tech: e.g. "My project Helios uses Next.js and FastAPI" → Concept: "project_helios_stack", Value: "Next.js and FastAPI"
+- Instruments & Passions: e.g. "My guitar is a Fender Stratocaster" → Concept: "guitar_brand", Value: "Fender" AND Concept: "guitar_model", Value: "Stratocaster"
+- Vehicles & Mobility: e.g. "I drive a Honda Civic 2022" → Concept: "car_model", Value: "Honda Civic 2022"
+- Fitness & Milestones: e.g. "I am training for a sub-4h marathon in Dec" → Concept: "marathon_target", Value: "sub-4h marathon in Dec"
+Always preserve exact stated values with groundedInTurn: true.
+
 DAY-OF-WEEK HANDLING (for reminder actions):
 - "Mon to Sat" / "mon se sat" / "Monday se Saturday" / "mom to sat" → active_days: ["monday","tuesday","wednesday","thursday","friday","saturday"]
 - "Mon" / "monday" alone → active_days: ["monday"]
