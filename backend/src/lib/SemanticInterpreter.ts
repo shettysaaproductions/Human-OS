@@ -319,6 +319,19 @@ Extract clean, snake_case scoped concept keys for entities and their traits:
 - Fitness & Milestones: e.g. "I am training for a sub-4h marathon in Dec" → Concept: "marathon_target", Value: "sub-4h marathon in Dec"
 Always preserve exact stated values with groundedInTurn: true.
 
+THIRD-PARTY ENTITIES & SEMANTIC OWNERSHIP (CRITICAL MANDATE):
+When the user shares facts about another person, friend, coworker, or their relatives:
+- You MUST preserve semantic ownership using entity-scoped concept keys: 'entity:person_<name>_<rel>:<attr>' or 'entity:person_<name>:<attr>'.
+- Example: "Ijaz's father was in the Navy"
+  → Concept: "entity:person_ijaz_father:occupation", Value: "Navy", groundedInTurn: true
+  (DO NOT use "father_occupation" — that would wrongly attribute the fact to the user's father!)
+- Example: "Sushant's wife works in banking"
+  → Concept: "entity:person_sushant_wife:occupation", Value: "banking", groundedInTurn: true
+  (DO NOT use "wife_occupation" — that would wrongly attribute it to the user's wife!)
+- Example: "My friend's brother lives in Dubai"
+  → Concept: "entity:person_friend_brother:location", Value: "Dubai", groundedInTurn: true
+- Flat keys like "father_occupation", "father_name", "mother_name", "wife_name", "wife_occupation", "son_name", "son_age" belong EXCLUSIVELY to the user's own immediate family.
+
 DAY-OF-WEEK HANDLING (for reminder actions):
 - "Mon to Sat" / "mon se sat" / "Monday se Saturday" / "mom to sat" → active_days: ["monday","tuesday","wednesday","thursday","friday","saturday"]
 - "Mon" / "monday" alone → active_days: ["monday"]

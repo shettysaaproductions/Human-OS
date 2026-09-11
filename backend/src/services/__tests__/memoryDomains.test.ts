@@ -137,5 +137,58 @@ describe('Wardrobe Memory Domains & Neural Dot-Connecting', () => {
       expect(promptText).toContain('EVENING_ROUTINE');
       expect(promptText).toContain('COLLABORATION');
     });
+
+    it('creates separate multi-hop branches for third-party entities without polluting user relations', () => {
+      const memories = [
+        { key: 'father_name', value: 'Suresh', memory_type: 'family' },
+        { key: 'entity:person_ejaz_father:military_service', value: 'Navy', memory_type: 'family' },
+        { key: 'entity:person_sushant_wife:occupation', value: 'Banking', memory_type: 'family' },
+      ];
+
+      const graph = buildDynamicKnowledgeGraph(memories, [], 'Saa');
+
+      // 1. User Father Node
+      const userFather = graph.nodes.find(n => n.id === 'mem-father_name');
+      expect(userFather).toBeDefined();
+      expect(userFather?.name).toContain('Suresh');
+
+      // 2. Ejaz (Friend) Branch & Ejaz's Father Sub-Branch
+      const ejazNode = graph.nodes.find(n => n.id === 'mem-entity-ejaz');
+      expect(ejazNode).toBeDefined();
+      expect(ejazNode?.name).toBe('Ejaz (Friend)');
+
+      const ejazFatherNode = graph.nodes.find(n => n.id === 'mem-entity-ejaz-father');
+      expect(ejazFatherNode).toBeDefined();
+      expect(ejazFatherNode?.name).toBe("Ejaz's Father");
+      expect(ejazFatherNode?.parentEntityId).toBe('mem-entity-ejaz');
+
+      // 3. Navy stem belongs to Ejaz's Father, NOT user father
+      const navyStem = graph.nodes.find(n => n.raw_key === 'entity:person_ejaz_father:military_service');
+      expect(navyStem).toBeDefined();
+      expect(navyStem?.parentEntityId).toBe('mem-entity-ejaz-father');
+      expect(navyStem?.value).toBe('Navy');
+
+      // 4. Sushant (Friend) Branch & Sushant's Wife Sub-Branch
+      const sushantNode = graph.nodes.find(n => n.id === 'mem-entity-sushant');
+      expect(sushantNode).toBeDefined();
+      const sushantWifeNode = graph.nodes.find(n => n.id === 'mem-entity-sushant-wife');
+      expect(sushantWifeNode).toBeDefined();
+      expect(sushantWifeNode?.parentEntityId).toBe('mem-entity-sushant');
+
+      // 5. Prompt rendering preserves hierarchy
+      const prompt = formatHierarchicalMemoryPrompt(memories, [], 'Saa');
+      expect(prompt).toContain("Ejaz's Father");
+      expect(prompt).toContain('Navy');
+    });
+  });
+
+  describe('360° Canonical Schema & Child Birthdate Alignment', () => {
+    it('canonicalizes child_birthdate to son_birth_date, never to user birth_date', () => {
+      expect(canonicalizeKey('child_birthdate').canonical).toBe('son_birth_date');
+      expect(canonicalizeKey('child_birth_date').canonical).toBe('son_birth_date');
+      expect(canonicalizeKey('child_dob').canonical).toBe('son_birth_date');
+      expect(canonicalizeKey('my_birthday').canonical).toBe('birth_date');
+    });
   });
 });
+

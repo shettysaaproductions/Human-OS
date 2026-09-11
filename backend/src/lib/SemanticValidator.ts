@@ -151,7 +151,7 @@ export function isConceptRelationshipSupported(
 
   // For facts: at least one non-generic concept token must appear in source or context (including synonyms)
   const tokens = concept
-    .split('_')
+    .split(/[:_]/)
     .map(t => t.toLowerCase())
     .filter(t => t && !GENERIC_KEY_TOKENS.has(t));
 
@@ -206,7 +206,7 @@ export function isValueReflexive(concept: string, value: string): boolean {
   // A generic semantic rule: if the value is precisely one of the tokens 
   // that makes up the concept key (e.g., concept: "wife_name", value: "wife"),
   // or the concept is just the value with an appended identifier like _name.
-  const tokens = concept.split('_').map(t => t.toLowerCase());
+  const tokens = concept.split(/[:_]/).map(t => t.toLowerCase());
   if (tokens.includes(v)) return true;
   
   return false;

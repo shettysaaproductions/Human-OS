@@ -130,7 +130,8 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     k.startsWith('daughter_') ||
     k.startsWith('sister_') ||
     k.startsWith('brother_') ||
-    k.includes('nail_art')
+    k.includes('nail_art') ||
+    (k.startsWith('entity:') && !k.includes('company') && !k.includes('venture') && !k.includes('office') && !k.includes('work'))
   ) {
     return DOMAIN_TAXONOMY.family;
   }
@@ -1655,22 +1656,38 @@ export function clusterMemoriesIntoWardrobes(
     }>();
 
     for (const [k, entry] of unconsumedMemories) {
-      const parts = k.split('_');
       let prefixType = 'lifestyle';
       let entitySlug = '';
-      if (parts.length >= 3 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
-        prefixType = parts[0];
-        entitySlug = parts[1];
-      } else if (parts.length === 2 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
-        prefixType = parts[0];
-        entitySlug = parts[0];
-      } else if (parts.length >= 2) {
-        prefixType = parts[0];
-        entitySlug = parts[0];
+
+      if (k.startsWith('entity:')) {
+        const rest = k.slice(7);
+        const colonIdx = rest.indexOf(':');
+        const subjectId = colonIdx > -1 ? rest.slice(0, colonIdx) : rest;
+        const subParts = subjectId.split('_');
+        prefixType = 'friend';
+        if (subParts.length >= 3) {
+          entitySlug = `${subParts[1]}_${subParts.slice(2).join('_')}`;
+        } else if (subParts.length === 2) {
+          entitySlug = subParts[1];
+        } else {
+          entitySlug = subjectId;
+        }
       } else {
-        const domainClass = classifyDomain(k, entry.memory_type);
-        prefixType = domainClass.domain;
-        entitySlug = domainClass.domain;
+        const parts = k.split('_');
+        if (parts.length >= 3 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
+          prefixType = parts[0];
+          entitySlug = parts[1];
+        } else if (parts.length === 2 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
+          prefixType = parts[0];
+          entitySlug = parts[0];
+        } else if (parts.length >= 2) {
+          prefixType = parts[0];
+          entitySlug = parts[0];
+        } else {
+          const domainClass = classifyDomain(k, entry.memory_type);
+          prefixType = domainClass.domain;
+          entitySlug = domainClass.domain;
+        }
       }
 
       const groupKey = `${prefixType}_${entitySlug}`;
@@ -1722,7 +1739,10 @@ export function clusterMemoriesIntoWardrobes(
         consumedKeys.add(item.key);
         const parts = item.key.split('_');
         let label = item.key;
-        if (parts.length >= 3 && (parts[0] === group.prefixType || parts[1].toLowerCase() === group.entityName.toLowerCase())) {
+        if (item.key.startsWith('entity:')) {
+          const colonIdx = item.key.lastIndexOf(':');
+          label = colonIdx > -1 ? item.key.slice(colonIdx + 1) : item.key;
+        } else if (parts.length >= 3 && (parts[0] === group.prefixType || parts[1].toLowerCase() === group.entityName.toLowerCase())) {
           label = parts.slice(2).join(' ');
         } else if (parts.length >= 2 && parts[0] === group.prefixType) {
           label = parts.slice(1).join(' ');
@@ -2066,8 +2086,99 @@ export function buildDynamicKnowledgeGraph(
     let edgeType: 'ENTITY_BRANCH' | 'ATTRIBUTE_STEM' = 'ENTITY_BRANCH';
     let explanation = `Belongs to ${deptTitle}`;
 
+    // Entity-Scoped Multi-Hop Stems & Branches (e.g. entity:person_ejaz_father:military_service)
+    if (k.startsWith('entity:')) {
+      const rest = k.slice(7);
+      const colonIdx = rest.indexOf(':');
+      const subjectId = colonIdx > -1 ? rest.slice(0, colonIdx) : rest;
+      const predicate = colonIdx > -1 ? rest.slice(colonIdx + 1) : 'attribute';
+
+      const subParts = subjectId.split('_');
+      let baseEntityName = 'Friend';
+      let subRelationName = '';
+      if (subParts.length >= 3) {
+        baseEntityName = cleanStr(subParts[1]);
+        subRelationName = cleanStr(subParts.slice(2).join(' '));
+      } else if (subParts.length === 2) {
+        baseEntityName = cleanStr(subParts[1]);
+      } else {
+        baseEntityName = cleanStr(subjectId);
+      }
+
+      const baseNodeId = `mem-entity-${baseEntityName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      if (!nodeIds.has(baseNodeId)) {
+        nodes.push({
+          id: baseNodeId,
+          name: `${baseEntityName} (Friend)`,
+          entity_type: 'friend',
+          department: 'family',
+          color: DOMAIN_TAXONOMY.family.color,
+          radius: 20,
+          value: `${baseEntityName} · Friend`,
+          raw_key: `friend_${baseEntityName.toLowerCase()}`,
+          emoji: '🤝',
+          parentEntityId: 'dept-family',
+          hierarchyLevel: 2,
+          treePath: [cleanUserName, 'Family & Relationships', baseEntityName]
+        });
+        nodeIds.add(baseNodeId);
+        deptCounts.family++;
+        edges.push({
+          id: `edge-dept-family-${baseNodeId}`,
+          source: 'dept-family',
+          target: baseNodeId,
+          relation: 'FRIEND_BRANCH',
+          color: DOMAIN_TAXONOMY.family.color,
+          weight: 2,
+          edgeType: 'ENTITY_BRANCH',
+          explanation: `Friend branch for ${baseEntityName}`
+        });
+      }
+
+      let directParentNodeId = baseNodeId;
+      if (subRelationName) {
+        const subNodeId = `mem-entity-${baseEntityName.toLowerCase()}-${subRelationName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+        if (!nodeIds.has(subNodeId)) {
+          const subEmoji = subRelationName.toLowerCase().includes('father') ? '👨‍🦳' :
+                           subRelationName.toLowerCase().includes('mother') ? '👵' :
+                           subRelationName.toLowerCase().includes('wife') ? '👩' : '👤';
+          nodes.push({
+            id: subNodeId,
+            name: `${baseEntityName}'s ${subRelationName}`,
+            entity_type: subRelationName.toLowerCase(),
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 16,
+            value: `${baseEntityName}'s ${subRelationName}`,
+            raw_key: subjectId,
+            emoji: subEmoji,
+            parentEntityId: baseNodeId,
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', baseEntityName, `${baseEntityName}'s ${subRelationName}`]
+          });
+          nodeIds.add(subNodeId);
+          edges.push({
+            id: `edge-${baseNodeId}-${subNodeId}`,
+            source: baseNodeId,
+            target: subNodeId,
+            relation: 'RELATIONSHIP_BRANCH',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `${subRelationName} of ${baseEntityName}`
+          });
+        }
+        directParentNodeId = subNodeId;
+      }
+
+      parentId = directParentNodeId;
+      hierarchyLevel = 3;
+      edgeType = 'ATTRIBUTE_STEM';
+      relation = predicate.toUpperCase();
+      explanation = `Attribute stem of ${subRelationName ? `${baseEntityName}'s ${subRelationName}` : baseEntityName}`;
+    }
     // Family Tree Stems
-    if (meta.domain === 'family') {
+    else if (meta.domain === 'family') {
       if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'partner_name', 'husband_name', 'sakshi', 'shreshth'].includes(k)) {
         hierarchyLevel = 2;
         relation = 'FAMILY_MEMBER';

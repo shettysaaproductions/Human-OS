@@ -2223,6 +2223,36 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
             logger.debug('[Chat] Guardian post-turn observation non-fatal error', { error: gErr?.message });
           });
         }).catch(() => {});
+
+        // Section 12, 13, 14, 31: Adaptive Watchtower & Semantic Self-Audit Loop
+        import('../services/EntityResolutionService').then(({ entityResolutionService }) => {
+          const resolvedTurn = entityResolutionService.resolveTurn(primaryMessage);
+          import('../services/AdaptiveRiskScorer').then(({ adaptiveRiskScorer }) => {
+            const riskAssessment = adaptiveRiskScorer.evaluate(
+              primaryMessage,
+              resolvedTurn.facts.map(f => ({ key: f.canonicalKey, value: f.value })),
+              {
+                hasCorrections: turnAnalysis.hasCorrections,
+                activeEntitiesCount: resolvedTurn.entities.length,
+              }
+            );
+
+            if (riskAssessment.tier !== 'LOW') {
+              import('../services/SemanticVerificationService').then(({ semanticVerificationService }) => {
+                semanticVerificationService.verifyTurn({
+                  userId,
+                  userMessage: primaryMessage,
+                  generatedResponse: reply,
+                  sourceMessageId: userMessageId,
+                  candidateFacts: resolvedTurn.facts,
+                  currentMemories: (memories || []).map((m: any) => ({ key: m?.key || '', value: m?.value || '' })),
+                }).catch((err: any) => {
+                  logger.warn('[Chat] Semantic verification loop non-fatal error', { error: err?.message });
+                });
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+        }).catch(() => {});
       });
 
       if (asyncDeadlineTimer) {

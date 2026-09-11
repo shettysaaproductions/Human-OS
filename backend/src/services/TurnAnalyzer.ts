@@ -4,6 +4,7 @@ import { TemporalParser } from '../utils/temporalParser';
 import { TemporalMetadata } from '../types/memory';
 import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 import { isValueDerivedKey } from '../lib/correctionSemantics';
+import { entityResolutionService } from './EntityResolutionService';
 
 export type SemanticUnitType = 'question' | 'fact' | 'emotion' | 'action' | 'correction' | 'casual';
 export type FactClassification = 'HIGH_CONFIDENCE_DURABLE_FACT' | 'PROTECTED_FACT' | 'TRANSIENT_FACT';
@@ -771,78 +772,122 @@ export class TurnAnalyzer {
       ? 'TRANSIENT_FACT'
       : 'HIGH_CONFIDENCE_DURABLE_FACT';
 
+    // ── 0. 360° Semantic Entity & Reference Resolution Layer ──────────────────
+    const erResult = entityResolutionService.resolveTurn(text);
+    const thirdPartyRelations = new Set<string>();
+
+    for (const rf of erResult.facts) {
+      const entity = erResult.entities.find(e => e.id === rf.subjectEntityId);
+      const isDirect = entity?.isDirectUserRelation ?? (rf.subjectEntityId === 'user');
+
+      if (!isDirect) {
+        if (facts.every(f => f.key !== rf.canonicalKey)) {
+          facts.push({
+            key: rf.canonicalKey,
+            value: rf.value,
+            text,
+            isProtected: isExplicitRemember,
+            factClass,
+            temporalMetadata: rf.temporalState === 'PAST' ? {
+              raw_stated: text,
+              temporal_status: 'HISTORICAL',
+              precision: 'year_only'
+            } : undefined
+          });
+        }
+
+        const subParts = rf.subjectEntityId.split('_');
+        if (subParts.length >= 3) {
+          thirdPartyRelations.add(subParts[subParts.length - 1].toLowerCase());
+        }
+      }
+    }
+
     // ── Family Relationships: Real/Formal Names & Direct Nicknames ───────────
+    let m: RegExpMatchArray | null = null;
 
     // Mother nickname
-    let m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'mother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (!thirdPartyRelations.has('mother')) {
+      m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'mother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Mother name
-    if (facts.every(f => f.key !== 'mother_nickname')) {
-      m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) {
-        facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
-      } else {
-        m = lower.match(/\b(?:my|meri)\s+(?:mummy|mom|mother|maa)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-        if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      // Mother name
+      if (facts.every(f => f.key !== 'mother_nickname')) {
+        m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) {
+          facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+        } else {
+          m = lower.match(/\b(?:my|meri)\s+(?:mummy|mom|mother|maa)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+          if (m) facts.push({ key: 'mother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+        }
       }
     }
 
     // Father nickname
-    m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'father_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (!thirdPartyRelations.has('father')) {
+      let m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'father_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Father name
-    if (facts.every(f => f.key !== 'father_nickname')) {
-      m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) {
-        facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
-      } else {
-        m = lower.match(/\b(?:my|mere)\s+(?:papa|dad|father|pita)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-        if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      // Father name
+      if (facts.every(f => f.key !== 'father_nickname')) {
+        m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|hai|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) {
+          facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+        } else {
+          m = lower.match(/\b(?:my|mere)\s+(?:papa|dad|father|pita)\s+(?:is|hai)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+          if (m) facts.push({ key: 'father_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+        }
       }
     }
 
     // Wife nickname
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'wife_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (!thirdPartyRelations.has('wife')) {
+      let m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'wife_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Wife name
-    if (facts.every(f => f.key !== 'wife_nickname')) {
-      m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      // Wife name
+      if (facts.every(f => f.key !== 'wife_nickname')) {
+        m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) facts.push({ key: 'wife_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
 
     // Husband nickname
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'husband_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (!thirdPartyRelations.has('husband')) {
+      let m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'husband_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Husband name
-    if (facts.every(f => f.key !== 'husband_nickname')) {
-      m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      // Husband name
+      if (facts.every(f => f.key !== 'husband_nickname')) {
+        m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) facts.push({ key: 'husband_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
 
     // Sister nickname
-    m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister|didi)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'sister_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (!thirdPartyRelations.has('sister')) {
+      let m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister|didi)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'sister_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Sister name
-    if (facts.every(f => f.key !== 'sister_nickname')) {
-      m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
-          lower.match(/\b(?:meri|mere|my)\s+(?:behen|sister)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
-      if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      // Sister name
+      if (facts.every(f => f.key !== 'sister_nickname')) {
+        m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+            lower.match(/\b(?:meri|mere|my)\s+(?:behen|sister)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
+        if (m) facts.push({ key: 'sister_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
 
     // Brother nickname
-    m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother|bhaiya)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-    if (m) facts.push({ key: 'brother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    if (!thirdPartyRelations.has('brother')) {
+      let m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother|bhaiya)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'brother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-    // Brother name
-    if (facts.every(f => f.key !== 'brother_nickname')) {
-      m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
-          lower.match(/\b(?:mera|mere|my)\s+(?:bhai|brother)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
-      if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      // Brother name
+      if (facts.every(f => f.key !== 'brother_nickname')) {
+        m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+            lower.match(/\b(?:mera|mere|my)\s+(?:bhai|brother)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
+        if (m) facts.push({ key: 'brother_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
     }
 
     // Son nickname & Son name combined extraction
@@ -1045,6 +1090,18 @@ export class TurnAnalyzer {
         
         if (unit.type === 'question') {
           prompt += `Must provide an answer.`;
+        } else if (unit.factKey?.startsWith('entity:')) {
+          const rest = unit.factKey.slice(7);
+          const colonIdx = rest.indexOf(':');
+          const subjectId = colonIdx > -1 ? rest.slice(0, colonIdx) : rest;
+          const predicate = colonIdx > -1 ? rest.slice(colonIdx + 1) : 'attribute';
+          const subParts = subjectId.split('_');
+          const ownerName = subParts.length >= 2 ? subParts[1].charAt(0).toUpperCase() + subParts[1].slice(1) : 'Associate';
+          const subRel = subParts.length >= 3 ? subParts.slice(2).join(' ') : '';
+          const subjectDisplayName = subRel ? `${ownerName}'s ${subRel}` : ownerName;
+          const cleanPredicate = predicate.replace(/_/g, ' ');
+
+          prompt += `[ENTITY_SCOPE = THIRD_PARTY, SUBJECT = '${subjectDisplayName}', ATTRIBUTE = '${cleanPredicate}']\n  * CRITICAL ENTITY RESOLUTION CONSTRAINT: This fact explicitly belongs to ${subjectDisplayName}, NOT to the user.\n  * You MUST NOT claim or imply this fact belongs to the user or user's direct family.\n  * Acknowledge this fact accurately and naturally in conversation (e.g., "${subjectDisplayName} — ${cleanPredicate}: ${unit.factValue || unit.text}").`;
         } else if (unit.type === 'correction') {
           if (isUnknownRelation) {
             prompt += `[RELATIONSHIP_STATE = UNKNOWN, RELATIONSHIP_VALUE = NONE, ANTECEDENT = NONE]\n  * CRITICAL MANDATORY CONSTRAINT: The relationship of '${unit.factValue}' is completely UNKNOWN.\n  * You MUST NOT guess or assume any relationship (do NOT assume sister, brother, mother, friend, colleague, etc.).\n  * Output ONLY ONE concise clarification question (e.g., "${unit.factValue} kaun hain tumhare liye — sister, friend, ya koi aur?").\n  * RELEVANCE-FIRST & CONVERSATIONAL RESTRAINT: Do NOT append time-of-day commentary, speculative emotions ("tension hai kya"), unrelated questions, or generic reassurance. Keep it strictly to the concise clarification.`;

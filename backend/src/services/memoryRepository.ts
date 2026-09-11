@@ -531,8 +531,13 @@ export class MemoryRepository {
         }
       }
 
-      // Phase 2A: Non-blocking Guardian mutation observation trigger
+      // Phase 2A: Non-blocking Guardian mutation observation trigger + Analytics Cache Invalidation
       setImmediate(() => {
+        try {
+          import('../routes/analytics').then(({ invalidateAnalyticsCache }) => {
+            invalidateAnalyticsCache(userId);
+          }).catch(() => {});
+        } catch (_) {}
         deterministicGuardian.runMutationScan(userId, 'memory', normalizedMemory.key).catch(gErr => {
           logger.debug('[MemoryRepository] Guardian observation non-fatal error', { error: gErr?.message });
         });

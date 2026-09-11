@@ -121,6 +121,16 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     }
   }
 
+  if (k.startsWith('entity:')) {
+    const subParts = k.replace(/^entity:/, '').split(':');
+    const entityScoped = (subParts[0] || '').replace(/^person_/, '').split('_').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    const attr = (subParts[1] || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return {
+      title: v || attr,
+      sub: attr ? `${entityScoped} • ${attr}` : entityScoped
+    };
+  }
+
   if (k === 'wife_name' || k === 'sakshi') return { title: v || 'Sakshi', sub: 'Wife' };
   if (k === 'son_name' || k === 'shreshth') return { title: v || 'Shreshth', sub: 'Son' };
   if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) return { title: v || 'Tuku', sub: 'Nickname' };

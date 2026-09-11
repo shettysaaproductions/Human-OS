@@ -115,7 +115,6 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Dates: birthday ─────────────────────────────────────────────────────────
   birth_date: [
     'birthday', 'date_of_birth', 'dob', 'bday', 'janam_din', 'user_birth_date', 'user_dob', 'my_birthday', 'my_dob',
-    'child_birthdate',  // generic child birthdate — we preserve the value
   ],
   wife_birth_date: [
     'wife_dob', 'wifes_birthday', 'wifes_birth_date', 'wife_birthday',
@@ -124,11 +123,34 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   ],
   son_birth_date: [
     'son_dob', 'sons_birthday', 'sons_birth_date', 'son_birthday',
-    'sons_dob', 'child_birth_date', 'child_dob', 'child_birthday',
+    'sons_dob', 'child_birth_date', 'child_dob', 'child_birthday', 'child_birthdate',
     'tiku_birthday', 'tiku_dob', 'tiku_birth_date',
     'tuku_birthday', 'tuku_dob', 'tuku_birth_date',
     'shreshth_birthday', 'shreshth_dob', 'shreshth_birth_date', 'shreshth_bday',
     'bete_ka_bday', 'bete_ka_birthday', 'bete_ki_date_of_birth', 'son_bday', 'son_date_of_birth',
+  ],
+  // ── Family: occupations ──────────────────────────────────────────────────────
+  father_occupation: [
+    'fathers_occupation', 'dad_occupation', 'dads_occupation', 'papa_ka_kaam', 'father_profession', 'father_job', 'dads_job'
+  ],
+  mother_occupation: [
+    'mothers_occupation', 'mom_occupation', 'moms_occupation', 'maa_ka_kaam', 'mother_profession', 'mother_job', 'moms_job'
+  ],
+  wife_occupation: [
+    'wifes_occupation', 'wife_profession', 'wife_job', 'biwi_ka_kaam'
+  ],
+  husband_occupation: [
+    'husbands_occupation', 'husband_profession', 'husband_job', 'pati_ka_kaam'
+  ],
+  brother_occupation: [
+    'brothers_occupation', 'brother_profession', 'brother_job', 'bhai_ka_kaam'
+  ],
+  sister_occupation: [
+    'sisters_occupation', 'sister_profession', 'sister_job', 'behen_ka_kaam'
+  ],
+  // ── Friends & Associates ────────────────────────────────────────────────────
+  friend_name: [
+    'friends_name', 'friend', 'dost_ka_naam', 'dost'
   ],
   // ── Dates: marriage ─────────────────────────────────────────────────────────
   marriage_date: [
@@ -270,10 +292,14 @@ export function sameCanonicalConcept(keyA: string, keyB: string): boolean {
 }
 
 /**
- * Return whether a canonical key is explicitly defined in our map.
+ * Return whether a canonical key is explicitly defined in our map,
+ * or is a valid entity-scoped canonical key (e.g. entity:person_ejaz_father:military_service).
  */
 export function isKnownCanonicalKey(canonicalKey: string): boolean {
-  return CANONICAL_KEYS.has(canonicalKey);
+  if (CANONICAL_KEYS.has(canonicalKey)) return true;
+  // Entity-scoped canonical keys: entity:<subject_id>:<predicate>
+  if (/^entity:[a-z0-9_]+:[a-z0-9_]+$/i.test(canonicalKey)) return true;
+  return false;
 }
 
 /**
