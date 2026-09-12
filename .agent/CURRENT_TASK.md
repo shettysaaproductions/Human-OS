@@ -1,34 +1,32 @@
 # CURRENT TASK
 
 ## Task ID
-FRONTEND-CHAT-UX-LIFESTYLE-RELIABILITY-UPGRADE
+ADAPTIVE-LIVING-CONSCIOUSNESS-HEARTBEAT-UPGRADE
 
 ## Objective
-Identify and resolve high-impact front-end bugs and loopholes in the chat section to maximize responsiveness, productivity, and lifestyle adaptation for diverse user personas:
-1. **Prefix Stacking Bug Fixed**: Replaced repetitive prefix concatenation with smart prefix substitution (`ALL_QUICK_PREFIXES`) in `ChatScreen.tsx`.
-2. **Persistent Lifestyle Hub Modal**: Built interactive modal accessible anytime via quick chip (`🌟 Lifestyles`) or header button with 10 lifestyle tracks:
-   - Founder & Entrepreneur
-   - Family & Parenting
-   - Finance & Wealth
-   - Mental Clarity & Calm
-   - Work & Productivity
-   - Student & Learning
-   - Fitness & Health
-   - Habits & Routine
-   - Pet Parent
-   - Creative & Ideas
-3. **Multi-Selection UI Stale Highlight Bug**: Updated FlatList `extraData` to `${displayedMessages.length}_${selectedMessageIds.join(',')}_${isTyping ? '1' : '0'}` ensuring instant row highlight when toggling multiple selections.
-4. **Selection Bar Edit Focus**: Added immediate `inputRef.current?.focus()` on edit action.
-5. **Date Separator Bug During Search Filter**: Updated `renderItem` to calculate dates using `displayedMessages` instead of `reversedMessages`.
-6. **Pagination False Unread Badge Bump**: Tracked newest message ID so prepending older messages via `loadOlderMessages()` never triggers the scroll-down FAB unread badge.
-7. **Android Multiline Input Vertical Centering**: Configured `textAlignVertical="top"` on multiline `TextInput` and anchored clear button to `top: 10`.
-8. **Image URI Dropped on Retry**: Passed `imageUri: msg.image_uri` in `retryMessage` in `useChatStore.ts`.
-9. **Scroll-To-Bottom Layout Race**: Wrapped `scrollToOffset` in `requestAnimationFrame` on send.
+Implement Option A ("Adaptive Living Consciousness") to transition from rigid static 15-minute background cron loops into an always-active, dynamically paced presence orchestrator:
+1. **Adaptive Living Consciousness Orchestrator (`AdaptiveConsciousnessScheduler.ts`)**:
+   - Classifies user presence and activity into 3 dynamic cadence profiles:
+     - `ACTIVE` (Online, typing, or chatted in last 15 min): 90s NACE pulse, 2-minute Watchtower Heartbeat.
+     - `WARM` (Active in last 2 hours): 3-minute NACE pulse, 5-minute Watchtower Heartbeat.
+     - `AMBIENT` (Idle > 2 hours or quiet hours 10 PM - 6 AM): 15-minute NACE, 15-minute Watchtower.
+   - Guarded by 30-second tick evaluation with re-entrancy concurrency locks.
+2. **Watchtower Heartbeat Dynamic Cadence Support (`WatchtowerHeartbeatService.ts`)**:
+   - Upgraded `deriveHeartbeatWindowId` and `acquireLease` to support dynamic `slotMinutes` (defaulting to 2-minute slots).
+   - Scaled `leaseUntil` dynamically to prevent lease collisions on high-frequency pulses.
+3. **Real-Time Event-Driven Knowledge Graph Curation (`memoryRepository.ts`)**:
+   - Connected `AutonomousMemoryGraphCuratorService.curateUserMemoryGraph(userId)` to the post-upsert non-blocking execution hook so memory changes curate the Knowledge Graph immediately.
+4. **Server Boot Integration (`backend/src/index.ts`)**:
+   - Replaced static `setInterval(15m)` calls with `adaptiveConsciousnessScheduler.start()`, preserving 30s and 90s initial boot warmup pulses.
 
 ## Scope
-- `mobile/src/screens/ChatScreen.tsx`
-- `mobile/src/store/useChatStore.ts`
+- `backend/src/services/AdaptiveConsciousnessScheduler.ts`
+- `backend/src/services/WatchtowerHeartbeatService.ts`
+- `backend/src/services/memoryRepository.ts`
+- `backend/src/index.ts`
 
 ## Verification Gates Passed
-- `npm run build` in `backend`: EXIT 0 (0 errors).
-- `npx tsc --noEmit` in `mobile`: EXIT 0 (0 errors).
+- `npm run build` in `backend`: **EXIT 0** (0 errors).
+- `npx jest --testPathPattern=WatchtowerHeartbeatPhase3a` in `backend`: **EXIT 0** (20/20 passed).
+- `npx jest --testPathPattern=EngineSchedulerLiveness` in `backend`: **EXIT 0** (13/13 passed).
+- `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).

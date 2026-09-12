@@ -531,7 +531,7 @@ export class MemoryRepository {
         }
       }
 
-      // Phase 2A: Non-blocking Guardian mutation observation trigger + Analytics Cache Invalidation
+      // Phase 2A: Non-blocking Guardian mutation observation trigger + Analytics Cache Invalidation + Autonomous Graph Curation
       setImmediate(() => {
         try {
           import('../routes/analytics').then(({ invalidateAnalyticsCache }) => {
@@ -541,6 +541,11 @@ export class MemoryRepository {
         deterministicGuardian.runMutationScan(userId, 'memory', normalizedMemory.key).catch(gErr => {
           logger.debug('[MemoryRepository] Guardian observation non-fatal error', { error: gErr?.message });
         });
+        import('./AutonomousMemoryGraphCuratorService').then(({ autonomousMemoryGraphCurator }) => {
+          autonomousMemoryGraphCurator.curateUserMemoryGraph(userId).catch(cErr => {
+            logger.debug('[MemoryRepository] Autonomous graph curator non-fatal error', { error: cErr?.message });
+          });
+        }).catch(() => {});
       });
     } catch (err) {
       logger.error('Failed to upsert memory', { error: err instanceof Error ? err.message : String(err), canonicalKey: memory.key, reason: 'UPSERT_FAILED' });

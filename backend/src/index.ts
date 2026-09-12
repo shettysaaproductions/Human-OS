@@ -102,8 +102,7 @@ async function main(): Promise<void> {
       intervalMs: 30000, initialDelayMs: 0,
     });
 
-    // NACE: Nova Autonomous Consciousness Engine (runs every 3 minutes for responsiveness)
-    // Initial pulse fires 30s after boot so Nova is active immediately
+    // Initial boot warmup pulses
     setTimeout(async () => {
       try {
         logger.info('[BOOT] Initial NACE pulse running...');
@@ -113,45 +112,26 @@ async function main(): Promise<void> {
       }
     }, 30 * 1000);
 
-    const naceInterval = setInterval(async () => {
-      try {
-        logger.info('Scheduler: Triggering NACE pulse...');
-        await novaConsciousnessEngine.pulse();
-        await novaConsciousnessEngine.expireOldAgendaItems();
-      } catch (err) {
-        logger.error('Error in NACE pulse', { error: err instanceof Error ? err.message : String(err) });
-      }
-    }, 15 * 60 * 1000); // NACE pulse every 15 minutes (Free tier hard limit)
-    if (naceInterval.unref) naceInterval.unref();
-    logger.info('[Scheduler] Engine registered', {
-      engine: 'NACE', event: 'scheduler_registered',
-      initialDelayMs: 30000, intervalMs: 15 * 60 * 1000,
-    });
-
-    // Watchtower Heartbeat: Supervisory Cognition Pulse (Runs every 15 minutes, staggered by 2m)
     setTimeout(async () => {
       try {
         logger.info('[BOOT] Initial Watchtower Heartbeat running...');
         const { watchtowerHeartbeatService } = await import('./services/WatchtowerHeartbeatService');
-        await watchtowerHeartbeatService.executeHeartbeat();
+        await watchtowerHeartbeatService.executeHeartbeat({ slotMinutes: 2 });
       } catch (e) {
         logger.warn('[BOOT] Initial Watchtower Heartbeat failed (non-critical)', { error: e });
       }
     }, 90 * 1000); // 90s after boot
 
-    const watchtowerInterval = setInterval(async () => {
-      try {
-        logger.info('Scheduler: Triggering Watchtower Heartbeat pulse...');
-        const { watchtowerHeartbeatService } = await import('./services/WatchtowerHeartbeatService');
-        await watchtowerHeartbeatService.executeHeartbeat();
-      } catch (err) {
-        logger.error('Error in Watchtower Heartbeat pulse', { error: err instanceof Error ? err.message : String(err) });
-      }
-    }, 15 * 60 * 1000); // Watchtower heartbeat every 15 minutes
-    if (watchtowerInterval.unref) watchtowerInterval.unref();
+    // Adaptive Living Consciousness Orchestrator (Dynamically paces NACE & Watchtower Heartbeat)
+    // Active (online/typing/chatting): 90s NACE, 2m Watchtower
+    // Warm (active < 2h): 3m NACE, 5m Watchtower
+    // Ambient (idle > 2h or sleep hours): 15m NACE, 15m Watchtower
+    const { adaptiveConsciousnessScheduler } = await import('./services/AdaptiveConsciousnessScheduler');
+    adaptiveConsciousnessScheduler.start();
     logger.info('[Scheduler] Engine registered', {
-      engine: 'WATCHTOWER', event: 'scheduler_registered',
-      initialDelayMs: 90000, intervalMs: 15 * 60 * 1000,
+      engine: 'ADAPTIVE_CONSCIOUSNESS',
+      event: 'scheduler_registered',
+      pacing: 'presence_aware_dynamic',
     });
 
     // Jarvis Protocol: Proactive Environment Monitoring (Runs every 3 hours)

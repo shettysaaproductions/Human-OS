@@ -36,16 +36,17 @@ import {
 } from '../types/watchtowerHeartbeat';
 
 /**
- * Derives a deterministic window ID based on 15-minute time slots.
- * Example: 'watchtower:2026-08-31:13:00'
+ * Derives a deterministic window ID based on adaptive time slots (default 2-minute slot).
+ * Example: 'watchtower:2026-08-31:13:02'
  */
-export function deriveHeartbeatWindowId(timestampMs: number = Date.now()): string {
+export function deriveHeartbeatWindowId(timestampMs: number = Date.now(), slotMinutes: number = 2): string {
   const date = new Date(timestampMs);
   const yyyy = date.getUTCFullYear();
   const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(date.getUTCDate()).padStart(2, '0');
   const hh = String(date.getUTCHours()).padStart(2, '0');
-  const minuteSlot = Math.floor(date.getUTCMinutes() / 15) * 15;
+  const safeSlot = Math.max(1, slotMinutes);
+  const minuteSlot = Math.floor(date.getUTCMinutes() / safeSlot) * safeSlot;
   const minStr = String(minuteSlot).padStart(2, '0');
   return `watchtower:${yyyy}-${mm}-${dd}:${hh}:${minStr}`;
 }
@@ -87,9 +88,10 @@ export class WatchtowerHeartbeatService {
   /**
    * Attempts to acquire a distributed, database-backed lease for a heartbeat window.
    */
-  async acquireLease(windowTimestampMs: number = Date.now()): Promise<HeartbeatLeaseAcquireResult> {
-    const runId = deriveHeartbeatWindowId(windowTimestampMs);
-    const leaseUntil = new Date(Date.now() + WATCHTOWER_HEARTBEAT_LIMITS.LEASE_DURATION_MS).toISOString();
+  async acquireLease(windowTimestampMs: number = Date.now(), slotMinutes: number = 2): Promise<HeartbeatLeaseAcquireResult> {
+    const runId = deriveHeartbeatWindowId(windowTimestampMs, slotMinutes);
+    const safeLeaseMs = Math.min(WATCHTOWER_HEARTBEAT_LIMITS.LEASE_DURATION_MS, Math.max(120_000, slotMinutes * 60_000 * 1.5));
+    const leaseUntil = new Date(Date.now() + safeLeaseMs).toISOString();
 
     try {
       // 1. Check existing run record
@@ -197,15 +199,17 @@ export class WatchtowerHeartbeatService {
     targetUserId?: string;
     dryRun?: boolean;
     skipLease?: boolean;
+    slotMinutes?: number;
   }): Promise<WatchtowerHeartbeatSummary> {
     const startedAt = Date.now();
-    const runId = options?.forcedWindowId || deriveHeartbeatWindowId(startedAt);
+    const slotMins = options?.slotMinutes ?? 2;
+    const runId = options?.forcedWindowId || deriveHeartbeatWindowId(startedAt, slotMins);
 
     let leaseAcquired = false;
     let leaseOwner = this.workerInstanceId;
 
     if (!options?.skipLease) {
-      const leaseRes = await this.acquireLease(startedAt);
+      const leaseRes = await this.acquireLease(startedAt, slotMins);
       if (!leaseRes.acquired) {
         logger.info('[WatchtowerHeartbeat] Heartbeat pulse skipped (lease not acquired)', { runId, reason: leaseRes.reason });
         return {
