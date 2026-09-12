@@ -28,6 +28,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.humanos.mobile",
       "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",

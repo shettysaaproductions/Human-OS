@@ -3,9 +3,10 @@ import { AppState, AppStateStatus } from 'react-native';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator,
-  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions, Image, Alert, Modal
+  Pressable, ScrollView, TouchableWithoutFeedback, Animated, Dimensions, Image, Alert, Modal,
+  Keyboard
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { useChatStore, Message } from '../store/useChatStore';
 import { api } from '../services/api';
@@ -720,6 +721,23 @@ function SwipeableBubble({ item, children, onReply }: { item: Message, children:
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setIsKeyboardVisible(true)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setIsKeyboardVisible(false)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   const { messages, isTyping, isHydrated, hydrateMessages, sendMessage, abortGeneration, retryMessage, diagnostics, developerMode, loadOlderMessages, isLoadingMore, hasMoreMessages, checkProactiveMessages, replyingTo, setReplyingTo, updateMessageReaction, switchMessageVersion, regenerateBranch } = useChatStore();
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
   const [inputText, setInputText] = useState('');
@@ -1311,13 +1329,14 @@ export function ChatScreen() {
   }
 
   return (
-    <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView
         style={[s.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
       >
-        <OfflineBanner visible={isOffline} />
+        <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top']}>
+          <OfflineBanner visible={isOffline} />
         {/* Header */}
         {isSelectionMode ? (
           <View style={[s.header, { borderBottomColor: colors.border, backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}>
@@ -1514,7 +1533,7 @@ export function ChatScreen() {
             inverted
             data={displayedMessages}
             showsVerticalScrollIndicator={false}
-            keyboardDismissMode="on-drag"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             extraData={`${displayedMessages.length}_${selectedMessageIds.join(',')}_${isTyping ? '1' : '0'}`}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
@@ -1715,7 +1734,7 @@ export function ChatScreen() {
         </View>
 
         {/* Input */}
-        <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>
+        <View style={{ paddingHorizontal: 8, paddingBottom: isKeyboardVisible ? 6 : Math.max(insets.bottom, 8) }}>
           {selectedImage && (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginLeft: 8 }}>
               <TouchableOpacity
@@ -1760,6 +1779,12 @@ export function ChatScreen() {
                   setInputText(text);
                   presenceService.onTypingStart();
                 }}
+                onFocus={() => {
+                  presenceService.onTypingStart();
+                  setTimeout(() => {
+                    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                  }, 100);
+                }}
                 placeholder="Message Nova..."
                 placeholderTextColor={colors.placeholder}
                 multiline
@@ -1801,6 +1826,7 @@ export function ChatScreen() {
             )}
           </View>
         </View>
+        </SafeAreaView>
       </KeyboardAvoidingView>
 
       {/* ── Message Version History & Branching Modal ── */}
@@ -2020,7 +2046,7 @@ export function ChatScreen() {
           </View>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
