@@ -908,7 +908,14 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       set((s) => ({
         messages: s.messages.map(m => m.id === messageId ? { ...m, status: 'sending' as const } : m),
-        pendingQueue: [...s.pendingQueue, { id: msg.id, content: msg.content, imageBase64: msg.image_base64, replyToId: msg.reply_to_id, replyToContent: msg.reply_to_content }]
+        pendingQueue: [...s.pendingQueue, { 
+          id: msg.id, 
+          content: msg.content, 
+          imageBase64: msg.image_base64, 
+          imageUri: msg.image_uri,
+          replyToId: msg.reply_to_id, 
+          replyToContent: msg.reply_to_content 
+        }]
       }));
 
       get().processQueue();

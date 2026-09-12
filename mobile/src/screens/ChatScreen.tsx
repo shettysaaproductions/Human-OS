@@ -507,15 +507,56 @@ const LIFESTYLE_TRACKS: LifestylePrompt[] = [
     id: 'habits',
     category: 'Habits',
     emoji: '🧘',
-    title: 'Habits & Mindset',
+    title: 'Habits & Routine',
     description: 'Morning rituals & evening reflection',
     prompt: "Set up a high-energy morning routine and a quick evening reflection for my habits.",
     badge: 'Mindset',
     color: '#6366F1',
   },
+  {
+    id: 'founder',
+    category: 'Founder',
+    emoji: '🚀',
+    title: 'Founder & Venture',
+    description: 'Venture ops, cash flow, team & customer execution',
+    prompt: "Let's review my business priorities, venture tasks, and critical cash flow milestones today.",
+    badge: 'Founder',
+    color: '#EC4899',
+  },
+  {
+    id: 'parenting',
+    category: 'Parenting',
+    emoji: '👶',
+    title: 'Family & Parenting',
+    description: 'Baby milestones, feeding, vaccines & family sync',
+    prompt: "Help me log and track my child's milestone schedule, feeding times, and family calendar.",
+    badge: 'Family',
+    color: '#F43F5E',
+  },
+  {
+    id: 'finance_track',
+    category: 'Finance',
+    emoji: '💰',
+    title: 'Finance & Wealth',
+    description: 'Expense logging, savings targets & budgets',
+    prompt: "Help me log today's expenses and review progress against my monthly budget.",
+    badge: 'Finance',
+    color: '#10B981',
+  },
+  {
+    id: 'wellness',
+    category: 'Wellness',
+    emoji: '🕊️',
+    title: 'Mental Clarity & Calm',
+    description: 'De-stress, emotional grounding & breathwork',
+    prompt: "I need a quick 5-minute mental reset. Help me de-stress, reflect, and regain focus.",
+    badge: 'Calm',
+    color: '#06B6D4',
+  },
 ];
 
 const QUICK_ACTION_CHIPS = [
+  { id: 'lifestyle_hub', icon: '🌟', label: 'Lifestyles', isModal: true },
   { id: 'remind', icon: '⏰', label: 'Remind', prefix: 'Remind me to ' },
   { id: 'goal', icon: '🎯', label: 'Goal', prefix: 'My goal is: ' },
   { id: 'workout', icon: '💪', label: 'Workout', prefix: 'Log workout / nutrition: ' },
@@ -530,24 +571,28 @@ const QUICK_ACTION_CHIPS = [
   { id: 'brain', icon: '🧠', label: 'Brain Galaxy', isNavigation: true },
 ];
 
+export const ALL_QUICK_PREFIXES = QUICK_ACTION_CHIPS.map(c => c.prefix).filter(Boolean) as string[];
+
 function LifestyleOnboardingHub({
   colors,
   onSelectPrompt,
   onCustomize,
+  isInModal = false,
 }: {
   colors: any;
   onSelectPrompt: (text: string) => void;
   onCustomize: (text: string) => void;
+  isInModal?: boolean;
 }) {
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const categories = ['All', 'Fitness', 'Student', 'Work', 'Pet Parent', 'Creative', 'Habits'];
+  const categories = ['All', 'Founder', 'Work', 'Student', 'Parenting', 'Fitness', 'Finance', 'Habits', 'Pet Parent', 'Creative', 'Wellness'];
 
   const filtered = selectedCategory === 'All'
     ? LIFESTYLE_TRACKS
     : LIFESTYLE_TRACKS.filter(t => t.category === selectedCategory);
 
   return (
-    <View style={[s.lifestyleHubContainer, { transform: [{ scaleY: -1 }] }]}>
+    <View style={[s.lifestyleHubContainer, !isInModal && { transform: [{ scaleY: -1 }] }]}>
       {/* Hero Avatar & Mindset */}
       <View style={s.lifestyleHero}>
         <View style={s.lifestyleAvatarOrb}>
@@ -693,7 +738,8 @@ export function ChatScreen() {
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
   const isFocused = useIsFocused();
   const [isOffline, setIsOffline] = useState(false);
-
+  const [isLifestyleModalVisible, setIsLifestyleModalVisible] = useState(false);
+  const lastKnownNewestIdRef = useRef<string | null>(null);
   const isSelectionMode = selectedMessageIds.length > 0;
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -763,10 +809,19 @@ export function ChatScreen() {
 
   useEffect(() => {
     logEvent('MESSAGES_COUNT');
-    if (!isNearBottomRef.current && messages.length > 0) {
-      setNewMessagesWhileScrolled(prev => prev + 1);
+    if (messages.length === 0) return;
+    const newestMsg = messages[messages.length - 1];
+    if (!lastKnownNewestIdRef.current) {
+      lastKnownNewestIdRef.current = newestMsg.id;
+      return;
     }
-  }, [messages.length]);
+    if (newestMsg.id !== lastKnownNewestIdRef.current) {
+      lastKnownNewestIdRef.current = newestMsg.id;
+      if (!isNearBottomRef.current) {
+        setNewMessagesWhileScrolled(prev => prev + 1);
+      }
+    }
+  }, [messages]);
 
   useEffect(() => {
     if (isHydrated) {
@@ -904,7 +959,9 @@ export function ChatScreen() {
     setSelectedImage(null);
     isNearBottomRef.current = true;
     setNewMessagesWhileScrolled(0);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
   }, [inputText, selectedImage, sendMessage]);
 
   const handlePickImage = useCallback(() => {
@@ -974,10 +1031,10 @@ export function ChatScreen() {
     }
     
     let showDateSeparator = false;
-    if (index === reversedMessages.length - 1) {
+    if (index === displayedMessages.length - 1) {
       showDateSeparator = true;
     } else {
-      const prevMessage = reversedMessages[index + 1];
+      const prevMessage = displayedMessages[index + 1];
       if (prevMessage && item.timestamp) {
         const currentDate = new Date(item.timestamp).toDateString();
         const prevDate = new Date(prevMessage.timestamp || new Date().toISOString()).toDateString();
@@ -1243,7 +1300,7 @@ export function ChatScreen() {
         </SwipeableBubble>
       </View>
     );
-  }, [retryMessage, colors, reversedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage, handleSend, setReplyingTo, setVersionModalMessage]);
+  }, [retryMessage, colors, displayedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage, handleSend, setReplyingTo, setVersionModalMessage]);
 
   if (!isHydrated) {
     return (
@@ -1319,6 +1376,7 @@ export function ChatScreen() {
                   const msg = messages.find(m => m.id === selectedMessageIds[0]);
                   if (msg) {
                     setInputText(msg.content);
+                    setTimeout(() => inputRef.current?.focus(), 50);
                   }
                   setSelectedMessageIds([]);
                 }} style={s.headerBtn}>
@@ -1346,6 +1404,13 @@ export function ChatScreen() {
               </View>
             </View>
             <View style={s.headerRight}>
+              <TouchableOpacity
+                onPress={() => setIsLifestyleModalVisible(true)}
+                style={[s.headerBtn, { backgroundColor: 'rgba(139, 92, 246, 0.12)', borderRadius: 8, marginRight: 4 }]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={s.headerBtnText}>🌟</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {
                   setIsSearchActive(prev => !prev);
@@ -1450,7 +1515,7 @@ export function ChatScreen() {
             data={displayedMessages}
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="on-drag"
-            extraData={displayedMessages.length + (selectedMessageIds.length > 0 ? selectedMessageIds[0] : '') + (isTyping ? '1' : '0')}
+            extraData={`${displayedMessages.length}_${selectedMessageIds.join(',')}_${isTyping ? '1' : '0'}`}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={s.listContent}
@@ -1619,13 +1684,22 @@ export function ChatScreen() {
                 key={chip.id}
                 style={[s.quickActionChip, { backgroundColor: 'rgba(139, 92, 246, 0.12)', borderColor: 'rgba(139, 92, 246, 0.28)' }]}
                 onPress={() => {
-                  if (chip.isNavigation) {
+                  if ((chip as any).isModal) {
+                    setIsLifestyleModalVisible(true);
+                  } else if (chip.isNavigation) {
                     navigation.navigate('Brain');
                   } else if (chip.prefix) {
                     setInputText(prev => {
-                      if (!prev.trim()) return chip.prefix;
-                      if (prev.startsWith(chip.prefix)) return prev;
-                      return `${chip.prefix}${prev.trim()}`;
+                      const trimmed = prev.trim();
+                      if (!trimmed) return chip.prefix;
+                      // Cleanly replace any existing known quick action prefix
+                      for (const p of ALL_QUICK_PREFIXES) {
+                        if (trimmed.startsWith(p)) {
+                          const customSuffix = trimmed.slice(p.length).trim();
+                          return customSuffix ? `${chip.prefix}${customSuffix}` : chip.prefix;
+                        }
+                      }
+                      return `${chip.prefix}${trimmed}`;
                     });
                     presenceService.onTypingStart();
                     inputRef.current?.focus();
@@ -1690,7 +1764,7 @@ export function ChatScreen() {
                 placeholderTextColor={colors.placeholder}
                 multiline
                 maxLength={2000}
-                textAlignVertical="center"
+                textAlignVertical="top"
               />
               {inputText.length > 0 && (
                 <TouchableOpacity
@@ -1894,6 +1968,47 @@ export function ChatScreen() {
               )}
             </View>
           </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* ── Interactive Lifestyle Hub Modal ── */}
+      <Modal
+        visible={isLifestyleModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsLifestyleModalVisible(false)}
+      >
+        <View style={s.lifestyleModalOverlay}>
+          <View style={[s.lifestyleModalContent, { backgroundColor: colors.background === '#1A1A1A' ? '#1E1E2E' : '#F9FAFB', borderColor: colors.border }]}>
+            <View style={s.lifestyleModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontSize: 20 }}>🌟</Text>
+                <Text style={[s.lifestyleModalTitle, { color: colors.textPrimary }]}>Choose Your Lifestyle Mode</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsLifestyleModalVisible(false)}
+                style={s.lifestyleModalCloseBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 16, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+              <LifestyleOnboardingHub
+                colors={colors}
+                isInModal={true}
+                onSelectPrompt={(prompt) => {
+                  setIsLifestyleModalVisible(false);
+                  handleSend(prompt);
+                }}
+                onCustomize={(prompt) => {
+                  setIsLifestyleModalVisible(false);
+                  setInputText(prompt);
+                  setTimeout(() => inputRef.current?.focus(), 100);
+                }}
+              />
+            </ScrollView>
+          </View>
         </View>
       </Modal>
 
@@ -2238,6 +2353,7 @@ const s = StyleSheet.create({
   clearInputBtn: {
     position: 'absolute',
     right: 12,
+    top: 10,
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -2543,5 +2659,39 @@ const s = StyleSheet.create({
     color: '#E0E7FF',
     fontSize: 13,
     fontWeight: '600',
+  },
+  lifestyleModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  lifestyleModalContent: {
+    height: '85%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    overflow: 'hidden',
+  },
+  lifestyleModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  lifestyleModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  lifestyleModalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
