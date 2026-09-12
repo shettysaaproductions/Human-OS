@@ -126,12 +126,15 @@ export class SituationalAwareness {
 
     lines.push(`## SITUATION BRIEF — Nova's Internal Understanding`);
     lines.push(`(CRITICAL: This entire brief, including all labels, phase names, engine names, and reasoning instructions, is INTERNAL ONLY. You must NEVER leak phrases like "Situation Brief", "Discovery Phase", "Current Time", or "Internal Understanding" to the user.)`);
-    lines.push(`- Right now: ${ctx.dayName}, ${ctx.dateStr}, ${ctx.timeStr} ${ctx.tzLabel} (${ctx.isWeekend ? 'Weekend / Weekoff' : 'Weekday'})`);
+    const cleanDateStr = ctx.dateStr.startsWith(`${ctx.dayName}, `)
+      ? ctx.dateStr.slice(`${ctx.dayName}, `.length)
+      : ctx.dateStr;
+    lines.push(`- Right now: ${ctx.dayName}, ${cleanDateStr}, ${ctx.timeStr} ${ctx.tzLabel} (${ctx.isWeekend ? 'Weekend / Weekoff' : 'Weekday'})`);
     if (ctx.isWeekend && !ctx.scheduleOverrideNote) {
-      lines.push(`- WEEKOFF MODE: It's a weekend. The user is likely relaxing, off from work, or has casual plans. Avoid pushing work/office topics unless the user explicitly brings them up.`);
+      lines.push(`- WEEKOFF MODE: Today is ${ctx.dayName} (weekend). The user is likely relaxing, off from work, or has casual plans. Avoid pushing work/office topics unless the user explicitly brings them up.`);
     }
     lines.push(`- Time of day: ${this.getTimeOfDay(ctx.nowLocal)}`);
-    lines.push(`- Time-based persona: ${this.getTimedPersona(ctx.nowLocal, ctx.isWeekend)}`);
+    lines.push(`- Time-based persona: ${this.getTimedPersona(ctx.nowLocal, ctx.isWeekend, ctx.dayName)}`);
 
     const currentHour = ctx.nowLocal.getUTCHours();
     if (currentHour >= 20 || currentHour < 6) {
@@ -145,7 +148,7 @@ export class SituationalAwareness {
 
     if (ctx.gapMinutes !== null) {
       lines.push(`- Last contact: ${this.describeGap(ctx.gapMinutes)}`);
-      lines.push(`- Greeting strategy: ${this.getGreetingStrategy(ctx.gapMinutes, ctx.nowLocal)}`);
+      lines.push(`- Greeting strategy: ${this.getGreetingStrategy(ctx.gapMinutes, ctx.nowLocal, ctx.dayName)}`);
       // Hard-lock stale context when gap is significant
       if (ctx.gapMinutes > 1440) { // > 24 hours
         lines.push(`- ⛔ CONTEXT HARD STOP: It has been over 24 hours since last message. The previous conversation thread is CLOSED. Do NOT reference or continue it. Open fresh with something relevant to RIGHT NOW — current time, day, what they are likely doing.`);
@@ -349,6 +352,7 @@ export class SituationalAwareness {
     lines.push(`- NEVER say "I understand you're busy" or "I can see you're feeling X". Just respond accordingly.`);
     lines.push(`- CONFIRM ROLES BEFORE ASSUMING (CRITICAL): Never assume the user performs an activity (like cooking, childcare, or operations) when memories or conversations relate it to a family member (e.g. wife). If the user mentioned that his wife cooks and he is interested in a cloud kitchen business, ask clarifying questions (e.g. "Waise cooking aap karte ho ya aapki wife?") rather than guessing or assuming the user is into cooking!`);
     lines.push(`- 🛡️ CONCRETE PROOF & HYPOTHESIS CONFIRMATION (CRITICAL INVARIANT): All 21 LLM background engines must use user messages strictly as concrete proof. Never assume, extrapolate, or hallucinate new memories. When you discover a connected dot or opportunity (e.g. Sakshi's cooking talent ⇄ Shetty's Dhaba cloud kitchen venture), that shows brilliant autonomous reasoning! However, introduce it naturally as a thought, suggestion, or question (e.g. "Maine socha kya hum...", "Ek thought aaya tha..."). NEVER treat or believe it as a settled fact in memory until the user explicitly agrees/confirms!`);
+    lines.push(`- 📅 TEMPORAL TRUTH INVARIANT (CRITICAL): Today is STRICTLY ${ctx.dayName}. Never refer to today as any other day of the week under any circumstances. If today is Saturday, calling it Sunday (or any other day) is a forbidden hallucination!`);
     lines.push(`- If something is unclear — ask ONE direct question upfront. Do not guess and pretend to understand.`);
 
     return lines.join('\n');
@@ -383,13 +387,14 @@ export class SituationalAwareness {
     return 'Late Night';
   }
 
-  private getTimedPersona(now: Date, isWeekend: boolean): string {
+  private getTimedPersona(now: Date, isWeekend: boolean, dayName?: string): string {
     const hour = now.getUTCHours();
+    const dayPrefix = dayName ? `${dayName}` : (isWeekend ? 'Weekend' : 'Weekday');
     if (hour >= 0 && hour < 5) return 'It\'s very late / early. User might be having trouble sleeping, studying late, or unwinding. Be low-key, warm, and chill. Don\'t be hyper.';
-    if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ' on weekend' : ''}. ${isWeekend ? 'Might be early riser or insomnia. Casual check-in.' : 'Keep it snappy.'}`;
-    if (hour >= 9 && hour < 12) return `${isWeekend ? 'Weekend morning' : 'Weekday morning'}. ${isWeekend ? 'Relaxed mode. They might be free.' : 'They might be busy with their day. Don\'t distract unnecessarily.'}`;
+    if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ` on ${dayPrefix}` : ''}. ${isWeekend ? 'Might be early riser or insomnia. Casual check-in.' : 'Keep it snappy.'}`;
+    if (hour >= 9 && hour < 12) return `${dayPrefix} morning. ${isWeekend ? 'Relaxed weekend mode. They might be free.' : 'They might be busy with their day. Don\'t distract unnecessarily.'}`;
     if (hour >= 12 && hour < 14) return 'Lunch time / Mid-day. Good time for a casual conversation.';
-    if (hour >= 14 && hour < 17) return `${isWeekend ? 'Weekend afternoon' : 'Weekday afternoon'}. ${isWeekend ? 'Might be chilling, watching something, out with someone.' : 'Keep responses helpful and respect their time if they are busy.'}`;
+    if (hour >= 14 && hour < 17) return `${dayPrefix} afternoon. ${isWeekend ? 'Might be chilling, watching something, out with someone.' : 'Keep responses helpful and respect their time if they are busy.'}`;
     if (hour >= 17 && hour < 20) return `Evening — winding down from the day. ${isWeekend ? 'Evening plans likely.' : 'Most open to chatting now.'}`;
     if (hour >= 20 && hour < 23) return 'Night — prime conversation time. User is relaxed. Best time to have deeper conversations.';
     return 'Late night — likely tired. Keep it light.';
@@ -421,14 +426,14 @@ export class SituationalAwareness {
     return `${days} day${days > 1 ? 's' : ''} ago — user has been away a long time`;
   }
 
-  private getGreetingStrategy(gapMinutes: number, now: Date): string {
+  private getGreetingStrategy(gapMinutes: number, now: Date, dayName?: string): string {
     const hour = now.getUTCHours();
     if (gapMinutes < 2) return 'Continue naturally. Zero greeting.';
     if (gapMinutes < 30) return 'Pick up where you left off. No greeting.';
     if (gapMinutes < 120) return 'Brief acknowledgment is fine, but don\'t over-greet.';
-    if (hour >= 5 && hour < 12) return 'Long gap + morning. Greet with "good morning" energy — casual and warm.';
-    if (hour >= 12 && hour < 17) return 'Long gap + afternoon. Ask how their day is going naturally.';
-    if (hour >= 17 && hour < 21) return 'Long gap + evening. Reference their day or what they might be up to.';
+    if (hour >= 5 && hour < 12) return `Long gap + morning. Greet with "good morning" (${dayName ? `${dayName} morning` : 'morning'}) energy — casual and warm. (Today is strictly ${dayName || 'today'}, do NOT refer to it as any other day).`;
+    if (hour >= 12 && hour < 17) return `Long gap + afternoon. Ask how their ${dayName || 'day'} is going naturally.`;
+    if (hour >= 17 && hour < 21) return `Long gap + evening. Reference their ${dayName || 'day'} or what they might be up to.`;
     return 'Long gap + late night. Be warm and low-key — they might be tired or reflective.';
   }
 

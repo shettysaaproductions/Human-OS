@@ -433,11 +433,75 @@ export function validateAndRepairGrounding(
     text = `Mast plan hai yaar! 💪 Kya main tere liye roz subah ${timeStr} ka workout reminder set kar doon, taaki routine na tute?`;
   }
 
-  // 11. Watchtower Deterministic Quality & Voice Inspector (Feminine Grammar, Tone, Coherence)
+  // 11. Temporal Day-of-the-Week Truth Guard (Zero Tolerance Day Hallucinations)
+  let resolvedToday = context?.todayDayName;
+  if (!resolvedToday && context?.situationBrief) {
+    const dayMatch = context.situationBrief.match(/Right now:\s*([A-Za-z]+)/i);
+    if (dayMatch && dayMatch[1]) {
+      resolvedToday = dayMatch[1];
+    }
+  }
+  if (!resolvedToday) {
+    const tzOffsetHours = context?.profile?.timezone_offset ? (context.profile.timezone_offset / 60) : 5.5;
+    const nowLocal = new Date(Date.now() + tzOffsetHours * 3600000);
+    const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    resolvedToday = ALL_DAYS[nowLocal.getUTCDay()];
+  }
+  if (resolvedToday) {
+    const beforeDayRepair = text;
+    text = repairDayOfWeekHallucinations(text, resolvedToday);
+    if (text !== beforeDayRepair) {
+      logger.warn('[GroundingValidator] Intercepted day-of-week hallucination, repaired to true day', {
+        trueDay: resolvedToday,
+        original: beforeDayRepair,
+        repaired: text,
+      });
+    }
+  }
+
+  // 12. Watchtower Deterministic Quality & Voice Inspector (Feminine Grammar, Tone, Coherence)
   const inspected = watchtowerInspector.inspectAndRepair(text, userMessage, context);
   text = inspected.cleanText;
 
   return text.trim();
+}
+
+/**
+ * Repairs present-tense day-of-week hallucinations.
+ * For example, if today is Saturday, but the model asserts "Abhi toh Sunday morning hai!"
+ * or "Happy Sunday!", it repairs the day to "Saturday".
+ */
+export function repairDayOfWeekHallucinations(text: string, todayDayName: string): string {
+  if (!text || !todayDayName) return text;
+  const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const normalizedToday = ALL_DAYS.find(d => d.toLowerCase() === todayDayName.toLowerCase());
+  if (!normalizedToday) return text;
+
+  const otherDays = ALL_DAYS.filter(d => d.toLowerCase() !== normalizedToday.toLowerCase());
+  const otherDaysPattern = otherDays.join('|');
+
+  // 1. "Abhi toh Sunday", "Aaj Sunday", "It's Sunday", "Happy Sunday", "Today is Sunday", "Abhi Sunday"
+  const prefixRegex = new RegExp(`\\b(abhi\\s+toh|abhi|aaj\\s+toh|aaj|it's|its|happy|today\\s+is)\\s+(${otherDaysPattern})\\b`, 'gi');
+  let repaired = text.replace(prefixRegex, (_match, prefix, day) => {
+    const replacementDay = day[0] === day[0].toUpperCase() ? normalizedToday : normalizedToday.toLowerCase();
+    return `${prefix} ${replacementDay}`;
+  });
+
+  // 2. "Sunday morning", "Sunday afternoon", "Sunday evening", "Sunday night", "Sunday ki subah/shaam/raat"
+  const suffixRegex = new RegExp(`\\b(${otherDaysPattern})\\s+(morning|afternoon|evening|night|ki\\s+subah|ki\\s+shaam|ki\\s+dopahar|ki\\s+raat)\\b`, 'gi');
+  repaired = repaired.replace(suffixRegex, (_match, day, timeWord) => {
+    const replacementDay = day[0] === day[0].toUpperCase() ? normalizedToday : normalizedToday.toLowerCase();
+    return `${replacementDay} ${timeWord}`;
+  });
+
+  // 3. "Sunday hai" preceded by present tense ("abhi Sunday hai", "toh Sunday hai")
+  const haiRegex = new RegExp(`\\b(abhi\\s+|aaj\\s+|toh\\s+)(${otherDaysPattern})\\s+(hai|h)\\b`, 'gi');
+  repaired = repaired.replace(haiRegex, (_match, prefix, day, haiWord) => {
+    const replacementDay = day[0] === day[0].toUpperCase() ? normalizedToday : normalizedToday.toLowerCase();
+    return `${prefix}${replacementDay} ${haiWord}`;
+  });
+
+  return repaired;
 }
 
 /**

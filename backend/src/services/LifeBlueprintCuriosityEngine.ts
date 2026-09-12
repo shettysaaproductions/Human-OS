@@ -257,14 +257,14 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
   {
     key: 'weekend_routine',
     category: 'PERSONAL_CHOICES_AND_RECHARGE',
-    title: 'Sunday / Weekend Recharge Style',
-    description: 'How user typically likes to spend Sundays or off days',
+    title: 'Weekend & Off-Day Recharge Style',
+    description: 'How user typically likes to spend weekends or off days',
     importance: 'HIGH',
     timingAffinity: 'WEEKEND_RELAX',
     matchingKeys: ['weekend_routine', 'sunday_routine', 'weekend_habit', 'off_day_habit'],
     valueEvidencePatterns: [/\b(?:family time|sleeping in|outing|cooking|movies|relaxing|chilling|exploring)\b/i],
     promptTemplates: [
-      "Sunday ya weekoff pe tumhara usual routine kya hota hai — pura din rest aur family time, ya kuch exploration?",
+      "Weekend ya weekoff pe tumhara usual routine kya hota hai — pura din rest aur family time, ya kuch exploration?",
       "Weekend pe tumhein sabse zyada kya karna pasand hai?"
     ],
     companionValue: "Enables weekend mode personalization and ensures off-days feel restorative."

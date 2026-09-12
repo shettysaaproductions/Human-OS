@@ -277,7 +277,13 @@ export class UserLifeStageEngine {
       const localMinute = localDate.getUTCMinutes();
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const dayOfWeek = dayNames[localDate.getUTCDay()];
-      const isWeekendDay = dayOfWeek === 'Sunday';
+      const customWeekoffDay = (
+        (workingContext && Array.isArray(workingContext) ? workingContext.find((w: any) => w.key === 'weekoff_day')?.value : null) ||
+        (workingContext && typeof workingContext === 'object' && !Array.isArray(workingContext) ? (workingContext as any).weekoff_day : null)
+      )?.toLowerCase();
+      const isWeekendDay = customWeekoffDay 
+        ? dayOfWeek.toLowerCase() === customWeekoffDay 
+        : (dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday');
 
       // Inspect custom sleep/wake memories if known
       const memMap = new Map<string, string>();
@@ -343,7 +349,7 @@ export class UserLifeStageEngine {
         isSleepQuietHours = true;
       } else if (isWeekendDay) {
         currentPhase = 'WEEKEND_FLEX';
-        phaseDescription = 'Sunday Family / Weekend Mode. Relaxed, open for family moments and venture brainstorming.';
+        phaseDescription = `${dayOfWeek} Family / Weekend Mode. Relaxed, open for family moments and venture brainstorming.`;
         proactiveAllowance = 'FAMILY_STRATEGIC';
       } else if (localHour >= 11 && localHour < 20) {
         currentPhase = 'WORK_FOCUS';

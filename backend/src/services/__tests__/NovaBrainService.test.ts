@@ -466,6 +466,38 @@ describe('NovaBrainService', () => {
       expect(repaired).toContain('Arre sorry yaar! Mera thoda dhyan bhatak gaya tha');
       expect(repaired).not.toContain('Shreshth');
     });
+
+    it('intercepts and repairs Sunday morning hallucination on Saturday', () => {
+      const hallucinated = 'Arey, kahan tha tu itni der? 🎉 Kya chal raha hai? Abhi toh Sunday morning hai!';
+      const repaired = validateAndRepairGrounding(
+        hallucinated,
+        '',
+        { todayDayName: 'Saturday' }
+      );
+      expect(repaired).toBe('Arey, kahan tha tu itni der? 🎉 Kya chal raha hai? Abhi toh Saturday morning hai!');
+      expect(repaired).not.toContain('Sunday');
+    });
+
+    it('intercepts day-of-week hallucination using situationBrief extraction', () => {
+      const hallucinated = 'Happy Sunday! Aaj toh Sunday morning mast chai peete hain.';
+      const repaired = validateAndRepairGrounding(
+        hallucinated,
+        '',
+        { situationBrief: '- Right now: Saturday, September 12, 2026, 10:44 AM IST (Weekend / Weekoff)' }
+      );
+      expect(repaired).toBe('Happy Saturday! Aaj toh Saturday morning mast chai peete hain.');
+      expect(repaired).not.toContain('Sunday');
+    });
+
+    it('preserves valid future-dated references to other days', () => {
+      const message = 'Sunday ko match dekhne chalenge!';
+      const repaired = validateAndRepairGrounding(
+        message,
+        'Sunday ko kya plan hai?',
+        { todayDayName: 'Saturday' }
+      );
+      expect(repaired).toBe('Sunday ko match dekhne chalenge!');
+    });
   });
 });
 

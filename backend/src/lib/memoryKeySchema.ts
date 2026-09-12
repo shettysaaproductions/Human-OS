@@ -117,11 +117,12 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Dates: birthday ─────────────────────────────────────────────────────────
   birth_date: [
     'birthday', 'date_of_birth', 'dob', 'bday', 'janam_din', 'user_birth_date', 'user_dob', 'my_birthday', 'my_dob',
+    'user_date_of_birth', 'my_date_of_birth', 'users_date_of_birth', 'users_dob'
   ],
   wife_birth_date: [
     'wife_dob', 'wifes_birthday', 'wifes_birth_date', 'wife_birthday',
     'wifes_dob', 'sakshi_birthday', 'sakshi_dob', 'sakshi_birth_date',
-    'biwi_ka_bday', 'wife_bday',
+    'biwi_ka_bday', 'wife_bday', 'wife_date_of_birth', 'wifes_date_of_birth', 'sakshi_date_of_birth'
   ],
   son_birth_date: [
     'son_dob', 'sons_birthday', 'sons_birth_date', 'son_birthday',
@@ -130,6 +131,12 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'tuku_birthday', 'tuku_dob', 'tuku_birth_date',
     'shreshth_birthday', 'shreshth_dob', 'shreshth_birth_date', 'shreshth_bday',
     'bete_ka_bday', 'bete_ka_birthday', 'bete_ki_date_of_birth', 'son_bday', 'son_date_of_birth',
+    'shreshth_date_of_birth', 'shresth_date_of_birth', 'shresth_dob', 'shresth_birthday',
+    'tiku_date_of_birth', 'tuku_date_of_birth', 'child_date_of_birth'
+  ],
+  daughter_birth_date: [
+    'daughters_birth_date', 'daughter_dob', 'daughter_birthday', 'daughters_dob', 'daughters_birthday',
+    'daughter_date_of_birth', 'beti_ka_bday', 'beti_ki_date_of_birth'
   ],
   // ── Family: occupations ──────────────────────────────────────────────────────
   father_occupation: [

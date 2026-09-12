@@ -1259,7 +1259,7 @@ chatRouter.post(
       const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
       const dayIdx = nowLocal.getUTCDay();
-      const dateStr = `${DAY_NAMES[dayIdx]}, ${MONTH_NAMES[nowLocal.getUTCMonth()]} ${nowLocal.getUTCDate()}, ${nowLocal.getUTCFullYear()}`;
+      const dateStr = `${MONTH_NAMES[nowLocal.getUTCMonth()]} ${nowLocal.getUTCDate()}, ${nowLocal.getUTCFullYear()}`;
       const hh = nowLocal.getUTCHours(), mm = nowLocal.getUTCMinutes();
       const timeStr = `${hh % 12 || 12}:${mm.toString().padStart(2,'0')} ${hh >= 12 ? 'PM' : 'AM'}`;
       const tzLabel = tzOffset === 5.5 ? 'IST' : `UTC${tzOffset >= 0 ? '+' : ''}${tzOffset}`;
@@ -1501,6 +1501,7 @@ chatRouter.post(
         // P0-B: question clause texts — forwarded to memory extraction jobs
         questionClauses: turnAnalysis.questionClauses || [],
         language: language || 'auto',
+        todayDayName: DAY_NAMES[dayIdx],
       };
 
 

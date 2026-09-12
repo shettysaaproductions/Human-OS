@@ -26,6 +26,11 @@ const GARBAGE_VALUE_PATTERNS: RegExp[] = [
   /^(active goals?|current goals?|long.?term goals?|user's goals?)$/i,
   /^(pending tasks?|upcoming tasks?|active tasks?)$/i,
 
+  // ── Non-data placeholders & missing-data strings ──────────────────────────
+  /^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data)$/i,
+  /^(not\s+mentioned\s+in\s+chat|not\s+available\s+yet|date\s+not\s+mentioned|dob\s+not\s+mentioned|birthday\s+not\s+mentioned)$/i,
+  /^(since\s+the\s+son|as\s+an\s+infant|the\s+son\s+is\s+an\s+infant|infant\s+son)$/i,
+
   // ── P0-B: Hinglish interrogative question-word guard ─────────────────────
   // Catches question fragments extracted FROM questions WITHOUT a trailing "?".
   // These are defense-in-depth; the primary fix is passing questionClauses to
