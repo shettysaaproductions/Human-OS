@@ -71,3 +71,76 @@ export function classifyIntent(message: string, recentHistory: string[] = []): R
   // Default: Human chat, medium budget — enough for 2 proper bubbles
   return { mode: 'HUMAN_CHAT', maxTokens: 450, temperature: 0.7, shouldOfferTable: false };
 }
+
+export interface ContextualOptionsInput {
+  message: string;
+  replyText: string;
+  language?: string;
+  mode?: ResponseMode;
+}
+
+/**
+ * Synthesize smart, contextual quick-reply options (2-3 chips) when the LLM
+ * did not output explicit <OPTIONS> tags or when JSON was malformed.
+ * Tailored dynamically to lifestyle context (student, founder, fitness, task, venting)
+ * and language (Hindi/Hinglish vs English).
+ */
+export function synthesizeContextualOptions(input: ContextualOptionsInput): string[] {
+  const { message, replyText, language = 'auto' } = input;
+  const lowerMsg = (message || '').toLowerCase();
+  const lowerReply = (replyText || '').toLowerCase();
+
+  const isHindi = language === 'hi' || (language !== 'en' && /\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(message + ' ' + replyText));
+
+  // 1. Reminder / Task confirmation or routine check
+  if (/\b(remind|reminder|schedule|alarm|task|yaad|routine|target)\b/i.test(lowerMsg) || /\b(reminder set|set kar diya|yaad dila|schedule kiya|noted)\b/i.test(lowerReply)) {
+    return isHindi 
+      ? ['Kab remind karu?', 'Show my tasks', 'All set, thanks!']
+      : ['When should I remind you?', 'Show my tasks', 'All set, thanks!'];
+  }
+
+  // 2. Planning, studying, or student aspirant
+  if (/\b(exam|study|syllabus|notes|revision|prepare|college|semester|mock test|padhai)\b/i.test(lowerMsg) || /\b(study|revision|padhai)\b/i.test(lowerReply)) {
+    return isHindi
+      ? ['Daily study plan bana do', 'Key points summarise karo', 'Quick quiz lo']
+      : ['Make a daily study plan', 'Summarize key points', 'Give me a quick quiz'];
+  }
+
+  // 3. Work, startup, productivity, builder
+  if (/\b(work|office|client|meeting|presentation|pitch|code|bug|project|deadline|sprint|kaam)\b/i.test(lowerMsg)) {
+    return isHindi
+      ? ['Next step kya karein?', 'Draft quick notes', 'Focus mode on karo']
+      : ['What is the next step?', 'Draft quick notes', 'Set a focus block'];
+  }
+
+  // 4. Fitness, gym, health, routine
+  if (/\b(gym|workout|diet|calories|exercise|run|running|health|protein|fat|vazan|kasrat)\b/i.test(lowerMsg)) {
+    return isHindi
+      ? ['Workout log karo', 'Diet tips do', 'Water reminder set karo']
+      : ['Log this workout', 'Give diet tips', 'Remind me to hydrate'];
+  }
+
+  // 5. Emotional vent / stress / companionship
+  if (/\b(feel|tired|exhausted|sad|tension|stress|lonely|bored|dukhi|pareshan|thak gaya|thak gayi)\b/i.test(lowerMsg)) {
+    return isHindi
+      ? ['Thoda baat karein?', 'Distract me please', 'I need a break']
+      : ["Let's chat a bit", 'Distract me please', 'I need a break'];
+  }
+
+  // 6. Factual / Explanatory followup
+  if (/\b(explain|detail|difference|compare|why|kaise|samjhao|batao)\b/i.test(lowerMsg)) {
+    return isHindi
+      ? ['Example ke saath batao', 'Table format me dikhao', 'Short summary do']
+      : ['Give an example', 'Show in a table', 'Give a short summary'];
+  }
+
+  // 7. General friendly conversational progression
+  if (lowerReply.includes('?') || lowerMsg.includes('?')) {
+    return isHindi
+      ? ['Haan bilkul', 'Thoda aur batao', 'Nahi, baad me']
+      : ['Yes, definitely', 'Tell me more', 'Not right now'];
+  }
+
+  return [];
+}
+

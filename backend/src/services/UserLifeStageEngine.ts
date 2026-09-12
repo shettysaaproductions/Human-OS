@@ -181,92 +181,139 @@ export class UserLifeStageEngine {
         }
       }
 
-      const userName = profile?.preferred_name || profile?.full_name || 'Saa';
+      const userName = profile?.preferred_name || profile?.full_name || 'Friend';
 
       // 2. Cluster into Entity Wardrobes
       const clusterResult: any = clusterMemoriesIntoWardrobes(memories, workingContext);
       const wardrobes: EntityWardrobe[] = Array.isArray(clusterResult) ? clusterResult : (clusterResult?.wardrobes || []);
 
-      // 3. Extract Family Dependents
+      // 3. Extract Family Dependents (ONLY from verified evidence)
       const familyWardrobes = wardrobes.filter(w => w.domain === 'family');
-      const sonW = familyWardrobes.find(w => w.name.toLowerCase().includes('shreshth') || (w.roleTitle && w.roleTitle.toLowerCase().includes('son')));
-      const wifeW = familyWardrobes.find(w => w.name.toLowerCase().includes('sakshi') || (w.roleTitle && w.roleTitle.toLowerCase().includes('wife')));
-      const fatherW = familyWardrobes.find(w => w.name.toLowerCase().includes('suresh') || (w.roleTitle && w.roleTitle.toLowerCase().includes('father')));
-      const motherW = familyWardrobes.find(w => w.name.toLowerCase().includes('rajeshree') || (w.roleTitle && w.roleTitle.toLowerCase().includes('mother')));
+      const sonW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('son') || w.name.toLowerCase().includes('shreshth'));
+      const daughterW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('daughter'));
+      const wifeW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('wife') || w.name.toLowerCase().includes('sakshi'));
+      const husbandW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('husband'));
+      const fatherW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('father') || w.name.toLowerCase().includes('suresh'));
+      const motherW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('mother') || w.name.toLowerCase().includes('rajeshree'));
 
-      const sonAgeStr = sonW?.traits.find(t => (t.value || '').toLowerCase().includes('month') || (t.value || '').toLowerCase().includes('mahine') || (t.value || '').toLowerCase().includes('age'))?.value || '';
-      const hasInfant = !!sonW || memories.some(m => /6\s*(?:month|mahine)|baby|infant/i.test(m.value));
+      const sonAgeStr = sonW?.traits?.find(t => (t.value || '').toLowerCase().includes('month') || (t.value || '').toLowerCase().includes('mahine') || (t.value || '').toLowerCase().includes('age'))?.value || '';
+      const hasInfantMem = memories.some(m => /\b(?:6\s*(?:month|mahine)|infant|newborn|baby)\b/i.test(m.value || ''));
+      const hasInfant = !!sonW || hasInfantMem;
       const infantAge = sonAgeStr ? sonAgeStr.replace(/.*:\s*/, '').trim() : (hasInfant ? '6 months' : undefined);
 
       const spouseSkills: string[] = [];
-      if (wifeW) {
-        for (const trait of wifeW.traits) {
+      const spouseW = wifeW || husbandW;
+      if (spouseW) {
+        for (const trait of spouseW.traits || []) {
           const val = (trait.value || trait.label || '').toLowerCase();
-          if (/cook|culinary|dish|khana/i.test(val)) spouseSkills.push('Culinary talent & traditional cooking');
-          if (/nail|artist/i.test(val)) spouseSkills.push('Self-taught nail artist');
+          if (/cook|culinary|dish|khana/i.test(val)) spouseSkills.push(trait.value || 'Cooking');
+          if (/nail|artist|craft/i.test(val)) spouseSkills.push(trait.value || 'Creative artist');
         }
       }
 
-      const familyDependents = {
+      const hasAnyFamily = hasInfant || !!spouseW || !!fatherW || !!motherW || !!daughterW;
+      const familyDependents: UserLifeStageContext['familyDependents'] = hasAnyFamily ? {
         hasInfant,
-        infantName: sonW?.name || (hasInfant ? 'Shreshth' : undefined),
+        infantName: sonW?.name || (hasInfant ? (sonAgeStr ? sonW?.name : undefined) : undefined),
         infantAge,
-        spouseName: wifeW?.name || 'Sakshi',
-        spouseRole: wifeW?.roleTitle || 'Wife',
-        spouseSkills: spouseSkills.length > 0 ? spouseSkills : ['Cooking talent', 'Nail artist'],
-        parents: {
-          father: {
-            name: fatherW?.name || 'Suresh',
-            occupation: fatherW?.traits.find(t => /undergarment|business|trade/i.test(t.value || ''))?.value || 'Undergarments distribution business'
-          },
-          mother: {
-            name: motherW?.name || 'Rajeshree',
-            occupation: motherW?.traits.find(t => /tailor|craft|garment/i.test(t.value || ''))?.value || 'Tailoring & garment craftsmanship'
+        spouseName: spouseW?.name,
+        spouseRole: spouseW?.roleTitle || (wifeW ? 'Wife' : husbandW ? 'Husband' : undefined),
+        spouseSkills: spouseSkills.length > 0 ? spouseSkills : undefined,
+        parents: (fatherW || motherW) ? {
+          father: fatherW ? {
+            name: fatherW.name,
+            occupation: fatherW.traits?.find(t => /business|trade|job|work/i.test(t.value || ''))?.value
+          } : undefined,
+          mother: motherW ? {
+            name: motherW.name,
+            occupation: motherW.traits?.find(t => /tailor|craft|job|work/i.test(t.value || ''))?.value
+          } : undefined,
+        } : undefined
+      } : undefined;
+
+      // 4. Extract Primary Livelihood (from work wardrobes, memories, or profile)
+      const workWardrobes = wardrobes.filter(w => w.domain === 'work');
+      const primaryWorkW = workWardrobes.find(w => w.name && !w.name.toLowerCase().includes('dhaba') && !w.name.toLowerCase().includes('kitchen')) || workWardrobes[0];
+      
+      const companyMem = memories.find(m => m.key === 'company_name' || m.key === 'work_place');
+      const workSchedMem = memories.find(m => m.key === 'work_schedule');
+      const isStudent = memories.some(m => /\b(?:student|college|university|exam|exams|study|neet|jee|upsc|gate|cat|semester|coaching)\b/i.test(m.value || '') || (m.key && /study|college|exam/i.test(m.key)));
+
+      let primaryLivelihood: UserLifeStageContext['primaryLivelihood'] | undefined;
+      if (isStudent && !companyMem) {
+        const examGoal = memories.find(m => /exam|upsc|jee|neet|gate|cat|semester/i.test(m.value || ''))?.value;
+        const schedStr = memories.find(m => /schedule|timing/i.test(m.key || ''))?.value || 'Daily Study & Academic Routine';
+        primaryLivelihood = {
+          name: examGoal ? `Exam Prep: ${examGoal}` : 'Academic Studies & Exam Prep',
+          roleOrTitle: 'Student / Aspirant',
+          type: 'study',
+          scheduleDescription: schedStr,
+          shiftStartHour: 8,
+          shiftEndHour: 18,
+          activeDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+          currentGoals: [
+            examGoal ? `Master syllabus and succeed in ${examGoal}` : 'Clear target exams and master key concepts'
+          ]
+        };
+      } else if (primaryWorkW || companyMem) {
+        const companyName = primaryWorkW?.name || companyMem?.value || 'Work';
+        const schedStr = workSchedMem?.value || 'Monday to Saturday, 11:00 AM – 8:00 PM';
+        
+        let startH = 10;
+        let endH = 19;
+        if (schedStr) {
+          const hourMatches = schedStr.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|to|–)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+          if (hourMatches) {
+            const p1 = parseCustomHourMinute(hourMatches[1]);
+            const p2 = parseCustomHourMinute(hourMatches[2]);
+            if (p1) startH = p1.hour;
+            if (p2) endH = p2.hour;
           }
         }
-      };
 
-      // 4. Extract Primary Livelihood
-      const workWardrobes = wardrobes.filter(w => w.domain === 'work');
-      const convictionW = workWardrobes.find(w => w.name.toLowerCase().includes('conviction') || (w.summary && w.summary.toLowerCase().includes('recruitment')));
-      
-      const primaryLivelihood = {
-        name: convictionW?.name || 'Conviction HR',
-        roleOrTitle: 'Founder / Lead Recruiter',
-        type: 'agency' as const,
-        scheduleDescription: 'Monday to Saturday, 11:00 AM – 8:00 PM',
-        shiftStartHour: 11,
-        shiftEndHour: 20,
-        activeDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-        currentGoals: [
-          'Hiring drive: 4 candidates interviewing, target 2 selections',
-          'Scale agency operations and placements'
-        ]
-      };
+        primaryLivelihood = {
+          name: companyName,
+          roleOrTitle: primaryWorkW?.roleTitle || 'Team Member / Professional',
+          type: companyName.toLowerCase().includes('agency') || companyName.toLowerCase().includes('hr') ? 'agency' : 'job',
+          scheduleDescription: schedStr,
+          shiftStartHour: startH,
+          shiftEndHour: endH,
+          activeDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+          currentGoals: [
+            `Succeed and scale operations at ${companyName}`
+          ]
+        };
+      }
 
       // 5. Extract Active Ventures & Aspirations
       const activeVentures: UserLifeStageContext['activeVentures'] = [];
-      const dhabaW = workWardrobes.find(w => w.name.toLowerCase().includes('dhaba') || w.name.toLowerCase().includes('kitchen'));
+      const ventureW = workWardrobes.find(w => w.name && (w.name.toLowerCase().includes('dhaba') || w.name.toLowerCase().includes('kitchen') || w.name.toLowerCase().includes('startup') || w.name.toLowerCase().includes('venture')));
+      const ventureMem = memories.find(m => m.key === 'venture_name');
       
-      activeVentures.push({
-        name: dhabaW?.name || "Shetty's Dhaba",
-        category: 'Cloud Kitchen / Food Venture',
-        description: "Cloud kitchen food venture leveraging Sakshi's cooking flair and family recipes",
-        capitalRequirement: '₹15,000 seed funds',
-        linkedFundingSource: 'PF fund disbursement (pending portal bank detail update)',
-        collaborators: ['Sakshi (Culinary Lead)'],
-        status: 'preparing_funds'
-      });
+      if (ventureW || ventureMem) {
+        const vName = ventureW?.name || ventureMem?.value || 'Side Venture';
+        activeVentures.push({
+          name: vName,
+          category: vName.toLowerCase().includes('kitchen') || vName.toLowerCase().includes('dhaba') ? 'Cloud Kitchen / Food Venture' : 'Startup Venture',
+          description: ventureW?.summary || `Entrepreneurial venture: ${vName}`,
+          capitalRequirement: memories.find(m => m.key === 'seed_funds')?.value ? '₹15,000 seed funds' : undefined,
+          linkedFundingSource: memories.find(m => /pf|portal/i.test(m.value || '')) ? 'PF fund disbursement' : undefined,
+          collaborators: spouseW ? [`${spouseW.name} (Culinary Lead)`] : undefined,
+          status: 'preparing_funds'
+        });
+      }
 
       // 6. Extract Financial Stakes
-      const financialStakes: UserLifeStageContext['financialStakes'] = [
-        {
+      const financialStakes: UserLifeStageContext['financialStakes'] = [];
+      const pfMem = memories.find(m => /pf|provident fund/i.test(m.key || '') || /pf.*bank/i.test(m.value || ''));
+      if (pfMem) {
+        financialStakes.push({
           title: 'PF Bank Details Update',
           amount: '₹15,000',
           actionRequired: 'Update bank details on the PF portal to release funds',
-          linkedVentureOrNeed: "Seed capital for Shetty's Dhaba kitchen appliances and initial setup"
-        }
-      ];
+          linkedVentureOrNeed: activeVentures[0] ? `Seed capital for ${activeVentures[0].name}` : 'Personal savings disbursement'
+        });
+      }
 
       // 7. Compute Local Time & Daily Rhythm Phase
       const tzHours = resolveUserTzOffsetHours(profile || undefined);
@@ -319,10 +366,8 @@ export class UserLifeStageEngine {
 
       let isSleepingNow = false;
       if (sleepMinutesFromMidnight > wakeMinutesFromMidnight) {
-        // e.g. 23:30 (1410 min) to 7:30 (450 min) across midnight
         isSleepingNow = currentMinutesFromMidnight >= sleepMinutesFromMidnight || currentMinutesFromMidnight < wakeMinutesFromMidnight;
       } else {
-        // e.g. 01:00 AM (60 min) to 09:00 AM (540 min)
         isSleepingNow = currentMinutesFromMidnight >= sleepMinutesFromMidnight && currentMinutesFromMidnight < wakeMinutesFromMidnight;
       }
 
@@ -349,16 +394,20 @@ export class UserLifeStageEngine {
         isSleepQuietHours = true;
       } else if (isWeekendDay) {
         currentPhase = 'WEEKEND_FLEX';
-        phaseDescription = `${dayOfWeek} Family / Weekend Mode. Relaxed, open for family moments and venture brainstorming.`;
+        phaseDescription = `${dayOfWeek} Rest & Flexible Mode. Relaxed, open for personal moments, hobbies, and ideas.`;
         proactiveAllowance = 'FAMILY_STRATEGIC';
-      } else if (localHour >= 11 && localHour < 20) {
+      } else if (localHour >= (primaryLivelihood?.shiftStartHour ?? 11) && localHour < (primaryLivelihood?.shiftEndHour ?? 20)) {
         currentPhase = 'WORK_FOCUS';
-        phaseDescription = 'Active Work Shift at Conviction HR (11:00 AM – 8:00 PM). Focus hours. Suppress casual domestic curiosities.';
+        const focusLabel = primaryLivelihood?.name ? `Active Work Shift at ${primaryLivelihood.name}` : (isStudent ? 'Active Study & Learning Session' : 'Daytime Productive Focus');
+        phaseDescription = `${focusLabel} (${primaryLivelihood?.shiftStartHour ?? 11}:00 AM – ${primaryLivelihood?.shiftEndHour ?? 8}:00 PM). Focus hours.`;
         proactiveAllowance = 'WORK_OPERATIONAL_ONLY';
         isWorkFocusHours = true;
       } else if (localHour >= 20 && (localHour < 22 || (localHour === 22 && localMinute <= 30))) {
         currentPhase = 'FAMILY_COLLABORATIVE';
-        phaseDescription = 'Evening Family Time & Venture Brainstorming (8:00 PM – 10:30 PM). Post-shift wind-down with Sakshi and baby Shreshth.';
+        const eveningLabel = familyDependents?.spouseName || familyDependents?.infantName
+          ? `Evening Family Time (${familyDependents.spouseName || 'family'}${familyDependents.infantName ? ` and baby ${familyDependents.infantName}` : ''})`
+          : 'Evening Unwind & Personal Downtime';
+        phaseDescription = `${eveningLabel} (8:00 PM – 10:30 PM). Post-shift wind-down and relaxed conversation.`;
         proactiveAllowance = 'FAMILY_STRATEGIC';
         isFamilyCollaborativeHours = true;
       } else if (isWindDownNow || localHour >= 22) {
@@ -373,24 +422,44 @@ export class UserLifeStageEngine {
       }
 
       // 8. Classify Holistic Life Stage
-      let stage: LifeStageType = 'FAMILY_FOUNDER_WITH_INFANT';
-      let stageLabel = 'Family Founder & Young Father';
+      let stage: LifeStageType = 'INDIVIDUAL_EXPLORER';
+      let stageLabel = 'Individual Explorer';
 
       if (hasInfant && (activeVentures.length > 0 || primaryLivelihood)) {
         stage = 'FAMILY_FOUNDER_WITH_INFANT';
-        stageLabel = 'Family Founder with Infant (Father of 6-month-old Shreshth + Dual Venture Operator)';
+        stageLabel = `Family Founder with Infant (${familyDependents?.infantName ? `Parent of ${familyDependents.infantName}` : 'Parent with Infant'} + Venture/Career Operator)`;
       } else if (hasInfant) {
         stage = 'FAMILY_WITH_CHILDREN';
-        stageLabel = 'Family with Infant';
+        stageLabel = 'Family with Infant/Children';
       } else if (activeVentures.length > 0) {
         stage = 'SOLO_FOUNDER';
-        stageLabel = 'Venture Founder';
-      } else {
+        stageLabel = `Venture Founder (${activeVentures[0].name})`;
+      } else if (isStudent) {
+        stage = 'STUDENT_ASPIRANT';
+        stageLabel = 'Student & Knowledge Aspirant';
+      } else if (primaryLivelihood) {
+        stage = 'EARLY_CAREER_BUILDER';
+        stageLabel = `Working Professional (${primaryLivelihood.name})`;
+      } else if (familyDependents) {
         stage = 'FAMILY_PROVIDER';
-        stageLabel = 'Family Provider';
+        stageLabel = 'Family Connected Individual';
+      } else {
+        stage = 'INDIVIDUAL_EXPLORER';
+        stageLabel = 'Individual Explorer';
       }
 
-      const corePurposeSummary = `${userName} is navigating a high-stakes life stage as a father of a 6-month-old baby boy (${familyDependents.infantName}), supporting his wife (${familyDependents.spouseName}) and family, running ${primaryLivelihood.name} (11am-8pm), and actively preparing seed funds (15k PF) to launch ${activeVentures[0].name}. Every companion touch must respect his time, honor his purpose, and connect his daily actions to this bigger mission.`;
+      let corePurposeSummary = '';
+      if (stage === 'FAMILY_FOUNDER_WITH_INFANT') {
+        corePurposeSummary = `${userName} is navigating a high-stakes life stage balancing family care for their infant (${familyDependents?.infantName || 'baby'}), supporting family, running ${primaryLivelihood?.name || 'their venture'}, and planning future milestones. Every companion touch must respect their time, honor their purpose, and connect daily actions to this mission.`;
+      } else if (stage === 'STUDENT_ASPIRANT') {
+        corePurposeSummary = `${userName} is dedicated to academic and competitive growth, building discipline, managing study schedules, and preparing for future milestones. Nova acts as an encouraging, attentive study partner and daily guide.`;
+      } else if (stage === 'SOLO_FOUNDER') {
+        corePurposeSummary = `${userName} is driving entrepreneurial ventures (${activeVentures[0]?.name || 'their business'}), balancing vision, financial discipline, and daily momentum.`;
+      } else if (stage === 'EARLY_CAREER_BUILDER') {
+        corePurposeSummary = `${userName} is focused on professional growth at ${primaryLivelihood?.name || 'work'}, executing daily responsibilities while cultivating a healthy work-life rhythm.`;
+      } else {
+        corePurposeSummary = `${userName} is establishing their daily rhythm with Nova. Nova's purpose is to be an adaptable, intelligent living companion who learns their unique lifestyle, habits, and goals naturally through genuine conversation.`;
+      }
 
       return {
         userId,
@@ -425,9 +494,9 @@ export class UserLifeStageEngine {
       // Safe robust fallback
       return {
         userId,
-        stage: 'FAMILY_FOUNDER_WITH_INFANT',
-        stageLabel: 'Family Founder & Provider',
-        userName: 'Saa',
+        stage: 'INDIVIDUAL_EXPLORER',
+        stageLabel: 'Individual Explorer',
+        userName: 'Friend',
         lifestyleRhythm: {
           currentPhase: 'WORK_FOCUS',
           phaseDescription: 'Standard Daytime Active Rhythm',
@@ -440,15 +509,14 @@ export class UserLifeStageEngine {
           isSleepQuietHours: false,
           proactiveAllowance: 'WORK_OPERATIONAL_ONLY'
         },
-        corePurposeSummary: 'Supporting family, business ventures, and daily focus with purposeful companion touchpoints.'
+        corePurposeSummary: 'Supporting daily focus, personal rhythm, and meaningful companion touchpoints.'
       };
     }
   }
 
   /**
    * Enriches a raw reminder text into a high-EQ, purpose-connected companion touchpoint.
-   * e.g. transforms "PF ke lie bank details update karna" into a motivating message that
-   * explains WHY it matters (clearing 15k seed funds for Shetty's Dhaba).
+   * Connects to user's real ventures and livelihoods dynamically if present.
    */
   enrichReminderMessage(
     rawReminderText: string,
@@ -456,20 +524,32 @@ export class UserLifeStageEngine {
   ): string {
     const textLower = (rawReminderText || '').toLowerCase();
     const name = stageCtx.userName || 'yaar';
+    const venture = stageCtx.activeVentures?.[0];
+    const livelihood = stageCtx.primaryLivelihood;
+    const infantName = stageCtx.familyDependents?.infantName;
+    const spouseName = stageCtx.familyDependents?.spouseName;
 
-    // 1. PF / Bank Update → Cloud Kitchen Seed Funds
+    // 1. PF / Bank Update → Venture Seed Funds if venture exists
     if (/pf|provident fund|bank details|portal.*update/i.test(textLower)) {
-      return `Arey ${name}, PF portal pe bank details update ka zaroor dekh lena — wahan se 15k clear hote hi Shetty's Dhaba ke initial setup aur kitchen appliances ka rasta aage badhega! Shreshth aur Sakshi ke sath plan aage badhane me ye seed fund help karega.`;
+      if (venture) {
+        const famPart = infantName && spouseName ? ` ${infantName} aur ${spouseName} ke sath plan aage badhane me ye seed fund help karega.` : '';
+        return `Arey ${name}, PF portal pe bank details update ka zaroor dekh lena — wahan se 15k clear hote hi ${venture.name} ke initial setup aur kitchen appliances ka rasta aage badhega!${famPart}`;
+      }
+      return `Arey ${name}, PF portal pe bank details update zaroor sort kar lena — funds release hote hi aage ka financial plan smooth ho jayega!`;
     }
 
-    // 2. Hiring / Candidate Interviews → Conviction HR Scaling
+    // 2. Hiring / Candidate Interviews → Career/Agency Scaling
     if (/candidate|interview|hiring|placement|cv|resume/i.test(textLower)) {
-      return `Arey ${name}, candidate interviews ka schedule dekh lena — Conviction HR ke is round se 2 solid selections nikal gaye to agency scaling ka target track pe rahega!`;
+      const targetName = livelihood?.name || 'team';
+      return `Arey ${name}, candidate interviews ka schedule dekh lena — ${targetName} ke is round se solid selections nikal gaye to scaling ka target track pe rahega!`;
     }
 
-    // 3. Shetty's Dhaba / Cloud Kitchen Menu Planning
+    // 3. Cloud Kitchen / Dhaba Menu Planning if venture exists
     if (/dhaba|cloud kitchen|recipe|khana banana|kitchen/i.test(textLower)) {
-      return `Arey ${name}, Shetty's Dhaba ke menu ideas ka dekh lena — Sakshi ki signature recipes ke sath initial offerings plan kar loge to cloud kitchen launch aur strong banega!`;
+      if (venture) {
+        const spousePart = spouseName ? ` ${spouseName} ki signature recipes ke sath initial offerings plan kar loge to` : '';
+        return `Arey ${name}, ${venture.name} ke menu ideas ka dekh lena —${spousePart} launch aur strong banega!`;
+      }
     }
 
     // 4. General fallback with warmth (never mechanical "Arey sun, yaad hai na... Time pe dekh lena!")

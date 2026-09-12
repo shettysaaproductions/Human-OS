@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { saveAssistantMessage } from '../services/ChatHistoryHelpers';
-import { classifyIntent } from '../services/ResponseIntelligence';
+import { classifyIntent, synthesizeContextualOptions } from '../services/ResponseIntelligence';
 import { z } from 'zod';
 import { complete } from '../lib/nvidia';
 import { logger } from '../lib/logger';
@@ -47,6 +47,11 @@ export const MAX_OUTPUT_TOKENS = 2048;
  *    network) instead of exposing server/tech details.
  */
 export const FALLBACK_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
+export const FALLBACK_REPLY_EN = "Hmm... give me a moment to think, I'll text you right back in a bit.";
+
+export function getFallbackReply(isEnglish?: boolean): string {
+  return isEnglish ? FALLBACK_REPLY_EN : FALLBACK_REPLY;
+}
 
 /**
  * Checks if a highly similar assistant message was recently sent.
@@ -642,6 +647,12 @@ chatRouter.post(
       // Legacy extraction for the primary message (used for logging and some logic)
       const primaryMessage = normalizedMessages[normalizedMessages.length - 1].message;
       client_message_id = normalizedMessages[normalizedMessages.length - 1].client_message_id;
+
+      // Detect language preference dynamically
+      const isExplicitEnglish = language === 'en';
+      const isHindiMarker = /\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(primaryMessage);
+      const isEnglishUser = isExplicitEnglish || (language !== 'hi' && !isHindiMarker && /[a-zA-Z]{3,}/.test(primaryMessage));
+      const requestFallbackReply = getFallbackReply(isEnglishUser);
 
       const request_received_ms = Date.now();
       let context_started_ms: number | null = null;
@@ -1658,14 +1669,21 @@ chatRouter.post(
                   const recentSnippet = Array.isArray(brainContext?.recentMessages)
                     ? brainContext.recentMessages.slice(-2).map((m: any) => `${m.role === 'user' ? 'User' : 'Nova'}: ${m.content}`).join('\n')
                     : '';
-                  const fastRetryMessages = [
-                    {
-                      role: 'system' as const,
-                      content: `You are Nova, a female virtual best friend texting on WhatsApp.
+                  const fastRetryPrompt = isEnglishUser
+                    ? `You are Nova, a female virtual best friend texting on WhatsApp.
+Reply in 1-2 SHORT, natural English sentences. Max 1 emoji.
+Output ONLY conversational text. NEVER output rule names, labels, guidelines, instructions, or bullet points.
+Plain conversational text only.`
+                    : `You are Nova, a female virtual best friend texting on WhatsApp.
 Reply in 1-2 SHORT, natural Hinglish sentences. Max 1 emoji.
 Output ONLY conversational text. NEVER output rule names, labels, guidelines, instructions, or bullet points.
 Nova is female: use "Main samajh gayi", "Main batati hoon".
-Use casual "tu/tum", never formal "Aap". Plain conversational text only.`
+Use casual "tu/tum", never formal "Aap". Plain conversational text only.`;
+
+                  const fastRetryMessages = [
+                    {
+                      role: 'system' as const,
+                      content: fastRetryPrompt
                     },
                     ...(recentSnippet ? [{ role: 'user' as const, content: `Recent Context:\n${recentSnippet}\n\nUser: ${primaryMessage}` }] : [{ role: 'user' as const, content: primaryMessage }])
                   ];
@@ -1679,11 +1697,11 @@ Use casual "tu/tum", never formal "Aap". Plain conversational text only.`
                     const sanitizedFastReply = validateAndRepairGrounding(sanitizeReply(fastReply.trim()), primaryMessage, brainContext);
                     result = { reply: sanitizedFastReply || NOVA_EMPTY_REPLY, subconscious_actions: [] };
                   } else {
-                    result = { reply: FALLBACK_REPLY, subconscious_actions: [] };
+                    result = { reply: requestFallbackReply, subconscious_actions: [] };
                   }
                 } catch (retryErr) {
                   logger.error('[Chat] Fast 8B retry also failed', { userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
-                  result = { reply: FALLBACK_REPLY, subconscious_actions: [] };
+                  result = { reply: requestFallbackReply, subconscious_actions: [] };
                 }
               } else {
                 throw llmErr;
@@ -1697,13 +1715,19 @@ Use casual "tu/tum", never formal "Aap". Plain conversational text only.`
               logger.warn('[Chat] Prompt instruction leak detected in rawReply, triggering secondary fast worker retry', { rawReply });
               try {
                 const { complete: nvidiaComplete } = await import('../lib/nvidia');
+                const promptLeakRetryPrompt = isEnglishUser
+                  ? `You are Nova, a female best friend texting on WhatsApp in natural English.
+Reply in 1-2 SHORT sentences. Output ONLY spoken conversational dialogue.
+NO lists, NO formatting, NO prompt rules, NO internal labels. Plain text only.`
+                  : `You are Nova, a female best friend texting on WhatsApp in natural Hinglish.
+Reply in 1-2 SHORT sentences. Output ONLY spoken conversational dialogue.
+NO lists, NO formatting, NO prompt rules, NO internal labels.
+Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
+
                 const fastRetryMessages = [
                   {
                     role: 'system' as const,
-                    content: `You are Nova, a female best friend texting on WhatsApp in natural Hinglish.
-Reply in 1-2 SHORT sentences. Output ONLY spoken conversational dialogue.
-NO lists, NO formatting, NO prompt rules, NO internal labels.
-Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
+                    content: promptLeakRetryPrompt
                   },
                   { role: 'user' as const, content: primaryMessage }
                 ];
@@ -1714,11 +1738,11 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
                 if (fastReply && !isPromptLeak(fastReply)) {
                   rawReply = validateAndRepairGrounding(sanitizeReply(fastReply), primaryMessage, brainContext);
                 } else {
-                  rawReply = FALLBACK_REPLY;
+                  rawReply = requestFallbackReply;
                 }
               } catch (e: any) {
                 logger.error('[Chat] Fast retry on prompt leak failed', { error: e.message });
-                rawReply = FALLBACK_REPLY;
+                rawReply = requestFallbackReply;
               }
             }
             if (result.subconscious_actions && result.subconscious_actions.length > 0) {
@@ -1735,7 +1759,9 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
 
           // Auto-append table offer as follow-up bubble in LONG_CONTEXT mode
           if (responseConfig.shouldOfferTable && !rawReply.includes('<NOVA_TABLE>')) {
-            const extraText = '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
+            const extraText = isEnglishUser
+              ? '\n<NOVA_MESSAGE_BREAK>\nWant to see this in a table format? It might be clearer.'
+              : '\n<NOVA_MESSAGE_BREAK>\nTable format mein dekhna chahega? Zyada clear hoga.';
             rawReply += extraText;
             if (isStreaming) {
               res.write(`data: ${JSON.stringify({ type: 'chunk', content: extraText })}\n\n`);
@@ -1749,19 +1775,21 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
           if (isStreaming) {
             // Persist the fallback (the raw errStr shown live must NOT be stored — it would
             // render as a broken bubble in history). The user message stays orphaned otherwise.
-            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId, {
+            await persistAssistantMessage(userId, activeConversationId, requestFallbackReply, is_proactive ? undefined : userMessageId, {
               asyncMode: async_mode,
               source: 'nvidia_error_streaming',
             });
-            res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'error', error: requestFallbackReply })}\n\n`);
             if (typeof (res as any).flush === 'function') (res as any).flush();
             res.end();
             return;
           } else if (async_mode) {
             if (isContentPolicy) {
-              rawReply = 'Acha, is topic par main jyada bol nahi sakti yaar 😂 kuch aur baat karte hain?';
+              rawReply = isEnglishUser
+                ? "Well, I can't really talk much about that topic 😂 Let's chat about something else?"
+                : 'Acha, is topic par main jyada bol nahi sakti yaar 😂 kuch aur baat karte hain?';
             } else {
-              rawReply = FALLBACK_REPLY;
+              rawReply = requestFallbackReply;
             }
             logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId, isContentPolicy });
           } else {
@@ -1776,13 +1804,16 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
       let coverage_repair_invoked = false;
       const uncoveredUnits = TurnAnalyzer.getUncoveredUnits(turnAnalysis, rawReply);
       const elapsedBudget = Date.now() - request_received_ms;
-      if (uncoveredUnits.length > 0 && rawReply !== FALLBACK_REPLY && elapsedBudget < 4000) {
+      if (uncoveredUnits.length > 0 && rawReply !== FALLBACK_REPLY && rawReply !== FALLBACK_REPLY_EN && elapsedBudget < 4000) {
         logger.warn('[Chat] Uncovered required units detected, injecting repair bubble', { uncoveredUnits });
         try {
           const { complete } = await import('../lib/nvidia');
           const missedPoints = uncoveredUnits.map(u => u.text).join(' | ');
+          const repairContent = isEnglishUser
+            ? 'You are Nova, a casual best friend. Your previous message forgot to address these points: "' + missedPoints + '". Write a 1-2 sentence quick follow-up to casually cover it. Start with "Oh and also," or similar. NO lists, NO emojis.'
+            : 'You are Nova, a casual Hinglish friend. Your previous message forgot to address these points: "' + missedPoints + '". Write a 1-2 sentence quick follow-up to casually cover it. Start with "Oh aur haan," or similar. NO lists, NO emojis.';
           const fastRepair = await complete('TIMEOUT_FALLBACK', [
-             { role: 'system', content: 'You are Nova, a casual Hinglish friend. Your previous message forgot to address these points: "' + missedPoints + '". Write a 1-2 sentence quick follow-up to casually cover it. Start with "Oh aur haan," or similar. NO lists, NO emojis.' },
+             { role: 'system', content: repairContent },
              { role: 'user', content: 'You missed answering/acknowledging this. Add a quick follow up.' }
           ], { maxTokens: 100, temperature: 0.7 });
           
@@ -1807,13 +1838,55 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
       }
 
       let optionsArray: string[] | undefined;
-      const optionsMatch = rawReply.match(/<OPTIONS>([\s\S]*?)<\/OPTIONS>/);
+      const optionsMatch = rawReply.match(/<OPTIONS>([\s\S]*?)<\/OPTIONS>/i);
       if (optionsMatch) {
+        const rawOptionsContent = optionsMatch[1].trim();
         try {
-          optionsArray = JSON.parse(optionsMatch[1]);
-          rawReply = rawReply.replace(/<OPTIONS>[\s\S]*?<\/OPTIONS>/, '').trim();
+          // 1. Try standard JSON parse
+          const parsed = JSON.parse(rawOptionsContent);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            optionsArray = parsed.map((item: any) => String(item).trim()).filter(Boolean).slice(0, 4);
+          }
         } catch (e) {
-          logger.warn('Failed to parse OPTIONS JSON', { error: e instanceof Error ? e.message : String(e) });
+          // 2. Resilient fallback: parse single-quoted or unquoted items
+          try {
+            const normalizedJson = rawOptionsContent
+              .replace(/'/g, '"')
+              .replace(/,\s*]/, ']');
+            const parsed = JSON.parse(normalizedJson);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              optionsArray = parsed.map((item: any) => String(item).trim()).filter(Boolean).slice(0, 4);
+            }
+          } catch {
+            // 3. Regex match any quoted strings
+            const matches = Array.from(rawOptionsContent.matchAll(/["']([^"']+)["']/g))
+              .map(m => m[1].trim())
+              .filter(Boolean);
+            if (matches.length > 0) {
+              optionsArray = matches.slice(0, 4);
+            }
+          }
+          logger.warn('Lenient parse applied for OPTIONS JSON', { rawOptions: rawOptionsContent, recoveredCount: optionsArray?.length });
+        }
+      }
+
+      // CRITICAL BUG FIX: ALWAYS strip <OPTIONS> tags (even malformed/dangling tags) from rawReply
+      // so raw XML tags never leak into the visible chat bubble on mobile!
+      rawReply = rawReply
+        .replace(/<OPTIONS>[\s\S]*?<\/OPTIONS>/gi, '')
+        .replace(/<\/?OPTIONS>/gi, '')
+        .trim();
+
+      // If no options were emitted by model or parse yielded empty, synthesize contextual quick replies
+      if (!optionsArray || optionsArray.length === 0) {
+        const synthesized = synthesizeContextualOptions({
+          message: primaryMessage,
+          replyText: rawReply,
+          language: language || 'auto',
+          mode: responseConfig?.mode,
+        });
+        if (synthesized.length > 0) {
+          optionsArray = synthesized;
         }
       }
 
@@ -1876,7 +1949,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
       // res.end() would throw. Non-streaming: send an empty 200 so the client never
       if (finalBubbles.length === 0) {
         logger.info('[Chat] LLM returned a blank reply or leaks were stripped. Forcing friendly fallback bubble.', { userId });
-        finalBubbles = [FALLBACK_REPLY];
+        finalBubbles = [requestFallbackReply];
       }
       const reply = finalBubbles.join('\n\n');
 
@@ -2279,6 +2352,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
             memories_retrieved: memories.length,
             keywords_searched: keywords,
             degraded: false,
+            options: optionsArray || [],
           }
         });
       }
@@ -2301,6 +2375,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
       // is in the DB but Nova never replied. Save a fallback reply so the user
       // always gets SOMETHING and the chat never stays stuck.
       const isAsync = req.body?.async_mode === true;
+      const errFallback = (typeof requestFallbackReply !== 'undefined' && requestFallbackReply) ? requestFallbackReply : FALLBACK_REPLY;
       if (isAsync) {
         logger.error('[ASYNC] Unexpected crash during processing — saving fallback reply', {
           error: err instanceof Error ? err.message : String(err),
@@ -2313,14 +2388,14 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
           // '' into the uuid column makes the fallback insert fail silently, so the
           // user never gets their "glitch" recovery message.
           if (userId) {
-            await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, undefined, {
+            await persistAssistantMessage(userId, activeConversationId, errFallback, undefined, {
               asyncMode: true,
               source: 'async_catch_block',
             });
             // Try to push a notification so user knows to check
             const ptResult = await supabaseAdmin.from('profiles').select('push_token').eq('id', userId).maybeSingle();
             if (ptResult.data?.push_token) {
-              sendNovaReplyNotification(ptResult.data.push_token, FALLBACK_REPLY).catch(() => {});
+              sendNovaReplyNotification(ptResult.data.push_token, errFallback).catch(() => {});
             }
           }
         } catch (fallbackErr) {
@@ -2332,7 +2407,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
         if (res.headersSent) {
           logger.error('[Chat] Unhandled error during streaming', { error: err instanceof Error ? err.message : String(err) });
           try {
-            res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'error', error: errFallback })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
             res.end();
           } catch (e) {}

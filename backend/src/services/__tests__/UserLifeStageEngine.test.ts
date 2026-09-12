@@ -80,4 +80,55 @@ describe('UserLifeStageEngine', () => {
     expect(enriched).toContain('Conviction HR');
     expect(enriched).toContain('scaling');
   });
+
+  it('classifies a new user with empty memories as INDIVIDUAL_EXPLORER with zero hardcoded leaks', async () => {
+    const newUserStage = await userLifeStageEngine.getUserLifeStageContext(
+      'new-user-empty-memories',
+      [],
+      {}
+    );
+
+    expect(newUserStage.stage).toBe('INDIVIDUAL_EXPLORER');
+    expect(newUserStage.familyDependents).toBeUndefined();
+    expect(newUserStage.primaryLivelihood).toBeUndefined();
+    expect(newUserStage.activeVentures).toHaveLength(0);
+    expect(newUserStage.financialStakes).toHaveLength(0);
+    expect(newUserStage.corePurposeSummary).not.toContain('Conviction HR');
+    expect(newUserStage.corePurposeSummary).not.toContain("Shetty's Dhaba");
+    expect(newUserStage.corePurposeSummary).not.toContain('Sakshi');
+    expect(newUserStage.corePurposeSummary).not.toContain('Shreshth');
+
+    // Reminder enrichment should NOT inject hardcoded Dhaba or Conviction HR
+    const genericReminder = userLifeStageEngine.enrichReminderMessage(
+      'Buy groceries and fruits',
+      newUserStage
+    );
+    expect(genericReminder).not.toContain('Conviction HR');
+    expect(genericReminder).not.toContain("Shetty's Dhaba");
+    expect(genericReminder).not.toContain('Sakshi');
+    expect(genericReminder).not.toContain('15k');
+  });
+
+  it('correctly classifies a STUDENT_ASPIRANT and anchors purpose to academic goals', async () => {
+    const studentMemories = [
+      { key: 'target_exam', value: 'UPSC Civil Services 2027', memory_type: 'goals' },
+      { key: 'study_schedule', value: 'Daily 6 AM - 12 PM library revision', memory_type: 'work' },
+      { key: 'college_degree', value: 'Final year BA Political Science', memory_type: 'background' }
+    ];
+
+    const studentStage = await userLifeStageEngine.getUserLifeStageContext(
+      'student-user-456',
+      studentMemories,
+      { 'target_exam': 'UPSC 2027' }
+    );
+
+    expect(studentStage.stage).toBe('STUDENT_ASPIRANT');
+    expect(studentStage.familyDependents).toBeUndefined();
+    expect(studentStage.stageLabel).toContain('Student');
+    expect(studentStage.primaryLivelihood?.type).toBe('study');
+    expect(studentStage.primaryLivelihood?.name).toContain('UPSC');
+    expect(studentStage.corePurposeSummary).not.toContain('Conviction HR');
+    expect(studentStage.corePurposeSummary).not.toContain("Shetty's Dhaba");
+  });
 });
+

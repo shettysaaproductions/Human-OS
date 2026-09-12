@@ -372,7 +372,7 @@ Daily Lifestyle Rhythm: ${stageCtx.lifestyleRhythm.phaseDescription}
 
 You need to remind them about this: "${text}".
 PURPOSE-DRIVEN COMPANION RULES:
-- Connect this task to their real-life purpose (e.g. if PF/bank details, it clears 15k capital to launch Shetty's Dhaba cloud kitchen; if interview/hiring, it scales Conviction HR; if family, it supports baby Shreshth and Sakshi).
+- Connect this task to their real-life purpose using their verified goals, livelihood, and lifestyle from the context above.
 - Speak as a perceptive, supportive companion.
 - DO NOT sound like a robotic alarm clock.
 - NEVER use boilerplate formulas like "Arey sun, yaad hai na... Time pe dekh lena!" or "abhi free hai toh start kar de".

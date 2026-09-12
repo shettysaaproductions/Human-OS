@@ -313,23 +313,22 @@ export class WatchtowerMemoryAuditor {
       (sonNameMem && (sonNameMem.value.toLowerCase() === 'tiku' || sonNameMem.value.toLowerCase() === 'tuku')) ||
       (sonNickMem && sonNameMem && sonNickMem.value.toLowerCase() === sonNameMem.value.toLowerCase())
     ) {
+      const canonicalSonName = sonNameMem?.value.toLowerCase() === 'tiku' || sonNameMem?.value.toLowerCase() === 'tuku' ? 'Shreshth' : sonNameMem?.value || 'Son';
       findings.push({
-        entity: 'Shreshth (Son)',
-        flaw: `Son real name was erroneously conflated with nickname Tiku. Real name confirmed from chats is Shreshth, pet nickname is Tiku.`,
+        entity: 'Son',
+        flaw: `Son real name was erroneously conflated with nickname Tiku. Real name confirmed from chats is ${canonicalSonName}, pet nickname is Tiku.`,
         flawType: 'NAME_NICKNAME_INVERSION',
-        provenChatTruth: `Son real name is Shreshth, pet nickname is Tiku.`,
+        provenChatTruth: `Son real name is ${canonicalSonName}, pet nickname is Tiku.`,
         action: 'AUTO_RECONCILE',
         updates: [
-          { key: 'son_name', value: 'Shreshth', memoryType: 'family', entity: 'son' },
-          { key: 'son_nickname', value: 'Tiku', memoryType: 'family', entity: 'son' },
-          { key: 'family_details', value: 'Wife Sakshi, Son Shreshth (6 months old), Father Suresh, Mother Rajeshree', memoryType: 'family', entity: 'user' }
+          { key: 'son_name', value: canonicalSonName, memoryType: 'family', entity: 'son' },
+          { key: 'son_nickname', value: 'Tiku', memoryType: 'family', entity: 'son' }
         ]
       });
     }
 
     // ── AUDIT 3: Primary Career vs Side Venture Collision ────────────────────
-    // User works at Conviction HR Monday-Saturday 11 AM - 8 PM.
-    // Shetty's Dhaba is an entrepreneurial cloud kitchen business venture.
+    // Separate primary employer from entrepreneurial venture when both exist
     const companyMem = memMap.get('company_name');
     const workSchedMem = memMap.get('work_schedule') || memMap.get('important_facts');
 
@@ -350,12 +349,15 @@ export class WatchtowerMemoryAuditor {
       }
     }
 
-    // ── AUDIT 4: Schedule & Goals Integrity Guard ────────────────────────────
+    // ── AUDIT 4: Schedule & Goals Integrity Guard (Conviction HR users only) ──
     const currentSched = memMap.get('work_schedule');
     const currentGoals = memMap.get('goals');
+    const isConvictionUser = companyMem?.value.toLowerCase().includes('conviction') || (workSchedMem && workSchedMem.value.toLowerCase().includes('conviction'));
     if (
-      (currentSched && (currentSched.value.toLowerCase().includes('8 selections') || !currentSched.value.toLowerCase().includes('conviction hr'))) ||
-      (currentGoals && currentGoals.value.toLowerCase().includes('to be revised'))
+      isConvictionUser && (
+        (currentSched && currentSched.value.toLowerCase().includes('8 selections')) ||
+        (currentGoals && currentGoals.value.toLowerCase().includes('to be revised'))
+      )
     ) {
       findings.push({
         entity: 'Work Schedule & Goals',
