@@ -24,7 +24,7 @@ import { complete } from '../lib/nvidia';
 import { cache } from '../lib/cache';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
-import { isPlaceholderValue, isTransientSituationalItem } from '../lib/memoryDomains';
+import { isPlaceholderValue, isTransientSituationalItem, classifyDomain } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
 
 export interface CurationRemoval {
@@ -531,6 +531,76 @@ export class AutonomousMemoryGraphCuratorService {
       });
     }
 
+    // ── 8. ENTITY DEDUPLICATION & REDUNDANT WORKING MEMORY PRUNING ───────────
+    // Identify established entities across memories and working memory
+    const knownEntities = new Set<string>();
+    for (const [key, mem] of memMap.entries()) {
+      if (key.startsWith('friend_') || key.startsWith('colleague_') || key.startsWith('pet_') || key.startsWith('dog_')) {
+        const parts = key.split('_');
+        if (parts.length >= 2) knownEntities.add(parts[1].toLowerCase());
+      }
+      if (mem.value && mem.value.length < 25 && !mem.value.includes(' ') && !isPlaceholderValue(mem.value)) {
+        if (key.includes('name') && !key.includes('company') && !key.includes('user') && !key.includes('preferred')) {
+          knownEntities.add(mem.value.toLowerCase().trim());
+        }
+      }
+    }
+
+    // Also look for known entities in working memory
+    for (const [key, wm] of wmMap.entries()) {
+      if (key.startsWith('friend_name_') || key.startsWith('colleague_name')) {
+        const val = wm.value.trim().toLowerCase();
+        if (val && val.length < 25) knownEntities.add(val);
+      }
+    }
+
+    // A. Prune redundant working memory items that merely declare an established entity's name or weak fragment
+    for (const [key, wm] of wmMap.entries()) {
+      const valLower = wm.value.trim().toLowerCase();
+      const isRedundantNameKey = key === 'colleague_name' || key.startsWith('friend_name_') || key.startsWith('colleague_name_') || key === 'friends';
+      
+      if (isRedundantNameKey && (knownEntities.has(valLower) || valLower === 'user has friends')) {
+        removals.push({
+          key,
+          target: 'working_memory',
+          reason: `Pruned redundant entity name working memory "${key}" with value "${wm.value}"`
+        });
+      }
+
+      // If working memory is a redundant job phrasing when occupation is already captured in memories
+      if (key.endsWith('_office_job') || key === 'office_job' || key === 'ijaz_office_job') {
+        const matchingEntity = Array.from(knownEntities).find(e => key.includes(e) || valLower.includes(e));
+        if (matchingEntity) {
+          removals.push({
+            key,
+            target: 'working_memory',
+            reason: `Pruned working memory "${key}" consolidated into entity "${matchingEntity}"`
+          });
+        }
+      }
+    }
+
+    // B. Reclassify/Move friend memories to work if conversation and facts confirm office/company role
+    for (const [key, mem] of memMap.entries()) {
+      const valLower = (mem.value || '').toLowerCase();
+      const isWorkRelated = valLower.includes('conviction') || valLower.includes('office') || valLower.includes('company') || valLower.includes('job karta') || valLower.includes('hr');
+      
+      if (key.startsWith('friend_') && isWorkRelated && mem.memory_type === 'family') {
+        const parts = key.split('_');
+        const entityName = parts.length >= 2 ? parts[1] : 'colleague';
+        const trait = parts.slice(2).join('_') || 'occupation';
+        const newKey = `colleague_${entityName}_${trait}`;
+
+        // Merge/update to work domain
+        merges.push({
+          sourceKey: key,
+          targetKey: newKey,
+          provenValue: mem.value,
+          reason: `Moved "${key}" from family to career/work domain as "${newKey}" based on employment at company`
+        });
+      }
+    }
+
     return {
       removals,
       merges,
@@ -803,7 +873,7 @@ Curate the memory tree and knowledge graph against the conversation proof and re
             user_id: userId,
             key: canonical,
             value: m.provenValue,
-            memory_type: 'personal',
+            memory_type: classifyDomain(canonical).domain || 'personal',
             confidence: 1.0,
             importance: 90,
             is_archived: false,

@@ -420,7 +420,7 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       }
     }
 
-    // Collapse duplicate branch items (e.g. wife_sakshi and sakshi and wife_name)
+    // Collapse duplicate branch items (e.g. wife_sakshi and sakshi and wife_name, or multiple ijaz / conviction hr entries)
     const branchItems: any[] = [];
     const seenBranchKeys = new Set<string>();
     for (const b of rawBranchItems) {
@@ -433,13 +433,22 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         // Redundant nickname in branch list - should never be an entity branch
         continue;
       }
+
+      // General title-based branch deduplication (e.g. Ijaz, Sushant, Conviction HR)
+      const displayTitle = toDisplayNames(b.raw_key || b.id, b.value, b.name).title.trim().toLowerCase();
+      if (displayTitle && displayTitle !== 'memory' && displayTitle !== 'attribute') {
+        if (seenBranchKeys.has(`title:${displayTitle}`)) continue;
+        seenBranchKeys.add(`title:${displayTitle}`);
+      }
+
       if (seenBranchKeys.has(norm)) continue;
       seenBranchKeys.add(norm);
       branchItems.push(b);
     }
 
-    // Deduplicate redundant nail art / self-taught stems under Sakshi
+    // Deduplicate redundant nail art / self-taught stems under Sakshi and prune redundant name-stems
     const seenNailArt = new Set<string>();
+    const seenStemKeys = new Set<string>();
     const stemItems: any[] = [];
     for (const s of rawStemItems) {
       const sk = (s.raw_key || s.id || '').toLowerCase();
@@ -452,6 +461,22 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         s.value = 'Self-taught nail artist (creates beautiful art with kit from last year)';
         s.raw_key = 'wife_nail_art_skill';
       }
+
+      // Drop redundant name-declaration stems whose display title matches parent entity
+      const sTitle = toDisplayNames(s.raw_key || s.id, s.value, s.name).title.trim().toLowerCase();
+      const parentBranch = branchItems.find(b => b.id === s.parentEntityId);
+      const parentTitle = parentBranch ? toDisplayNames(parentBranch.raw_key || parentBranch.id, parentBranch.value, parentBranch.name).title.trim().toLowerCase() : '';
+      if (parentTitle && sTitle === parentTitle) {
+        continue;
+      }
+
+      // Drop duplicate stems under the same parent
+      const stemDedupKey = `${s.parentEntityId || 'root'}:${sTitle}`;
+      if (sTitle && seenStemKeys.has(stemDedupKey)) {
+        continue;
+      }
+      seenStemKeys.add(stemDedupKey);
+
       stemItems.push(s);
     }
 

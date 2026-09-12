@@ -2323,7 +2323,34 @@ export function buildDynamicKnowledgeGraph(
         });
       }
 
-      if (item.id === colleagueNodeId || (k === 'colleague_ijaz' && item.id.includes('ijaz'))) {
+      // Link colleague to company with WORKS_AT if company is known
+      if (allKeys.has('company_name') || allKeys.has('current_company')) {
+        const compNodeId = allKeys.has('company_name') ? 'mem-company_name' : (allItems.find(i => i.key.toLowerCase().includes('company'))?.id || 'dept-work');
+        const worksAtEdgeId = `edge-${colleagueNodeId}-${compNodeId}-works-at`;
+        if (!edges.some(e => e.id === worksAtEdgeId)) {
+          edges.push({
+            id: worksAtEdgeId,
+            source: colleagueNodeId,
+            target: compNodeId,
+            relation: 'WORKS_AT',
+            color: DOMAIN_TAXONOMY.work.color,
+            weight: 2,
+            edgeType: 'NEURAL_BRIDGE',
+            explanation: `${colleagueName} works at company`
+          });
+        }
+      }
+
+      const valClean = item.value.trim().toLowerCase();
+      const colClean = colleagueName.toLowerCase();
+      if (
+        item.id === colleagueNodeId ||
+        (k === 'colleague_ijaz' && item.id.includes('ijaz')) ||
+        valClean === colClean ||
+        k === 'colleague_name' ||
+        k === `friend_name_${colClean}` ||
+        k === `colleague_name_${colClean}`
+      ) {
         continue;
       }
 
@@ -2381,7 +2408,15 @@ export function buildDynamicKnowledgeGraph(
         });
       }
 
-      if (item.id === friendNodeId || (k === 'friend_ijaz' && item.id.includes('ijaz'))) {
+      const valClean = item.value.trim().toLowerCase();
+      const frClean = friendName.toLowerCase();
+      if (
+        item.id === friendNodeId ||
+        (k === 'friend_ijaz' && item.id.includes('ijaz')) ||
+        valClean === frClean ||
+        k === 'friend_name' ||
+        k === `friend_name_${frClean}`
+      ) {
         continue;
       }
 
@@ -2487,23 +2522,26 @@ export function buildDynamicKnowledgeGraph(
         edgeType = 'ATTRIBUTE_STEM';
         relation = 'VENTURE_DETAIL';
         explanation = `Detail stem of Business Venture`;
-      } else if (allKeys.has('company_name') || allKeys.has('current_company')) {
-        const compKey = allKeys.has('company_name') ? 'mem-company_name' : (allItems.find(i => i.key.toLowerCase().includes('company'))?.id || 'dept-work');
-        parentId = compKey;
-        hierarchyLevel = 3;
-        edgeType = 'ATTRIBUTE_STEM';
-        if (k.includes('schedule') || k.includes('hours') || k.includes('timing')) {
-          relation = 'WORK_SCHEDULE';
-          explanation = `Operational schedule of Company`;
-        } else if (k.includes('location') || k.includes('office')) {
-          relation = 'OFFICE_LOCATION';
-          explanation = `Office location of Company`;
-        } else if (k.includes('candidate') || k.includes('interview') || k.includes('selection')) {
-          relation = 'HIRING_TARGET';
-          explanation = `Recruitment and hiring target at Company`;
-        } else {
-          relation = 'WORK_DETAIL';
-          explanation = `Operational detail of Company`;
+      } else if (parentId === 'dept-work' && (allKeys.has('company_name') || allKeys.has('current_company'))) {
+        // Only attach to compKey if not specifically about a colleague or entity!
+        if (!k.includes('colleague') && !k.includes('ijaz') && !k.includes('coworker') && !item.value.toLowerCase().includes('ijaz')) {
+          const compKey = allKeys.has('company_name') ? 'mem-company_name' : (allItems.find(i => i.key.toLowerCase().includes('company'))?.id || 'dept-work');
+          parentId = compKey;
+          hierarchyLevel = 3;
+          edgeType = 'ATTRIBUTE_STEM';
+          if (k.includes('schedule') || k.includes('hours') || k.includes('timing')) {
+            relation = 'WORK_SCHEDULE';
+            explanation = `Operational schedule of Company`;
+          } else if (k.includes('location') || k.includes('office')) {
+            relation = 'OFFICE_LOCATION';
+            explanation = `Office location of Company`;
+          } else if (k.includes('candidate') || k.includes('interview') || k.includes('selection')) {
+            relation = 'HIRING_TARGET';
+            explanation = `Recruitment and hiring target at Company`;
+          } else {
+            relation = 'WORK_DETAIL';
+            explanation = `Operational detail of Company`;
+          }
         }
       }
     }
@@ -2639,6 +2677,21 @@ export function buildDynamicKnowledgeGraph(
 
     const nodeName = toGraphLabel(item.key, item.value);
     const parentNode = nodes.find(n => n.id === parentId);
+    const parentCleanName = parentNode?.name.replace(/\s*\(.*?\)$/, '').trim().toLowerCase();
+    if (parentCleanName && item.value.trim().toLowerCase() === parentCleanName) {
+      // Never create a child node whose value is merely the parent entity's own name
+      continue;
+    }
+
+    const cleanCandidateTitle = nodeName.replace(/\s*\(.*?\)$/, '').trim().toLowerCase();
+    const existingSameTitle = nodes.find(n => {
+      const nClean = n.name.replace(/\s*\(.*?\)$/, '').trim().toLowerCase();
+      return nClean === cleanCandidateTitle && (n.id === parentId || n.parentEntityId === parentId || (n.department === meta.domain && n.hierarchyLevel === hierarchyLevel));
+    });
+    if (existingSameTitle) {
+      // Duplicate bubble with same title prevented
+      continue;
+    }
     const treePath = parentNode?.treePath ? [...parentNode.treePath, nodeName] : [cleanUserName, deptTitle, nodeName];
 
     const node: DynamicKgNode = {
