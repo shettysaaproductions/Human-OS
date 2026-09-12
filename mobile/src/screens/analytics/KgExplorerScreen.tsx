@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, ActivityIndicator,
-  TouchableOpacity, ScrollView
+  TouchableOpacity, ScrollView, Alert, Modal, TextInput,
+  KeyboardAvoidingView, Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -1054,6 +1055,14 @@ function KgExplorerContent() {
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
 
+  // Conversational Memory Surgery & On-the-Spot Correction State
+  const [talkModalVisible, setTalkModalVisible] = useState(false);
+  const [talkInput, setTalkInput] = useState('');
+  const [directInput, setDirectInput] = useState('');
+  const [isDirectEditMode, setIsDirectEditMode] = useState(false);
+  const [surgicalLoading, setSurgicalLoading] = useState(false);
+  const [novaFeedback, setNovaFeedback] = useState<string | null>(null);
+
   // Default 3D perspective camera state
   const defaultCamera = {
     pitch: 0.24, // ~14 deg tilt (X-axis)
@@ -1801,6 +1810,101 @@ function KgExplorerContent() {
     }
   }, [selectedEdge, projectedGraph, panX, panY, savedPanX, savedPanY, scale, savedScale, yaw, pitch, roll, syncCamera]);
 
+  // Conversational Memory Editing & Surgical Handlers
+  const handleOpenTalkModal = useCallback((node: GraphNode) => {
+    setTalkInput('');
+    setDirectInput(node.value || node.name);
+    setIsDirectEditMode(false);
+    setNovaFeedback(null);
+    setTalkModalVisible(true);
+  }, []);
+
+  const handleSurgicalSubmit = useCallback(async () => {
+    if (!selectedNode) return;
+    if (!isDirectEditMode && !talkInput.trim()) return;
+    if (isDirectEditMode && !directInput.trim()) return;
+
+    try {
+      setSurgicalLoading(true);
+      setNovaFeedback(null);
+
+      const res = await api.post('/analytics/kg/surgical-alteration', {
+        nodeId: selectedNode.id,
+        rawKey: selectedNode.raw_key,
+        nodeName: selectedNode.name,
+        currentValue: selectedNode.value,
+        department: selectedNode.department,
+        userInstruction: talkInput.trim(),
+        directValue: isDirectEditMode ? directInput.trim() : undefined
+      });
+
+      if (res.data?.success) {
+        setNovaFeedback(res.data.message || 'Updated on the spot!');
+
+        if (res.data.action === 'DELETE') {
+          setTimeout(() => {
+            setTalkModalVisible(false);
+            setSelectedNode(null);
+            fetchGraph(false);
+          }, 1200);
+        } else {
+          const newVal = res.data.value || (isDirectEditMode ? directInput.trim() : talkInput.trim());
+          setSelectedNode(prev => prev ? { ...prev, value: newVal } : null);
+          fetchGraph(false);
+          setTimeout(() => {
+            setTalkModalVisible(false);
+          }, 1400);
+        }
+      } else {
+        Alert.alert('Error', res.data?.error || 'Failed to update memory');
+      }
+    } catch (err: any) {
+      Alert.alert('Alteration Error', err?.response?.data?.error || err?.message || 'Failed to update');
+    } finally {
+      setSurgicalLoading(false);
+    }
+  }, [selectedNode, isDirectEditMode, talkInput, directInput, fetchGraph]);
+
+  const handleConfirmDelete = useCallback((node: GraphNode) => {
+    Alert.alert(
+      'Delete Memory Bubble?',
+      `Are you sure you want to remove "${node.name}" from your neural memory? Nova will surgically archive and forget this fact.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSyncing(true);
+              const res = await api.delete(`/analytics/kg/node/${node.id}`, {
+                data: { rawKey: node.raw_key, nodeName: node.name }
+              });
+              if (res.data?.success) {
+                setSelectedNode(null);
+                fetchGraph(false);
+              } else {
+                Alert.alert('Error', res.data?.error || 'Could not delete node');
+              }
+            } catch (err: any) {
+              Alert.alert('Delete Error', err?.response?.data?.error || err?.message || 'Failed to delete');
+            } finally {
+              setSyncing(false);
+            }
+          }
+        }
+      ]
+    );
+  }, [fetchGraph]);
+
+  const handleOpenInChat = useCallback(() => {
+    if (!selectedNode) return;
+    setTalkModalVisible(false);
+    navigation.navigate('Chat', {
+      initialPrompt: `Regarding memory: [${selectedNode.name}]: "${selectedNode.value}" - `
+    });
+  }, [selectedNode, navigation]);
+
   const handleFocusDept = useCallback((deptId: string) => {
     setSelectedDept(deptId);
     setSelectedNode(null);
@@ -2468,6 +2572,29 @@ function KgExplorerContent() {
 
             <Text style={styles.detailValue}>{selectedNode.value}</Text>
 
+            {/* Surgical Action Bar: Talk to Nova to Edit & Delete Bubble */}
+            {!selectedNode.isDepartment && selectedNode.id !== 'user-core' && (
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={styles.talkToNovaBtn}
+                  onPress={() => handleOpenTalkModal(selectedNode)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.talkToNovaIcon}>⚡</Text>
+                  <Text style={styles.talkToNovaText}>Talk to Nova to Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.deleteBubbleBtn}
+                  onPress={() => handleConfirmDelete(selectedNode)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.deleteBubbleIcon}>🗑️</Text>
+                  <Text style={styles.deleteBubbleText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Parent Entity Quick Jump */}
             {parentNode && (
               <View style={styles.parentSection}>
@@ -2551,6 +2678,143 @@ function KgExplorerContent() {
             )}
           </View>
         )}
+
+        {/* Nova On-the-Spot Memory Surgeon Modal */}
+        <Modal
+          visible={talkModalVisible}
+          animationType="fade"
+          transparent={true}
+          onRequestClose={() => setTalkModalVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalOverlay}
+          >
+            <TouchableOpacity
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setTalkModalVisible(false)}
+            />
+            <View style={styles.modalCard}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderTitleRow}>
+                  <View style={styles.novaAvatarCircle}>
+                    <Text style={styles.novaAvatarEmoji}>⚡</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.modalTitle}>Talk to Nova to Correct</Text>
+                    <Text style={styles.modalSubtitle} numberOfLines={1}>
+                      {selectedNode?.name} • {selectedNode?.department?.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setTalkModalVisible(false)} style={styles.modalCloseBtn}>
+                  <Text style={styles.modalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Current Value Display */}
+              <View style={styles.currentValBox}>
+                <Text style={styles.currentValLabel}>CURRENT MEMORY VALUE:</Text>
+                <Text style={styles.currentValText} numberOfLines={3}>
+                  {selectedNode?.value}
+                </Text>
+              </View>
+
+              {/* Mode Toggle: Conversational vs Direct Edit */}
+              <View style={styles.modeToggleRow}>
+                <TouchableOpacity
+                  style={[styles.modeToggleBtn, !isDirectEditMode && styles.modeToggleBtnActive]}
+                  onPress={() => setIsDirectEditMode(false)}
+                >
+                  <Text style={[styles.modeToggleText, !isDirectEditMode && styles.modeToggleTextActive]}>
+                    💬 Talk to Nova
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeToggleBtn, isDirectEditMode && styles.modeToggleBtnActive]}
+                  onPress={() => setIsDirectEditMode(true)}
+                >
+                  <Text style={[styles.modeToggleText, isDirectEditMode && styles.modeToggleTextActive]}>
+                    ✏️ Direct Edit
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Input Area */}
+              {!isDirectEditMode ? (
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputGuideText}>
+                    Tell Nova in your own words what to correct or change:
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="e.g. Actually her birthday is 24 July, or She works in Bangalore..."
+                    placeholderTextColor="#71717A"
+                    value={talkInput}
+                    onChangeText={setTalkInput}
+                    multiline
+                    numberOfLines={3}
+                  />
+                </View>
+              ) : (
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputGuideText}>
+                    Directly modify the stored value:
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="Enter updated memory value..."
+                    placeholderTextColor="#71717A"
+                    value={directInput}
+                    onChangeText={setDirectInput}
+                    multiline
+                    numberOfLines={3}
+                  />
+                </View>
+              )}
+
+              {/* Live Nova Feedback Message */}
+              {novaFeedback && (
+                <View style={styles.novaFeedbackBox}>
+                  <Text style={styles.novaFeedbackIcon}>✨</Text>
+                  <Text style={styles.novaFeedbackText}>{novaFeedback}</Text>
+                </View>
+              )}
+
+              {/* Action Buttons */}
+              <View style={styles.modalActionRow}>
+                <TouchableOpacity
+                  style={styles.modalChatBtn}
+                  onPress={handleOpenInChat}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.modalChatText}>💬 Deep Chat</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modalSubmitBtn,
+                    surgicalLoading && styles.modalSubmitBtnDisabled
+                  ]}
+                  onPress={handleSurgicalSubmit}
+                  disabled={surgicalLoading}
+                  activeOpacity={0.8}
+                >
+                  {surgicalLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Text style={styles.modalSubmitIcon}>⚡</Text>
+                      <Text style={styles.modalSubmitText}>Correct On-the-Spot</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
       </SafeAreaView>
     </View>
@@ -2850,5 +3114,264 @@ const styles = StyleSheet.create({
   linkChipRelation: { fontSize: 9.5, fontWeight: '700' },
   linkChipTarget: { fontSize: 11, fontWeight: '500', color: '#FFFFFF', marginTop: 1 },
   linkChipExplanation: { fontSize: 9, color: '#71717A', marginTop: 2, maxWidth: 160 },
-  noLinksText: { fontSize: 11, color: '#71717A', fontStyle: 'italic' }
+  noLinksText: { fontSize: 11, color: '#71717A', fontStyle: 'italic' },
+
+  // Surgical Action Bar & Buttons
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 6,
+    gap: 8
+  },
+  talkToNovaBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(14,116,144,0.3)',
+    borderColor: '#38BDF8',
+    borderWidth: 1.2,
+    borderRadius: 9,
+    paddingVertical: 7,
+    paddingHorizontal: 12
+  },
+  talkToNovaIcon: {
+    fontSize: 13,
+    marginRight: 6
+  },
+  talkToNovaText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#38BDF8',
+    letterSpacing: 0.3
+  },
+  deleteBubbleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderColor: 'rgba(239,68,68,0.5)',
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingVertical: 7,
+    paddingHorizontal: 12
+  },
+  deleteBubbleIcon: {
+    fontSize: 12,
+    marginRight: 4
+  },
+  deleteBubbleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#EF4444'
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.65)'
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0
+  },
+  modalCard: {
+    backgroundColor: '#0F172A',
+    borderColor: 'rgba(56,189,248,0.3)',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 32,
+    shadowColor: '#38BDF8',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 20
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12
+  },
+  modalHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1
+  },
+  novaAvatarCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(56,189,248,0.2)',
+    borderColor: '#38BDF8',
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  novaAvatarEmoji: {
+    fontSize: 16
+  },
+  modalTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#F4F4F5'
+  },
+  modalSubtitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#38BDF8',
+    marginTop: 1
+  },
+  modalCloseBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  modalCloseText: {
+    fontSize: 13,
+    color: '#A1A1AA',
+    fontWeight: '700'
+  },
+  currentValBox: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12
+  },
+  currentValLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#94A3B8',
+    letterSpacing: 0.8,
+    marginBottom: 4
+  },
+  currentValText: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    color: '#E2E8F0',
+    lineHeight: 17
+  },
+  modeToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 8,
+    padding: 3,
+    marginBottom: 10
+  },
+  modeToggleBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 6
+  },
+  modeToggleBtnActive: {
+    backgroundColor: '#38BDF8'
+  },
+  modeToggleText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8'
+  },
+  modeToggleTextActive: {
+    color: '#0F172A',
+    fontWeight: '800'
+  },
+  inputContainer: {
+    marginBottom: 12
+  },
+  inputGuideText: {
+    fontSize: 10.5,
+    fontWeight: '500',
+    color: '#A1A1AA',
+    marginBottom: 6
+  },
+  modalInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 13,
+    color: '#FFFFFF',
+    minHeight: 65,
+    textAlignVertical: 'top'
+  },
+  novaFeedbackBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderColor: 'rgba(16,185,129,0.4)',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 12
+  },
+  novaFeedbackIcon: {
+    fontSize: 14,
+    marginRight: 6
+  },
+  novaFeedbackText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#34D399'
+  },
+  modalActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  modalChatBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  modalChatText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#D4D4D8'
+  },
+  modalSubmitBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0284C7',
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 14
+  },
+  modalSubmitBtnDisabled: {
+    opacity: 0.6
+  },
+  modalSubmitIcon: {
+    fontSize: 13,
+    marginRight: 6
+  },
+  modalSubmitText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#FFFFFF'
+  }
 });

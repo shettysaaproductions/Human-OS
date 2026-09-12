@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { complete } from '../lib/nvidia';
 import { SourceAuthority } from '../types/memory';
 import {
   classifyDomain,
@@ -677,6 +678,338 @@ analyticsRouter.get('/kg', async (req: Request, res: Response, next: NextFunctio
     });
   } catch (err) {
     logger.error('Failed to fetch kg analytics', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
+// POST /analytics/kg/surgical-alteration — surgical memory update or deletion via talking to Nova
+analyticsRouter.post('/kg/surgical-alteration', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const {
+      nodeId,
+      rawKey,
+      nodeName,
+      currentValue,
+      department,
+      userInstruction,
+      directValue
+    } = req.body;
+
+    if (!userInstruction && !directValue) {
+      res.status(400).json({ error: 'Provide userInstruction or directValue' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const effectiveName = nodeName || rawKey || 'Memory';
+    const effectiveKey = rawKey || (nodeId?.startsWith('mem-') ? nodeId.replace(/^mem-/, '') : (nodeId?.startsWith('wm-') ? nodeId.replace(/^wm-/, '') : canonicalizeKey(effectiveName).canonical));
+
+    let action: 'UPDATE' | 'DELETE' = 'UPDATE';
+    let finalValue = directValue ? directValue.trim() : '';
+    let novaReply = '';
+
+    // If direct value was supplied, skip LLM extraction
+    if (directValue && directValue.trim()) {
+      action = 'UPDATE';
+      finalValue = directValue.trim();
+      novaReply = `I've updated ${effectiveName} to "${finalValue}" on the spot, Saa!`;
+    } else {
+      // Conversational instruction to Nova — parse intent with LLM
+      const instructionText = (userInstruction || '').trim();
+      const isExplicitDelete = /^(delete|remove|forget|erase|drop|clear|destroy|omit|trash)\b/i.test(instructionText) ||
+        /\b(delete this|remove this|forget this|delete it|remove it|forget it|no longer relevant|not true anymore)\b/i.test(instructionText);
+
+      if (isExplicitDelete) {
+        action = 'DELETE';
+        novaReply = `Understood, Saa. I've surgically removed ${effectiveName} from your memory bank and neural graph.`;
+      } else {
+        // Fast semantic extraction with Nova
+        try {
+          const sysPrompt = `You are Nova's Surgical Memory Engine for HumanOS.
+The user wants to update or alter a specific memory node in their neural brain graph:
+Node Name: "${effectiveName}"
+Key: "${effectiveKey}"
+Domain: "${department || 'personal'}"
+Current Value: "${currentValue || ''}"
+
+User's instruction to Nova:
+"${instructionText}"
+
+Determine:
+1. "action": "UPDATE" (if modifying/correcting) or "DELETE" (if asking to delete/forget)
+2. "updatedValue": the concise, clean, concrete updated fact or value (strip quotes, conversational filler)
+3. "novaReply": a warm, concise, confident response from Nova to the user confirming the update (e.g., "Updated Sakshi's birthday to 24 July, Saa!")
+
+Return ONLY valid JSON:
+{"action": "UPDATE", "updatedValue": "string", "novaReply": "string"}`;
+
+          const llmRes = await complete('MEMORY', [
+            { role: 'system', content: sysPrompt },
+            { role: 'user', content: instructionText }
+          ], { temperature: 0.1, maxTokens: 250 });
+
+          const rawStr = typeof llmRes === 'string' ? llmRes : ((llmRes as any)?.text || (llmRes as any)?.content || '');
+          const match = rawStr.match(/\{[\s\S]*\}/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            if (parsed.action === 'DELETE') {
+              action = 'DELETE';
+            } else {
+              action = 'UPDATE';
+              finalValue = (parsed.updatedValue || parsed.value || instructionText).trim();
+            }
+            novaReply = parsed.novaReply || (action === 'DELETE' ? `Removed ${effectiveName}.` : `Updated ${effectiveName} to "${finalValue}".`);
+          } else {
+            finalValue = instructionText;
+            novaReply = `Updated ${effectiveName} to "${finalValue}".`;
+          }
+        } catch (llmErr) {
+          logger.warn('[SurgicalAlteration] LLM fallback triggered', { error: String(llmErr) });
+          finalValue = instructionText;
+          novaReply = `Updated ${effectiveName} to "${finalValue}".`;
+        }
+      }
+    }
+
+    if (action === 'DELETE') {
+      // 1. Soft-tombstone in memories table
+      await supabaseAdmin
+        .from('memories')
+        .update({
+          is_archived: true,
+          lifecycle_state: 'INVALIDATED',
+          supersession_reason: `[Surgical User Alteration] ${userInstruction || 'Deleted by user'}`,
+          updated_at: now
+        })
+        .eq('user_id', userId)
+        .or(`id.eq.${nodeId},key.eq.${effectiveKey},key.eq.${effectiveName}`);
+
+      // 2. Delete from working_memory
+      await supabaseAdmin
+        .from('working_memory')
+        .delete()
+        .eq('user_id', userId)
+        .or(`id.eq.${nodeId},key.eq.${effectiveKey},key.eq.${effectiveName}`);
+
+      // 3. Delete from kg_nodes and kg_edges
+      const { data: matchedKgNodes } = await supabaseAdmin
+        .from('kg_nodes')
+        .select('id')
+        .eq('user_id', userId)
+        .or(`id.eq.${nodeId},name.eq.${effectiveName}`);
+
+      for (const kn of (matchedKgNodes || [])) {
+        await supabaseAdmin.from('kg_edges').delete().or(`source_node_id.eq.${kn.id},target_node_id.eq.${kn.id}`);
+        await supabaseAdmin.from('kg_nodes').delete().eq('id', kn.id);
+      }
+
+      // 4. Record in correction ledger
+      try {
+        await supabaseAdmin.from('nova_correction_ledger').insert({
+          user_id: userId,
+          correction_source: 'user_surgical_alteration',
+          field_name: effectiveKey,
+          previous_value: currentValue || '[UNKNOWN]',
+          corrected_value: '[DELETED]',
+          reason: userInstruction || 'User deleted bubble from 3D Knowledge Graph',
+          created_at: now
+        });
+      } catch {}
+
+      invalidateAnalyticsCache(userId);
+
+      res.status(200).json({
+        success: true,
+        action: 'DELETE',
+        message: novaReply,
+        nodeId,
+        key: effectiveKey
+      });
+      return;
+    }
+
+    // UPDATE ACTION:
+    // 1. Check if memory exists in memories table
+    const { data: existingMem } = await supabaseAdmin
+      .from('memories')
+      .select('id, key, value, memory_type, importance')
+      .eq('user_id', userId)
+      .or(`id.eq.${nodeId},key.eq.${effectiveKey}`)
+      .eq('is_archived', false)
+      .order('importance', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let updatedId = existingMem?.id;
+
+    if (existingMem) {
+      await supabaseAdmin
+        .from('memories')
+        .update({
+          value: finalValue,
+          lifecycle_state: 'CURRENT',
+          source_authority: 'explicit_user',
+          is_archived: false,
+          updated_at: now
+        })
+        .eq('id', existingMem.id);
+    } else {
+      // Check working memory
+      const { data: existingWm } = await supabaseAdmin
+        .from('working_memory')
+        .select('id, key')
+        .eq('user_id', userId)
+        .or(`id.eq.${nodeId},key.eq.${effectiveKey}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingWm) {
+        await supabaseAdmin
+          .from('working_memory')
+          .update({
+            value: finalValue
+          })
+          .eq('id', existingWm.id);
+      }
+
+      // Also persist authoritative memory row
+      const { data: insertedMem } = await supabaseAdmin
+        .from('memories')
+        .insert({
+          user_id: userId,
+          key: effectiveKey,
+          value: finalValue,
+          memory_type: department || 'personal',
+          importance: 85,
+          confidence: 1.0,
+          is_archived: false,
+          lifecycle_state: 'CURRENT',
+          source_authority: 'explicit_user',
+          created_at: now,
+          updated_at: now
+        })
+        .select('id')
+        .single();
+
+      updatedId = insertedMem?.id || existingWm?.id || nodeId;
+    }
+
+    // Update kg_nodes attributes if present
+    await supabaseAdmin
+      .from('kg_nodes')
+      .update({
+        attributes: { value: finalValue },
+        updated_at: now
+      })
+      .eq('user_id', userId)
+      .or(`id.eq.${nodeId},name.eq.${effectiveName}`);
+
+    // Record in correction ledger
+    try {
+      await supabaseAdmin.from('nova_correction_ledger').insert({
+        user_id: userId,
+        correction_source: 'user_surgical_alteration',
+        field_name: effectiveKey,
+        previous_value: currentValue || '[NONE]',
+        corrected_value: finalValue,
+        reason: userInstruction || 'User edited bubble from 3D Knowledge Graph',
+        created_at: now
+      });
+    } catch {}
+
+    invalidateAnalyticsCache(userId);
+
+    res.status(200).json({
+      success: true,
+      action: 'UPDATE',
+      message: novaReply,
+      nodeId: updatedId,
+      key: effectiveKey,
+      name: effectiveName,
+      value: finalValue
+    });
+  } catch (err) {
+    logger.error('Failed to perform surgical memory alteration', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
+// DELETE /analytics/kg/node/:nodeId — direct surgical removal of a node
+analyticsRouter.delete('/kg/node/:nodeId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { nodeId } = req.params;
+    const rawKey = (req.query.rawKey as string) || (req.body?.rawKey as string) || '';
+    const nodeName = (req.query.nodeName as string) || (req.body?.nodeName as string) || '';
+    const now = new Date().toISOString();
+
+    const effectiveKey = rawKey || (nodeId?.startsWith('mem-') ? nodeId.replace(/^mem-/, '') : (nodeId?.startsWith('wm-') ? nodeId.replace(/^wm-/, '') : canonicalizeKey(nodeName).canonical));
+
+    // 1. Soft-tombstone in memories
+    await supabaseAdmin
+      .from('memories')
+      .update({
+        is_archived: true,
+        lifecycle_state: 'INVALIDATED',
+        supersession_reason: 'User direct bubble deletion from 3D Knowledge Graph',
+        updated_at: now
+      })
+      .eq('user_id', userId)
+      .or(`id.eq.${nodeId},key.eq.${effectiveKey}`);
+
+    // 2. Delete from working_memory
+    await supabaseAdmin
+      .from('working_memory')
+      .delete()
+      .eq('user_id', userId)
+      .or(`id.eq.${nodeId},key.eq.${effectiveKey}`);
+
+    // 3. Delete from kg_nodes & kg_edges
+    const { data: matchedKgNodes } = await supabaseAdmin
+      .from('kg_nodes')
+      .select('id')
+      .eq('user_id', userId)
+      .or(`id.eq.${nodeId},name.eq.${nodeName}`);
+
+    for (const kn of (matchedKgNodes || [])) {
+      await supabaseAdmin.from('kg_edges').delete().or(`source_node_id.eq.${kn.id},target_node_id.eq.${kn.id}`);
+      await supabaseAdmin.from('kg_nodes').delete().eq('id', kn.id);
+    }
+
+    // 4. Record in correction ledger
+    try {
+      await supabaseAdmin.from('nova_correction_ledger').insert({
+        user_id: userId,
+        correction_source: 'user_bubble_delete',
+        field_name: effectiveKey,
+        previous_value: nodeName,
+        corrected_value: '[DELETED]',
+        reason: 'Direct bubble removal from 3D Neural Galaxy',
+        created_at: now
+      });
+    } catch {}
+
+    invalidateAnalyticsCache(userId);
+
+    res.status(200).json({
+      success: true,
+      message: `Memory "${nodeName || effectiveKey}" has been surgically removed from your brain.`,
+      nodeId,
+      key: effectiveKey
+    });
+  } catch (err) {
+    logger.error('Failed to delete kg node', { error: err instanceof Error ? err.message : String(err) });
     next(err);
   }
 });
