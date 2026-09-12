@@ -152,8 +152,14 @@ export class TurnAnalyzer {
         const clauseEntityCorrection = entityRelationshipCorrectionService.detectEntityCorrection(clause) || detectedEntityCorrection;
         if (clauseEntityCorrection && !units.some(u => u.relationship === clauseEntityCorrection.newRelation && u.type === 'correction')) {
           const eSlug = clauseEntityCorrection.entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          const finalKey = clauseEntityCorrection.newDomain === 'work' ? `colleague_${eSlug}` : `friend_${eSlug}`;
-          const finalVal = `${clauseEntityCorrection.entityName} is an ${clauseEntityCorrection.newRelation}`;
+          const newRelSlug = clauseEntityCorrection.newRelation.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          let finalKey = `${newRelSlug}_${eSlug}`;
+          if (clauseEntityCorrection.newDomain === 'work') {
+            finalKey = (newRelSlug.includes('colleague') || newRelSlug.includes('office') || newRelSlug.includes('coworker')) ? `colleague_${eSlug}` : `profession_${eSlug}`;
+          } else if (clauseEntityCorrection.newDomain === 'family') {
+            finalKey = (newRelSlug.includes('dog') || newRelSlug.includes('cat') || newRelSlug.includes('pet')) ? `pet_${eSlug}` : `friend_${eSlug}`;
+          }
+          const finalVal = `${clauseEntityCorrection.entityName} is ${clauseEntityCorrection.newRelation}`;
 
           units.push({
             unitId: crypto.randomUUID(),

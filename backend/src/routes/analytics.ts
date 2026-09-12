@@ -731,17 +731,25 @@ analyticsRouter.post('/kg/surgical-alteration', async (req: Request, res: Respon
 
       // Check for entity relationship reclassification (e.g. "Ijaz is not my family member is is my office frind")
       const { entityRelationshipCorrectionService } = await import('../services/EntityRelationshipCorrectionService');
-      const detectedCorrection = entityRelationshipCorrectionService.detectEntityCorrection(instructionText);
+      const detectedCorrection = entityRelationshipCorrectionService.detectEntityCorrection(instructionText) || await entityRelationshipCorrectionService.detectOrInferCorrection(instructionText);
       if (detectedCorrection) {
         await entityRelationshipCorrectionService.severAndReclassifyEntity(userId, detectedCorrection);
         const reply = entityRelationshipCorrectionService.generateNovaReply(detectedCorrection);
+        const cleanSlug = detectedCorrection.entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const relSlug = detectedCorrection.newRelation.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        let generatedKey = `${relSlug}_${cleanSlug}`;
+        if (detectedCorrection.newDomain === 'work') {
+          generatedKey = (relSlug.includes('colleague') || relSlug.includes('office') || relSlug.includes('coworker')) ? `colleague_${cleanSlug}` : `profession_${cleanSlug}`;
+        } else if (detectedCorrection.newDomain === 'family') {
+          generatedKey = (relSlug.includes('dog') || relSlug.includes('cat') || relSlug.includes('pet')) ? `pet_${cleanSlug}` : `friend_${cleanSlug}`;
+        }
         res.status(200).json({
           success: true,
           action: 'UPDATE',
           message: reply,
           nodeId,
-          key: detectedCorrection.newDomain === 'work' ? `colleague_${detectedCorrection.entityName.toLowerCase()}` : `friend_${detectedCorrection.entityName.toLowerCase()}`,
-          value: `${detectedCorrection.entityName} is an ${detectedCorrection.newRelation}`,
+          key: generatedKey,
+          value: `${detectedCorrection.entityName} is ${detectedCorrection.newRelation}`,
           department: detectedCorrection.newDomain
         });
         return;

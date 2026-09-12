@@ -31,6 +31,7 @@ import { reminderIntentDetector } from '../services/ReminderIntentDetector';
 import { userLifeStageEngine } from '../services/UserLifeStageEngine';
 import { lifeBlueprintCuriosityEngine } from '../services/LifeBlueprintCuriosityEngine';
 import { entityRelationshipCorrectionService } from '../services/EntityRelationshipCorrectionService';
+import { DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1401,8 +1402,8 @@ chatRouter.post(
         }
       }
 
-      // Entity Relationship & Bubble Reclassification Execution & Directive
-      const entityCorrection = turnAnalysis.entityCorrection || entityRelationshipCorrectionService.detectEntityCorrection(effectiveMessage);
+      // Entity Relationship & Universal Reclassification Execution & Directive
+      const entityCorrection = turnAnalysis.entityCorrection || await entityRelationshipCorrectionService.detectOrInferCorrection(effectiveMessage);
       if (entityCorrection) {
         try {
           await entityRelationshipCorrectionService.severAndReclassifyEntity(userId, entityCorrection);
@@ -1410,7 +1411,9 @@ chatRouter.post(
           logger.warn('[Chat] Entity reclassification execution warning', { error: corrErr?.message });
         }
 
-        const branchShiftDirective = `\n\n## 🌿 ENTITY RELATIONSHIP & BUBBLE RECLASSIFICATION (CRITICAL - TOP PRIORITY)\nThe user explicitly corrected that "${entityCorrection.entityName}" is NOT a ${entityCorrection.oldRelation || 'family member'}, but is their ${entityCorrection.newRelation}!\nYou have ALREADY severed ${entityCorrection.entityName}'s branch from Family & Relationships and reclassified them into ${entityCorrection.newRelation} under ${entityCorrection.newDomain === 'work' ? 'Career & Professional (Office Friends)' : 'Friends'}.\nCRITICAL INSTRUCTIONS:\n1. Warmly, smoothly, and casually confirm that you've updated this: acknowledge that ${entityCorrection.entityName} is their ${entityCorrection.newRelation} and that you've moved him/her from family over to the ${entityCorrection.newDomain === 'work' ? 'office friends / work' : 'friends'} branch.\n2. Example response: "Arre got it Saa! Maine ${entityCorrection.entityName} ko family se hata kar tumhare office friends / work branch me move kar diya hai 😊"\n3. Do NOT debate or question the user. Keep it natural, warm, and concise (1-2 sentences).`;
+        const oldLabel = entityCorrection.oldRelation || entityCorrection.oldDomain;
+        const newDomainTitle = DOMAIN_TAXONOMY[entityCorrection.newDomain]?.title || entityCorrection.newDomain;
+        const branchShiftDirective = `\n\n## 🌿 UNIVERSAL ENTITY & TOPIC RECLASSIFICATION (CRITICAL - TOP PRIORITY)\nThe user explicitly corrected that "${entityCorrection.entityName}" is NOT "${oldLabel}", but is "${entityCorrection.newRelation}" (${newDomainTitle})!\nYou have ALREADY severed ${entityCorrection.entityName} from the ${entityCorrection.oldDomain} compartment/branch and reclassified it into ${entityCorrection.newDomain} (${entityCorrection.newRelation}).\nCRITICAL INSTRUCTIONS:\n1. Warmly, smoothly, and casually confirm that you've updated this in your memory: acknowledge that ${entityCorrection.entityName} is now filed under ${entityCorrection.newRelation} (${newDomainTitle}) and no longer under ${oldLabel}.\n2. Example response: "Arre got it Saa! Maine ${entityCorrection.entityName} ko ${oldLabel} se hata kar tumhare ${entityCorrection.newRelation} (${newDomainTitle}) me move kar diya hai 😊"\n3. Do NOT debate or question the user. Keep it natural, warm, and concise (1-2 sentences).`;
         turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + branchShiftDirective;
       }
 

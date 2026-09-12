@@ -1,26 +1,30 @@
 /**
  * EntityRelationshipCorrectionService.ts
  *
- * Dedicated Autonomous Entity Relationship Correction & Branch Severing Engine.
+ * Universal Autonomous Entity & Concept Reclassification Engine.
  *
  * ARCHITECTURAL ROLE:
- * Handles user corrections when an entity's relationship or domain compartment is corrected.
- * Example: "Ijaz is not my family member is is my office frind"
+ * Handles user corrections and reclassifications when ANY entity, concept, habit,
+ * vehicle, instrument, pet, tool, project, or person is corrected or moved across domains.
  *
- * Actions:
- * 1. Accurately detects entity relationship corrections and domain shifts.
- * 2. Surgically severs the entity's previous branch (e.g. from family / FAMILY_MEMBER).
- * 3. Reassigns the entity to the correct branch (e.g. work / office_friend / colleague).
- * 4. Updates memories (supersedes old relation rows, creates authoritative new relation row).
- * 5. Updates working_memory, kg_nodes, and kg_edges in Supabase.
- * 6. Records the audit trail in nova_correction_ledger.
- * 7. Invalidates the analytics and graph cache so mobile UI updates immediately.
+ * Examples:
+ * - "Ijaz is not my family member is is my office frind" (Family -> Work / Colleague)
+ * - "Guitar is not my hobby, it is my full time profession" (Lifestyle -> Work / Profession)
+ * - "Coco is not my cat, he is my pet dog" (Cat -> Dog within Family)
+ * - "React is not just a side project, it's my core tech stack" (Lifestyle -> Work / Stack)
+ * - "Mumbai is not a vacation trip, that's where I live" (Lifestyle -> Core Identity)
+ * - "Keto is not a casual diet, it is my medical restriction" (Lifestyle -> Health)
+ * - "Morning run is not an occasional hobby, it is my daily routine" (Lifestyle -> Routine)
+ * - "Move tennis from sports to my fitness routine" (Lifestyle -> Routine)
+ * - "Don't put BMW under travel, put it under cars" (Category adjustment)
+ * - "Guitar mera timepass nahi hai, career hai" (Hinglish Lifestyle -> Work)
  */
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
+import { LifeDomainKey, DOMAIN_TAXONOMY, selectDynamicDrawerEmoji } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
+import { chatCompletionMemory } from '../lib/nvidia';
 
 export interface EntityCorrection {
   entityName: string;
@@ -29,6 +33,41 @@ export interface EntityCorrection {
   newRelation: string;
   newDomain: LifeDomainKey;
   rawText: string;
+}
+
+/**
+ * Infers the LifeDomainKey for arbitrary concepts and categories.
+ */
+export function inferDomainFromConcept(concept: string, fallback: LifeDomainKey = 'lifestyle'): LifeDomainKey {
+  if (!concept) return fallback;
+  const c = concept.toLowerCase().trim();
+
+  // 1. Work / Career / Profession / Tech Stack / Business
+  if (/\b(work|career|profession|professional|job|office|colleague|colleagues|coworker|coworkers|manager|boss|client|clients|company|startup|venture|business|co-founder|cofounder|partner\s+in\s+business|tech\s*stack|stack|software|repo|coding|code|developer|project|freelance|employment|salary)\b/i.test(c)) {
+    return 'work';
+  }
+
+  // 2. Family & Personal Relationships & Pets
+  if (/\b(family|family\s+member|relative|relatives|brother|bhai|sister|behen|father|papa|dad|mother|mom|maa|son|beta|daughter|beti|wife|biwi|patni|husband|pati|spouse|partner|pet|dog|puppy|kutta|cat|kitten|billi|bird|parrot|cousin|uncle|aunt|dost|friend|close\s+friend|best\s+friend)\b/i.test(c)) {
+    // If it mentions office friend or work friend, work takes precedence!
+    if (/\b(office|work|colleague|coworker)\b/i.test(c)) {
+      return 'work';
+    }
+    return 'family';
+  }
+
+  // 3. Goals & Ambitions & Milestones
+  if (/\b(goal|goals|target|ambition|dream|dreams|milestone|milestones|vision|aim|resolution|bucket\s*list|future\s*plan|marathon|race)\b/i.test(c)) {
+    return 'goals';
+  }
+
+  // 4. Core Identity / Personal Living Location
+  if (/\b(home|home\s*city|residence|where\s+i\s+live|living\s+place|birth\s*place|native\s*place|identity|real\s*name|legal\s*name|citizenship|nationality)\b/i.test(c)) {
+    return 'identity';
+  }
+
+  // 5. Default to Lifestyle (hobbies, instruments, fitness, routines, food, travel)
+  return 'lifestyle';
 }
 
 export class EntityRelationshipCorrectionService {
@@ -42,8 +81,8 @@ export class EntityRelationshipCorrectionService {
   }
 
   /**
-   * Detects if the user's turn expresses an entity relationship reclassification.
-   * Handles natural typing typos (e.g., "is is my office frind", "collegue", "cowoker").
+   * Fast-path deterministic detection for entity corrections across arbitrary domains.
+   * Handles natural typing typos (e.g., "is is", "frind", "collegue", "cowoker").
    */
   detectEntityCorrection(text: string): EntityCorrection | null {
     if (!text || typeof text !== 'string') return null;
@@ -56,6 +95,7 @@ export class EntityRelationshipCorrectionService {
       .replace(/\bregarding\s+memory:\s*\[[^\]]+\]:\s*["'][^"']*["']\s*-\s*/i, '') // strip modal quote prefix
       .replace(/\bregarding\s+memory:\s*\[[^\]]+\]:\s*/i, '')
       .replace(/\bregarding\s+([a-zA-Z]+):\s*/i, '$1 ')
+      .replace(/^(actually|wait|no|listen|hey nova|nova|bhai|yaar)[,\s]+/i, '')
       .replace(/\bfrind\b/gi, 'friend')
       .replace(/\bcollegue\b/gi, 'colleague')
       .replace(/\bcowoker\b/gi, 'coworker')
@@ -65,78 +105,212 @@ export class EntityRelationshipCorrectionService {
 
     const lower = clean.toLowerCase();
 
-    // ── Pattern 1: Direct Negation + Reclassification ─────────────────────────
+    // ── Pattern 1: Universal Direct Negation + Assertion ─────────────────────
     // e.g. "Ijaz is not my family member, he is my office friend"
-    // e.g. "Ijaz is not my brother, is my colleague"
-    // e.g. "Ijaz family member nahi hai, office friend hai"
-    // e.g. "Ijaz mera bhai nahi hai, office ka dost hai"
-    const pattern1 = /\b([a-zA-Z]+)\s+(?:is\s+not|isn't|is\s+no\s+longer|are\s+not|family\s+member\s+nahi\s+hai|nahi\s+hai|mera\s+bhai\s+nahi\s+hai)\s*(?:my|a|an|mera|meri)?\s*(family\s+member|family|brother|sister|relative|bhai|behen|father|mother|son|daughter|dost|friend)?\s*[,;.-]?\s*(?:he\s+is|she\s+is|they\s+are|he's|she's|is|woh|wo|actually|to|mera|meri)?\s*(?:my|a|an|mera|meri)?\s*(office\s+friend|work\s+friend|office\s+colleague|work\s+colleague|colleague|coworker|friend|dost|office\s+ka\s+dost|office\s+dost)\b/i;
-
+    // e.g. "Guitar is not my hobby, it is my full time profession"
+    // e.g. "Coco is not my cat, he is my pet dog"
+    // e.g. "React is not a side project, it's my core tech stack"
+    // e.g. "Mumbai is not a vacation trip, that is my home city"
+    const pattern1 = /\b([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+(?:is\s+not|isn't|is\s+no\s+longer|are\s+not|aren't)(?:\s+(?:my|an|a|mera|meri|mere|just|only|simply))?\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3})\s*(?:,\s*(?:it\s+is|it's|he\s+is|she\s+is|they\s+are|he's|she's|is|woh|wo|actually|to|that's|that\s+is)?|[,;.-]?\s+(?:it\s+is|it's|he\s+is|she\s+is|they\s+are|he's|she's|is|woh|wo|actually|to|that's|that\s+is))\s+(?:my|an|a|mera|meri|mere)?\s*([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3})(?:[.,;!]|$)/i;
     const m1 = lower.match(pattern1);
     if (m1) {
-      const entityName = this.capitalize(m1[1]);
+      const entityName = this.cleanEntity(m1[1]);
       if (this.isValidEntityName(entityName)) {
-        const oldRelRaw = m1[2] ? m1[2].trim() : 'family member';
-        const newRelRaw = m1[3] ? m1[3].trim() : 'office friend';
-        return this.buildCorrection(entityName, oldRelRaw, newRelRaw, clean);
+        const oldConceptRaw = m1[2].trim();
+        const newConceptRaw = m1[3].trim().replace(/\s+at\s+work$/i, '');
+        if (oldConceptRaw && newConceptRaw && oldConceptRaw !== newConceptRaw) {
+          return this.buildCorrection(entityName, oldConceptRaw, newConceptRaw, clean);
+        }
       }
     }
 
-    // ── Pattern 2: Reversed Assertion ("Ijaz is my office friend, not a family member")
-    const pattern2 = /\b([a-zA-Z]+)\s+(?:is|hai)\s+(?:my|mera|meri|a|an)?\s*(office\s+friend|work\s+friend|colleague|coworker|friend|dost)\s*[,;.-]?\s*(?:not|nahi\s+hai)\s+(?:my|mera|meri|a|an)?\s*(family\s+member|family|brother|sister|relative|bhai|behen)\b/i;
+    // ── Pattern 2: Universal Reversed Assertion ──────────────────────────────
+    // e.g. "Ijaz is my office friend, not a family member"
+    // e.g. "Guitar is my full time profession, not a hobby"
+    // e.g. "Coco is my pet dog, not a cat"
+    const pattern2 = /\b([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+(?:is|hai)\s+(?:my|mera|meri|mere|an|a)?\s*([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3})\s*[,;.-]?\s*(?:not|nahi\s+hai|aur\s+nahi)\s+(?:my|mera|meri|mere|an|a)?\s*([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3})(?:[.,;!]|$)/i;
     const m2 = lower.match(pattern2);
     if (m2) {
-      const entityName = this.capitalize(m2[1]);
+      const entityName = this.cleanEntity(m2[1]);
       if (this.isValidEntityName(entityName)) {
-        const newRelRaw = m2[2].trim();
-        const oldRelRaw = m2[3].trim();
-        return this.buildCorrection(entityName, oldRelRaw, newRelRaw, clean);
+        const newConceptRaw = m2[2].trim();
+        const oldConceptRaw = m2[3].trim();
+        if (oldConceptRaw && newConceptRaw && oldConceptRaw !== newConceptRaw) {
+          return this.buildCorrection(entityName, oldConceptRaw, newConceptRaw, clean);
+        }
       }
     }
 
-    // ── Pattern 3: Move/Reassign Command ──────────────────────────────────────
-    // e.g. "Move Ijaz from family to friends / office friends branch"
-    const pattern3 = /\b(?:move|shift|transfer|put)\s+([a-zA-Z]+)\s+(?:from\s+family\s+to|se\s+hata\s+kar\s+to|to)?\s*(office\s+friends?|colleagues?|friends?|work)\s*(?:branch)?\b/i;
-    const m3 = lower.match(pattern3);
-    if (m3) {
-      const entityName = this.capitalize(m3[1]);
+    // ── Pattern 3: Universal Move / Reassign Commands ─────────────────────────
+    // e.g. "Move tennis from sports to fitness routine"
+    // e.g. "Move Ijaz from family to office friends"
+    // e.g. "Don't put BMW under travel, put it under cars"
+    // e.g. "Guitar ko hobbies se hata kar work me daal do"
+    const pattern3a = /\b(?:move|shift|transfer|put)\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+from\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+to\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})(?:\s+branch|\s+drawer|\s+wardrobe|\s+category)?(?:[.,;!]|$)/i;
+    const m3a = lower.match(pattern3a);
+    if (m3a) {
+      const entityName = this.cleanEntity(m3a[1]);
       if (this.isValidEntityName(entityName)) {
-        const newRelRaw = m3[2].trim();
-        return this.buildCorrection(entityName, 'family member', newRelRaw, clean);
+        return this.buildCorrection(entityName, m3a[2].trim(), m3a[3].trim(), clean);
+      }
+    }
+
+    const pattern3b = /\b(?:don't|do\s+not)\s+put\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+under\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})[,;.-]?\s*(?:put\s+it\s+under|move\s+it\s+to|it\s+belongs\s+to|it's\s+in)\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})(?:[.,;!]|$)/i;
+    const m3b = lower.match(pattern3b);
+    if (m3b) {
+      const entityName = this.cleanEntity(m3b[1]);
+      if (this.isValidEntityName(entityName)) {
+        return this.buildCorrection(entityName, m3b[2].trim(), m3b[3].trim(), clean);
+      }
+    }
+
+    const pattern3c = /\b([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+ko\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+se\s+(?:hata\s+kar|nikal\s+kar)\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,2})\s+(?:me|mein)\s+(?:daal|move|shift|put)(?:[.,;!]|$)/i;
+    const m3c = lower.match(pattern3c);
+    if (m3c) {
+      const entityName = this.cleanEntity(m3c[1]);
+      if (this.isValidEntityName(entityName)) {
+        return this.buildCorrection(entityName, m3c[2].trim(), m3c[3].trim(), clean);
+      }
+    }
+
+    // ── Pattern 4: Hinglish Direct Negation + Assertion ───────────────────────
+    // 4a. With possession: "Guitar mera timepass nahi hai, career hai"
+    const pattern4a = /\b([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+)?)\s+(?:mera|meri|mere|ka|ki|ke)\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+)?)\s+nahi\s+(?:hai|tha|thi)?\s*[,;.-]?\s*(?:mera|meri|mere|woh|wo|to|yeh)?\s*([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3})\s+(?:hai|mein\s+aata\s+hai)(?:[.,;!]|$)/i;
+    const m4a = lower.match(pattern4a);
+    if (m4a) {
+      const entityName = this.cleanEntity(m4a[1]);
+      if (this.isValidEntityName(entityName)) {
+        const oldConceptRaw = m4a[2].trim();
+        const newConceptRaw = m4a[3].trim();
+        if (oldConceptRaw && newConceptRaw && oldConceptRaw !== newConceptRaw) {
+          return this.buildCorrection(entityName, oldConceptRaw, newConceptRaw, clean);
+        }
+      }
+    }
+
+    // 4b. Without possession: "Ijaz family member nahi hai, office ka dost hai"
+    const pattern4b = /\b([a-zA-Z0-9]+)\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+)?)\s+nahi\s+(?:hai|tha|thi)?\s*[,;.-]?\s*(?:mera|meri|mere|woh|wo|to|yeh)?\s*([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3})\s+(?:hai|mein\s+aata\s+hai)(?:[.,;!]|$)/i;
+    const m4b = lower.match(pattern4b);
+    if (m4b) {
+      const entityName = this.cleanEntity(m4b[1]);
+      if (this.isValidEntityName(entityName)) {
+        const oldConceptRaw = m4b[2].trim();
+        const newConceptRaw = m4b[3].trim();
+        if (oldConceptRaw && newConceptRaw && oldConceptRaw !== newConceptRaw) {
+          return this.buildCorrection(entityName, oldConceptRaw, newConceptRaw, clean);
+        }
       }
     }
 
     return null;
   }
 
+  /**
+   * Dual-layer intelligence: Tries fast deterministic regex first, then falls
+   * back to LLM workforce extraction (NVIDIA / Hippocampus) for complex conversational phrasing.
+   */
+  async detectOrInferCorrection(text: string): Promise<EntityCorrection | null> {
+    if (!text || typeof text !== 'string') return null;
+
+    // 1. Fast path: deterministic regex
+    const fastMatch = this.detectEntityCorrection(text);
+    if (fastMatch) return fastMatch;
+
+    // 2. Check if the turn contains correction or category change cues
+    const cueRegex = /\b(not my|not a|isn't|is not|are not|aren't|nahi hai|hata kar|reclassify|wrong branch|wrong category|wrong drawer|under .* instead|actually a|actually my|don't put|move .* to|shift .* to)\b/i;
+    if (!cueRegex.test(text)) return null;
+
+    // 3. Fallback: LLM workforce extraction
+    try {
+      const prompt = `Analyze if the user is correcting an entity/topic category or relationship in their life knowledge base.
+User message: "${text}"
+
+If the user is correcting or moving an entity (e.g. saying X is not Y, it is Z, or move X from Y to Z):
+Return a JSON object with:
+{
+  "isCorrection": true,
+  "entityName": "name of entity or topic (e.g. Guitar, Ijaz, Coco, React, Mumbai, Tennis)",
+  "oldConcept": "previous concept or category (e.g. hobby, family member, cat, side project)",
+  "newConcept": "new concept or category (e.g. profession, office friend, dog, tech stack)",
+  "oldDomain": "work | family | goals | lifestyle | identity",
+  "newDomain": "work | family | goals | lifestyle | identity"
+}
+
+If this message is NOT an entity/concept category correction, return:
+{ "isCorrection": false }
+
+Output ONLY valid JSON.`;
+
+      const responseStr = await chatCompletionMemory([
+        { role: 'system', content: 'You are a precise JSON memory extraction agent.' },
+        { role: 'user', content: prompt }
+      ], { temperature: 0.1, maxTokens: 150 });
+
+      const jsonMatch = responseStr.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.isCorrection && parsed.entityName && parsed.newConcept) {
+        return this.buildCorrection(
+          parsed.entityName,
+          parsed.oldConcept || 'previous category',
+          parsed.newConcept,
+          text
+        );
+      }
+    } catch (llmErr) {
+      logger.warn('[EntityRelationshipCorrection] LLM fallback extraction warning', { error: String(llmErr) });
+    }
+
+    return null;
+  }
+
+  private cleanEntity(raw: string): string {
+    return raw
+      .replace(/^(my|a|an|the|mera|meri|mere)\s+/i, '')
+      .replace(/\s+(is|hai|are)$/i, '')
+      .trim();
+  }
+
   private isValidEntityName(name: string): boolean {
-    if (!name || name.length < 2) return false;
+    if (!name || name.trim().length < 2) return false;
+    const clean = name.trim().toLowerCase();
     const stopWords = new Set([
       'he', 'she', 'it', 'they', 'this', 'that', 'there', 'who', 'what', 'why', 'when',
-      'my', 'mine', 'your', 'his', 'her', 'our', 'their', 'mera', 'meri', 'mere', 'mai'
+      'my', 'mine', 'your', 'his', 'her', 'our', 'their', 'mera', 'meri', 'mere', 'mai',
+      'i', 'you', 'we', 'us', 'him', 'them', 'no', 'not', 'yes', 'so', 'and', 'but', 'or'
     ]);
-    return !stopWords.has(name.toLowerCase());
+    return !stopWords.has(clean);
   }
 
-  private capitalize(s: string): string {
-    if (!s) return '';
-    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  private capitalizeWords(str: string): string {
+    if (!str) return '';
+    return str
+      .trim()
+      .split(/\s+/)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
   }
 
-  private buildCorrection(entityName: string, oldRelRaw: string, newRelRaw: string, rawText: string): EntityCorrection {
-    const normNew = newRelRaw.toLowerCase();
-    const isOffice = normNew.includes('office') || normNew.includes('colleague') || normNew.includes('coworker') || normNew.includes('work');
+  private buildCorrection(entityName: string, oldConceptRaw: string, newConceptRaw: string, rawText: string): EntityCorrection {
+    const cleanEntity = this.capitalizeWords(this.cleanEntity(entityName));
+    const oldConcept = oldConceptRaw.trim().toLowerCase();
+    let newConcept = newConceptRaw.trim();
 
-    const newRelation = isOffice
-      ? (normNew.includes('colleague') ? 'Colleague' : 'Office Friend')
-      : 'Friend';
+    const oldDomain = inferDomainFromConcept(oldConcept, 'lifestyle');
+    let newDomain = inferDomainFromConcept(newConcept, 'lifestyle');
 
-    const newDomain: LifeDomainKey = isOffice ? 'work' : 'family';
-    const oldDomain: LifeDomainKey = 'family';
+    // Specific overrides for professional workplace and colleagues
+    if (/\b(office|colleague|coworker|work\s+friend)\b/i.test(newConcept)) {
+      newDomain = 'work';
+      newConcept = newConcept.toLowerCase().includes('colleague') ? 'Colleague' : 'Office Friend';
+    }
+
+    const newRelation = this.capitalizeWords(newConcept);
 
     return {
-      entityName,
-      oldRelation: oldRelRaw || 'family member',
+      entityName: cleanEntity,
+      oldRelation: oldConcept,
       oldDomain,
       newRelation,
       newDomain,
@@ -153,21 +327,52 @@ export class EntityRelationshipCorrectionService {
     }
 
     const now = new Date().toISOString();
-    const { entityName, newRelation, newDomain, rawText } = correction;
+    const { entityName, newRelation, oldRelation, oldDomain, newDomain, rawText } = correction;
     const cleanEntitySlug = entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const newMemoryKey = newDomain === 'work' ? `colleague_${cleanEntitySlug}` : `friend_${cleanEntitySlug}`;
-    const newMemoryValue = `${entityName} is an ${newRelation}`;
+    const newConceptSlug = newRelation.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+    // Generate canonical memory key according to category and domain
+    let newMemoryKey = `${newConceptSlug}_${cleanEntitySlug}`;
+    if (newDomain === 'work') {
+      if (newConceptSlug.includes('colleague') || newConceptSlug.includes('office') || newConceptSlug.includes('coworker')) {
+        newMemoryKey = `colleague_${cleanEntitySlug}`;
+      } else if (newConceptSlug.includes('profession') || newConceptSlug.includes('career') || newConceptSlug.includes('job')) {
+        newMemoryKey = `profession_${cleanEntitySlug}`;
+      } else if (newConceptSlug.includes('stack') || newConceptSlug.includes('project') || newConceptSlug.includes('tech')) {
+        newMemoryKey = `project_${cleanEntitySlug}`;
+      }
+    } else if (newDomain === 'family') {
+      if (newConceptSlug.includes('dog') || newConceptSlug.includes('puppy')) {
+        newMemoryKey = `dog_${cleanEntitySlug}`;
+      } else if (newConceptSlug.includes('cat') || newConceptSlug.includes('kitten')) {
+        newMemoryKey = `cat_${cleanEntitySlug}`;
+      } else if (newConceptSlug.includes('pet')) {
+        newMemoryKey = `pet_${cleanEntitySlug}`;
+      } else if (newConceptSlug.includes('friend') || newConceptSlug.includes('dost')) {
+        newMemoryKey = `friend_${cleanEntitySlug}`;
+      }
+    } else if (newDomain === 'lifestyle') {
+      if (newConceptSlug.includes('routine') || newConceptSlug.includes('habit')) {
+        newMemoryKey = `routine_${cleanEntitySlug}`;
+      } else if (newConceptSlug.includes('instrument') || newConceptSlug.includes('guitar') || newConceptSlug.includes('piano')) {
+        newMemoryKey = `instrument_${cleanEntitySlug}`;
+      }
+    }
+
+    const newMemoryValue = `${entityName} is ${newRelation}`;
 
     logger.info('[EntityRelationshipCorrection] Severing old branch and reclassifying entity', {
       userId,
       entityName,
+      oldRelation,
+      oldDomain,
       newRelation,
       newDomain,
       newMemoryKey
     });
 
     try {
-      // 1. Supersede any existing family memories relating to this entity
+      // 1. Supersede any existing memories touching this entity in the old domain or matching old concept
       const { data: existingMems } = await supabaseAdmin
         .from('memories')
         .select('id, key, value, memory_type')
@@ -175,15 +380,17 @@ export class EntityRelationshipCorrectionService {
         .eq('is_archived', false);
 
       const memsToSupersede: string[] = [];
+      const oldConceptClean = (oldRelation || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
       for (const m of (existingMems || [])) {
         const k = (m.key || '').toLowerCase();
         const v = (m.value || '').toLowerCase();
 
-        const touchesEntity = k.includes(cleanEntitySlug) || v.includes(entityName.toLowerCase());
-        const isFamilyRelated = m.memory_type === 'family' || k.includes('family') || k.includes('brother') || k.includes('sister') || k.includes('relative') || k.startsWith('friend_');
+        const touchesEntity = k.includes(cleanEntitySlug) || v.includes(entityName.toLowerCase()) || v.includes(cleanEntitySlug);
+        const matchesOldConcept = oldConceptClean ? (k.includes(oldConceptClean) || v.includes(oldConceptClean)) : false;
+        const matchesOldDomain = m.memory_type === oldDomain;
 
-        if (touchesEntity && (isFamilyRelated || k === 'brother_name')) {
+        if (touchesEntity && (matchesOldConcept || (oldDomain !== newDomain && matchesOldDomain) || (oldDomain === 'family' && (k === 'brother_name' || k.includes('family') || k.startsWith('friend_'))))) {
           memsToSupersede.push(m.id);
         }
       }
@@ -194,13 +401,13 @@ export class EntityRelationshipCorrectionService {
           .update({
             is_archived: true,
             lifecycle_state: 'SUPERSEDED',
-            supersession_reason: `[Entity Reclassification] User explicitly corrected: ${entityName} is not a ${correction.oldRelation || 'family member'}, but an ${newRelation}. (${rawText})`,
+            supersession_reason: `[Universal Reclassification] User explicitly corrected: ${entityName} is not ${oldRelation || oldDomain}, but ${newRelation} (${newDomain}). (${rawText})`,
             updated_at: now
           })
           .eq('user_id', userId)
           .in('id', memsToSupersede);
 
-        logger.info('[EntityRelationshipCorrection] Superseded old family relation rows', {
+        logger.info('[EntityRelationshipCorrection] Superseded old memories', {
           userId,
           count: memsToSupersede.length,
           ids: memsToSupersede
@@ -250,7 +457,7 @@ export class EntityRelationshipCorrectionService {
         .from('working_memory')
         .delete()
         .eq('user_id', userId)
-        .or(`key.eq.brother_name,key.eq.family_${cleanEntitySlug},key.eq.friend_${cleanEntitySlug}`);
+        .or(`key.eq.brother_name,key.eq.family_${cleanEntitySlug},key.eq.friend_${cleanEntitySlug},key.ilike.%${cleanEntitySlug}%`);
 
       await supabaseAdmin
         .from('working_memory')
@@ -270,26 +477,29 @@ export class EntityRelationshipCorrectionService {
         .or(`name.ilike.%${entityName}%,raw_key.ilike.%${cleanEntitySlug}%`);
 
       for (const kn of (matchedKgNodes || [])) {
-        // Sever old edge to dept-family
+        // Sever old edges to old department or parents
         await supabaseAdmin
           .from('kg_edges')
           .delete()
           .eq('user_id', userId)
           .or(`target_node_id.eq.${kn.id},source_node_id.eq.${kn.id}`);
 
-        // Update node department
+        const newEmoji = selectDynamicDrawerEmoji(entityName, newRelation, newMemoryKey, newMemoryValue);
+
+        // Update node department and metadata
         await supabaseAdmin
           .from('kg_nodes')
           .update({
             department: newDomain,
             name: `${entityName} (${newRelation})`,
-            entity_type: newDomain === 'work' ? 'office_friend' : 'friend',
+            entity_type: newConceptSlug,
             color: DOMAIN_TAXONOMY[newDomain].color,
+            emoji: newEmoji,
             updated_at: now
           })
           .eq('id', kn.id);
 
-        // Add new edge to dept-work (or dept-family if personal friend)
+        // Add new edge from new department root
         const parentDeptId = `dept-${newDomain}`;
         await supabaseAdmin
           .from('kg_edges')
@@ -297,7 +507,7 @@ export class EntityRelationshipCorrectionService {
             user_id: userId,
             source_node_id: parentDeptId,
             target_node_id: kn.id,
-            relation_type: newDomain === 'work' ? 'OFFICE_FRIEND_BRANCH' : 'FRIEND_BRANCH',
+            relation_type: `${newConceptSlug.toUpperCase()}_BRANCH`,
             weight: 2,
             created_at: now
           });
@@ -308,9 +518,9 @@ export class EntityRelationshipCorrectionService {
         await supabaseAdmin.from('nova_correction_ledger').insert({
           user_id: userId,
           correction_source: 'user_chat_entity_reclassification',
-          field_name: `${cleanEntitySlug}_relationship`,
-          previous_value: correction.oldRelation || 'Family Member',
-          corrected_value: newRelation,
+          field_name: `${cleanEntitySlug}_classification`,
+          previous_value: oldRelation || oldDomain,
+          corrected_value: `${newRelation} (${newDomain})`,
           reason: rawText,
           created_at: now
         });
@@ -321,7 +531,7 @@ export class EntityRelationshipCorrectionService {
       // 6. Invalidate analytics and wardrobe caches immediately
       invalidateAnalyticsCache(userId);
 
-      const confirmMsg = `Severed ${entityName} from family branch and moved to ${newRelation} under ${DOMAIN_TAXONOMY[newDomain].title}.`;
+      const confirmMsg = `Severed ${entityName} from ${oldDomain} branch and moved to ${newRelation} under ${DOMAIN_TAXONOMY[newDomain].title}.`;
       logger.info('[EntityRelationshipCorrection] Reclassification complete', { userId, confirmMsg });
 
       return { success: true, message: confirmMsg };
@@ -338,11 +548,13 @@ export class EntityRelationshipCorrectionService {
    * Generates a warm, authentic, best-friend acknowledgment reply for Nova.
    */
   generateNovaReply(correction: EntityCorrection): string {
-    const { entityName, newDomain } = correction;
-    if (newDomain === 'work') {
+    const { entityName, newRelation, oldRelation, oldDomain, newDomain } = correction;
+    if (newDomain === 'work' && (newRelation.toLowerCase().includes('office') || newRelation.toLowerCase().includes('colleague'))) {
       return `Got it, Saa! Maine ${entityName} ko family se hata kar tumhare office friends / work branch me shift kar diya hai. 😊`;
     }
-    return `Got it, Saa! Maine ${entityName} ko family member branch se hata kar friends branch me move kar diya hai. 😊`;
+    const oldLabel = oldRelation || oldDomain;
+    const newDomainTitle = DOMAIN_TAXONOMY[newDomain]?.title || newDomain;
+    return `Got it, Saa! Maine ${entityName} ko ${oldLabel} se hata kar tumhare ${newRelation} (${newDomainTitle}) me shift kar diya hai. 😊`;
   }
 }
 

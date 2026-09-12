@@ -73,6 +73,100 @@ describe('Entity Relationship Correction & Branch Severing Engine', () => {
       expect(correction?.newDomain).toBe('work');
     });
 
+    it('detects instrument to career reclassification ("Guitar is not my hobby, it is my full time profession")', () => {
+      const input = 'Guitar is not my hobby, it is my full time profession';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Guitar');
+      expect(correction?.oldRelation).toBe('hobby');
+      expect(correction?.oldDomain).toBe('lifestyle');
+      expect(correction?.newRelation).toBe('Full Time Profession');
+      expect(correction?.newDomain).toBe('work');
+    });
+
+    it('detects pet species correction ("Coco is not my cat, he is my pet dog")', () => {
+      const input = 'Coco is not my cat, he is my pet dog';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Coco');
+      expect(correction?.oldRelation).toBe('cat');
+      expect(correction?.newRelation).toBe('Pet Dog');
+      expect(correction?.newDomain).toBe('family');
+    });
+
+    it('detects tech stack / project reclassification ("React is not a side project, it is my core tech stack")', () => {
+      const input = 'React is not a side project, it is my core tech stack';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('React');
+      expect(correction?.oldRelation).toBe('side project');
+      expect(correction?.newDomain).toBe('work');
+    });
+
+    it('detects location / identity correction ("Mumbai is not a vacation trip, that is my home city")', () => {
+      const input = 'Mumbai is not a vacation trip, that is my home city';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Mumbai');
+      expect(correction?.oldRelation).toBe('vacation trip');
+      expect(correction?.newDomain).toBe('identity');
+    });
+
+    it('detects health / diet restriction ("Keto is not a casual diet, it is my medical restriction")', () => {
+      const input = 'Keto is not a casual diet, it is my medical restriction';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Keto');
+      expect(correction?.oldRelation).toBe('casual diet');
+      expect(correction?.newRelation).toBe('Medical Restriction');
+    });
+
+    it('detects routine / habit shift ("Morning run is not an occasional hobby, it is my daily routine")', () => {
+      const input = 'Morning run is not an occasional hobby, it is my daily routine';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Morning Run');
+      expect(correction?.oldRelation).toBe('occasional hobby');
+      expect(correction?.newRelation).toBe('Daily Routine');
+    });
+
+    it('detects move commands for arbitrary topics ("Move tennis from sports to fitness routine")', () => {
+      const input = 'Move tennis from sports to fitness routine';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Tennis');
+      expect(correction?.oldRelation).toBe('sports');
+      expect(correction?.newRelation).toBe('Fitness Routine');
+    });
+
+    it('detects "don\'t put under" commands ("Don\'t put BMW under travel, put it under cars")', () => {
+      const input = "Don't put BMW under travel, put it under cars";
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Bmw');
+      expect(correction?.oldRelation).toBe('travel');
+      expect(correction?.newRelation).toBe('Cars');
+    });
+
+    it('detects Hinglish random topics ("Guitar mera timepass nahi hai, career hai")', () => {
+      const input = 'Guitar mera timepass nahi hai, career hai';
+      const correction = entityRelationshipCorrectionService.detectEntityCorrection(input);
+
+      expect(correction).not.toBeNull();
+      expect(correction?.entityName).toBe('Guitar');
+      expect(correction?.oldRelation).toBe('timepass');
+      expect(correction?.newRelation).toBe('Career');
+      expect(correction?.newDomain).toBe('work');
+    });
+
     it('ignores unrelated regular messages', () => {
       expect(entityRelationshipCorrectionService.detectEntityCorrection('Kal subah 9 baje meeting hai')).toBeNull();
       expect(entityRelationshipCorrectionService.detectEntityCorrection('I had lunch with my brother')).toBeNull();
