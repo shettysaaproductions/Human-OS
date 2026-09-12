@@ -593,7 +593,7 @@ function LifestyleOnboardingHub({
     : LIFESTYLE_TRACKS.filter(t => t.category === selectedCategory);
 
   return (
-    <View style={[s.lifestyleHubContainer, !isInModal && { transform: [{ scaleY: -1 }] }]}>
+    <View style={s.lifestyleHubContainer}>
       {/* Hero Avatar & Mindset */}
       <View style={s.lifestyleHero}>
         <View style={s.lifestyleAvatarOrb}>
@@ -971,9 +971,7 @@ export function ChatScreen() {
     // If only image is sent with no text, use a meaningful placeholder so backend min(1) passes
     const textToSend = textToEvaluate.trim() || '📷 (image attached)';
     sendMessage(textToSend, selectedImage?.base64, selectedImage?.uri);
-    if (typeof overrideText !== 'string') {
-      setInputText('');
-    }
+    setInputText('');
     setSelectedImage(null);
     isNearBottomRef.current = true;
     setNewMessagesWhileScrolled(0);
@@ -1033,7 +1031,11 @@ export function ChatScreen() {
     let StatusIcon = null;
     if (isUser) {
       if (item.status === 'sending') {
-        StatusIcon = <Text style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 4 }}>🕒</Text>;
+        StatusIcon = (
+          <Text style={{ fontSize: 10, color: isOffline ? '#F59E0B' : '#9CA3AF', marginLeft: 4 }}>
+            {isOffline ? '🕒 Offline' : '🕒'}
+          </Text>
+        );
       } else if (item.status === 'error' || item.status === 'failed') {
         StatusIcon = (
           <TouchableOpacity onPress={() => retryMessage(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -1300,20 +1302,32 @@ export function ChatScreen() {
             </View>
           )}
           
-          {item.options && item.options.length > 0 && !isUser && index <= 1 && (
-            <View style={s.optionsContainer}>
-              {item.options.map((option, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={s.optionChip}
-                  onPress={() => handleSend(option)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.optionText}>{option}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          {(() => {
+            if (!item.options || item.options.length === 0 || isUser) return null;
+            // Only show option chips on the latest assistant message if no newer user reply exists
+            const isNewestAssistant = displayedMessages[0]?.role === 'assistant';
+            if (!isNewestAssistant) return null;
+
+            // If it's a multi-part chunk, only render options on the final part
+            const isFinalChunk = !item.chunkTotal || item.chunkIndex === item.chunkTotal;
+            if (index === 0 && isFinalChunk) {
+              return (
+                <View style={s.optionsContainer}>
+                  {item.options.map((option, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={s.optionChip}
+                      onPress={() => handleSend(option)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.optionText}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              );
+            }
+            return null;
+          })()}
           </View>
         </SwipeableBubble>
       </View>
@@ -1527,70 +1541,13 @@ export function ChatScreen() {
         )}
         {/* Messages Container */}
         <View style={{ flex: 1 }}>
-
-          <FlatList
-            ref={flatListRef}
-            inverted
-            data={displayedMessages}
-            showsVerticalScrollIndicator={false}
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            extraData={`${displayedMessages.length}_${selectedMessageIds.join(',')}_${isTyping ? '1' : '0'}`}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={s.listContent}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onContentSizeChange={(w, h) => {
-              setMainWidths(prev => ({ ...prev, content: h }));
-              logEvent('ON_CONTENT_SIZE_CHANGE');
-              if (isInitialScrollRef.current) {
-                if (messages.length > 0) {
-                  isInitialScrollRef.current = false;
-                  logEvent('INITIAL_SCROLL_COMPLETED');
-                }
-              } else if (isNearBottomRef.current) {
-                logEvent('SCROLL_TO_END_CALLED');
-                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-              }
-            }}
-            onLayout={(e) => {
-              const layoutHeight = e.nativeEvent.layout.height;
-              setMainWidths(prev => ({ ...prev, view: layoutHeight }));
-              logEvent('ON_LAYOUT');
-            }}
-            removeClippedSubviews
-            windowSize={10}
-            initialNumToRender={15}
-            maxToRenderPerBatch={5}
-            updateCellsBatchingPeriod={50}
-            onEndReached={() => {
-              // In an inverted list, "end" is visually the TOP = oldest messages
-              if (hasMoreMessages && !isLoadingMore && !isSearchActive) {
-                loadOlderMessages();
-              }
-            }}
-            onEndReachedThreshold={0.3}
-            ListFooterComponent={
-              isLoadingMore ? (
-                <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#8B5CF6" />
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>Loading older messages...</Text>
-                </View>
-              ) : null
-            }
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={
-              isSearchActive && searchQuery.trim() ? (
-                <View style={{ transform: [{ scaleY: -1 }], padding: 32, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 32, marginBottom: 8 }}>🔍</Text>
-                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>
-                    No messages found
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center' }}>
-                    No messages matching "{searchQuery}". Try another keyword or clear search.
-                  </Text>
-                </View>
-              ) : (
+          {displayedMessages.length === 0 && !isSearchActive ? (
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 32 }}
+              >
                 <LifestyleOnboardingHub
                   colors={colors}
                   onSelectPrompt={(prompt) => handleSend(prompt)}
@@ -1599,9 +1556,75 @@ export function ChatScreen() {
                     inputRef.current?.focus();
                   }}
                 />
-              )
-            }
-          />
+              </ScrollView>
+            </TouchableWithoutFeedback>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              inverted
+              data={displayedMessages}
+              showsVerticalScrollIndicator={false}
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              extraData={`${displayedMessages.length}_${selectedMessageIds.join(',')}_${isTyping ? '1' : '0'}`}
+              keyExtractor={(item, index) => item.id ? `${item.id}_${index}` : String(index)}
+              renderItem={renderItem}
+              contentContainerStyle={s.listContent}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              onContentSizeChange={(w, h) => {
+                setMainWidths(prev => ({ ...prev, content: h }));
+                logEvent('ON_CONTENT_SIZE_CHANGE');
+                if (isInitialScrollRef.current) {
+                  if (messages.length > 0) {
+                    isInitialScrollRef.current = false;
+                    logEvent('INITIAL_SCROLL_COMPLETED');
+                  }
+                } else if (isNearBottomRef.current) {
+                  logEvent('SCROLL_TO_END_CALLED');
+                  flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                }
+              }}
+              onLayout={(e) => {
+                const layoutHeight = e.nativeEvent.layout.height;
+                setMainWidths(prev => ({ ...prev, view: layoutHeight }));
+                logEvent('ON_LAYOUT');
+              }}
+              removeClippedSubviews
+              windowSize={10}
+              initialNumToRender={15}
+              maxToRenderPerBatch={5}
+              updateCellsBatchingPeriod={50}
+              onEndReached={() => {
+                // In an inverted list, "end" is visually the TOP = oldest messages
+                if (hasMoreMessages && !isLoadingMore && !isSearchActive) {
+                  loadOlderMessages();
+                }
+              }}
+              onEndReachedThreshold={0.3}
+              ListFooterComponent={
+                isLoadingMore ? (
+                  <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#8B5CF6" />
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>Loading older messages...</Text>
+                  </View>
+                ) : null
+              }
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                isSearchActive && searchQuery.trim() ? (
+                  <View style={{ transform: [{ scaleY: -1 }], padding: 32, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 32, marginBottom: 8 }}>🔍</Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>
+                      No messages found
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+                      No messages matching "{searchQuery}". Try another keyword or clear search.
+                    </Text>
+                  </View>
+                ) : null
+              }
+            />
+          )}
 
           {/* Custom Main Chat Scrollbar */}
           {mainWidths.content > mainWidths.view && (
