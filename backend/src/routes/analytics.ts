@@ -726,8 +726,27 @@ analyticsRouter.post('/kg/surgical-alteration', async (req: Request, res: Respon
       finalValue = directValue.trim();
       novaReply = `I've updated ${effectiveName} to "${finalValue}" on the spot, Saa!`;
     } else {
-      // Conversational instruction to Nova — parse intent with LLM
+      // Conversational instruction to Nova — check for entity relationship reclassification first
       const instructionText = (userInstruction || '').trim();
+
+      // Check for entity relationship reclassification (e.g. "Ijaz is not my family member is is my office frind")
+      const { entityRelationshipCorrectionService } = await import('../services/EntityRelationshipCorrectionService');
+      const detectedCorrection = entityRelationshipCorrectionService.detectEntityCorrection(instructionText);
+      if (detectedCorrection) {
+        await entityRelationshipCorrectionService.severAndReclassifyEntity(userId, detectedCorrection);
+        const reply = entityRelationshipCorrectionService.generateNovaReply(detectedCorrection);
+        res.status(200).json({
+          success: true,
+          action: 'UPDATE',
+          message: reply,
+          nodeId,
+          key: detectedCorrection.newDomain === 'work' ? `colleague_${detectedCorrection.entityName.toLowerCase()}` : `friend_${detectedCorrection.entityName.toLowerCase()}`,
+          value: `${detectedCorrection.entityName} is an ${detectedCorrection.newRelation}`,
+          department: detectedCorrection.newDomain
+        });
+        return;
+      }
+
       const isExplicitDelete = /^(delete|remove|forget|erase|drop|clear|destroy|omit|trash)\b/i.test(instructionText) ||
         /\b(delete this|remove this|forget this|delete it|remove it|forget it|no longer relevant|not true anymore)\b/i.test(instructionText);
 

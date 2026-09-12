@@ -139,6 +139,19 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     return DOMAIN_TAXONOMY.lifestyle;
   }
 
+  // 0b. Explicit office friends, colleagues, coworkers are ALWAYS Career & Professional (work), NEVER family!
+  if (
+    k.startsWith('colleague_') ||
+    k.startsWith('coworker_') ||
+    k.startsWith('office_friend_') ||
+    k.includes('office_friend') ||
+    k.includes('work_friend') ||
+    ((k.includes('office') || k.includes('colleague') || k.includes('coworker')) && (k.includes('friend') || k.includes('dost') || k.includes('name') || k.startsWith('entity:'))) ||
+    mt === 'work'
+  ) {
+    return DOMAIN_TAXONOMY.work;
+  }
+
   // 1. Explicit family ties & personal relations take top priority (even if child age or family trait)
   if (
     k.includes('son_age') ||
@@ -528,7 +541,8 @@ export function selectDynamicDrawerEmoji(entityName: string, prefixType: string,
   if (/\b(travel|trip|flight|hotel|vacation|tour|destination|resort)\b/i.test(combined)) return '✈️';
   if (/\b(doctor|medical|health|clinic|hospital|medicine|surgeon|physician)\b/i.test(combined)) return '🩺';
   if (/\b(student|study|studying|college|university|exam|degree|course|school)\b/i.test(combined)) return '🎓';
-  if (/\b(friend|friends|dost|pal|buddy|colleague|colleagues|coworker|coworkers|mentor|advisor)\b/i.test(combined)) return '👥';
+  if (/\b(office|colleague|colleagues|coworker|coworkers|office_friend|work_friend)\b/i.test(combined)) return '👔';
+  if (/\b(friend|friends|dost|pal|buddy|mentor|advisor)\b/i.test(combined)) return '👥';
   if (/\b(food|restaurant|dhaba|cafe|coffee|tea|recipe)\b/i.test(combined)) return '🍲';
   return '📦'; // Default cupboard drawer box
 }
@@ -540,9 +554,9 @@ export function selectDynamicDrawerRole(_entityName: string, prefixType: string,
   const p = prefixType.toLowerCase();
   if (['pet', 'dog', 'cat', 'bird', 'puppy', 'kitten'].includes(p)) return 'Companion Pet';
   if (['friend', 'dost'].includes(p)) return 'Close Friend';
+  if (p.includes('office') || ['colleague', 'coworker', 'manager', 'work_friend'].includes(p)) return 'Office Friend';
   if (['mentor', 'advisor'].includes(p)) return 'Mentor & Guide';
   if (['doctor', 'medical'].includes(p)) return 'Healthcare Advisor';
-  if (['colleague', 'coworker', 'manager'].includes(p)) return 'Professional Colleague';
   if (['project', 'venture', 'app', 'startup', 'repo', 'software'].includes(p)) return 'Project & Venture';
   if (['car', 'bike', 'vehicle', 'motorcycle', 'auto'].includes(p)) return 'Vehicle & Mobility';
   if (['guitar', 'piano', 'drums', 'instrument', 'music'].includes(p)) return 'Musical Instrument';
@@ -1732,6 +1746,10 @@ export function clusterMemoriesIntoWardrobes(
       entries: Array<{ key: string; value: string; id?: string; memory_type?: string; updated_at?: string; isWorkingContext?: boolean }>;
     }>();
 
+    const SOCIAL_ENTITY_PREFIXES = new Set([
+      'friend', 'dost', 'colleague', 'coworker', 'office', 'mentor', 'advisor', 'doctor', 'relative', 'cousin', 'sister', 'brother', 'uncle', 'aunt'
+    ]);
+
     for (const [k, entry] of unconsumedMemories) {
       let prefixType = 'lifestyle';
       let entitySlug = '';
@@ -1749,9 +1767,16 @@ export function clusterMemoriesIntoWardrobes(
         } else {
           entitySlug = subjectId;
         }
+      } else if (k.startsWith('office_friend_')) {
+        prefixType = 'colleague';
+        const rest = k.replace(/^office_friend_/, '');
+        entitySlug = rest.split('_')[0] || rest;
       } else {
         const parts = k.split('_');
         if (parts.length >= 3 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
+          prefixType = parts[0];
+          entitySlug = parts[1];
+        } else if (parts.length === 2 && SOCIAL_ENTITY_PREFIXES.has(parts[0]) && !['name', 'list', 'members', 'count', 'detail', 'info'].includes(parts[1])) {
           prefixType = parts[0];
           entitySlug = parts[1];
         } else if (parts.length === 2 && KNOWN_ENTITY_PREFIXES.has(parts[0])) {
@@ -2254,9 +2279,69 @@ export function buildDynamicKnowledgeGraph(
       relation = predicate.toUpperCase();
       explanation = `Attribute stem of ${subRelationName ? `${baseEntityName}'s ${subRelationName}` : baseEntityName}`;
     }
+    // Dedicated Colleagues & Office Friends Branching in Career & Professional
+    else if (
+      (meta.domain === 'work' || k.startsWith('colleague_') || k.startsWith('coworker_') || k.startsWith('office_friend_') || k.includes('office_friend') || k.includes('colleague') || k.includes('coworker') || ((k.includes('ijaz') || item.value.toLowerCase().includes('ijaz')) && allItems.some(i => i.key.includes('colleague') || i.value.toLowerCase().includes('office') || i.value.toLowerCase().includes('colleague')))) &&
+      (k.startsWith('colleague_') || k.startsWith('coworker_') || k.startsWith('office_friend_') || k.includes('friend') || k.includes('dost') || k.includes('ijaz') || item.value.toLowerCase().includes('ijaz'))
+    ) {
+      let colleagueName = 'Colleague';
+      if (k.includes('ijaz') || item.value.toLowerCase().includes('ijaz')) colleagueName = 'Ijaz';
+      else if (k.startsWith('colleague_')) colleagueName = cleanStr(k.replace(/^colleague_/, ''));
+      else if (k.startsWith('coworker_')) colleagueName = cleanStr(k.replace(/^coworker_/, ''));
+      else if (k.startsWith('office_friend_')) colleagueName = cleanStr(k.replace(/^office_friend_/, ''));
+      else if (item.value && !item.value.toLowerCase().includes('colleague') && item.value.length < 30) {
+        colleagueName = cleanStr(item.value);
+      }
+
+      const colleagueNodeId = `mem-colleague-${colleagueName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      if (!nodeIds.has(colleagueNodeId)) {
+        nodes.push({
+          id: colleagueNodeId,
+          name: `${colleagueName} (Office Friend)`,
+          entity_type: 'office_friend',
+          department: 'work',
+          color: DOMAIN_TAXONOMY.work.color,
+          radius: 20,
+          value: `${colleagueName} · Office Friend`,
+          raw_key: `colleague_${colleagueName.toLowerCase()}`,
+          emoji: '👔',
+          parentEntityId: 'dept-work',
+          hierarchyLevel: 2,
+          treePath: [cleanUserName, 'Career & Professional', `${colleagueName} (Office Friend)`]
+        });
+        nodeIds.add(colleagueNodeId);
+        deptCounts.work++;
+        edges.push({
+          id: `edge-dept-work-${colleagueNodeId}`,
+          source: 'dept-work',
+          target: colleagueNodeId,
+          relation: 'OFFICE_FRIEND_BRANCH',
+          color: DOMAIN_TAXONOMY.work.color,
+          weight: 2,
+          edgeType: 'ENTITY_BRANCH',
+          explanation: `Office friend branch for ${colleagueName}`
+        });
+      }
+
+      if (item.id === colleagueNodeId || (k === 'colleague_ijaz' && item.id.includes('ijaz'))) {
+        continue;
+      }
+
+      parentId = colleagueNodeId;
+      hierarchyLevel = 3;
+      edgeType = 'ATTRIBUTE_STEM';
+      relation = k.includes('since') ? 'WORKED_TOGETHER_SINCE' : (k.includes('father') ? 'FATHER_BACKGROUND' : 'COLLEAGUE_DETAIL');
+      explanation = `Detail stem of ${colleagueName}`;
+    }
     // Dedicated Friends Sub-Branching in Family / Relationships
     else if (
       meta.domain === 'family' &&
+      !k.includes('office') &&
+      !k.includes('colleague') &&
+      !k.includes('coworker') &&
+      !item.value.toLowerCase().includes('office') &&
+      !item.value.toLowerCase().includes('colleague') &&
+      !(item.value.toLowerCase().includes('ijaz') && allItems.some(i => i.key.includes('colleague') || i.value.toLowerCase().includes('office') || i.value.toLowerCase().includes('colleague'))) &&
       (k.startsWith('friend_') || k.includes('friend') || k.includes('dost') || (k === 'father_background' && (item.value.toLowerCase().includes('ijaz') || item.value.toLowerCase().includes('navi'))))
     ) {
       let friendName = 'Friend';
@@ -2309,6 +2394,9 @@ export function buildDynamicKnowledgeGraph(
     // Family Tree Stems
     else if (meta.domain === 'family') {
       if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'partner_name', 'husband_name', 'sakshi', 'shreshth'].includes(k)) {
+        if (k === 'brother_name' && item.value.toLowerCase().includes('ijaz') && allItems.some(i => i.key.includes('colleague') || i.value.toLowerCase().includes('office') || i.value.toLowerCase().includes('colleague'))) {
+          continue; // Severed from family!
+        }
         hierarchyLevel = 2;
         relation = 'FAMILY_MEMBER';
         edgeType = 'ENTITY_BRANCH';

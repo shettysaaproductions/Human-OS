@@ -5,6 +5,7 @@ import { TemporalMetadata } from '../types/memory';
 import { MemorySemanticResolver } from '../lib/MemorySemanticResolver';
 import { isValueDerivedKey } from '../lib/correctionSemantics';
 import { entityResolutionService } from './EntityResolutionService';
+import { entityRelationshipCorrectionService, EntityCorrection } from './EntityRelationshipCorrectionService';
 
 export type SemanticUnitType = 'question' | 'fact' | 'emotion' | 'action' | 'correction' | 'casual';
 export type FactClassification = 'HIGH_CONFIDENCE_DURABLE_FACT' | 'PROTECTED_FACT' | 'TRANSIENT_FACT';
@@ -92,6 +93,8 @@ export interface TurnAnalysisResult {
   correctionTarget?: string | null;
   /** P0-1: Deterministic value for the correction extracted from the user turn */
   correctionValue?: string | null;
+  /** Dedicated Entity Relationship Correction metadata */
+  entityCorrection?: EntityCorrection | null;
 }
 
 export interface ExtractedFact {
@@ -122,6 +125,8 @@ export class TurnAnalyzer {
       ? messages
       : [];
 
+    let detectedEntityCorrection: EntityCorrection | null = null;
+
     for (const msg of msgList) {
       // Strict USER-only: filter out explicit non-user roles (assistant, system), allow undefined for mock/ingress
       if ((msg as any).role && (msg as any).role !== 'user') continue;
@@ -129,6 +134,10 @@ export class TurnAnalyzer {
       const sourceMessageId = msg.client_message_id || crypto.randomUUID();
       const rawText = msg.message.trim();
       if (!rawText) continue;
+
+      if (!detectedEntityCorrection) {
+        detectedEntityCorrection = entityRelationshipCorrectionService.detectEntityCorrection(rawText);
+      }
 
       // Split into clauses by sentence-ending punctuation or comma/conjunction boundaries when multiple clauses exist
       const clauses = this.splitIntoClauses(rawText);
@@ -138,6 +147,34 @@ export class TurnAnalyzer {
         const lower = clause.toLowerCase();
         const extractedFacts = this.extractFacts(clause);
         const isExplicitRemember = /\b(remember this|don't forget|do not forget|yaad rakhna|bhoolna mat|hamesha yaad rakh)\b/i.test(lower);
+
+        // 0. Check for entity relationship correction (e.g. "Ijaz is not my family member, he is my office friend")
+        const clauseEntityCorrection = entityRelationshipCorrectionService.detectEntityCorrection(clause) || detectedEntityCorrection;
+        if (clauseEntityCorrection && !units.some(u => u.relationship === clauseEntityCorrection.newRelation && u.type === 'correction')) {
+          const eSlug = clauseEntityCorrection.entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          const finalKey = clauseEntityCorrection.newDomain === 'work' ? `colleague_${eSlug}` : `friend_${eSlug}`;
+          const finalVal = `${clauseEntityCorrection.entityName} is an ${clauseEntityCorrection.newRelation}`;
+
+          units.push({
+            unitId: crypto.randomUUID(),
+            sourceMessageId,
+            order,
+            type: 'correction',
+            text: clause,
+            importance: 10,
+            responseRequired: true,
+            acknowledgementPreferred: true,
+            memoryCandidate: true,
+            actionCandidate: false,
+            factKey: finalKey,
+            factValue: finalVal,
+            oldValue: clauseEntityCorrection.oldRelation,
+            relationship: clauseEntityCorrection.newRelation,
+            isProtected: true,
+            factClass: 'PROTECTED_FACT'
+          });
+          continue;
+        }
 
         // 1. Check for structured/explicit correction
         const structuredCorrection = this.extractStructuredCorrection(clause);
@@ -428,6 +465,7 @@ export class TurnAnalyzer {
       negatedGoals,
       // P0-B: Question clause texts for admission-guard forwarding
       questionClauses,
+      entityCorrection: detectedEntityCorrection || null,
     };
   }
 

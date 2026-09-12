@@ -632,6 +632,20 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
                           </TouchableOpacity>
                         ))}
                       </View>
+
+                      {/* Expanded Card Actions: Chat with Nova */}
+                      {isExpanded && (
+                        <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', flexDirection: 'row', justifyContent: 'flex-end' }}>
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${w.color}20`, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: `${w.color}40`, gap: 6 }}
+                            onPress={() => navigation.navigate('Chat', { initialPrompt: `Regarding ${w.name}: ` })}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={{ fontSize: 13 }}>💬</Text>
+                            <Text style={{ color: w.color, fontSize: 12, fontWeight: 'bold' }}>Chat with Nova about {w.name}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   </View>
                 );

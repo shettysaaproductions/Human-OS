@@ -161,6 +161,11 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   friend_name: [
     'friends_name', 'friend', 'dost_ka_naam', 'dost'
   ],
+  // ── Colleagues & Work Associates ────────────────────────────────────────────
+  colleague_name: [
+    'colleague', 'coworker', 'colleague_name', 'coworker_name', 'office_friend',
+    'office_friend_name', 'work_friend', 'work_colleague', 'office_colleague', 'office_dost'
+  ],
   // ── Dates: marriage ─────────────────────────────────────────────────────────
   marriage_date: [
     'wedding_date', 'anniversary', 'anniversary_date', 'shadi_date',
@@ -308,6 +313,8 @@ export function isKnownCanonicalKey(canonicalKey: string): boolean {
   if (CANONICAL_KEYS.has(canonicalKey)) return true;
   // Entity-scoped canonical keys: entity:<subject_id>:<predicate>
   if (/^entity:[a-z0-9_]+:[a-z0-9_]+$/i.test(canonicalKey)) return true;
+  // Dynamic entity relationship keys (e.g. colleague_ijaz, office_friend_ijaz, friend_sushant)
+  if (/^(?:colleague|office_friend|coworker|friend|mentor|doctor|pet)_[a-z0-9_]+$/i.test(canonicalKey)) return true;
   return false;
 }
 

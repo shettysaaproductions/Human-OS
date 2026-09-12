@@ -30,6 +30,7 @@ import { watchtowerReflectionService } from '../services/WatchtowerReflectionSer
 import { reminderIntentDetector } from '../services/ReminderIntentDetector';
 import { userLifeStageEngine } from '../services/UserLifeStageEngine';
 import { lifeBlueprintCuriosityEngine } from '../services/LifeBlueprintCuriosityEngine';
+import { entityRelationshipCorrectionService } from '../services/EntityRelationshipCorrectionService';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1400,9 +1401,22 @@ chatRouter.post(
         }
       }
 
+      // Entity Relationship & Bubble Reclassification Execution & Directive
+      const entityCorrection = turnAnalysis.entityCorrection || entityRelationshipCorrectionService.detectEntityCorrection(effectiveMessage);
+      if (entityCorrection) {
+        try {
+          await entityRelationshipCorrectionService.severAndReclassifyEntity(userId, entityCorrection);
+        } catch (corrErr: any) {
+          logger.warn('[Chat] Entity reclassification execution warning', { error: corrErr?.message });
+        }
+
+        const branchShiftDirective = `\n\n## 🌿 ENTITY RELATIONSHIP & BUBBLE RECLASSIFICATION (CRITICAL - TOP PRIORITY)\nThe user explicitly corrected that "${entityCorrection.entityName}" is NOT a ${entityCorrection.oldRelation || 'family member'}, but is their ${entityCorrection.newRelation}!\nYou have ALREADY severed ${entityCorrection.entityName}'s branch from Family & Relationships and reclassified them into ${entityCorrection.newRelation} under ${entityCorrection.newDomain === 'work' ? 'Career & Professional (Office Friends)' : 'Friends'}.\nCRITICAL INSTRUCTIONS:\n1. Warmly, smoothly, and casually confirm that you've updated this: acknowledge that ${entityCorrection.entityName} is their ${entityCorrection.newRelation} and that you've moved him/her from family over to the ${entityCorrection.newDomain === 'work' ? 'office friends / work' : 'friends'} branch.\n2. Example response: "Arre got it Saa! Maine ${entityCorrection.entityName} ko family se hata kar tumhare office friends / work branch me move kar diya hai 😊"\n3. Do NOT debate or question the user. Keep it natural, warm, and concise (1-2 sentences).`;
+        turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + branchShiftDirective;
+      }
+
       // User Mistake Callout & Misunderstanding Reconciliation Directive
       const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|pagal ho kya|kuch bhi mat bolo|ye galat hai|aisa nahi hai|maine kab bola|kya bol rahi ho|kya bol rahe ho|galat bol rahi ho|galat kaha)\b/i.test(effectiveMessage);
-      if (turnAnalysis.hasCorrections || isUserCallingOutMistake) {
+      if (turnAnalysis.hasCorrections || isUserCallingOutMistake || !!entityCorrection) {
         const correctionDirective = `\n\n## 🛠️ USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is pointing out a mistake, misunderstanding, or incorrect assertion made by Nova in the previous reply.\n1. Humbly and warmly acknowledge the misunderstanding like a true best friend ("Arre sorry yaar! Mera dhyan kahan tha...", "Arre meri galti!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).`;
         turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + correctionDirective;
       }
