@@ -245,16 +245,19 @@ export class ReminderSchedulerService {
       // Still handle recurrence below — the reminder logic continues even if this firing is suppressed.
     } else if (finalStatus === 'FAILED_TRANSIENT') {
       logger.warn('[Reminder] Delivery failed transiently — will retry on next poll', { reminderId });
-      // Do NOT advance recurrence — leave the reminder in current state so the next
-      // checkAndFireReminders poll retries with the same idempotencyKey.
       return;
     } else if (finalStatus === 'FAILED_TERMINAL') {
       logger.error('[Reminder] Delivery failed terminally (e.g., account deleted)', { reminderId, reason: dispatchResult.reason });
-      // Terminal — mark reminder cancelled to prevent infinite retry.
       await supabaseAdmin.from('reminders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', reminderId);
       return;
     } else {
       logger.info('[Reminder] Delivered successfully', { reminderId, finalStatus, terminal: dispatchResult.terminal });
+      // Update accountability status to 'reminded'
+      await supabaseAdmin.from('reminders').update({
+        accountability_status: 'reminded',
+        last_follow_up_at: now.toISOString(),
+        updated_at: now.toISOString()
+      }).eq('id', reminderId);
     }
 
     // 3. Handle recurrence or mark completed
@@ -304,41 +307,28 @@ export class ReminderSchedulerService {
         .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('id', reminderId);
       logger.info('Reminder fired and completed', { reminderId });
+    }
 
-      // Respectful check-in: ONLY for genuinely critical/emergency reminders (health, deadlines).
-      // Never nag every 2 minutes for general/lifestyle reminders — silence is respect.
-      try {
-        const reminderText = reminder.text.toLowerCase();
+    // 4. Nova Autonomous Accountability Check-In (For workout, health, bills, habits, general)
+    try {
+      const firedAt = now.toISOString();
+      const firstCheckAt = new Date(Date.now() + 25 * 60 * 1000); // 25 min follow-up
 
-        const isCritical = [
-          'medicine', 'tablet', 'pill', 'dawai', 'dawa', 'doctor',
-          'hospital', 'injection', 'dose', 'medication',   // health
-          'flight', 'train', 'ticket', 'exam', 'interview', // high stakes
-          'emergency', 'urgent',
-        ].some(k => reminderText.includes(k));
-
-        if (isCritical) {
-          const firedAt = now.toISOString();
-          const firstCheckAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min gap, not 2 min
-
-          await supabaseAdmin.from('nova_agenda').insert({
-            user_id: reminder.user_id,
-            event_description: reminder.text.substring(0, 500),
-            follow_up_question: `User was reminded about critical task: "${reminder.text}". Check warmly if completed.`,
-            follow_up_after: firstCheckAt.toISOString(),
-            source_message: `reminder_ack_check:${firedAt}`,
-            status: 'pending',
-            next_retry_at: firstCheckAt.toISOString(),
-            urgency: 'high',
-            is_recurring: false, // Do not loop endlessly
-            max_retries: 2,      // Max 2 gentle attempts
-          });
-          logger.info('[Reminder] Respectful check-in queued for critical task', { reminderId });
-        }
-      } catch (agendaErr) {
-        logger.warn('[Reminder] Failed to queue check-in agenda', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
-      }
-
+      await supabaseAdmin.from('nova_agenda').insert({
+        user_id: reminder.user_id,
+        event_description: reminder.text.substring(0, 500),
+        follow_up_question: `User was reminded about: "${reminder.text}". Check warmly and accountably if they did it.`,
+        follow_up_after: firstCheckAt.toISOString(),
+        source_message: `reminder_accountability_check:${reminder.id}:${firedAt}`,
+        status: 'pending',
+        next_retry_at: firstCheckAt.toISOString(),
+        urgency: reminder.urgency || 'medium',
+        is_recurring: false,
+        max_retries: 2,
+      });
+      logger.info('[Reminder] Autonomous accountability check-in queued', { reminderId });
+    } catch (agendaErr) {
+      logger.warn('[Reminder] Failed to queue check-in agenda', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
     }
 
   }
@@ -440,25 +430,28 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
     const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const MONTH_NAMES = ['january','february','march','april','may','june','july','august','september','october','november','december'];
 
+    const normDays = activeDays ? activeDays.map(d => d.toLowerCase()) : null;
+    const normMonths = activeMonths ? activeMonths.map(m => m.toLowerCase()) : null;
+
     let d = new Date(date);
     let safetyDay = 0;
     // Advance to a valid day
-    if (activeDays && activeDays.length > 0) {
+    if (normDays && normDays.length > 0) {
       while (safetyDay < 14) {
         const dayName = DAY_NAMES[d.getUTCDay()];
-        if (activeDays.includes(dayName)) break;
+        if (normDays.includes(dayName)) break;
         d.setUTCDate(d.getUTCDate() + 1);
         safetyDay++;
       }
     }
 
     // Advance to a valid month
-    if (activeMonths && activeMonths.length > 0) {
+    if (normMonths && normMonths.length > 0) {
       let safetyMonth = 0;
       while (safetyMonth < 24) {
         const monthName = MONTH_NAMES[d.getUTCMonth()];
         const yearOk = !activeYear || d.getUTCFullYear() === activeYear;
-        if (activeMonths.includes(monthName) && yearOk) break;
+        if (normMonths.includes(monthName) && yearOk) break;
         // Jump to 1st of next month, preserve time
         const hours = d.getUTCHours();
         const mins = d.getUTCMinutes();

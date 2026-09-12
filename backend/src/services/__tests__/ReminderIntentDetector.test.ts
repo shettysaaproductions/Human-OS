@@ -87,4 +87,64 @@ describe('ReminderIntentDetector — High-Precision Natural Reminder Parsing', (
     // Must be in the future (next year if current year has passed)
     expect(parsed.triggerAt!.getTime()).toBeGreaterThan(Date.now());
   });
+
+  it('8. Shields against past complaints like "Yes and apne aaj sube muje ek bhi bar remind nai kiya 8 am ko"', () => {
+    const text = 'Yes and apne aaj sube muje ek bhi bar remind nai kiya 8 am ko';
+    expect(detector.hasReminderIntent(text)).toBe(false);
+  });
+
+  it('9. Parses multi-step interval "remind me in 15 mins to drink water and keep reminding me 4 times"', () => {
+    const text = 'remind me in 15 mins to drink water and keep reminding me 4 times';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isBatch).toBe(true);
+    expect(parsed.batchCount).toBe(4);
+    expect(parsed.batchIntervalMinutes).toBe(15);
+    expect(parsed.title.toLowerCase()).toContain('drink water');
+  });
+
+  it('10. Parses day exclusion "remind me to go to gym every morning 8 am apart from friday and sunday"', () => {
+    const text = 'remind me to go to gym every morning 8 am apart from friday and sunday';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isRecurring).toBe(true);
+    expect(parsed.activeDays).toBeDefined();
+    expect(parsed.activeDays).not.toContain('friday');
+    expect(parsed.activeDays).not.toContain('sunday');
+    expect(parsed.activeDays).toContain('monday');
+    expect(parsed.activeDays).toContain('saturday');
+    expect(parsed.title.toLowerCase()).toContain('gym');
+  });
+
+  it('11. Detects monthly with month exclusions and asks for clarification if time missing: "every month remind me to pay bills on 28th apart from february month"', () => {
+    const text = 'every month remind me to pay bills on 28th apart from february month';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(true);
+    expect(parsed.clarificationQuestion).toBeDefined();
+    expect(parsed.clarificationQuestion).toContain('28');
+  });
+
+  it('12. Parses monthly with month exclusions when time is present: "every month remind me to pay bills on 28th 6 pm apart from february month"', () => {
+    const text = 'every month remind me to pay bills on 28th 6 pm apart from february month';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(false);
+    expect(parsed.isRecurring).toBe(true);
+    expect(parsed.activeMonths).toBeDefined();
+    expect(parsed.activeMonths).not.toContain('february');
+    expect(parsed.activeMonths).toContain('january');
+    expect(parsed.activeMonths).toContain('march');
+  });
+
+  it('13. Recognizes user affirmation to Nova reminder offer', () => {
+    const offer = 'Mast plan hai yaar! Roz subah 8:00 AM ka reminder set kar doon tere liye, taaki miss na ho? 😊 🏋️‍♂️';
+    const userAffirmation = "Ok let's do that 🥳";
+    expect(detector.hasReminderOffer(offer)).toBe(true);
+    expect(detector.isAffirmation(userAffirmation)).toBe(true);
+  });
 });

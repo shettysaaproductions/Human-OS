@@ -10,6 +10,7 @@ import { KgExplorerScreen } from '../screens/analytics/KgExplorerScreen';
 import { MemoryManagementScreen } from '../screens/analytics/MemoryManagementScreen';
 import { MemoryBrowserScreen } from '../screens/analytics/MemoryBrowserScreen';
 import { BetaAdminScreen } from '../screens/analytics/BetaAdminScreen';
+import { ReminderBrainScreen } from '../screens/analytics/ReminderBrainScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -107,6 +108,11 @@ export function BrainNavigator() {
       <Tab.Screen
         name="Beta"
         component={BetaAdminScreen}
+        options={{ tabBarItemStyle: { display: 'none' } }}
+      />
+      <Tab.Screen
+        name="Reminders"
+        component={ReminderBrainScreen}
         options={{ tabBarItemStyle: { display: 'none' } }}
       />
     </Tab.Navigator>

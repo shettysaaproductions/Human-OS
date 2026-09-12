@@ -2,27 +2,44 @@
  * ReminderIntentDetector.ts — High-Precision Natural Reminder Parsing & Scheduling Engine
  *
  * Designed to accurately detect and schedule reminders across English, Hindi, and Hinglish:
- * e.g.:
- * - "Kal muje afternoon me 1 bJe yaad dilao na PF ke lie bank details update karna hai muje uske portal pe"
- * - "Diya tha nai muje kal sube remind karo yaad se"
- * - "remind me in 15 minutes to take medicine"
- * - "parso shaam 6 baje call karna hai yaad dila dena"
+ * - Direct requests: "Kal muje afternoon me 1 bJe yaad dilao na PF ke lie bank details update karna hai"
+ * - Multi-step sequential batching: "remind me in 15 mins to drink water and keep reminding me 4 times"
+ * - Day recurrence with exclusions: "remind me to go to gym every morning 8 am apart from friday and sunday"
+ * - Monthly recurrence with month exclusions & time clarification: "every month remind me to pay bills on 28th apart from february month"
+ * - Multi-turn conversational affirmation: User saying "Ok let's do that" in response to Nova's offer!
+ * - Complaint shielding: Prevents past complaints ("remind nai kiya") from becoming bogus reminders.
  */
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import crypto from 'crypto';
 
 export interface ReminderDetectionResult {
   detected: boolean;
   scheduled: boolean;
   reminder?: any;
+  reminders?: any[];
   note?: string;
   task?: string;
   triggerAt?: Date;
   formattedTime?: string;
   isRecurring?: boolean;
   recurrenceType?: string;
+  recurrenceInterval?: number;
+  activeDays?: string[];
+  activeMonths?: string[];
+  isBatch?: boolean;
+  batchCount?: number;
+  batchIntervalMinutes?: number;
+  isAmbiguous?: boolean;
+  clarificationQuestion?: string;
 }
+
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const MONTH_NAMES = [
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december'
+];
 
 export class ReminderIntentDetector {
   private static instance: ReminderIntentDetector;
@@ -41,7 +58,12 @@ export class ReminderIntentDetector {
     if (!text || text.trim().length === 0) return false;
     const lower = text.toLowerCase();
 
-    // Negative triggers: user explicitly saying do not remind
+    // 1. Complaint / Missed reminder shield: If user is complaining about a missed reminder, do NOT treat as a new reminder!
+    if (this.isComplaint(lower)) {
+      return false;
+    }
+
+    // 2. Negative triggers: user explicitly saying do not remind
     if (/\b(?:don'?t|dont|not|mat)\s*(?:remind|yaad\s*(?:dilana|dila|karna|rakhna))\b/i.test(lower)) {
       return false;
     }
@@ -49,17 +71,53 @@ export class ReminderIntentDetector {
       return false;
     }
 
-    // Positive triggers
+    // 3. Positive triggers
     return /\b(yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena|karen)|reminder\s*(?:set|lagao|karo|banao)|alarm\s*(?:lagao|set|karo)|schedule\s*karo)\b/i.test(lower);
   }
 
   /**
+   * Checks if user is complaining or asking about a missed reminder.
+   */
+  isComplaint(lower: string): boolean {
+    const complaintPatterns = [
+      /\b(?:remind|yaad)\s*(?:nai|nahi|na|ni)\s*(?:kiya|karaya|kare|karte)\b/i,
+      /\bek\s*bhi\s*bar\s*(?:remind|yaad)\b/i,
+      /\bmiss\s*(?:ho\s*gaya|kar\s*diya)\b/i,
+      /\b(?:bhul\s*gaye|bhuul\s*gaye|forgot\s*to\s*remind)\b/i,
+      /\bwhy\s*didn'?t\s*you\s*remind\b/i,
+      /\b(?:apne|aapne)\s*(?:aaj|kal)?\s*(?:sube|subah|shaam)?\s*(?:muje|mujhe)?\s*(?:ek\s*bhi\s*bar\s*)?remind\s*(?:nai|nahi|na|ni)/i,
+      /\bremind\s*kyu[n]?\s*nahi\s*kiya\b/i
+    ];
+    return complaintPatterns.some(p => p.test(lower));
+  }
+
+  /**
+   * Checks if the message is an affirmation / consent (e.g. to Nova's offer).
+   */
+  isAffirmation(text: string): boolean {
+    if (!text) return false;
+    const lower = text.toLowerCase().trim();
+    const affirmationPattern = /^(?:ok|okay|sure|yes|yeah|yup|yess|haan|ha|haa|kar\s*do|kardo|let'?s\s*do\s*that|lets\s*do\s*that|do\s*it|chalega|done|theek\s*hai|thik\s*hai|bana\s*do|laga\s*do|please|zaroor|bilkul|haanji|definitely|alright|set\s*kar\s*do)(?:[\s!.,:;~🎉💪😊🥳]+.*)?$/i;
+    return affirmationPattern.test(lower);
+  }
+
+  /**
+   * Checks if assistant's message was an offer to set a reminder.
+   */
+  hasReminderOffer(text: string): boolean {
+    if (!text) return false;
+    const lower = text.toLowerCase();
+    const offerPatterns = [
+      /\b(?:reminder|alarm)\s*(?:set\s*kar\s*doon|laga\s*doon|kar\s*du|kar\s*doon\s*tere\s*liye|kar\s*du\s*tere\s*liye)\b/i,
+      /\b(?:ka\s*reminder|ka\s*alarm)\s*(?:set\s*kar|chahiye|lagau)\b/i,
+      /\b(?:remind\s*kar\s*doon|yaad\s*dila\s*doon)\b/i,
+      /\b(?:set\s*a\s*reminder|shall\s*i\s*remind\s*you|should\s*i\s*set\s*a\s*reminder|want\s*me\s*to\s*remind\s*you)\b/i
+    ];
+    return offerPatterns.some(p => p.test(lower));
+  }
+
+  /**
    * Smart Proactive Detection: Does the message discuss a future-dated plan, upcoming activity, daily routine, or habit?
-   * e.g.:
-   * - "Sube muje roz workout start karna hai 8 baje uth ke"
-   * - "kal se gym shuru karna hai"
-   * - "roz raat ko 10 baje book padhni hai"
-   * - "parso doctor ke paas jana hai"
    */
   hasFuturePlanIntent(text: string): boolean {
     if (!text || text.trim().length === 0) return false;
@@ -71,24 +129,20 @@ export class ReminderIntentDetector {
     }
 
     const hasHabitOrRoutine = /\b(?:roz|daily|har\s*din|every\s*day|subah|sube|sawere|savere|shaam|raat|dopahar)\b/i.test(lower);
-    const hasActivity = /\b(?:workout|gym|exercise|walk|running|yoga|diet|uthna|uth\s*ke|padhna|study|class|office|meeting|khana|cook|cooking|medication|dawa|doctor|client|project|kitchen|kaam)\b/i.test(lower);
+    const hasActivity = /\b(?:workout|gym|exercise|walk|running|yoga|diet|uthna|uth\s*ke|padhna|study|class|office|meeting|khana|cook|cooking|medication|dawa|doctor|client|project|kitchen|kaam|water|paani|bills?)\b/i.test(lower);
     const hasFutureIntention = /\b(?:start\s*karna|shuru\s*karna|karna\s*hai|karni\s*hai|jana\s*hai|soch\s*raha|planning|plan\s*hai|routine\s*banan[ai]|kal\s*se|parso\s*se|aaj\s*se)\b/i.test(lower);
     const hasTimeOrDate = /\b(?:\d{1,2}\s*(?:bje|baje|am|pm)|kal|parso|tarso|tomorrow|morning|evening|night)\b/i.test(lower);
 
-    // Combination 1: Habit/routine + activity (e.g. "roz workout", "sube gym")
     if (hasHabitOrRoutine && hasActivity) return true;
-    // Combination 2: Activity + Future intention (e.g. "workout start karna hai", "gym shuru karna hai")
     if (hasActivity && hasFutureIntention) return true;
-    // Combination 3: Future intention + Time/date (e.g. "kal jana hai 4 baje", "8 baje uth ke start karna hai")
     if (hasFutureIntention && hasTimeOrDate) return true;
-    // Combination 4: Specific habit with time (e.g. "roz 8 baje")
     if (hasHabitOrRoutine && hasTimeOrDate) return true;
 
     return false;
   }
 
   /**
-   * Deterministically parses time, date, recurrence, and task from the user's message.
+   * Deterministically parses time, date, recurrence, batching, and exclusions.
    */
   parseReminderDetails(
     text: string,
@@ -100,12 +154,40 @@ export class ReminderIntentDetector {
     formattedTime?: string;
     isRecurring?: boolean;
     recurrenceType?: string;
+    recurrenceInterval?: number;
+    activeDays?: string[];
+    activeMonths?: string[];
+    isBatch?: boolean;
+    batchCount?: number;
+    batchIntervalMinutes?: number;
+    clarificationQuestion?: string;
   } {
     const lower = text.toLowerCase();
-    // Current local time
     const nowLocal = new Date(Date.now() + tzOffsetHours * 3600 * 1000);
 
-    // ── 1. Relative Duration: "in 15 minutes", "10 min me", "aadhe ghante me", "1 ghante baad"
+    // ── 0. Multi-Step Sequential Batch ("remind me in 15 mins to drink water and keep reminding me 4 times") ──
+    const repeatCountMatch = lower.match(/\b(?:keep\s*reminding\s*(?:me)?\s*(\d+)\s*times|(\d+)\s*times?\s*(?:remind|yaad)|repeat\s*(\d+)\s*times?|(\d+)\s*bar\s*(?:yaad|remind))\b/i);
+    const relMinBatchMatch = lower.match(/\b(?:in\s+)?(\d+)\s*(?:mins?|minutes?|minut|minute)\b(?:\s*(?:me|mein|baad|after|every))?/i);
+
+    if (repeatCountMatch && relMinBatchMatch) {
+      const count = parseInt(repeatCountMatch[1] || repeatCountMatch[2] || repeatCountMatch[3] || repeatCountMatch[4], 10);
+      const intervalMins = parseInt(relMinBatchMatch[1], 10);
+      if (count > 1 && intervalMins > 0) {
+        const title = this.cleanTaskTitle(text);
+        const firstTrigger = new Date(Date.now() + intervalMins * 60 * 1000);
+        return {
+          title,
+          triggerAt: firstTrigger,
+          isAmbiguous: false,
+          formattedTime: `in ${intervalMins} mins, repeated ${count} times (every ${intervalMins}m)`,
+          isBatch: true,
+          batchCount: count,
+          batchIntervalMinutes: intervalMins
+        };
+      }
+    }
+
+    // ── 1. Relative Duration: "in 15 minutes", "10 min me", "aadhe ghante me", "1 ghante baad" ──
     const relMinMatch = lower.match(/\b(?:in\s+)?(\d+)\s*(?:mins?|minutes?|minut|minute)\b(?:\s*(?:me|mein|baad|after))?/i);
     if (relMinMatch) {
       const mins = parseInt(relMinMatch[1], 10);
@@ -144,10 +226,99 @@ export class ReminderIntentDetector {
       };
     }
 
-    // ── 1.5. Annual Event / Calendar Date Parsing (Birthdays, Anniversaries, DD/MM/YYYY, "15 din pehle", "har saal")
-    const isYearlyIntent = /\b(?:har\s*saal|every\s*year|yearly|annually|har\s*year|birthday|anniversary|janamdin|date\s*of\s*birth|dob)\b/i.test(lower);
+    // ── 2. Day-of-Week Recurrence with Day Exclusions ──
+    // e.g. "remind me to go to gym every morning 8 am apart from friday and sunday"
+    const hasEveryDayOrMorning = /\b(?:every\s*morning|every\s*day|roz|daily|har\s*din|har\s*subah|roz\s*subah)\b/i.test(lower);
+    const dayExclusionMatch = lower.match(/\b(?:apart\s*from|except|excluding|chhod\s*ke|chhodkar|bina)\s+([a-zA-Z\s,]+?)(?:\s*(?:month|baje|am|pm|$))/i);
 
-    // Check for advance offset: "15 din pehle", "10 days before", "1 hafte pehle", "2 days prior"
+    let activeDays: string[] | undefined = undefined;
+    if (hasEveryDayOrMorning && dayExclusionMatch) {
+      const excludedText = dayExclusionMatch[1].toLowerCase();
+      const excludedDays: string[] = [];
+      for (const d of DAY_NAMES) {
+        if (excludedText.includes(d) || (d === 'thursday' && excludedText.includes('thu'))) {
+          excludedDays.push(d);
+        }
+      }
+      if (excludedDays.length > 0) {
+        activeDays = DAY_NAMES.filter(d => !excludedDays.includes(d));
+      }
+    }
+
+    // ── 3. Monthly Recurrence with Month Exclusions & Missing Time ──
+    // e.g. "every month remind me to pay bills on 28th apart from february month"
+    const isMonthly = /\b(?:every\s*month|monthly|har\s*mahine|har\s*month)\b/i.test(lower);
+    const dayOfMonthMatch = lower.match(/\b(?:on\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/);
+
+    if (isMonthly && dayOfMonthMatch) {
+      const dayNum = parseInt(dayOfMonthMatch[1], 10);
+      let activeMonths: string[] = [...MONTH_NAMES];
+
+      const monthExclusionMatch = lower.match(/\b(?:apart\s*from|except|excluding|chhod\s*ke|chhodkar|bina)\s+([a-zA-Z\s,]+?)(?:\s*month)?\b/i);
+      if (monthExclusionMatch) {
+        const exclStr = monthExclusionMatch[1].toLowerCase();
+        activeMonths = MONTH_NAMES.filter(m => !exclStr.includes(m) && !exclStr.includes(m.slice(0, 3)));
+      }
+
+      // Check if explicit time was mentioned
+      const timeMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(?:bje|baje|am|pm)\b/i);
+      const title = this.cleanTaskTitle(text);
+
+      if (!timeMatch) {
+        // User didn't specify time for monthly reminder — ask for clarification
+        return {
+          title,
+          triggerAt: null,
+          isAmbiguous: true,
+          clarificationQuestion: `What time on the ${dayNum}th would you like me to remind you to ${title}?`
+        };
+      }
+
+      let hour = parseInt(timeMatch[1], 10);
+      const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+      if (/\bpm\b/i.test(timeMatch[0]) && hour < 12) hour += 12;
+      else if (/\bam\b/i.test(timeMatch[0]) && hour === 12) hour = 0;
+
+      // Find next eligible month
+      let targetYear = nowLocal.getUTCFullYear();
+      let targetMonth = nowLocal.getUTCMonth();
+      let candidate = new Date(Date.UTC(targetYear, targetMonth, dayNum, hour, minute, 0, 0));
+
+      let safety = 0;
+      while (safety < 24) {
+        const mName = MONTH_NAMES[candidate.getUTCMonth()];
+        if (candidate.getTime() > nowLocal.getTime() && activeMonths.includes(mName)) {
+          break;
+        }
+        targetMonth++;
+        if (targetMonth > 11) {
+          targetMonth = 0;
+          targetYear++;
+        }
+        candidate = new Date(Date.UTC(targetYear, targetMonth, dayNum, hour, minute, 0, 0));
+        safety++;
+      }
+
+      const triggerAt = new Date(candidate.getTime() - tzOffsetHours * 3600 * 1000);
+      const hh12 = hour % 12 || 12;
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      const timeStr = `${hh12}:${minute.toString().padStart(2, '0')} ${ampm}`;
+      const exclNote = activeMonths.length < 12 ? ` (excl. ${MONTH_NAMES.filter(m => !activeMonths.includes(m)).join(', ')})` : '';
+
+      return {
+        title,
+        triggerAt,
+        isAmbiguous: false,
+        formattedTime: `Every month on ${dayNum}th at ${timeStr}${exclNote}`,
+        isRecurring: true,
+        recurrenceType: 'months',
+        recurrenceInterval: 1,
+        activeMonths
+      };
+    }
+
+    // ── 4. Annual Event / Birthday ──
+    const isYearlyIntent = /\b(?:har\s*saal|every\s*year|yearly|annually|har\s*year|birthday|anniversary|janamdin|date\s*of\s*birth|dob)\b/i.test(lower);
     let advanceDays = 0;
     const advanceMatch = lower.match(/\b(\d+)\s*(?:din|days?)\s*(?:pehle|before|prior|ahead)\b/i);
     if (advanceMatch) {
@@ -156,23 +327,21 @@ export class ReminderIntentDetector {
       advanceDays = 7;
     }
 
-    // Check for calendar date: DD/MM/YYYY, DD/MM, or "7th August", "August 7"
     let eventDay: number | null = null;
-    let eventMonth: number | null = null; // 0-indexed (0 = Jan, 7 = Aug)
-
-    const ddmmyyyyMatch = lower.match(/\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b/);
+    let eventMonth: number | null = null;
     const monthNamesMap: Record<string, number> = {
       jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
       may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7,
       sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11
     };
 
+    const ddmmyyyyMatch = lower.match(/\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b/);
     if (ddmmyyyyMatch) {
       const d = parseInt(ddmmyyyyMatch[1], 10);
       const m = parseInt(ddmmyyyyMatch[2], 10);
       if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
         eventDay = d;
-        eventMonth = m - 1; // 0-indexed
+        eventMonth = m - 1;
       }
     } else {
       const monthWordMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\b/i) ||
@@ -186,11 +355,8 @@ export class ReminderIntentDetector {
     }
 
     if (eventDay !== null && eventMonth !== null) {
-      // Default notification time if not explicitly stated: 10:00 AM local
       let reminderHour = 10;
       let reminderMinute = 0;
-
-      // Check if explicit time was also mentioned (e.g. "shaam 6 baje")
       const timeNumMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(?:bje|baje|bJe|am|pm)\b/i);
       if (timeNumMatch) {
         let th = parseInt(timeNumMatch[1], 10);
@@ -205,12 +371,10 @@ export class ReminderIntentDetector {
 
       let targetYear = nowLocal.getUTCFullYear();
       let targetDate = new Date(Date.UTC(targetYear, eventMonth, eventDay, reminderHour, reminderMinute, 0, 0));
-
       if (advanceDays > 0) {
         targetDate.setUTCDate(targetDate.getUTCDate() - advanceDays);
       }
 
-      // If the target date in the current calendar year has already passed, schedule for NEXT year!
       if (targetDate.getTime() <= nowLocal.getTime()) {
         targetYear += 1;
         targetDate = new Date(Date.UTC(targetYear, eventMonth, eventDay, reminderHour, reminderMinute, 0, 0));
@@ -221,9 +385,8 @@ export class ReminderIntentDetector {
 
       const triggerAt = new Date(targetDate.getTime() - tzOffsetHours * 3600 * 1000);
       const title = this.cleanTaskTitle(text);
-
-      const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-      const targetMonthName = MONTH_NAMES[targetDate.getUTCMonth()];
+      const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const targetMonthName = MONTH_FULL[targetDate.getUTCMonth()];
       const targetDayNum = targetDate.getUTCDate();
       const hh12 = reminderHour % 12 || 12;
       const ampm = reminderHour >= 12 ? 'PM' : 'AM';
@@ -243,7 +406,7 @@ export class ReminderIntentDetector {
       };
     }
 
-    // ── 2. Determine Target Date
+    // ── 5. Standard Date / Time Extraction ──
     let targetYear = nowLocal.getUTCFullYear();
     let targetMonth = nowLocal.getUTCMonth();
     let targetDay = nowLocal.getUTCDate();
@@ -263,26 +426,19 @@ export class ReminderIntentDetector {
       dateLabel = 'Today';
     }
 
-    // ── 3. Determine Period (Morning / Afternoon / Evening / Night)
     const isMorning = /\b(?:subah|sube|sawere|savere|morning|am)\b/i.test(lower);
     const isAfternoon = /\b(?:dopahar|dupeher|afternoon)\b/i.test(lower);
     const isEvening = /\b(?:shaam|sham|sanjh|evening)\b/i.test(lower);
     const isNight = /\b(?:raat|night)\b/i.test(lower);
     const isPM = /\bpm\b/i.test(lower) || isAfternoon || isEvening;
 
-    // ── 4. Extract Explicit Numeric Time
-    // Matches: "1 bJe", "1 baje", "1:00", "1pm", "13:00", "at 4", "10:30 am", etc.
     let hour: number | null = null;
     let minute: number = 0;
 
     const timePatterns = [
-      // "1:30 pm" or "13:00"
       /\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i,
-      // "1 bje" or "1 baje" or "1 bJe"
       /\b(\d{1,2})\s*(?:bje|baje|bJe)\b/i,
-      // "1 pm" or "1 am"
       /\b(\d{1,2})\s*(am|pm)\b/i,
-      // "at 4"
       /\bat\s+(\d{1,2})\b/i
     ];
 
@@ -302,7 +458,6 @@ export class ReminderIntentDetector {
       }
     }
 
-    // If explicit hour found, adjust for period
     if (hour !== null) {
       if (hour >= 1 && hour <= 12) {
         if (isAfternoon || isEvening || isPM) {
@@ -313,14 +468,12 @@ export class ReminderIntentDetector {
         } else if (isMorning) {
           if (hour === 12) hour = 0;
         } else {
-          // Defaults for 1..6 without explicit AM: almost universally PM in reminder context
           if (hour >= 1 && hour <= 6) {
             hour += 12;
           }
         }
       }
     } else {
-      // Vague period defaults if no explicit hour was specified (e.g. "kal sube", "kal afternoon")
       if (isMorning) {
         hour = 9;
         minute = 0;
@@ -337,33 +490,51 @@ export class ReminderIntentDetector {
     }
 
     if (hour === null) {
-      // Intent was detected but time is completely missing
       const title = this.cleanTaskTitle(text);
       return {
         title,
         triggerAt: null,
-        isAmbiguous: true
+        isAmbiguous: true,
+        clarificationQuestion: `What time would you like to be reminded to ${title}?`
       };
     }
 
-    // Build local target date
-    const targetLocal = new Date(Date.UTC(targetYear, targetMonth, targetDay, hour, minute, 0, 0));
+    let targetLocal = new Date(Date.UTC(targetYear, targetMonth, targetDay, hour, minute, 0, 0));
 
-    // If target is today and the time has already passed, push to tomorrow
     if (!dateIdentified && targetLocal.getTime() <= nowLocal.getTime()) {
       targetLocal.setUTCDate(targetLocal.getUTCDate() + 1);
       dateLabel = 'Tomorrow';
     }
 
-    // Convert local time back to UTC timestamp
+    // If activeDays filter is present, advance targetLocal to the first valid active day
+    if (activeDays && activeDays.length > 0) {
+      let safety = 0;
+      while (safety < 14) {
+        const dayName = DAY_NAMES[targetLocal.getUTCDay()];
+        if (activeDays.includes(dayName) && targetLocal.getTime() > nowLocal.getTime()) {
+          break;
+        }
+        targetLocal.setUTCDate(targetLocal.getUTCDate() + 1);
+        safety++;
+      }
+    }
+
     const triggerAt = new Date(targetLocal.getTime() - tzOffsetHours * 3600 * 1000);
     const title = this.cleanTaskTitle(text);
-
-    const isRecurringDaily = /\b(?:roz|daily|har\s*din|every\s*day)\b/i.test(lower);
+    const isRecurringDaily = hasEveryDayOrMorning || /\b(?:roz|daily|har\s*din|every\s*day)\b/i.test(lower);
     const hh12 = hour % 12 || 12;
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const timeFormatted = `${hh12}:${minute.toString().padStart(2, '0')} ${ampm}`;
-    const formattedTime = isRecurringDaily ? `Every day at ${timeFormatted}` : `${dateLabel} at ${timeFormatted}`;
+
+    let formattedTime: string;
+    if (activeDays && activeDays.length > 0) {
+      const dayNamesFormatted = activeDays.map(d => d.slice(0, 3).toUpperCase()).join(', ');
+      formattedTime = `Every day (${dayNamesFormatted}) at ${timeFormatted}`;
+    } else if (isRecurringDaily) {
+      formattedTime = `Every day at ${timeFormatted}`;
+    } else {
+      formattedTime = `${dateLabel} at ${timeFormatted}`;
+    }
 
     return {
       title,
@@ -371,24 +542,16 @@ export class ReminderIntentDetector {
       isAmbiguous: false,
       formattedTime,
       isRecurring: isRecurringDaily,
-      recurrenceType: isRecurringDaily ? 'daily' : undefined
+      recurrenceType: isRecurringDaily ? 'daily' : undefined,
+      recurrenceInterval: isRecurringDaily ? 1 : undefined,
+      activeDays
     };
   }
 
   /**
    * Extracts future plan details for proactive reminder prompting.
    */
-  extractFuturePlanDetails(
-    text: string,
-    tzOffsetHours: number = 5.5
-  ): {
-    title: string;
-    triggerAt: Date | null;
-    isRecurring?: boolean;
-    recurrenceType?: string;
-    formattedTime?: string;
-    isAmbiguous: boolean;
-  } {
+  extractFuturePlanDetails(text: string, tzOffsetHours: number = 5.5) {
     return this.parseReminderDetails(text, tzOffsetHours);
   }
 
@@ -402,8 +565,10 @@ export class ReminderIntentDetector {
       .replace(/\b\d{1,2}(?::\d{2})?\s*(?:bje|baje|bJe|am|pm)?\b/gi, '')
       .replace(/\b(?:in\s+\d+\s*(?:mins?|minutes?|hours?)|aadhe\s*ghante\s*me)\b/gi, '')
       .replace(/\b(?:yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena)|reminder\s*(?:set|lagao|karo)|alarm\s*(?:lagao|set)|schedule\s*karo)\b/gi, '')
-      .replace(/\b(?:roz|daily|har\s*din|every\s*day|har\s*saal|every\s*year|yearly|annually)\b/gi, '')
+      .replace(/\b(?:roz|daily|har\s*din|every\s*day|every\s*morning|har\s*saal|every\s*year|yearly|annually|every\s*month|monthly)\b/gi, '')
       .replace(/\b(?:start\s*karna\s*hai|shuru\s*karna\s*hai|karna\s*hai|karni\s*hai|uth\s*ke|uthna)\b/gi, '')
+      .replace(/\b(?:keep\s*reminding\s*me\s*\d+\s*times|\d+\s*times|\d+\s*bar)\b/gi, '')
+      .replace(/\b(?:apart\s*from|except|excluding|chhod\s*ke|chhodkar|bina)\s+[a-zA-Z\s,]+/gi, '')
       .replace(/\b\d+\s*(?:din|days?)\s*(?:pehle|before|prior|ahead)\b/gi, '')
       .replace(/\b(?:date\s*of\s*birth|dob)\s*(?:ko\s*hai|\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?|hai)?\b/gi, '')
       .replace(/\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b/gi, '')
@@ -412,7 +577,6 @@ export class ReminderIntentDetector {
       .trim();
 
     if (!clean || clean.length < 3) {
-      // Fallback: strip just the trigger words
       clean = text
         .replace(/\b(?:yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena)|remind\s*(?:me|karo|karna))\b/gi, '')
         .trim();
@@ -422,7 +586,86 @@ export class ReminderIntentDetector {
   }
 
   /**
-   * Synchronously detects, parses, and persists a reminder into the database.
+   * Evaluates if user confirmed a previous reminder offer from Nova, and schedules it.
+   */
+  async checkAndScheduleAffirmation(
+    userId: string,
+    userMessage: string,
+    lastAssistantMessage: string,
+    tzOffsetHours: number = 5.5
+  ): Promise<ReminderDetectionResult> {
+    if (!lastAssistantMessage || !this.hasReminderOffer(lastAssistantMessage)) {
+      return { detected: false, scheduled: false };
+    }
+
+    if (!this.isAffirmation(userMessage)) {
+      return { detected: false, scheduled: false };
+    }
+
+    logger.info('[ReminderIntentDetector] User affirmed proactive reminder offer!', {
+      userId,
+      userMessage,
+      lastAssistantMessage
+    });
+
+    // Extract proposed parameters from the assistant's previous offer
+    const parsed = this.parseReminderDetails(lastAssistantMessage, tzOffsetHours);
+    // If title was stripped down to 'Reminder', extract from the context
+    if (parsed.title === 'Reminder' || parsed.title.length < 3) {
+      if (/workout|gym/i.test(lastAssistantMessage)) parsed.title = 'Workout';
+      else if (/water|paani/i.test(lastAssistantMessage)) parsed.title = 'Drink water';
+      else if (/medicine|dawai/i.test(lastAssistantMessage)) parsed.title = 'Take medicine';
+      else if (/bill/i.test(lastAssistantMessage)) parsed.title = 'Pay bills';
+    }
+
+    if (!parsed.triggerAt) {
+      // If time was missing in the offer, default to 8:00 AM tomorrow
+      const nowLocal = new Date(Date.now() + tzOffsetHours * 3600 * 1000);
+      nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
+      nowLocal.setUTCHours(8, 0, 0, 0);
+      parsed.triggerAt = new Date(nowLocal.getTime() - tzOffsetHours * 3600 * 1000);
+      parsed.formattedTime = 'Tomorrow at 8:00 AM';
+      parsed.isRecurring = true;
+      parsed.recurrenceType = 'days';
+    }
+
+    // Insert into database
+    const { data: inserted, error } = await supabaseAdmin
+      .from('reminders')
+      .insert({
+        user_id: userId,
+        text: parsed.title,
+        trigger_at: parsed.triggerAt.toISOString(),
+        status: 'active',
+        is_auto: false,
+        recurrence_type: parsed.recurrenceType || 'days',
+        recurrence_interval: parsed.isRecurring ? 1 : null,
+        accountability_status: 'pending',
+        created_at: new Date().toISOString()
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      logger.error('[ReminderIntentDetector] Failed to persist affirmed reminder', { error: error.message });
+      return { detected: true, scheduled: false };
+    }
+
+    return {
+      detected: true,
+      scheduled: true,
+      reminder: inserted,
+      task: parsed.title,
+      triggerAt: parsed.triggerAt,
+      formattedTime: parsed.formattedTime,
+      isRecurring: parsed.isRecurring,
+      recurrenceType: parsed.recurrenceType,
+      note: `AFFIRMED_PROACTIVE_REMINDER_SCHEDULED: The user agreed to your offer! A reminder for "${parsed.title}" has been saved in the database for ${parsed.formattedTime}. Confirm this naturally and enthusiastically to the user!`
+    };
+  }
+
+  /**
+   * Synchronously detects, parses, and persists reminders into the database.
    */
   async detectAndSchedule(
     userId: string,
@@ -433,7 +676,7 @@ export class ReminderIntentDetector {
       return { detected: false, scheduled: false };
     }
 
-    // Determine user timezone offset
+    // Determine user timezone offset (fixed: handles offset in minutes e.g. 330 -> 5.5 hours)
     let tzOffsetHours = country === 'IN' ? 5.5 : 5.5;
     try {
       const { data: profile } = await supabaseAdmin
@@ -443,7 +686,8 @@ export class ReminderIntentDetector {
         .maybeSingle();
 
       if (profile?.timezone_offset !== undefined && profile?.timezone_offset !== null) {
-        tzOffsetHours = Number(profile.timezone_offset);
+        const off = Number(profile.timezone_offset);
+        tzOffsetHours = off > 24 ? off / 60 : off;
       }
     } catch {
       // Fall back to default
@@ -451,16 +695,58 @@ export class ReminderIntentDetector {
 
     const parsed = this.parseReminderDetails(message, tzOffsetHours);
 
-    if (!parsed.triggerAt || parsed.isAmbiguous) {
+    if (parsed.isAmbiguous || !parsed.triggerAt) {
       return {
         detected: true,
         scheduled: false,
         task: parsed.title,
-        note: `REMINDER_CLARIFICATION_NEEDED: The user wants a reminder ("${parsed.title}"), but did not specify an exact time or day. Proactively and warmly ask them what time or date they would like to be reminded!`
+        isAmbiguous: true,
+        clarificationQuestion: parsed.clarificationQuestion,
+        note: `REMINDER_CLARIFICATION_NEEDED: ${parsed.clarificationQuestion || `The user wants a reminder ("${parsed.title}"), but did not specify an exact time or day. Ask them warmly what time or date they would like to be reminded!`}`
       };
     }
 
-    // Check for existing active reminder to prevent duplicates
+    // ── Multi-Step Sequential Batch Scheduling ──
+    if (parsed.isBatch && parsed.batchCount && parsed.batchIntervalMinutes) {
+      const batchGroupId = crypto.randomUUID();
+      const rowsToInsert = [];
+      for (let i = 1; i <= parsed.batchCount; i++) {
+        const trigger = new Date(Date.now() + i * parsed.batchIntervalMinutes * 60 * 1000);
+        rowsToInsert.push({
+          user_id: userId,
+          text: `${parsed.title} (step ${i}/${parsed.batchCount})`,
+          trigger_at: trigger.toISOString(),
+          status: 'active',
+          is_auto: false,
+          batch_group_id: batchGroupId,
+          accountability_status: 'pending',
+          created_at: new Date().toISOString()
+        });
+      }
+
+      const { data: insertedList, error: bErr } = await supabaseAdmin
+        .from('reminders')
+        .insert(rowsToInsert)
+        .select('*');
+
+      if (bErr) {
+        logger.error('[ReminderIntentDetector] Batch insert error', { error: bErr.message });
+        return { detected: true, scheduled: false, note: 'REMINDER_PERSISTENCE_FAILED' };
+      }
+
+      return {
+        detected: true,
+        scheduled: true,
+        reminders: insertedList || [],
+        task: parsed.title,
+        formattedTime: parsed.formattedTime,
+        isBatch: true,
+        batchCount: parsed.batchCount,
+        note: `BATCH_REMINDERS_SCHEDULED: Scheduled ${parsed.batchCount} reminders for "${parsed.title}" every ${parsed.batchIntervalMinutes} minutes. Confirm enthusiastically to the user!`
+      };
+    }
+
+    // ── Check for existing active reminder to prevent duplicates ──
     try {
       const tenMinutesMs = 10 * 60 * 1000;
       const targetTimeMs = parsed.triggerAt.getTime();
@@ -491,7 +777,7 @@ export class ReminderIntentDetector {
           formattedTime: parsed.formattedTime,
           isRecurring: parsed.isRecurring,
           recurrenceType: parsed.recurrenceType,
-          note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" is scheduled for ${parsed.formattedTime}. This is a FUTURE reminder. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi". NEVER use past tense or say they gave the reminder in the past ("diya tha").`
+          note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" is scheduled for ${parsed.formattedTime}. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi".`
         };
       }
 
@@ -505,7 +791,10 @@ export class ReminderIntentDetector {
           status: 'active',
           is_auto: false,
           recurrence_type: parsed.recurrenceType || null,
-          recurrence_interval: parsed.isRecurring ? 1 : null,
+          recurrence_interval: parsed.isRecurring ? (parsed.recurrenceInterval || 1) : null,
+          active_days: parsed.activeDays || null,
+          active_months: parsed.activeMonths || null,
+          accountability_status: 'pending',
           created_at: new Date().toISOString()
         })
         .select('*')
@@ -517,7 +806,7 @@ export class ReminderIntentDetector {
           detected: true,
           scheduled: false,
           task: parsed.title,
-          note: `REMINDER_PERSISTENCE_FAILED: Failed to save the reminder in the database right now. Tell the user you'll try again shortly.`
+          note: `REMINDER_PERSISTENCE_FAILED: Failed to save the reminder in the database right now.`
         };
       }
 
@@ -535,7 +824,11 @@ export class ReminderIntentDetector {
         task: parsed.title,
         triggerAt: parsed.triggerAt,
         formattedTime: parsed.formattedTime,
-        note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" has been successfully scheduled for ${parsed.formattedTime}. This is a FUTURE reminder. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi". NEVER use past tense or say they gave the reminder in the past ("diya tha").`
+        isRecurring: parsed.isRecurring,
+        recurrenceType: parsed.recurrenceType,
+        activeDays: parsed.activeDays,
+        activeMonths: parsed.activeMonths,
+        note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" has been successfully scheduled for ${parsed.formattedTime}. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi".`
       };
     } catch (err: any) {
       logger.error('[ReminderIntentDetector] Exception during reminder persistence', { error: err.message });

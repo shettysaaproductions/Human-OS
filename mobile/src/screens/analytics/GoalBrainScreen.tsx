@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { api } from '../../services/api';
 import { BrainHeader } from '../../components/BrainHeader';
+import { ReminderBrainScreen } from './ReminderBrainScreen';
 
 interface Goal {
   id: string;
@@ -67,6 +68,7 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<any>(null);
   const [tab, setTab] = useState<'active' | 'completed'>('active');
+  const [viewMode, setViewMode] = useState<'goals' | 'reminders'>('goals');
 
   useEffect(() => { fetchGoals(); }, []);
 
@@ -106,28 +108,48 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
   return (
     <SafeAreaView style={gr.container} edges={['top']}>
       <BrainHeader
-        title="Goals & Milestones"
-        subtitle={`${activeGoals.length} active · ${completedGoals.length} completed`}
-        icon="🎯"
+        title={viewMode === 'goals' ? 'Goals & Milestones' : 'Nova Reminders'}
+        subtitle={viewMode === 'goals' ? `${activeGoals.length} active · ${completedGoals.length} completed` : 'Manage all alarms & recurring schedules'}
+        icon={viewMode === 'goals' ? '🎯' : '⏰'}
         onRefresh={handleRefresh}
         isRefreshing={refreshing}
       />
 
-      {/* Summary Stats */}
-      <View style={gr.statsRow}>
-        <View style={gr.statCard}>
-          <Text style={[gr.statNum, { color: '#10B981' }]}>{activeGoals.length}</Text>
-          <Text style={gr.statLabel}>Active</Text>
-        </View>
-        <View style={gr.statCard}>
-          <Text style={[gr.statNum, { color: '#A78BFA' }]}>{completedGoals.length}</Text>
-          <Text style={gr.statLabel}>Completed</Text>
-        </View>
-        <View style={gr.statCard}>
-          <ProgressRing progress={overallProgress} color="#10B981" size={50} />
-          <Text style={gr.statLabel}>Avg Progress</Text>
-        </View>
+      {/* Top Mode Switcher: Goals vs Reminders */}
+      <View style={gr.modeSwitcherRow}>
+        <TouchableOpacity
+          style={[gr.modeBtn, viewMode === 'goals' && gr.modeBtnActiveGoal]}
+          onPress={() => setViewMode('goals')}
+        >
+          <Text style={[gr.modeBtnText, viewMode === 'goals' && gr.modeBtnTextActiveGoal]}>🎯 Goals</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[gr.modeBtn, viewMode === 'reminders' && gr.modeBtnActiveReminder]}
+          onPress={() => setViewMode('reminders')}
+        >
+          <Text style={[gr.modeBtnText, viewMode === 'reminders' && gr.modeBtnTextActiveReminder]}>⏰ Reminders Hub</Text>
+        </TouchableOpacity>
       </View>
+
+      {viewMode === 'reminders' ? (
+        <ReminderBrainScreen embedded={true} />
+      ) : (
+        <>
+          {/* Summary Stats */}
+          <View style={gr.statsRow}>
+            <View style={gr.statCard}>
+              <Text style={[gr.statNum, { color: '#10B981' }]}>{activeGoals.length}</Text>
+              <Text style={gr.statLabel}>Active</Text>
+            </View>
+            <View style={gr.statCard}>
+              <Text style={[gr.statNum, { color: '#A78BFA' }]}>{completedGoals.length}</Text>
+              <Text style={gr.statLabel}>Completed</Text>
+            </View>
+            <View style={gr.statCard}>
+              <ProgressRing progress={overallProgress} color="#10B981" size={50} />
+              <Text style={gr.statLabel}>Avg Progress</Text>
+            </View>
+          </View>
 
       {/* Tabs */}
       <View style={gr.tabRow}>
@@ -211,6 +233,8 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
           </View>
         }
       />
+        </>
+      )}
     </SafeAreaView>
   );
 });
@@ -218,6 +242,48 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
 const gr = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090B' },
+  modeSwitcherRow: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 6,
+    gap: 8,
+    backgroundColor: '#18181B',
+    padding: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  modeBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeBtnActiveGoal: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  modeBtnActiveReminder: {
+    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    borderWidth: 1,
+    borderColor: '#6366F1',
+  },
+  modeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#71717A',
+  },
+  modeBtnTextActiveGoal: {
+    color: '#10B981',
+    fontWeight: '700',
+  },
+  modeBtnTextActiveReminder: {
+    color: '#818CF8',
+    fontWeight: '700',
+  },
   statsRow: { flexDirection: 'row', marginHorizontal: 12, marginTop: 14, marginBottom: 14, gap: 8 },
   statCard: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)',

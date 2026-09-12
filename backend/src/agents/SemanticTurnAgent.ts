@@ -119,8 +119,10 @@ export class SemanticTurnAgent {
           
           for (const schedEvt of scheduleEvents) {
             try {
-              // Duplicate resolveUserTzOffsetHours logic roughly
-              const userTzHours = profile?.timezone_offset ?? (profile?.country === 'IN' ? 5.5 : 5.5);
+              const rawOffset = profile?.timezone_offset;
+              const userTzHours = (rawOffset !== undefined && rawOffset !== null)
+                ? (rawOffset > 24 ? rawOffset / 60 : rawOffset)
+                : (profile?.country === 'IN' ? 5.5 : 5.5);
               const { ReminderEngine: RE } = await import('../services/ReminderEngine');
               const engine = new RE(userTzHours);
               const parsed = engine.parse((schedEvt as any).reminderSpec);

@@ -1408,8 +1408,28 @@ chatRouter.post(
       }
 
       // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
-      // Direct high-precision reminder extraction & scheduling guard
-      if (!is_proactive && reminderIntentDetector.hasReminderIntent(effectiveMessage)) {
+      // 1. Proactive Offer Affirmation Guard: Check if user affirmed an immediate previous reminder offer
+      const lastAssistantMsg = ((historyResult.data || []) as any[])
+        .find(m => m.role === 'assistant')?.content || '';
+
+      if (!is_proactive && lastAssistantMsg && reminderIntentDetector.hasReminderOffer(lastAssistantMsg) && reminderIntentDetector.isAffirmation(effectiveMessage)) {
+        try {
+          const affirmedReminder = await reminderIntentDetector.checkAndScheduleAffirmation(userId, effectiveMessage, lastAssistantMsg, tzOffset);
+          if (affirmedReminder.scheduled) {
+            deterministicReminderCreated = true;
+            deterministicReminderNote = affirmedReminder.note || '';
+            logger.info('[Chat] Affirmed proactive reminder scheduled', {
+              userId,
+              task: affirmedReminder.task,
+              formattedTime: affirmedReminder.formattedTime
+            });
+          }
+        } catch (affErr: any) {
+          logger.warn('[Chat] Affirmed reminder detection error', { error: affErr?.message });
+        }
+      }
+      // 2. Direct high-precision reminder extraction & scheduling guard
+      else if (!is_proactive && reminderIntentDetector.hasReminderIntent(effectiveMessage)) {
         try {
           const directReminder = await reminderIntentDetector.detectAndSchedule(userId, effectiveMessage, userCountry);
           if (directReminder.detected) {
@@ -1428,6 +1448,37 @@ chatRouter.post(
           }
         } catch (rErr: any) {
           logger.warn('[Chat] Direct reminder detection non-fatal error', { error: rErr?.message });
+        }
+      }
+
+      // 3. Accountability Completion Signal: Check if user completed a recent pending/reminded task
+      const isCompletionSignal = /\b(?:ho\s*gaya|kar\s*diya|kar\s*liya|done|completed|finished|pani\s*pee\s*liya|workout\s*ho\s*gaya|gym\s*ho\s*gaya|bill\s*pay\s*kar\s*diya|dawai\s*le\s*li|dawa\s*kha\s*li)\b/i.test(effectiveMessage);
+      if (isCompletionSignal) {
+        try {
+          const fourHoursAgo = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
+          const { data: recentPending } = await supabaseAdmin
+            .from('reminders')
+            .select('*')
+            .eq('user_id', userId)
+            .in('accountability_status', ['reminded', 'pending'])
+            .gte('trigger_at', fourHoursAgo)
+            .order('trigger_at', { ascending: false })
+            .limit(1);
+
+          if (recentPending && recentPending.length > 0) {
+            const rem = recentPending[0];
+            await supabaseAdmin.from('reminders').update({
+              accountability_status: 'completed_confirmed',
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }).eq('id', rem.id);
+
+            const accountabilityDirective = `\n\n## 🏆 ACCOUNTABILITY CELEBRATION (TOP PRIORITY)\nThe user just confirmed they completed their reminder task: "${rem.text}"!\nPraise them warmly with authentic enthusiasm ("Proud of you yaar!", "Super consistency!"), celebrate their streak, and keep them feeling energized!`;
+            turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + accountabilityDirective;
+            logger.info('[Chat] Reminder completed confirmed by user', { reminderId: rem.id, task: rem.text });
+          }
+        } catch (cErr: any) {
+          logger.warn('[Chat] Accountability confirmation error', { error: cErr?.message });
         }
       }
 
