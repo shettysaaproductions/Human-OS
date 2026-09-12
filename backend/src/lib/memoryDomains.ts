@@ -102,11 +102,42 @@ const IDENTITY_PATTERNS = [
 ];
 
 /**
+ * Helper to match word/token boundaries in keys, preventing short substrings like 'cat'
+ * from erroneously matching inside words like 'location' or 'vacation'.
+ */
+function matchesTokenOrPattern(key: string, patterns: string[]): boolean {
+  const tokens = key.split(/[\s_\-:]+/);
+  for (const p of patterns) {
+    if (tokens.includes(p)) return true;
+    if (p.length >= 5 && key.includes(p)) return true;
+    if (key.startsWith(`${p}_`) || key.endsWith(`_${p}`) || key.includes(`_${p}_`)) return true;
+  }
+  return false;
+}
+
+/**
  * Classifies any memory or working context key into its authoritative Life Domain Compartment.
  */
 export function classifyDomain(rawKey: string, memoryType?: string | null): DomainMeta {
   const k = (rawKey || '').toLowerCase();
   const mt = (memoryType || '').toLowerCase();
+
+  // 0. Explicit location, transit, commuting, or time keys are NEVER family
+  if (
+    k.includes('location') ||
+    k.includes('metro') ||
+    k.includes('transit') ||
+    k.includes('travel') ||
+    k.includes('trip') ||
+    k.includes('schedule') ||
+    k.includes('leaving_time') ||
+    k.includes('morning_schedule')
+  ) {
+    if (k.includes('office') || k.includes('work') || k.includes('company')) {
+      return DOMAIN_TAXONOMY.work;
+    }
+    return DOMAIN_TAXONOMY.lifestyle;
+  }
 
   // 1. Explicit family ties & personal relations take top priority (even if child age or family trait)
   if (
@@ -124,8 +155,8 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     k.startsWith('pet_') ||
     k.startsWith('dog_') ||
     k.startsWith('cat_') ||
-    k.includes('dog_') ||
-    k.includes('cat_') ||
+    k.includes('_dog_') ||
+    k.includes('_cat_') ||
     k.startsWith('son_') ||
     k.startsWith('daughter_') ||
     k.startsWith('sister_') ||
@@ -208,16 +239,16 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
   if (mt === 'preferences' || mt === 'lifestyle') return DOMAIN_TAXONOMY.lifestyle;
   if (mt === 'personal' || mt === 'identity') {
     // Discriminate between family and identity
-    if (FAMILY_PATTERNS.some(p => k.includes(p))) return DOMAIN_TAXONOMY.family;
+    if (matchesTokenOrPattern(k, FAMILY_PATTERNS)) return DOMAIN_TAXONOMY.family;
     return DOMAIN_TAXONOMY.identity;
   }
 
   // 3. Pattern-based matching on the key
-  if (FAMILY_PATTERNS.some(p => k.includes(p))) return DOMAIN_TAXONOMY.family;
-  if (WORK_PATTERNS.some(p => k.includes(p))) return DOMAIN_TAXONOMY.work;
-  if (GOALS_PATTERNS.some(p => k.includes(p))) return DOMAIN_TAXONOMY.goals;
-  if (LIFESTYLE_PATTERNS.some(p => k.includes(p))) return DOMAIN_TAXONOMY.lifestyle;
-  if (IDENTITY_PATTERNS.some(p => k.includes(p))) return DOMAIN_TAXONOMY.identity;
+  if (matchesTokenOrPattern(k, FAMILY_PATTERNS)) return DOMAIN_TAXONOMY.family;
+  if (matchesTokenOrPattern(k, WORK_PATTERNS)) return DOMAIN_TAXONOMY.work;
+  if (matchesTokenOrPattern(k, GOALS_PATTERNS)) return DOMAIN_TAXONOMY.goals;
+  if (matchesTokenOrPattern(k, LIFESTYLE_PATTERNS)) return DOMAIN_TAXONOMY.lifestyle;
+  if (matchesTokenOrPattern(k, IDENTITY_PATTERNS)) return DOMAIN_TAXONOMY.identity;
 
   // Fallback to identity / core facts
   return DOMAIN_TAXONOMY.identity;
@@ -536,7 +567,42 @@ export function isPlaceholderValue(val?: string | null): boolean {
   if (!val) return true;
   const v = val.trim().toLowerCase();
   if (v.length < 2) return true;
-  return /^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(v);
+  const clean = v.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/^(not\s+applicable|not-applicable|non-applicable|not\s+mentioned|not\s+available|none|null|undefined|unknown|unkown|un-known|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(clean)) {
+    return true;
+  }
+  return /^(not\s+applicable|not-applicable|non-applicable|not\s+mentioned|not\s+available|none\.?|null|undefined|unknown|unkown|un-known|n\/a\.?|na\.?|n\.a\.?|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(v);
+}
+
+/**
+ * Detects ephemeral / commuting / transient context that belongs in working context or presence,
+ * but should NEVER pollute the durable Knowledge Graph (3D Neural Galaxy).
+ */
+export function isTransientSituationalItem(key: string, value?: string): boolean {
+  const k = (key || '').toLowerCase().trim();
+  const v = (value || '').toLowerCase().trim();
+
+  const SITUATIONAL_KEYS = new Set([
+    'current_location', 'self_location', 'last_metro_ride', 'office_leaving_time',
+    'saturday_morning', 'current_date', 'remaining_time', 'target_completion_date',
+    'goodnight_message', '8_am_reminder', 'kal_sube_reminder', 'nai_morning_schedule',
+    'office_location'
+  ]);
+  if (SITUATIONAL_KEYS.has(k)) return true;
+
+  if (k.includes('metro') || k.includes('current_loc') || k.includes('leaving_time')) return true;
+
+  // Transient utterances like "metro", "rastte me hoon", "office se nikal ke", "ghar ja raha hu"
+  if (/^(metro|in\s+metro|traveling|travelling|on\s+the\s+way|rastte\s+me\s+hoon|ghar\s+ja\s+raha\s+hu|office\s+se\s+nikal\s+ke|abhi\s+office|abhi)$/i.test(v)) {
+    return true;
+  }
+
+  // Conversational narratives stored verbatim in key/value
+  if (v.includes('office se nikal ke') || v.includes('rastte me hoon') || v.includes('ghar ja raha')) {
+    return true;
+  }
+
+  return false;
 }
 
 // Composite aggregate rows like family_details (which repeats wife, son, father, mother)
@@ -581,7 +647,7 @@ export function clusterMemoriesIntoWardrobes(
   const allEntries: any[] = [];
 
   for (const m of memories) {
-    if (!m.key || !m.value || isPlaceholderValue(m.value)) continue;
+    if (!m.key || !m.value || isPlaceholderValue(m.value) || isTransientSituationalItem(m.key, m.value)) continue;
     const entry = { ...m, isWorkingContext: false };
     memMap.set(m.key.toLowerCase(), entry);
     allEntries.push(entry);
@@ -597,7 +663,7 @@ export function clusterMemoriesIntoWardrobes(
       : [];
 
   for (const w of normalizedWorking) {
-    if (!w.key || !w.value || isPlaceholderValue(w.value)) continue;
+    if (!w.key || !w.value || isPlaceholderValue(w.value) || isTransientSituationalItem(w.key, w.value)) continue;
     const entry = { ...w, isWorkingContext: true };
     if (!memMap.has(w.key.toLowerCase())) {
       memMap.set(w.key.toLowerCase(), entry);
@@ -2037,11 +2103,11 @@ export function buildDynamicKnowledgeGraph(
   // Pre-index items for tree hierarchy detection
   const rawItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
   for (const m of memories) {
-    if (!m.key || !m.value || isPlaceholderValue(m.value)) continue;
+    if (!m.key || !m.value || isPlaceholderValue(m.value) || isTransientSituationalItem(m.key, m.value)) continue;
     rawItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value, memory_type: m.memory_type });
   }
   for (const w of workingContext) {
-    if (!w.key || !w.value || isPlaceholderValue(w.value)) continue;
+    if (!w.key || !w.value || isPlaceholderValue(w.value) || isTransientSituationalItem(w.key, w.value)) continue;
     rawItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
   }
 
@@ -2188,6 +2254,58 @@ export function buildDynamicKnowledgeGraph(
       relation = predicate.toUpperCase();
       explanation = `Attribute stem of ${subRelationName ? `${baseEntityName}'s ${subRelationName}` : baseEntityName}`;
     }
+    // Dedicated Friends Sub-Branching in Family / Relationships
+    else if (
+      meta.domain === 'family' &&
+      (k.startsWith('friend_') || k.includes('friend') || k.includes('dost') || (k === 'father_background' && (item.value.toLowerCase().includes('ijaz') || item.value.toLowerCase().includes('navi'))))
+    ) {
+      let friendName = 'Friend';
+      if (k.includes('ijaz') || item.value.toLowerCase().includes('ijaz')) friendName = 'Ijaz';
+      else if (k.includes('sushant') || item.value.toLowerCase().includes('sushant')) friendName = 'Sushant';
+      else if (k === 'friend_name' && item.value && !item.value.toLowerCase().includes('friend')) {
+        friendName = cleanStr(item.value);
+      }
+
+      const friendNodeId = `mem-friend-${friendName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      if (!nodeIds.has(friendNodeId)) {
+        nodes.push({
+          id: friendNodeId,
+          name: `${friendName} (Friend)`,
+          entity_type: 'friend',
+          department: 'family',
+          color: DOMAIN_TAXONOMY.family.color,
+          radius: 20,
+          value: `${friendName} · Friend`,
+          raw_key: `friend_${friendName.toLowerCase()}`,
+          emoji: '🤝',
+          parentEntityId: 'dept-family',
+          hierarchyLevel: 2,
+          treePath: [cleanUserName, 'Family & Relationships', friendName]
+        });
+        nodeIds.add(friendNodeId);
+        deptCounts.family++;
+        edges.push({
+          id: `edge-dept-family-${friendNodeId}`,
+          source: 'dept-family',
+          target: friendNodeId,
+          relation: 'FRIEND_BRANCH',
+          color: DOMAIN_TAXONOMY.family.color,
+          weight: 2,
+          edgeType: 'ENTITY_BRANCH',
+          explanation: `Friend branch for ${friendName}`
+        });
+      }
+
+      if (item.id === friendNodeId || (k === 'friend_ijaz' && item.id.includes('ijaz'))) {
+        continue;
+      }
+
+      parentId = friendNodeId;
+      hierarchyLevel = 3;
+      edgeType = 'ATTRIBUTE_STEM';
+      relation = k.includes('since') ? 'FRIEND_SINCE' : (k.includes('father') ? 'FATHER_BACKGROUND' : 'FRIEND_DETAIL');
+      explanation = `Detail stem of ${friendName}`;
+    }
     // Family Tree Stems
     else if (meta.domain === 'family') {
       if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'partner_name', 'husband_name', 'sakshi', 'shreshth'].includes(k)) {
@@ -2214,6 +2332,10 @@ export function buildDynamicKnowledgeGraph(
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Son (Shreshth / Tuku) in Family Tree`;
       } else if (k.startsWith('father_') && allKeys.has('father_name')) {
+        // Guard against friend's father or unrelated narrative
+        if (item.value.toLowerCase().includes('ijaz') || item.value.toLowerCase().includes('navi')) {
+          continue;
+        }
         parentId = 'mem-father_name';
         hierarchyLevel = 3;
         relation = 'MEMBER_ATTRIBUTE';

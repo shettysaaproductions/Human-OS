@@ -1877,7 +1877,8 @@ function KgExplorerContent() {
           onPress: async () => {
             try {
               setSyncing(true);
-              const res = await api.delete(`/analytics/kg/node/${node.id}`, {
+              const res = await api.delete(`/analytics/kg/node/${encodeURIComponent(node.id)}`, {
+                params: { rawKey: node.raw_key, nodeName: node.name },
                 data: { rawKey: node.raw_key, nodeName: node.name }
               });
               if (res.data?.success) {

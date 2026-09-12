@@ -27,9 +27,12 @@ const GARBAGE_VALUE_PATTERNS: RegExp[] = [
   /^(pending tasks?|upcoming tasks?|active tasks?)$/i,
 
   // ── Non-data placeholders & missing-data strings ──────────────────────────
-  /^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data)$/i,
-  /^(not\s+mentioned\s+in\s+chat|not\s+available\s+yet|date\s+not\s+mentioned|dob\s+not\s+mentioned|birthday\s+not\s+mentioned)$/i,
+  /^(not\s+applicable|not-applicable|non-applicable|not\s+mentioned|not\s+available|none\.?|null|undefined|unknown|unkown|un-known|n\/a\.?|na\.?|n\.a\.?|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data)$/i,
+  /^(not\s+mentioned\s+in\s+chat|not\s+available\s+yet|date\s+not\s+mentioned|dob\s+not\s+mentioned|birthday\s+not\s+mentioned|age\s+not\s+mentioned)$/i,
   /^(since\s+the\s+son|as\s+an\s+infant|the\s+son\s+is\s+an\s+infant|infant\s+son)$/i,
+
+  // ── Transient commuting / situational utterances misclassified as facts ──
+  /^(metro|in\s+metro|traveling|travelling|on\s+the\s+way|rastte\s+me\s+hoon|ghar\s+ja\s+raha\s+hu|office\s+se\s+nikal\s+ke)$/i,
 
   // ── P0-B: Hinglish interrogative question-word guard ─────────────────────
   // Catches question fragments extracted FROM questions WITHOUT a trailing "?".
@@ -53,6 +56,15 @@ const GARBAGE_KEY_PATTERNS: RegExp[] = [
   /^(recent_)?conversation$/i,
   /^last_message(_content)?$/i,
   /^(current_)?utterance$/i,
+  /^current_location$/i,
+  /^self_location$/i,
+  /^last_metro_ride$/i,
+  /^office_leaving_time$/i,
+  /^saturday_morning$/i,
+  /^current_date$/i,
+  /^remaining_time$/i,
+  /^target_completion_date$/i,
+  /^goodnight_message$/i,
   /^__sys_/i,
   /^nova_ignored_/i,
   /^_internal_/i,

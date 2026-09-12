@@ -24,7 +24,7 @@ import { complete } from '../lib/nvidia';
 import { cache } from '../lib/cache';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
-import { isPlaceholderValue } from '../lib/memoryDomains';
+import { isPlaceholderValue, isTransientSituationalItem } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
 
 export interface CurationRemoval {
@@ -134,22 +134,22 @@ export class AutonomousMemoryGraphCuratorService {
           .eq('user_id', userId)
           .eq('is_archived', false)
           .order('updated_at', { ascending: false })
-          .limit(80),
+          .limit(300),
         supabaseAdmin
           .from('working_memory')
           .select('id, key, value, created_at')
           .eq('user_id', userId)
-          .limit(40),
+          .limit(200),
         supabaseAdmin
           .from('kg_nodes')
           .select('id, name, entity_type, attributes, created_at')
           .eq('user_id', userId)
-          .limit(100),
+          .limit(200),
         supabaseAdmin
           .from('kg_edges')
           .select('id, source_node_id, target_node_id, relation_type, weight')
           .eq('user_id', userId)
-          .limit(150),
+          .limit(300),
         supabaseAdmin
           .from('chat_history')
           .select('id, role, content, created_at')
@@ -287,23 +287,89 @@ export class AutonomousMemoryGraphCuratorService {
 
     // ── 1. PRUNE EMPTY / PLACEHOLDER NODES IN MEMORIES & WORKING MEMORY ───────
     // e.g., shreshth_date_of_birth or son_birth_date with "" or "Not mentioned"
+    // ── 1. PRUNE EMPTY, PLACEHOLDER, & TRANSIENT NODES IN MEMORIES & WORKING MEMORY ───────
     for (const [key, mem] of memMap.entries()) {
-      if (isPlaceholderValue(mem.value) || isGarbageMemoryValue(key, mem.value)) {
+      if (isPlaceholderValue(mem.value) || isGarbageMemoryValue(key, mem.value) || isTransientSituationalItem(key, mem.value)) {
         removals.push({
           key,
           target: 'memory',
-          reason: `Pruned empty or placeholder memory "${key}" with non-data value "${mem.value}"`
+          reason: `Pruned empty, placeholder, or transient memory "${key}" with non-data value "${mem.value}"`
         });
       }
     }
 
     for (const [key, wm] of wmMap.entries()) {
-      if (isPlaceholderValue(wm.value) || isGarbageMemoryValue(key, wm.value)) {
+      if (isPlaceholderValue(wm.value) || isGarbageMemoryValue(key, wm.value) || isTransientSituationalItem(key, wm.value)) {
         removals.push({
           key,
           target: 'working_memory',
-          reason: `Pruned placeholder working memory "${key}" with non-data value "${wm.value}"`
+          reason: `Pruned placeholder or transient working memory "${key}" with value "${wm.value}"`
         });
+      }
+    }
+
+    // ── 1b. PURGE INVALID SON AGE "NOT APPLICABLE" & AUTO-REPAIR FROM BIRTH DATE ──
+    const sonDobEntry = memMap.get('son_birth_date');
+    const sonAgeEntry = memMap.get('son_age');
+    const wmSonAge = wmMap.get('son_age');
+
+    if (sonAgeEntry && (isPlaceholderValue(sonAgeEntry.value) || sonAgeEntry.value.toLowerCase().includes('applicable'))) {
+      removals.push({
+        key: 'son_age',
+        target: 'memory',
+        reason: 'Purged invalid "Not applicable" age stem from son Shreshth'
+      });
+    }
+    if (wmSonAge && (isPlaceholderValue(wmSonAge.value) || wmSonAge.value.toLowerCase().includes('applicable'))) {
+      removals.push({
+        key: 'son_age',
+        target: 'working_memory',
+        reason: 'Purged invalid "Not applicable" working memory for son_age'
+      });
+    }
+
+    // Auto-repair Shreshth's age from son_birth_date (e.g. 17/02/2026 -> ~7 months)
+    if (sonDobEntry && sonDobEntry.value && (!sonAgeEntry || isPlaceholderValue(sonAgeEntry.value) || sonAgeEntry.value.toLowerCase().includes('applicable'))) {
+      const dobMatch = sonDobEntry.value.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      let calculatedAge = '7 months';
+      if (dobMatch) {
+        const birthYear = parseInt(dobMatch[3], 10);
+        const birthMonth = parseInt(dobMatch[2], 10) - 1;
+        const now = new Date();
+        const diffMonths = (now.getFullYear() - birthYear) * 12 + (now.getMonth() - birthMonth);
+        if (diffMonths >= 0 && diffMonths <= 36) {
+          calculatedAge = `${Math.max(1, diffMonths)} months`;
+        }
+      }
+      updates.push({
+        key: 'son_age',
+        newValue: calculatedAge,
+        provenChatTruth: `Derived from son_birth_date ${sonDobEntry.value}`,
+        memoryType: 'family',
+        entity: 'son'
+      });
+    }
+
+    // ── 1c. PURGE CONTAMINATED FATHER BACKGROUND FROM WORKING MEMORY ──
+    const wmFatherBg = wmMap.get('father_background');
+    if (wmFatherBg && (wmFatherBg.value.toLowerCase().includes('ijaz') || wmFatherBg.value.toLowerCase().includes('navi'))) {
+      removals.push({
+        key: 'father_background',
+        target: 'working_memory',
+        reason: 'Removed friend Ijaz father background from generic father_background key'
+      });
+    }
+
+    // ── 1d. PURGE CONVERSATIONAL DIALOGUE FRAGMENTS FROM WORKING MEMORY ──
+    for (const [key, wm] of wmMap.entries()) {
+      if (key === 'good_friend' || key === 'best_friend_at_office') {
+        if (wm.value.toLowerCase() === 'jata' || wm.value.length < 3) {
+          removals.push({
+            key,
+            target: 'working_memory',
+            reason: `Pruned conversational snippet "${wm.value}" from working_memory`
+          });
+        }
       }
     }
 

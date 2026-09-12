@@ -10,7 +10,9 @@ import {
   clusterMemoriesIntoWardrobes,
   buildDynamicKnowledgeGraph,
   DOMAIN_TAXONOMY,
-  LifeDomainKey
+  LifeDomainKey,
+  isPlaceholderValue,
+  isTransientSituationalItem
 } from '../lib/memoryDomains';
 
 export const analyticsRouter = Router();
@@ -196,7 +198,9 @@ analyticsRouter.get('/memories', async (req: Request, res: Response, next: NextF
       !wm.key.includes('counter') &&
       !wm.key.includes('count') &&
       !wm.key.includes('suppressed') &&
-      wm.key !== 'birth_date'
+      wm.key !== 'birth_date' &&
+      !isPlaceholderValue(wm.value) &&
+      !isTransientSituationalItem(wm.key, wm.value)
     );
 
     // ── Context Deduplication Engine ──────────────────────────────────────────
@@ -659,7 +663,9 @@ analyticsRouter.get('/kg', async (req: Request, res: Response, next: NextFunctio
       !SYSTEM_WM_KEYS.has(wm.key) &&
       !wm.key.includes('counter') &&
       !wm.key.includes('count') &&
-      wm.key !== 'birth_date'
+      wm.key !== 'birth_date' &&
+      !isPlaceholderValue(wm.value) &&
+      !isTransientSituationalItem(wm.key, wm.value)
     ).filter((wm: any) => {
       const { canonical } = canonicalizeKey(wm.key || '');
       return !canonicalMap.has(canonical);
@@ -777,32 +783,58 @@ Return ONLY valid JSON:
       }
     }
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeId || '');
+    const candidateKeys = new Set<string>();
+    if (rawKey) candidateKeys.add(rawKey);
+    if (effectiveKey) candidateKeys.add(effectiveKey);
+    if (nodeId?.startsWith('mem-')) candidateKeys.add(nodeId.replace(/^mem-/, ''));
+    if (nodeId?.startsWith('wm-')) candidateKeys.add(nodeId.replace(/^wm-/, ''));
+    if (effectiveName) {
+      candidateKeys.add(canonicalizeKey(effectiveName).canonical);
+      candidateKeys.add(effectiveName.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+    }
+    const keyList = Array.from(candidateKeys).filter(Boolean);
+
     if (action === 'DELETE') {
       // 1. Soft-tombstone in memories table
-      await supabaseAdmin
-        .from('memories')
-        .update({
-          is_archived: true,
-          lifecycle_state: 'INVALIDATED',
-          supersession_reason: `[Surgical User Alteration] ${userInstruction || 'Deleted by user'}`,
-          updated_at: now
-        })
-        .eq('user_id', userId)
-        .or(`id.eq.${nodeId},key.eq.${effectiveKey},key.eq.${effectiveName}`);
+      if (isUuid) {
+        await supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            lifecycle_state: 'INVALIDATED',
+            supersession_reason: `[Surgical User Alteration] ${userInstruction || 'Deleted by user'}`,
+            updated_at: now
+          })
+          .eq('user_id', userId)
+          .eq('id', nodeId);
+      }
+      if (keyList.length > 0) {
+        await supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            lifecycle_state: 'INVALIDATED',
+            supersession_reason: `[Surgical User Alteration] ${userInstruction || 'Deleted by user'}`,
+            updated_at: now
+          })
+          .eq('user_id', userId)
+          .in('key', keyList);
+      }
 
       // 2. Delete from working_memory
-      await supabaseAdmin
-        .from('working_memory')
-        .delete()
-        .eq('user_id', userId)
-        .or(`id.eq.${nodeId},key.eq.${effectiveKey},key.eq.${effectiveName}`);
+      if (isUuid) {
+        await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('id', nodeId);
+      }
+      if (keyList.length > 0) {
+        await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).in('key', keyList);
+      }
 
       // 3. Delete from kg_nodes and kg_edges
-      const { data: matchedKgNodes } = await supabaseAdmin
-        .from('kg_nodes')
-        .select('id')
-        .eq('user_id', userId)
-        .or(`id.eq.${nodeId},name.eq.${effectiveName}`);
+      const kgMatchQuery = supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId);
+      const { data: matchedKgNodes } = isUuid
+        ? await kgMatchQuery.or(`id.eq.${nodeId},name.eq.${effectiveName}`)
+        : await kgMatchQuery.in('name', [effectiveName, ...keyList]);
 
       for (const kn of (matchedKgNodes || [])) {
         await supabaseAdmin.from('kg_edges').delete().or(`source_node_id.eq.${kn.id},target_node_id.eq.${kn.id}`);
@@ -836,15 +868,21 @@ Return ONLY valid JSON:
 
     // UPDATE ACTION:
     // 1. Check if memory exists in memories table
-    const { data: existingMem } = await supabaseAdmin
+    let existingMemQuery = supabaseAdmin
       .from('memories')
       .select('id, key, value, memory_type, importance')
       .eq('user_id', userId)
-      .or(`id.eq.${nodeId},key.eq.${effectiveKey}`)
       .eq('is_archived', false)
       .order('importance', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+
+    if (isUuid) {
+      existingMemQuery = existingMemQuery.eq('id', nodeId);
+    } else if (keyList.length > 0) {
+      existingMemQuery = existingMemQuery.in('key', keyList);
+    }
+
+    const { data: existingMem } = await existingMemQuery.maybeSingle();
 
     let updatedId = existingMem?.id;
 
@@ -956,31 +994,64 @@ analyticsRouter.delete('/kg/node/:nodeId', async (req: Request, res: Response, n
 
     const effectiveKey = rawKey || (nodeId?.startsWith('mem-') ? nodeId.replace(/^mem-/, '') : (nodeId?.startsWith('wm-') ? nodeId.replace(/^wm-/, '') : canonicalizeKey(nodeName).canonical));
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeId || '');
+    const candidateKeys = new Set<string>();
+    if (rawKey) candidateKeys.add(rawKey);
+    if (effectiveKey) candidateKeys.add(effectiveKey);
+    if (nodeId?.startsWith('mem-')) candidateKeys.add(nodeId.replace(/^mem-/, ''));
+    if (nodeId?.startsWith('wm-')) candidateKeys.add(nodeId.replace(/^wm-/, ''));
+    if (nodeName) {
+      candidateKeys.add(canonicalizeKey(nodeName).canonical);
+      candidateKeys.add(nodeName.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+    }
+    const keyList = Array.from(candidateKeys).filter(Boolean);
+
     // 1. Soft-tombstone in memories
-    await supabaseAdmin
-      .from('memories')
-      .update({
-        is_archived: true,
-        lifecycle_state: 'INVALIDATED',
-        supersession_reason: 'User direct bubble deletion from 3D Knowledge Graph',
-        updated_at: now
-      })
-      .eq('user_id', userId)
-      .or(`id.eq.${nodeId},key.eq.${effectiveKey}`);
+    if (isUuid) {
+      const { error: idMemErr } = await supabaseAdmin
+        .from('memories')
+        .update({
+          is_archived: true,
+          lifecycle_state: 'INVALIDATED',
+          supersession_reason: 'User direct bubble deletion from 3D Knowledge Graph',
+          updated_at: now
+        })
+        .eq('user_id', userId)
+        .eq('id', nodeId);
+      if (idMemErr) {
+        logger.error('[Analytics/deleteKgNode] Error soft-tombstoning memory by UUID', { error: idMemErr.message, nodeId });
+      }
+    }
+
+    if (keyList.length > 0) {
+      const { error: keyMemErr } = await supabaseAdmin
+        .from('memories')
+        .update({
+          is_archived: true,
+          lifecycle_state: 'INVALIDATED',
+          supersession_reason: 'User direct bubble deletion from 3D Knowledge Graph',
+          updated_at: now
+        })
+        .eq('user_id', userId)
+        .in('key', keyList);
+      if (keyMemErr) {
+        logger.error('[Analytics/deleteKgNode] Error soft-tombstoning memory by keys', { error: keyMemErr.message, keyList });
+      }
+    }
 
     // 2. Delete from working_memory
-    await supabaseAdmin
-      .from('working_memory')
-      .delete()
-      .eq('user_id', userId)
-      .or(`id.eq.${nodeId},key.eq.${effectiveKey}`);
+    if (isUuid) {
+      await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('id', nodeId);
+    }
+    if (keyList.length > 0) {
+      await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).in('key', keyList);
+    }
 
     // 3. Delete from kg_nodes & kg_edges
-    const { data: matchedKgNodes } = await supabaseAdmin
-      .from('kg_nodes')
-      .select('id')
-      .eq('user_id', userId)
-      .or(`id.eq.${nodeId},name.eq.${nodeName}`);
+    const kgQuery = supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId);
+    const { data: matchedKgNodes } = isUuid
+      ? await kgQuery.or(`id.eq.${nodeId},name.eq.${nodeName}`)
+      : await kgQuery.in('name', [nodeName, ...keyList].filter(Boolean));
 
     for (const kn of (matchedKgNodes || [])) {
       await supabaseAdmin.from('kg_edges').delete().or(`source_node_id.eq.${kn.id},target_node_id.eq.${kn.id}`);
