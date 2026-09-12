@@ -529,6 +529,16 @@ export function selectDynamicDrawerRole(_entityName: string, prefixType: string,
 // Helper to extract clean capitalized name across wardrobes and graph engines
 export const cleanStr = (val?: string) => (val || '').replace(/^Prefers to be called\s+/i, '').replace(/\.$/, '').replace(/_/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase());
 
+/**
+ * Checks whether a candidate memory value is empty, placeholder, or non-data.
+ */
+export function isPlaceholderValue(val?: string | null): boolean {
+  if (!val) return true;
+  const v = val.trim().toLowerCase();
+  if (v.length < 2) return true;
+  return /^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(v);
+}
+
 // Composite aggregate rows like family_details (which repeats wife, son, father, mother)
 // and important_facts (which repeats work schedule) are marked as composite duplicates
 // so the user-facing UI can suppress them without violating the no-hard-delete rule.
@@ -571,7 +581,7 @@ export function clusterMemoriesIntoWardrobes(
   const allEntries: any[] = [];
 
   for (const m of memories) {
-    if (!m.key || !m.value) continue;
+    if (!m.key || !m.value || isPlaceholderValue(m.value)) continue;
     const entry = { ...m, isWorkingContext: false };
     memMap.set(m.key.toLowerCase(), entry);
     allEntries.push(entry);
@@ -587,7 +597,7 @@ export function clusterMemoriesIntoWardrobes(
       : [];
 
   for (const w of normalizedWorking) {
-    if (!w.key || !w.value) continue;
+    if (!w.key || !w.value || isPlaceholderValue(w.value)) continue;
     const entry = { ...w, isWorkingContext: true };
     if (!memMap.has(w.key.toLowerCase())) {
       memMap.set(w.key.toLowerCase(), entry);
@@ -778,7 +788,8 @@ export function clusterMemoriesIntoWardrobes(
     const bdayKeys = [
       'son_birth_date', 'son_dob', 'son_birthday', 'child_birth_date', 'child_dob', 'child_birthday',
       'tuku_birthday', 'tuku_dob', 'tuku_birth_date', 'tiku_birthday', 'tiku_dob', 'tiku_birth_date',
-      'shreshth_birthday', 'shreshth_dob', 'shreshth_birth_date', 'shreshth_bday'
+      'shreshth_birthday', 'shreshth_dob', 'shreshth_birth_date', 'shreshth_bday', 'shreshth_date_of_birth',
+      'shresth_date_of_birth', 'shresth_dob', 'son_date_of_birth', 'child_date_of_birth'
     ];
     let sonBdayVal: string | undefined;
     let sonBdaySourceId: string | undefined;
@@ -786,7 +797,7 @@ export function clusterMemoriesIntoWardrobes(
       if (memMap.has(bk)) {
         consumedKeys.add(bk);
         const v = memMap.get(bk)?.value;
-        if (v) {
+        if (v && !isPlaceholderValue(v)) {
           sonBdayVal = v;
           sonBdaySourceId = memMap.get(bk)?.id;
         }
@@ -806,7 +817,7 @@ export function clusterMemoriesIntoWardrobes(
       }
     }
 
-    if (sonBdayVal) {
+    if (sonBdayVal && !isPlaceholderValue(sonBdayVal)) {
       traits.push({
         id: `trait-shreshth-birth-date`,
         key: 'son_birth_date',
@@ -1880,7 +1891,7 @@ function toGraphLabel(key: string, value: string): string {
   if (k === 'wife_name') return `${v} (Wife)`;
   if (k === 'son_name') return `${v} (Son)`;
   if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) return `${v || 'Tuku'} (Nickname)`;
-  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob')) return `${v || '17 Feb 2026'} (Birthday)`;
+  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('shreshth_date_of_birth') || k.includes('son_date_of_birth')) return `${v || '17 Feb 2026'} (Birthday)`;
   if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return `${v || '23 July'} (Birthday)`;
   if (k === 'son_age' || k === 'child_age' || k === 'baby_age') {
     const cleanAge = v.replace(/(\s*old)+$/i, '').trim();
@@ -2026,11 +2037,11 @@ export function buildDynamicKnowledgeGraph(
   // Pre-index items for tree hierarchy detection
   const rawItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
   for (const m of memories) {
-    if (!m.key || !m.value) continue;
+    if (!m.key || !m.value || isPlaceholderValue(m.value)) continue;
     rawItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value, memory_type: m.memory_type });
   }
   for (const w of workingContext) {
-    if (!w.key || !w.value) continue;
+    if (!w.key || !w.value || isPlaceholderValue(w.value)) continue;
     rawItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
   }
 
@@ -2199,7 +2210,7 @@ export function buildDynamicKnowledgeGraph(
       ) {
         parentId = allKeys.has('son_name') ? 'mem-son_name' : (allItems.find(i => i.key.toLowerCase().includes('shreshth'))?.id || 'dept-family');
         hierarchyLevel = 3;
-        relation = (k.includes('birth') || k.includes('bday') || k.includes('dob')) ? 'BIRTHDAY' : k.includes('age') ? 'AGE' : (k.includes('nick') || k.includes('tiku') || k.includes('tuku')) ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
+        relation = (k.includes('birth') || k.includes('bday') || k.includes('dob') || k.includes('date_of_birth')) ? 'BIRTHDAY' : k.includes('age') ? 'AGE' : (k.includes('nick') || k.includes('tiku') || k.includes('tuku')) ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Son (Shreshth / Tuku) in Family Tree`;
       } else if (k.startsWith('father_') && allKeys.has('father_name')) {

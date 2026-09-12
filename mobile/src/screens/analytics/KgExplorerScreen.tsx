@@ -137,7 +137,7 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) {
     return { title: 'Nail Artist', sub: 'Creative Skill' };
   }
-  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('child_b') || k.includes('child_dob')) return { title: v || '17 Feb 2026', sub: 'Birthday' };
+  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('child_b') || k.includes('child_dob') || k.includes('shreshth_date_of_birth') || k.includes('son_date_of_birth')) return { title: v || '17 Feb 2026', sub: 'Birthday' };
   if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return { title: v || '23 July', sub: 'Birthday' };
   if (k === 'son_age' || k === 'child_age' || k === 'baby_age') {
     const cleanAge = (v || '').replace(/(\s*old)+$/i, '').trim();
@@ -241,8 +241,16 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     family: [], work: [], goals: [], lifestyle: [], identity: []
   };
 
+  function isPlaceholderValue(val?: string | null): boolean {
+    if (!val) return true;
+    const v = val.trim().toLowerCase();
+    if (v.length < 2) return true;
+    return /^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(v);
+  }
+
   for (const n of rawNodes) {
     if (!n || n.id === 'user-core' || n.isHub || n.isDepartment || n.id?.startsWith('dept-')) continue;
+    if (isPlaceholderValue(n.value)) continue;
     const d = n.department || inferDomain(n.raw_key || n.id, n.entity_type);
     if (!deptBuckets[d]) deptBuckets[d] = [];
     deptBuckets[d].push(n);
@@ -310,7 +318,7 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
           // Composite summary - skip so individual family member entities are authoritative
           continue;
         }
-        if (k === 'family_nickname' || k.includes('family_nick') || k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('notes')) {
+        if (k === 'family_nickname' || k.includes('family_nick') || k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('shreshth_date_of_birth') || k.includes('notes')) {
           mem.hierarchyLevel = 3;
           mem.parentEntityId = 'mem-son_name';
           rawStemItems.push(mem);
@@ -693,10 +701,12 @@ function synthesizeGalaxy(memories: any[] = [], workingContext: any[] = []) {
   const allItems: Array<{ id: string; key: string; value: string; isContext?: boolean }> = [];
   for (const m of (memories || [])) {
     if (!m || !m.key || !m.value) continue;
+    if (/^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(String(m.value).trim())) continue;
     allItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value });
   }
   for (const w of (workingContext || [])) {
     if (!w || !w.key || !w.value) continue;
+    if (/^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(String(w.value).trim())) continue;
     allItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
   }
 

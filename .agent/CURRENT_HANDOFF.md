@@ -1,57 +1,46 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-12 — Human-OS / Nova 360° Intelligence, Entity Resolution, Adaptive Watchtower & Memory Reliability Upgrade
+2026-09-12 — Human-OS / Nova Autonomous Memory Tree & Knowledge Graph Curation Engine
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: 360° Intelligence, Memory, Conversation & Companion Reliability Upgrade across all 53 mandate sections.
+Task: Dedicated Autonomous LLM Engine continuously sorting memory tree and graph, cross-checking with conversational proof, updating, adding, removing, and merging autonomously.
 
 ## Confirmed Findings & Architectural Solutions
-1. **Semantic Entity Resolution Layer (`backend/src/services/EntityResolutionService.ts`):**
-   - Solves Bug Class #1: Semantic entity confusion.
-   - Example: "Ijaz's father was in the Navy" cleanly attaches to `entity:person_ijaz_father:occupation = "Navy"`, preserving `Ijaz -> Father -> Navy` and completely preventing attribution to the user.
-   - Multi-hop relationships, speaker identity, and temporal states (`PAST`, `CURRENT`, `FUTURE`) are fully resolved.
-2. **Schema & Canonical Keys (`backend/src/lib/memoryKeySchema.ts` & Migration `067`):**
-   - Added PostgreSQL migration `067_entity_scoped_memories_and_correction_ledger.sql` creating `nova_correction_ledger` table with RLS and indexes.
-   - Updated database SQL canonical key functions and TypeScript `isKnownCanonicalKey` to support entity-scoped keys `^entity:[a-z0-9_]+:[a-z0-9_]+$`.
-   - Fixed `child_birthdate` mapping to `son_birth_date` rather than user's birth date.
-3. **Dynamic Knowledge Graph & Wardrobe Hierarchy (`backend/src/lib/memoryDomains.ts`):**
-   - Multi-hop tree preservation: `You -> Friends -> Ejaz -> Father -> Navy`.
-   - Prevents phantom root nodes and eliminates collapsing third-party entities into user attributes.
-4. **Adaptive Watchtower & Multi-Model Compounding (`AdaptiveRiskScorer.ts` & `SemanticVerificationService.ts`):**
-   - Section 13 Adaptive Verification Loop: Evaluates LOW, MEDIUM, and HIGH risk dynamically.
-   - Section 14 Compounding Intelligence: Model B/C/D verification runs non-blockingly on elevated risk turns.
-   - Disagreements and autonomous repairs are recorded into `nova_correction_ledger`.
-5. **State Synchronization & Mobile Presentation (`memoryRepository.ts` & `KgExplorerScreen.tsx`):**
-   - `invalidateAnalyticsCache(userId)` called on memory mutations, preventing stale KG and Brain views.
-   - Mobile graph explorer displays entity-scoped keys gracefully (`Navy` with subtitle `Ijaz Father • Occupation`).
+1. **Root Causes of Phantom Nodes ("shreshth date of birth extra with no data"):**
+   - Missing aliases in `memoryKeySchema.ts` prevented incoming extracted DOB keys like `shreshth_date_of_birth` from canonicalizing to `son_birth_date`.
+   - Weak regex filtering admitted empty string values or raw placeholder text like `"Not mentioned"`, `"none"`, or `"no data"`.
+   - `buildDynamicKnowledgeGraph` and `KgExplorerScreen.tsx` created standalone level-2 attribute nodes when a key was not recognized as an entity branch, causing floating empty bubbles.
+2. **Deterministic Admission & Filtering Guards (`memoryFilters.ts`, `memoryDomains.ts`, `KgExplorerScreen.tsx`):**
+   - Added regex patterns to `GARBAGE_VALUE_PATTERNS` blocking `not mentioned`, `none`, `null`, `undefined`, `unknown`, `no data`, `empty`, `to be decided`, `extra with no data`, etc.
+   - Introduced `isPlaceholderValue()` to prune and suppress empty attribute bubbles across backend wardrobe clustering, graph synthesis, and mobile planetary galaxy rendering.
+3. **Dedicated Autonomous Memory Graph Curator Service (`AutonomousMemoryGraphCuratorService.ts`):**
+   - **Layer 1 (Deterministic Fast-Path)**:
+     - Soft-tombstones placeholder and empty memories (`lifecycle_state = 'INVALIDATED'`, `is_archived = true`, 0 hard deletes of durable records).
+     - Purges transient working memory placeholders.
+     - Prunes phantom `kg_nodes` and orphan `kg_edges` with empty attributes.
+     - Merges duplicate alias collisions into canonical keys, retaining proven data.
+   - **Layer 2 (Semantic LLM Curation)**:
+     - Calls `complete('SUBCONSCIOUS', ...)` providing the complete memory tree, working memory, KG nodes, and recent conversation turns.
+     - Grounds all mutations in user conversational proof.
+     - Applies additions, removals, merges, and updates.
+   - **Audit & Invalidation**:
+     - Writes full audit records to `nova_correction_ledger`.
+     - Automatically clears `wardrobes:${userId}`, `kg:${userId}`, and calls `invalidateAnalyticsCache(userId)`.
+4. **Continuous Autonomous Invocation Pipeline**:
+   - Integrated into `backend/src/routes/chat.ts` via `setImmediate` on post-reply turns.
+   - Integrated into `backend/src/services/WatchtowerMemoryAuditor.ts` during periodic memory audits.
+   - Integrated into `backend/src/services/WatchtowerHeartbeatService.ts` during 15-minute supervisory pulse.
+   - Handled by `backend/src/workers/queueWorker.ts` under `maintenanceQueue` for `curate_memory_graph` jobs.
 
 ## Verification Status
 - `npm run build` in `backend`: **EXIT 0** (0 errors).
 - `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).
-- Regression & test suites:
-  - `ComprehensiveNova360RegressionCorpus.test.ts`: **17/17 PASSED** (100%)
-  - `TurnAnalyzer.test.ts`: **41/41 PASSED** (100%)
-  - `P0ProactiveHallucinationFix.test.ts`: **13/13 PASSED** (100%)
-  - `EntityResolutionService.test.ts`: **10/10 PASSED** (100%)
-  - `SemanticVerificationService.test.ts`: **6/6 PASSED** (100%)
-  - `wardrobeClustering.test.ts`: **4/4 PASSED** (100%)
-  - `DynamicCupboardMemory.test.ts`: **6/6 PASSED** (100%)
-  - `MemoryIntegration.test.ts`: **10/10 PASSED** (100%)
-
-## Deployment Status
-- Commits `8e968f5`, `1e78515`, `294bb75`, `66890de`, and `573298b` pushed to `origin main`.
-- Automated Render backend deployment triggered.
-- Mobile EAS Production OTA Update published:
-  - **Branch**: `production`
-  - **Platform**: `android`
-  - **Runtime Version**: `1.1.0`
-  - **Update Group ID**: `248c6922-c922-496e-b916-736d4249487c`
-  - **Android Update ID**: `01a09210-0653-705a-ab13-f67646ab48fa`
-  - **Commit**: `573298b`
-  - **Status**: Live
+- Unit & regression test suites:
+  - `AutonomousMemoryGraphCuratorService.test.ts`: **3/3 PASSED** (100%)
+  - `WatchtowerMemoryAuditor.test.ts`: **4/4 PASSED** (100%)
 
 ## NEXT ACTION
-All tasks completed. Ready for production usage.
+Commit changes, push to `origin main`, and trigger mobile EAS Production OTA update.

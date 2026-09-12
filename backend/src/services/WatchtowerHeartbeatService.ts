@@ -26,6 +26,7 @@ import { sourceDependencyService } from './SourceDependencyService';
 import { watchtowerAttentionEngine } from './WatchtowerAttentionEngine';
 import { watchtowerProactiveIntegrationService } from './WatchtowerProactiveIntegrationService';
 import { RepairType } from '../types/canonicalRepair';
+import { autonomousMemoryGraphCurator } from './AutonomousMemoryGraphCuratorService';
 import {
   HeartbeatLeaseAcquireResult,
   HeartbeatUserMetrics,
@@ -563,6 +564,16 @@ export class WatchtowerHeartbeatService {
         await sourceDependencyService.canPermanentlyDeleteSource(userId, 'episodic_memory', 'audit_check_id');
       } catch (srcErr: any) {
         logger.debug('[WatchtowerHeartbeat] Source dependency check non-fatal error', { userId, error: srcErr?.message });
+      }
+
+      // ── STEP 5.5: AUTONOMOUS MEMORY GRAPH CURATION ───────────────────────
+      // Continuously cross-checks memory tree & graph, cleans empty/placeholder nodes & merges aliases
+      if (!options?.dryRun) {
+        try {
+          await autonomousMemoryGraphCurator.curateUserMemoryGraph(userId);
+        } catch (curErr: any) {
+          logger.warn('[WatchtowerHeartbeat] Autonomous graph curator non-fatal error', { userId, error: curErr?.message });
+        }
       }
 
       metrics.durationMs = Date.now() - userStart;

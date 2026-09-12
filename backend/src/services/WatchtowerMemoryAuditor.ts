@@ -18,6 +18,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import { cache } from '../lib/cache';
+import { autonomousMemoryGraphCurator } from './AutonomousMemoryGraphCuratorService';
 
 export interface MemoryAuditFinding {
   entity: string;
@@ -186,7 +187,15 @@ export class WatchtowerMemoryAuditor {
         logger.warn('[WatchtowerMemoryAuditor] Non-fatal semantic audit error', { error: semErr.message });
       }
 
-      // 3. Invalidate memory cache so frontend gets fresh data
+      // 3. Trigger Autonomous Memory Graph Curation (Pruning, Merging, KG nodes cleanup)
+      try {
+        const curationRes = await autonomousMemoryGraphCurator.curateUserMemoryGraph(userId);
+        result.repairsApplied += (curationRes.removalsApplied + curationRes.mergesApplied + curationRes.updatesApplied + curationRes.additionsApplied);
+      } catch (cErr: any) {
+        logger.warn('[WatchtowerMemoryAuditor] Non-fatal curation error', { error: cErr.message });
+      }
+
+      // 4. Invalidate memory cache so frontend gets fresh data
       if (result.repairsApplied > 0) {
         try {
           cache.invalidate(`wardrobes:${userId}`);
@@ -732,3 +741,4 @@ If there are no contradictions, return empty array [].`;
 }
 
 export const watchtowerMemoryAuditor = WatchtowerMemoryAuditor.getInstance();
+export { autonomousMemoryGraphCurator } from './AutonomousMemoryGraphCuratorService';

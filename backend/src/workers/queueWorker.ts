@@ -11,6 +11,7 @@ import { chatHistoryPruningService } from '../services/ChatHistoryPruningService
 import { cognitiveHealthService } from '../services/CognitiveHealthService';
 import { novaConsciousnessEngine } from '../services/NovaConsciousnessEngine';
 import { watchtowerMemoryAuditor } from '../services/WatchtowerMemoryAuditor';
+import { autonomousMemoryGraphCurator } from '../services/AutonomousMemoryGraphCuratorService';
 import { semanticTurnWorker } from './semanticTurnWorker';
 
 const MAX_RETRIES = 3;
@@ -172,6 +173,14 @@ export function startWorkers() {
             await watchtowerMemoryAuditor.auditAndReconcileUser(userId);
           }
         }, 'reconcile_facts');
+        break;
+      case 'curate_memory_graph':
+        await processWithBackoff(job, async (j) => {
+          const userId = j.payload?.user_id;
+          if (userId) {
+            await autonomousMemoryGraphCurator.curateUserMemoryGraph(userId);
+          }
+        }, 'curate_memory_graph');
         break;
       default:
         logger.warn(`[QueueWorker] Unknown maintenance job type: ${job.job_type}`);

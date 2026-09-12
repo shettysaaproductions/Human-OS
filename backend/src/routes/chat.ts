@@ -2254,6 +2254,13 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`
             }
           }).catch(() => {});
         }).catch(() => {});
+
+        // Dedicated Autonomous Memory Tree & Knowledge Graph Continuous Curator
+        import('../services/AutonomousMemoryGraphCuratorService').then(({ autonomousMemoryGraphCurator }) => {
+          autonomousMemoryGraphCurator.curateUserMemoryGraph(userId).catch(cErr => {
+            logger.debug('[Chat] Autonomous memory curator non-fatal error', { error: cErr?.message });
+          });
+        }).catch(() => {});
       });
 
       if (asyncDeadlineTimer) {
