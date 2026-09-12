@@ -269,11 +269,11 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
   // Anatomical 3D Brain Coordinates for 5 Main Functional Lobes
   const DEPT_3D_COORDS: Record<string, { x: number; y: number; z: number }> = {
-    goals: { x: -40, y: 340, z: 120 },       // Prefrontal Polar Cortex (Dorsal & Anterior)
-    work: { x: -300, y: 150, z: 230 },       // Left Frontal Executive Lobe
-    family: { x: 300, y: -70, z: 220 },      // Right Temporal & Limbic Lobe
-    lifestyle: { x: 260, y: -180, z: -250 }, // Right Occipital & Somatosensory Lobe
-    identity: { x: -250, y: -160, z: -250 }  // Left Parietal Cortical Lobe
+    goals: { x: -40, y: 360, z: 140 },       // Prefrontal Polar Cortex (Dorsal & Anterior)
+    work: { x: -340, y: 160, z: 240 },       // Left Frontal Executive Lobe
+    family: { x: 340, y: -75, z: 240 },      // Right Temporal & Limbic Lobe
+    lifestyle: { x: 280, y: -200, z: -260 }, // Right Occipital & Somatosensory Lobe
+    identity: { x: -270, y: -180, z: -260 }  // Left Parietal Cortical Lobe
   };
 
   for (const d of DEPT_KEYS) {
@@ -492,11 +492,11 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       const bx = Math.round(hx + branchDist * Math.cos(bAngle));
       const by = Math.round(hy + branchDist * Math.sin(bAngle));
 
-      const branchAngle3d = frac * Math.PI * 0.75;
-      const branchDist3d = 190;
-      const bx3d = Math.round(h3d.x + ux * (branchDist3d * 0.4) + (px3d * Math.cos(branchAngle3d) + qx3d * Math.sin(branchAngle3d)) * branchDist3d);
-      const by3d = Math.round(h3d.y + uy * (branchDist3d * 0.4) + (py3d * Math.cos(branchAngle3d) + qy3d * Math.sin(branchAngle3d)) * branchDist3d);
-      const bz3d = Math.round(h3d.z + uz * (branchDist3d * 0.4) + (pz3d * Math.cos(branchAngle3d) + qz3d * Math.sin(branchAngle3d)) * branchDist3d);
+      const branchAngle3d = frac * Math.PI * 0.82;
+      const branchDist3d = 260;
+      const bx3d = Math.round(h3d.x + ux * (branchDist3d * 0.35) + (px3d * Math.cos(branchAngle3d) + qx3d * Math.sin(branchAngle3d)) * branchDist3d);
+      const by3d = Math.round(h3d.y + uy * (branchDist3d * 0.35) + (py3d * Math.cos(branchAngle3d) + qy3d * Math.sin(branchAngle3d)) * branchDist3d);
+      const bz3d = Math.round(h3d.z + uz * (branchDist3d * 0.35) + (pz3d * Math.cos(branchAngle3d) + qz3d * Math.sin(branchAngle3d)) * branchDist3d);
 
       const treePath = bMem.treePath || [coreName, meta.short, names.title];
 
@@ -608,9 +608,9 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         const sx = Math.round(px + effectiveStemDist * Math.cos(sAngle));
         const sy = Math.round(py + effectiveStemDist * Math.sin(sAngle));
 
-        const stemAngle3d = sFrac * Math.PI * 0.9;
-        const stemDist3d = 125 + (sIdx % 2 === 0 ? 0 : 35);
-        const zOffset = (sIdx % 2 === 0 ? 40 : -40);
+        const stemAngle3d = sFrac * Math.PI * 0.95;
+        const stemDist3d = 175 + (sIdx % 3) * 45;
+        const zOffset = ((sIdx % 3) - 1) * 65;
 
         const sx3d = Math.round(pBranch3d.x + (px3d * Math.cos(stemAngle3d) + qx3d * Math.sin(stemAngle3d)) * stemDist3d);
         const sy3d = Math.round(pBranch3d.y + (py3d * Math.cos(stemAngle3d) + qy3d * Math.sin(stemAngle3d)) * stemDist3d);
@@ -1061,7 +1061,7 @@ function KgExplorerContent() {
     roll: 0.0,   // 0 deg roll (Z-axis)
     panX: 0,
     panY: 0,
-    scale: 0.85
+    scale: 0.70
   };
 
   const pendingCameraRef = useRef(defaultCamera);
@@ -1073,14 +1073,14 @@ function KgExplorerContent() {
   const roll = useSharedValue(0.0);
   const panX = useSharedValue(0);
   const panY = useSharedValue(0);
-  const scale = useSharedValue(0.85);
+  const scale = useSharedValue(0.70);
 
   const savedPitch = useSharedValue(0.24);
   const savedYaw = useSharedValue(0.35);
   const savedRoll = useSharedValue(0.0);
   const savedPanX = useSharedValue(0);
   const savedPanY = useSharedValue(0);
-  const savedScale = useSharedValue(0.85);
+  const savedScale = useSharedValue(0.70);
 
   const [isAutoOrbit, setIsAutoOrbit] = useState(false);
 
@@ -1227,16 +1227,16 @@ function KgExplorerContent() {
     roll.value = withSpring(0.0, { damping: 18 });
     panX.value = withSpring(0, { damping: 18 });
     panY.value = withSpring(0, { damping: 18 });
-    scale.value = withSpring(0.85, { damping: 18 });
+    scale.value = withSpring(0.70, { damping: 18 });
 
     savedPitch.value = 0.24;
     savedYaw.value = 0.35;
     savedRoll.value = 0.0;
     savedPanX.value = 0;
     savedPanY.value = 0;
-    savedScale.value = 0.85;
+    savedScale.value = 0.70;
 
-    syncCamera(0.35, 0.24, 0.0, 0, 0, 0.85);
+    syncCamera(0.35, 0.24, 0.0, 0, 0, 0.70);
   }, [pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
 
   const handleSpinY = useCallback(() => {
@@ -1427,7 +1427,7 @@ function KgExplorerContent() {
       bottom: number;
     }
 
-    function boxesOverlap(b1: PlacedBox, b2: PlacedBox, pad = 3): boolean {
+    function boxesOverlap(b1: PlacedBox, b2: PlacedBox, pad = 2): boolean {
       return !(
         b1.right + pad < b2.left ||
         b1.left - pad > b2.right ||
@@ -1436,7 +1436,29 @@ function KgExplorerContent() {
       );
     }
 
-    const occupiedBoxes: PlacedBox[] = [];
+    function boxCollidesWithCircle(box: PlacedBox, cx: number, cy: number, r: number, pad = 2): boolean {
+      const closestX = Math.max(box.left, Math.min(cx, box.right));
+      const closestY = Math.max(box.top, Math.min(cy, box.bottom));
+      const dx = cx - closestX;
+      const dy = cy - closestY;
+      return (dx * dx + dy * dy) < (r + pad) * (r + pad);
+    }
+
+    function getIntersectionArea(b1: PlacedBox, b2: PlacedBox, pad = 2): number {
+      const xOverlap = Math.max(0, Math.min(b1.right + pad, b2.right + pad) - Math.max(b1.left - pad, b2.left - pad));
+      const yOverlap = Math.max(0, Math.min(b1.bottom + pad, b2.bottom + pad) - Math.max(b1.top - pad, b2.top - pad));
+      return xOverlap * yOverlap;
+    }
+
+    // Node orbs for true-circle collision testing (excluding node's own circle)
+    const circleNodes = projectedNodesRaw.map(pn => ({
+      id: pn.node.id,
+      x: pn.screenX,
+      y: pn.screenY,
+      r: pn.circleSize / 2
+    }));
+
+    const placedLabelBoxes: PlacedBox[] = [];
 
     // Prioritize: Selected > Connected > Hub > Department > Branch > Stem
     const sortedForCollision = [...projectedNodesRaw].sort((a, b) => {
@@ -1457,98 +1479,185 @@ function KgExplorerContent() {
       return b.depth - a.depth;
     });
 
-    // Reserve circular areas so labels don't collide with node bubbles
-    for (const pn of sortedForCollision) {
-      const r = pn.circleSize / 2;
-      occupiedBoxes.push({
-        left: pn.screenX - r - 2,
-        top: pn.screenY - r - 2,
-        right: pn.screenX + r + 2,
-        bottom: pn.screenY + r + 2
-      });
+    interface PlacementResult {
+      labelOffsetX: number;
+      labelOffsetY: number;
+      labelW: number;
+      labelH: number;
+      hasLeaderLine: boolean;
+      leaderStartX: number;
+      leaderStartY: number;
+      leaderEndX: number;
+      leaderEndY: number;
     }
 
-    const placementMap = new Map<string, 'bottom' | 'top' | 'right' | 'left' | 'compact'>();
+    const placementMap = new Map<string, PlacementResult>();
+
+    // 16 radial test angles (ordered from base direction outward to inward)
+    const ANGLE_OFFSETS = [
+      0,
+      0.39, -0.39,   // ±22.5 deg
+      0.78, -0.78,   // ±45 deg
+      1.17, -1.17,   // ±67.5 deg
+      1.57, -1.57,   // ±90 deg
+      1.96, -1.96,   // ±112.5 deg
+      2.35, -2.35,   // ±135 deg
+      2.74, -2.74,   // ±157.5 deg
+      Math.PI        // 180 deg
+    ];
 
     for (const pn of sortedForCollision) {
       const isSelected = selectedNode?.id === pn.node.id;
       const isConnected = connectedNodeIds.has(pn.node.id);
-      const isImportant = isSelected || isConnected || pn.node.isHub || pn.node.isDepartment;
-
+      const isFocus = isSelected || isConnected;
       const r = pn.circleSize / 2;
-      const labelW = Math.min(130, Math.max(48, pn.node.name.length * 7.2 + 16));
-      const labelH = pn.node.subLabel ? 28 : 18;
 
-      const candidates: Array<{ placement: 'bottom' | 'top' | 'right' | 'left'; box: PlacedBox }> = [
-        {
-          placement: 'bottom',
-          box: {
-            left: pn.screenX - labelW / 2,
-            top: pn.screenY + r + 3,
-            right: pn.screenX + labelW / 2,
-            bottom: pn.screenY + r + 3 + labelH
-          }
-        },
-        {
-          placement: 'top',
-          box: {
-            left: pn.screenX - labelW / 2,
-            top: pn.screenY - r - 3 - labelH,
-            right: pn.screenX + labelW / 2,
-            bottom: pn.screenY - r - 3
-          }
-        },
-        {
-          placement: 'right',
-          box: {
-            left: pn.screenX + r + 4,
-            top: pn.screenY - labelH / 2,
-            right: pn.screenX + r + 4 + labelW,
-            bottom: pn.screenY + labelH / 2
-          }
-        },
-        {
-          placement: 'left',
-          box: {
-            left: pn.screenX - r - 4 - labelW,
-            top: pn.screenY - labelH / 2,
-            right: pn.screenX - r - 4,
-            bottom: pn.screenY + labelH / 2
+      // Dynamic sizing based on hierarchy and name length
+      let labelW = Math.min(100, Math.max(36, pn.node.name.length * 6.2 + 14));
+      let labelH = 16;
+
+      if (pn.node.isHub || pn.node.isDepartment) {
+        labelW = Math.min(130, Math.max(48, pn.node.name.length * 7.2 + 16));
+        labelH = pn.node.subLabel ? 26 : 18;
+      } else if (pn.node.hierarchyLevel === 2) {
+        labelW = Math.min(115, Math.max(42, pn.node.name.length * 6.6 + 14));
+        labelH = (pn.node.subLabel && isFocus) ? 24 : 17;
+      }
+
+      // Base outward arborization angle (away from parent or central sun)
+      let baseAngle = Math.PI / 2; // Default downwards
+      if (pn.node.parentEntityId && projectedNodeMap.has(pn.node.parentEntityId)) {
+        const parentPn = projectedNodeMap.get(pn.node.parentEntityId)!;
+        const dx = pn.screenX - parentPn.screenX;
+        const dy = pn.screenY - parentPn.screenY;
+        if (Math.hypot(dx, dy) > 2) {
+          baseAngle = Math.atan2(dy, dx);
+        }
+      } else if (pn.node.id !== 'user-core') {
+        const corePn = projectedNodeMap.get('user-core');
+        if (corePn) {
+          const dx = pn.screenX - corePn.screenX;
+          const dy = pn.screenY - corePn.screenY;
+          if (Math.hypot(dx, dy) > 2) {
+            baseAngle = Math.atan2(dy, dx);
           }
         }
+      }
+
+      // 3 distance tiers for PUBG/GTA style dynamic nameplate clearance
+      const tiers = [
+        { tier: 0, dist: r + 4 + labelH / 2 },
+        { tier: 1, dist: r + 15 + labelH / 2 },
+        { tier: 2, dist: r + 28 + labelH / 2 }
       ];
 
-      let chosenPlacement: 'bottom' | 'top' | 'right' | 'left' | 'compact' = 'bottom';
-      let foundClean = false;
+      let cleanFound: {
+        angle: number;
+        dist: number;
+        tier: number;
+        box: PlacedBox;
+      } | null = null;
 
-      for (const cand of candidates) {
-        const collides = occupiedBoxes.some(box => boxesOverlap(cand.box, box));
-        if (!collides) {
-          chosenPlacement = cand.placement;
-          occupiedBoxes.push(cand.box);
-          foundClean = true;
-          break;
+      let bestScore = Infinity;
+      let bestCandidate: {
+        angle: number;
+        dist: number;
+        tier: number;
+        box: PlacedBox;
+      } | null = null;
+
+      for (const t of tiers) {
+        for (const offset of ANGLE_OFFSETS) {
+          const angle = baseAngle + offset;
+          const cx = pn.screenX + t.dist * Math.cos(angle);
+          const cy = pn.screenY + t.dist * Math.sin(angle);
+
+          const candBox: PlacedBox = {
+            left: cx - labelW / 2,
+            top: cy - labelH / 2,
+            right: cx + labelW / 2,
+            bottom: cy + labelH / 2
+          };
+
+          // Test collision with other node circles (immunity from self-collision)
+          let collidesCircle = false;
+          let circleOverlapScore = 0;
+          for (const c of circleNodes) {
+            if (c.id === pn.node.id) continue;
+            if (boxCollidesWithCircle(candBox, c.x, c.y, c.r, 2)) {
+              collidesCircle = true;
+              circleOverlapScore += 200;
+            }
+          }
+
+          // Test collision with already placed labels
+          let collidesLabel = false;
+          let labelOverlapScore = 0;
+          for (const lb of placedLabelBoxes) {
+            if (boxesOverlap(candBox, lb, 2)) {
+              collidesLabel = true;
+              labelOverlapScore += getIntersectionArea(candBox, lb, 2);
+            }
+          }
+
+          if (!collidesCircle && !collidesLabel) {
+            cleanFound = { angle, dist: t.dist, tier: t.tier, box: candBox };
+            break;
+          }
+
+          const penaltyScore =
+            circleOverlapScore +
+            labelOverlapScore +
+            t.tier * 40 +
+            Math.abs(offset) * 12;
+
+          if (penaltyScore < bestScore) {
+            bestScore = penaltyScore;
+            bestCandidate = { angle, dist: t.dist, tier: t.tier, box: candBox };
+          }
         }
+        if (cleanFound) break;
       }
 
-      if (!foundClean) {
-        if (isImportant) {
-          chosenPlacement = 'bottom';
-          occupiedBoxes.push(candidates[0].box);
-        } else {
-          // Gracefully collapse crowded stems to luminous synaptic dots
-          chosenPlacement = 'compact';
+      const chosen = cleanFound || bestCandidate || {
+        angle: baseAngle,
+        dist: tiers[0].dist,
+        tier: 0,
+        box: {
+          left: pn.screenX - labelW / 2,
+          top: pn.screenY + tiers[0].dist - labelH / 2,
+          right: pn.screenX + labelW / 2,
+          bottom: pn.screenY + tiers[0].dist + labelH / 2
         }
-      }
+      };
 
-      placementMap.set(pn.node.id, chosenPlacement);
+      placedLabelBoxes.push(chosen.box);
+
+      const hasLeaderLine = chosen.tier >= 1;
+      const cosA = Math.cos(chosen.angle);
+      const sinA = Math.sin(chosen.angle);
+
+      placementMap.set(pn.node.id, {
+        labelOffsetX: chosen.dist * cosA,
+        labelOffsetY: chosen.dist * sinA,
+        labelW,
+        labelH,
+        hasLeaderLine,
+        leaderStartX: (r + 1) * cosA,
+        leaderStartY: (r + 1) * sinA,
+        leaderEndX: (chosen.dist - labelH / 2 - 2) * cosA,
+        leaderEndY: (chosen.dist - labelH / 2 - 2) * sinA
+      });
     }
 
     // Sort nodes back-to-front (painter's algorithm)
-    const finalNodes = projectedNodesRaw.map(pn => ({
-      ...pn,
-      labelPlacement: placementMap.get(pn.node.id) || 'bottom'
-    })).sort((a, b) => a.depth - b.depth);
+    const finalNodes = projectedNodesRaw.map(pn => {
+      const placement = placementMap.get(pn.node.id)!;
+      return {
+        ...pn,
+        ...placement
+      };
+    }).sort((a, b) => a.depth - b.depth);
 
     // 3. Project all edges
     const projectedEdges: Array<{
@@ -1993,6 +2102,26 @@ function KgExplorerContent() {
                     );
                   })}
                 </G>
+
+                {/* Dynamic Leader Lines connecting node orbs to offset nameplates */}
+                <G id="leader-lines">
+                  {projectedGraph.nodes.map((pn) => {
+                    if (!pn.hasLeaderLine) return null;
+                    return (
+                      <Line
+                        key={`leader-${pn.node.id}`}
+                        x1={pn.screenX + pn.leaderStartX}
+                        y1={pn.screenY + pn.leaderStartY}
+                        x2={pn.screenX + pn.leaderEndX}
+                        y2={pn.screenY + pn.leaderEndY}
+                        stroke={pn.node.color || 'rgba(255,255,255,0.45)'}
+                        strokeWidth={1}
+                        strokeDasharray="2, 2"
+                        opacity={0.65}
+                      />
+                    );
+                  })}
+                </G>
               </Svg>
 
               {/* 2. Interactive Midpoint Relationship Badges */}
@@ -2041,36 +2170,6 @@ function KgExplorerContent() {
                 const isSelected = selectedNode?.id === n.id;
                 const isConnected = connectedNodeIds.has(n.id);
                 const circleSize = pn.circleSize;
-                const r = circleSize / 2;
-                const isCompact = pn.labelPlacement === 'compact';
-
-                // Dynamic PUBG/GTA label positioning based on collision test
-                let labelStyle: any = {
-                  position: 'absolute',
-                  top: r + 3,
-                  alignSelf: 'center'
-                };
-                if (pn.labelPlacement === 'top') {
-                  labelStyle = {
-                    position: 'absolute',
-                    bottom: r + 3,
-                    alignSelf: 'center'
-                  };
-                } else if (pn.labelPlacement === 'right') {
-                  labelStyle = {
-                    position: 'absolute',
-                    left: r + 4,
-                    top: -14,
-                    alignSelf: 'center'
-                  };
-                } else if (pn.labelPlacement === 'left') {
-                  labelStyle = {
-                    position: 'absolute',
-                    right: r + 4,
-                    top: -14,
-                    alignSelf: 'center'
-                  };
-                }
 
                 return (
                   <View
@@ -2086,6 +2185,7 @@ function KgExplorerContent() {
                     ]}
                     pointerEvents="box-none"
                   >
+                    {/* Spherical Bubble Orb */}
                     <TouchableOpacity
                       style={styles.nodeTouchable}
                       onPress={() => handleNodePress(n)}
@@ -2173,34 +2273,48 @@ function KgExplorerContent() {
                           />
                         )}
                       </View>
+                    </TouchableOpacity>
 
-                      {/* Dynamic Non-Overlapping Nameplate (PUBG / GTA 360 Vision) */}
-                      {!isCompact && (
-                        <View
-                          style={[
-                            styles.labelPill,
-                            labelStyle,
-                            isSelected && styles.labelPillSelected,
-                            isConnected && styles.labelPillConnected
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.labelText,
-                              isSelected && styles.labelTextSelected,
-                              n.isDepartment && { color: n.color }
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {n.name}
-                          </Text>
-                          {n.subLabel ? (
-                            <Text style={styles.subLabelText} numberOfLines={1}>
-                              {n.subLabel}
-                            </Text>
-                          ) : null}
-                        </View>
-                      )}
+                    {/* Dynamic Non-Overlapping Nameplate (PUBG / GTA 360 Dynamic HUD) */}
+                    <TouchableOpacity
+                      style={[
+                        styles.labelPill,
+                        {
+                          position: 'absolute',
+                          left: pn.labelOffsetX - pn.labelW / 2,
+                          top: pn.labelOffsetY - pn.labelH / 2,
+                          width: pn.labelW,
+                          height: pn.labelH,
+                          borderColor: isSelected
+                            ? '#38BDF8'
+                            : isConnected
+                            ? '#38BDF8'
+                            : n.isDepartment
+                            ? n.color
+                            : 'rgba(255,255,255,0.22)'
+                        },
+                        isSelected && styles.labelPillSelected,
+                        isConnected && styles.labelPillConnected
+                      ]}
+                      onPress={() => handleNodePress(n)}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={[
+                          styles.labelText,
+                          isSelected && styles.labelTextSelected,
+                          n.isDepartment && { color: n.color }
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {n.name}
+                      </Text>
+                      {pn.labelH > 20 && n.subLabel ? (
+                        <Text style={styles.subLabelText} numberOfLines={1}>
+                          {n.subLabel}
+                        </Text>
+                      ) : null}
                     </TouchableOpacity>
                   </View>
                 );
@@ -2576,31 +2690,29 @@ const styles = StyleSheet.create({
   },
   labelPill: {
     backgroundColor: 'rgba(15,23,42,0.95)',
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(255,255,255,0.22)',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
+    borderRadius: 7,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    maxWidth: 150,
-    minWidth: 44,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 6
+    shadowRadius: 3,
+    elevation: 5
   },
   labelPillSelected: {
     borderColor: '#38BDF8',
-    backgroundColor: 'rgba(14,116,144,0.96)'
+    backgroundColor: 'rgba(14,116,144,0.98)'
   },
   labelPillConnected: {
     borderColor: '#38BDF8',
-    backgroundColor: 'rgba(15,23,42,0.96)'
+    backgroundColor: 'rgba(15,23,42,0.98)'
   },
   labelText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
     color: '#F4F4F5',
     textAlign: 'center'
@@ -2610,9 +2722,9 @@ const styles = StyleSheet.create({
     fontWeight: '800'
   },
   subLabelText: {
-    fontSize: 8,
+    fontSize: 7.5,
     fontWeight: '500',
-    color: '#A1A1AA',
+    color: '#94A3B8',
     textAlign: 'center',
     marginTop: 0.5
   },
