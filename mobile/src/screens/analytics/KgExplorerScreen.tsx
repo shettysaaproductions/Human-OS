@@ -1865,37 +1865,113 @@ function KgExplorerContent() {
     }
   }, [selectedNode, isDirectEditMode, talkInput, directInput, fetchGraph]);
 
-  const handleConfirmDelete = useCallback((node: GraphNode) => {
-    Alert.alert(
-      'Delete Memory Bubble?',
-      `Are you sure you want to remove "${node.name}" from your neural memory? Nova will surgically archive and forget this fact.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setSyncing(true);
-              const res = await api.delete(`/analytics/kg/node/${encodeURIComponent(node.id)}`, {
-                params: { rawKey: node.raw_key, nodeName: node.name },
-                data: { rawKey: node.raw_key, nodeName: node.name }
-              });
-              if (res.data?.success) {
-                setSelectedNode(null);
-                fetchGraph(false);
-              } else {
-                Alert.alert('Error', res.data?.error || 'Could not delete node');
+  const handleConfirmDelete = useCallback(async (node: GraphNode) => {
+    try {
+      setSyncing(true);
+      const previewRes = await api.get(`/analytics/kg/node/${encodeURIComponent(node.id)}/delete-preview`, {
+        params: { rawKey: node.raw_key, nodeName: node.name }
+      });
+      setSyncing(false);
+
+      const preview = previewRes.data?.preview;
+      const stemsCount = preview?.stemsCount || 0;
+      const remindersCount = preview?.remindersCount || 0;
+      const stemNames = (preview?.stems || []).map((s: any) => s.value || s.key).slice(0, 3).join(', ');
+
+      if (stemsCount > 0 || remindersCount > 0) {
+        Alert.alert(
+          `Delete "${node.name}" & Connected Stems?`,
+          `This bubble has ${stemsCount} connected detail(s)${stemNames ? ` (${stemNames}${stemsCount > 3 ? '...' : ''})` : ''} and ${remindersCount} active reminder(s).\n\nDeleting it will permanently remove the bubble, all downstream stems, and cancel connected reminders.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete Everything',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  setSyncing(true);
+                  const res = await api.delete(`/analytics/kg/node/${encodeURIComponent(node.id)}`, {
+                    params: { rawKey: node.raw_key, nodeName: node.name, cascade: true },
+                    data: { rawKey: node.raw_key, nodeName: node.name, cascade: true }
+                  });
+                  if (res.data?.success) {
+                    setSelectedNode(null);
+                    fetchGraph(false);
+                  } else {
+                    Alert.alert('Error', res.data?.error || 'Could not delete node');
+                  }
+                } catch (err: any) {
+                  Alert.alert('Delete Error', err?.response?.data?.error || err?.message || 'Failed to delete');
+                } finally {
+                  setSyncing(false);
+                }
               }
-            } catch (err: any) {
-              Alert.alert('Delete Error', err?.response?.data?.error || err?.message || 'Failed to delete');
-            } finally {
-              setSyncing(false);
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Delete Memory Bubble?',
+          `Are you sure you want to remove "${node.name}" from your neural memory? Nova will surgically archive and forget this fact.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  setSyncing(true);
+                  const res = await api.delete(`/analytics/kg/node/${encodeURIComponent(node.id)}`, {
+                    params: { rawKey: node.raw_key, nodeName: node.name, cascade: true },
+                    data: { rawKey: node.raw_key, nodeName: node.name, cascade: true }
+                  });
+                  if (res.data?.success) {
+                    setSelectedNode(null);
+                    fetchGraph(false);
+                  } else {
+                    Alert.alert('Error', res.data?.error || 'Could not delete node');
+                  }
+                } catch (err: any) {
+                  Alert.alert('Delete Error', err?.response?.data?.error || err?.message || 'Failed to delete');
+                } finally {
+                  setSyncing(false);
+                }
+              }
+            }
+          ]
+        );
+      }
+    } catch (err: any) {
+      setSyncing(false);
+      Alert.alert(
+        'Delete Memory Bubble?',
+        `Are you sure you want to remove "${node.name}" from your neural memory?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                setSyncing(true);
+                const res = await api.delete(`/analytics/kg/node/${encodeURIComponent(node.id)}`, {
+                  params: { rawKey: node.raw_key, nodeName: node.name, cascade: true },
+                  data: { rawKey: node.raw_key, nodeName: node.name, cascade: true }
+                });
+                if (res.data?.success) {
+                  setSelectedNode(null);
+                  fetchGraph(false);
+                }
+              } catch (delErr: any) {
+                Alert.alert('Delete Error', delErr?.message || 'Failed to delete');
+              } finally {
+                setSyncing(false);
+              }
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }
   }, [fetchGraph]);
 
   const handleOpenInChat = useCallback(() => {

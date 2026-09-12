@@ -823,72 +823,22 @@ Return ONLY valid JSON:
     const keyList = Array.from(candidateKeys).filter(Boolean);
 
     if (action === 'DELETE') {
-      // 1. Soft-tombstone in memories table
-      if (isUuid) {
-        await supabaseAdmin
-          .from('memories')
-          .update({
-            is_archived: true,
-            lifecycle_state: 'INVALIDATED',
-            supersession_reason: `[Surgical User Alteration] ${userInstruction || 'Deleted by user'}`,
-            updated_at: now
-          })
-          .eq('user_id', userId)
-          .eq('id', nodeId);
-      }
-      if (keyList.length > 0) {
-        await supabaseAdmin
-          .from('memories')
-          .update({
-            is_archived: true,
-            lifecycle_state: 'INVALIDATED',
-            supersession_reason: `[Surgical User Alteration] ${userInstruction || 'Deleted by user'}`,
-            updated_at: now
-          })
-          .eq('user_id', userId)
-          .in('key', keyList);
-      }
-
-      // 2. Delete from working_memory
-      if (isUuid) {
-        await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).eq('id', nodeId);
-      }
-      if (keyList.length > 0) {
-        await supabaseAdmin.from('working_memory').delete().eq('user_id', userId).in('key', keyList);
-      }
-
-      // 3. Delete from kg_nodes and kg_edges
-      const kgMatchQuery = supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId);
-      const { data: matchedKgNodes } = isUuid
-        ? await kgMatchQuery.or(`id.eq.${nodeId},name.eq.${effectiveName}`)
-        : await kgMatchQuery.in('name', [effectiveName, ...keyList]);
-
-      for (const kn of (matchedKgNodes || [])) {
-        await supabaseAdmin.from('kg_edges').delete().or(`source_node_id.eq.${kn.id},target_node_id.eq.${kn.id}`);
-        await supabaseAdmin.from('kg_nodes').delete().eq('id', kn.id);
-      }
-
-      // 4. Record in correction ledger
-      try {
-        await supabaseAdmin.from('nova_correction_ledger').insert({
-          user_id: userId,
-          correction_source: 'user_surgical_alteration',
-          field_name: effectiveKey,
-          previous_value: currentValue || '[UNKNOWN]',
-          corrected_value: '[DELETED]',
-          reason: userInstruction || 'User deleted bubble from 3D Knowledge Graph',
-          created_at: now
-        });
-      } catch {}
-
-      invalidateAnalyticsCache(userId);
+      const { entityRelationshipCorrectionService } = await import('../services/EntityRelationshipCorrectionService');
+      const deleteResult = await entityRelationshipCorrectionService.cascadingDeleteEntityBubble(userId, {
+        nodeId,
+        rawKey: effectiveKey,
+        entityName: effectiveName,
+        reason: userInstruction || 'User deleted bubble from 3D Knowledge Graph'
+      });
 
       res.status(200).json({
         success: true,
         action: 'DELETE',
-        message: novaReply,
         nodeId,
-        key: effectiveKey
+        key: effectiveKey,
+        message: deleteResult.message,
+        novaReply: novaReply || deleteResult.message,
+        cascadeResult: deleteResult
       });
       return;
     }
@@ -1005,6 +955,36 @@ Return ONLY valid JSON:
   }
 });
 
+// GET /analytics/kg/node/:nodeId/delete-preview — preview affected stems and reminders before cascading deletion
+analyticsRouter.get('/kg/node/:nodeId/delete-preview', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { nodeId } = req.params;
+    const rawKey = (req.query.rawKey as string) || '';
+    const nodeName = (req.query.nodeName as string) || '';
+
+    const { entityRelationshipCorrectionService } = await import('../services/EntityRelationshipCorrectionService');
+    const preview = await entityRelationshipCorrectionService.previewCascadingDelete(userId, {
+      nodeId,
+      rawKey,
+      entityName: nodeName
+    });
+
+    res.status(200).json({
+      success: true,
+      preview
+    });
+  } catch (err) {
+    logger.error('Failed to get cascading delete preview', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
 // DELETE /analytics/kg/node/:nodeId — direct surgical removal of a node
 analyticsRouter.delete('/kg/node/:nodeId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -1017,9 +997,29 @@ analyticsRouter.delete('/kg/node/:nodeId', async (req: Request, res: Response, n
     const { nodeId } = req.params;
     const rawKey = (req.query.rawKey as string) || (req.body?.rawKey as string) || '';
     const nodeName = (req.query.nodeName as string) || (req.body?.nodeName as string) || '';
+    const cascade = req.query.cascade === 'true' || req.body?.cascade === true || req.body?.cascade === 'true';
     const now = new Date().toISOString();
 
     const effectiveKey = rawKey || (nodeId?.startsWith('mem-') ? nodeId.replace(/^mem-/, '') : (nodeId?.startsWith('wm-') ? nodeId.replace(/^wm-/, '') : canonicalizeKey(nodeName).canonical));
+
+    if (cascade) {
+      const { entityRelationshipCorrectionService } = await import('../services/EntityRelationshipCorrectionService');
+      const deleteResult = await entityRelationshipCorrectionService.cascadingDeleteEntityBubble(userId, {
+        nodeId,
+        rawKey: effectiveKey,
+        entityName: nodeName,
+        reason: 'User confirmed cascading deletion from 3D Knowledge Graph'
+      });
+
+      res.status(200).json({
+        success: true,
+        message: deleteResult.message,
+        nodeId,
+        key: effectiveKey,
+        cascadeResult: deleteResult
+      });
+      return;
+    }
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeId || '');
     const candidateKeys = new Set<string>();

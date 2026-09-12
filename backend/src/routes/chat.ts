@@ -1402,6 +1402,29 @@ chatRouter.post(
         }
       }
 
+      // Conversational Bubble & Stem Cascading Deletion
+      const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(effectiveMessage);
+      if (deleteIntent) {
+        try {
+          const deleteResult = await entityRelationshipCorrectionService.cascadingDeleteEntityBubble(userId, {
+            entityName: deleteIntent.entityName,
+            reason: effectiveMessage
+          });
+
+          const deleteReply = entityRelationshipCorrectionService.generateCascadingDeleteReply(deleteResult);
+          const deleteDirective = `\n\n## 🗑️ CASCADING BUBBLE & STEM DELETION CONFIRMATION (CRITICAL - TOP PRIORITY)
+The user explicitly asked to delete "${deleteIntent.entityName}" and its stems/reminders.
+You have ALREADY permanently deleted "${deleteIntent.entityName}", ${deleteResult.deletedStemsCount} connected stem detail(s) (${deleteResult.deletedStemNames.slice(0, 3).join(', ')}), and cancelled ${deleteResult.cancelledRemindersCount} active reminder(s).
+CRITICAL INSTRUCTIONS:
+1. Reassure the user warmly and directly in 1-2 sentences (in natural WhatsApp Hinglish/Hindi or English matching user) that ${deleteIntent.entityName} and all connected stems (walk routine, food, breed, color, reminders) have been completely removed from the graph and memory.
+2. Example response: "${deleteReply}"
+3. Do NOT ask for confirmation or debate, as the deletion has already been executed successfully in the database and graph.`;
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + deleteDirective;
+        } catch (delErr: any) {
+          logger.warn('[Chat] Conversational cascading delete warning', { error: delErr?.message });
+        }
+      }
+
       // Entity Relationship & Universal Reclassification Execution & Directive
       const entityCorrection = turnAnalysis.entityCorrection || await entityRelationshipCorrectionService.detectOrInferCorrection(effectiveMessage);
       if (entityCorrection) {
@@ -1413,7 +1436,15 @@ chatRouter.post(
 
         const oldLabel = entityCorrection.oldRelation || entityCorrection.oldDomain;
         const newDomainTitle = DOMAIN_TAXONOMY[entityCorrection.newDomain]?.title || entityCorrection.newDomain;
-        const branchShiftDirective = `\n\n## 🌿 UNIVERSAL ENTITY & TOPIC RECLASSIFICATION (CRITICAL - TOP PRIORITY)\nThe user explicitly corrected that "${entityCorrection.entityName}" is NOT "${oldLabel}", but is "${entityCorrection.newRelation}" (${newDomainTitle})!\nYou have ALREADY severed ${entityCorrection.entityName} from the ${entityCorrection.oldDomain} compartment/branch and reclassified it into ${entityCorrection.newDomain} (${entityCorrection.newRelation}).\nCRITICAL INSTRUCTIONS:\n1. Warmly, smoothly, and casually confirm that you've updated this in your memory: acknowledge that ${entityCorrection.entityName} is now filed under ${entityCorrection.newRelation} (${newDomainTitle}) and no longer under ${oldLabel}.\n2. Example response: "Arre got it Saa! Maine ${entityCorrection.entityName} ko ${oldLabel} se hata kar tumhare ${entityCorrection.newRelation} (${newDomainTitle}) me move kar diya hai 😊"\n3. Do NOT debate or question the user. Keep it natural, warm, and concise (1-2 sentences).`;
+        const branchShiftDirective = entityCorrection.isAttributeTransfer
+          ? `\n\n## 🌿 UNIVERSAL ATTRIBUTE & TIMING TRANSFER (CRITICAL - TOP PRIORITY)
+The user explicitly updated their schedule/attribute: "${entityCorrection.transferredValue || entityCorrection.entityName}" is NOT for "${oldLabel}", but belongs to "${entityCorrection.newRelation}" (${newDomainTitle})!
+You have ALREADY severed it from "${oldLabel}" and reclassified it under "${entityCorrection.newRelation}" (${newDomainTitle}).
+CRITICAL INSTRUCTIONS:
+1. Warmly, smoothly, and casually confirm this update (e.g. "Got it Saa! Maine ${entityCorrection.transferredValue || entityCorrection.entityName} ko ${oldLabel} se hata kar tumhare ${entityCorrection.newRelation} (${newDomainTitle}) me shift kar diya hai 😊").
+2. Keep it natural, concise (1-2 sentences).`
+          : `\n\n## 🌿 UNIVERSAL ENTITY & TOPIC RECLASSIFICATION (CRITICAL - TOP PRIORITY)
+The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${oldLabel}", but is "${entityCorrection.newRelation}" (${newDomainTitle})!\nYou have ALREADY severed ${entityCorrection.entityName} from the ${entityCorrection.oldDomain} compartment/branch and reclassified it into ${entityCorrection.newDomain} (${entityCorrection.newRelation}).\nCRITICAL INSTRUCTIONS:\n1. Warmly, smoothly, and casually confirm that you've updated this in your memory: acknowledge that ${entityCorrection.entityName} is now filed under ${entityCorrection.newRelation} (${newDomainTitle}) and no longer under ${oldLabel}.\n2. Example response: "Arre got it Saa! Maine ${entityCorrection.entityName} ko ${oldLabel} se hata kar tumhare ${entityCorrection.newRelation} (${newDomainTitle}) me move kar diya hai 😊"\n3. Do NOT debate or question the user. Keep it natural, warm, and concise (1-2 sentences).`;
         turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + branchShiftDirective;
       }
 

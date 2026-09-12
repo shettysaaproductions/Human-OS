@@ -28,6 +28,7 @@ export interface SemanticUnit {
   isProtected?: boolean;
   factClass?: FactClassification;
   temporalMetadata?: TemporalMetadata;
+  memoryDomain?: string;
 }
 
 /**
@@ -151,15 +152,23 @@ export class TurnAnalyzer {
         // 0. Check for entity relationship correction (e.g. "Ijaz is not my family member, he is my office friend")
         const clauseEntityCorrection = entityRelationshipCorrectionService.detectEntityCorrection(clause) || detectedEntityCorrection;
         if (clauseEntityCorrection && !units.some(u => u.relationship === clauseEntityCorrection.newRelation && u.type === 'correction')) {
-          const eSlug = clauseEntityCorrection.entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          const newRelSlug = clauseEntityCorrection.newRelation.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          let finalKey = `${newRelSlug}_${eSlug}`;
-          if (clauseEntityCorrection.newDomain === 'work') {
-            finalKey = (newRelSlug.includes('colleague') || newRelSlug.includes('office') || newRelSlug.includes('coworker')) ? `colleague_${eSlug}` : `profession_${eSlug}`;
-          } else if (clauseEntityCorrection.newDomain === 'family') {
-            finalKey = (newRelSlug.includes('dog') || newRelSlug.includes('cat') || newRelSlug.includes('pet')) ? `pet_${eSlug}` : `friend_${eSlug}`;
+          let finalKey: string;
+          let finalVal: string;
+
+          if (clauseEntityCorrection.isAttributeTransfer) {
+            finalKey = clauseEntityCorrection.targetKey || 'gym_time';
+            finalVal = `${clauseEntityCorrection.newRelation} is ${clauseEntityCorrection.transferredValue || clauseEntityCorrection.entityName}`;
+          } else {
+            const eSlug = clauseEntityCorrection.entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            const newRelSlug = clauseEntityCorrection.newRelation.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            finalKey = `${newRelSlug}_${eSlug}`;
+            if (clauseEntityCorrection.newDomain === 'work') {
+              finalKey = (newRelSlug.includes('colleague') || newRelSlug.includes('office') || newRelSlug.includes('coworker')) ? `colleague_${eSlug}` : `profession_${eSlug}`;
+            } else if (clauseEntityCorrection.newDomain === 'family') {
+              finalKey = (newRelSlug.includes('dog') || newRelSlug.includes('cat') || newRelSlug.includes('pet')) ? `pet_${eSlug}` : `friend_${eSlug}`;
+            }
+            finalVal = `${clauseEntityCorrection.entityName} is ${clauseEntityCorrection.newRelation}`;
           }
-          const finalVal = `${clauseEntityCorrection.entityName} is ${clauseEntityCorrection.newRelation}`;
 
           units.push({
             unitId: crypto.randomUUID(),
@@ -173,9 +182,10 @@ export class TurnAnalyzer {
             memoryCandidate: true,
             actionCandidate: false,
             factKey: finalKey,
-            factValue: finalVal,
+            factValue: clauseEntityCorrection.isAttributeTransfer ? (clauseEntityCorrection.transferredValue || clauseEntityCorrection.entityName) : finalVal,
             oldValue: clauseEntityCorrection.oldRelation,
             relationship: clauseEntityCorrection.newRelation,
+            memoryDomain: clauseEntityCorrection.newDomain,
             isProtected: true,
             factClass: 'PROTECTED_FACT'
           });
