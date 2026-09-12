@@ -1,14 +1,14 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, ActivityIndicator,
   TouchableOpacity, ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import Svg, { G, Line, Path } from 'react-native-svg';
+import Svg, { G, Line, Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, Easing
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, Easing, runOnJS
 } from 'react-native-reanimated';
 import { api } from '../../services/api';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -40,6 +40,9 @@ interface GraphNode {
   treePath?: string[];
   x: number;
   y: number;
+  x3d?: number;
+  y3d?: number;
+  z3d?: number;
 }
 
 interface GraphEdge {
@@ -231,7 +234,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     hierarchyLevel: 1,
     treePath: [coreName],
     x: CENTER,
-    y: CENTER
+    y: CENTER,
+    x3d: 0,
+    y3d: 0,
+    z3d: 0
   };
   nodes.push(coreNode);
   nodeMap.set(coreNode.id, coreNode);
@@ -261,11 +267,21 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
   const deptList: DepartmentMeta[] = [];
   const DEPT_KEYS = ['family', 'work', 'goals', 'lifestyle', 'identity'];
 
+  // Anatomical 3D Brain Coordinates for 5 Main Functional Lobes
+  const DEPT_3D_COORDS: Record<string, { x: number; y: number; z: number }> = {
+    goals: { x: -40, y: 340, z: 120 },       // Prefrontal Polar Cortex (Dorsal & Anterior)
+    work: { x: -300, y: 150, z: 230 },       // Left Frontal Executive Lobe
+    family: { x: 300, y: -70, z: 220 },      // Right Temporal & Limbic Lobe
+    lifestyle: { x: 260, y: -180, z: -250 }, // Right Occipital & Somatosensory Lobe
+    identity: { x: -250, y: -160, z: -250 }  // Left Parietal Cortical Lobe
+  };
+
   for (const d of DEPT_KEYS) {
     const meta = DOMAIN_COLORS[d] || DOMAIN_COLORS.identity;
     const angle = DEPT_ANGLES[d] ?? 0;
     const hx = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.cos(angle));
     const hy = Math.round(CENTER + DEPT_ORBIT_RADIUS * Math.sin(angle));
+    const coords3d = DEPT_3D_COORDS[d] || { x: 0, y: 0, z: 0 };
 
     const hubId = `dept-${d}`;
     const hubNode: GraphNode = {
@@ -284,7 +300,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       hierarchyLevel: 1,
       treePath: [coreName, meta.short],
       x: hx,
-      y: hy
+      y: hy,
+      x3d: coords3d.x,
+      y3d: coords3d.y,
+      z3d: coords3d.z
     };
     nodes.push(hubNode);
     nodeMap.set(hubNode.id, hubNode);
@@ -445,6 +464,26 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     const branchDist = 330;
     const branchSpread = Math.min(Math.PI * 0.85, Math.max(0.55, (branchCount - 1) * 0.46));
 
+    // 3D Direction & Orthogonal Basis for Branch Arborization
+    const h3d = coords3d;
+    const hLen = Math.sqrt(h3d.x * h3d.x + h3d.y * h3d.y + h3d.z * h3d.z) || 1;
+    const ux = h3d.x / hLen;
+    const uy = h3d.y / hLen;
+    const uz = h3d.z / hLen;
+
+    let px3d = -uy;
+    let py3d = ux;
+    let pz3d = 0;
+    const pLen = Math.sqrt(px3d * px3d + py3d * py3d);
+    if (pLen > 0.001) {
+      px3d /= pLen; py3d /= pLen;
+    } else {
+      px3d = 1; py3d = 0; pz3d = 0;
+    }
+    const qx3d = uy * pz3d - uz * py3d;
+    const qy3d = uz * px3d - ux * pz3d;
+    const qz3d = ux * py3d - uy * px3d;
+
     branchItems.forEach((bMem, bIdx) => {
       const names = toDisplayNames(bMem.raw_key, bMem.value, bMem.name);
       const frac = branchCount === 1 ? 0 : (bIdx / (branchCount - 1) - 0.5);
@@ -452,6 +491,12 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
       const bx = Math.round(hx + branchDist * Math.cos(bAngle));
       const by = Math.round(hy + branchDist * Math.sin(bAngle));
+
+      const branchAngle3d = frac * Math.PI * 0.75;
+      const branchDist3d = 190;
+      const bx3d = Math.round(h3d.x + ux * (branchDist3d * 0.4) + (px3d * Math.cos(branchAngle3d) + qx3d * Math.sin(branchAngle3d)) * branchDist3d);
+      const by3d = Math.round(h3d.y + uy * (branchDist3d * 0.4) + (py3d * Math.cos(branchAngle3d) + qy3d * Math.sin(branchAngle3d)) * branchDist3d);
+      const bz3d = Math.round(h3d.z + uz * (branchDist3d * 0.4) + (pz3d * Math.cos(branchAngle3d) + qz3d * Math.sin(branchAngle3d)) * branchDist3d);
 
       const treePath = bMem.treePath || [coreName, meta.short, names.title];
 
@@ -472,7 +517,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         hierarchyLevel: 2,
         treePath,
         x: bx,
-        y: by
+        y: by,
+        x3d: bx3d,
+        y3d: by3d,
+        z3d: bz3d
       };
 
       nodes.push(branchNode);
@@ -546,6 +594,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       const stemDist = 240;
       const stemSpread = Math.min(Math.PI * 0.95, Math.max(0.55, (sCount - 1) * 0.44));
 
+      const pBranch3d = (parentNode && parentNode.x3d !== undefined)
+        ? { x: parentNode.x3d, y: parentNode.y3d || 0, z: parentNode.z3d || 0 }
+        : h3d;
+
       stems.forEach((sMem, sIdx) => {
         const names = toDisplayNames(sMem.raw_key, sMem.value, sMem.name);
         const sFrac = sCount === 1 ? 0 : (sIdx / (sCount - 1) - 0.5);
@@ -555,6 +607,14 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         const effectiveStemDist = stemDist + (sIdx % 2 === 0 ? 0 : 70);
         const sx = Math.round(px + effectiveStemDist * Math.cos(sAngle));
         const sy = Math.round(py + effectiveStemDist * Math.sin(sAngle));
+
+        const stemAngle3d = sFrac * Math.PI * 0.9;
+        const stemDist3d = 125 + (sIdx % 2 === 0 ? 0 : 35);
+        const zOffset = (sIdx % 2 === 0 ? 40 : -40);
+
+        const sx3d = Math.round(pBranch3d.x + (px3d * Math.cos(stemAngle3d) + qx3d * Math.sin(stemAngle3d)) * stemDist3d);
+        const sy3d = Math.round(pBranch3d.y + (py3d * Math.cos(stemAngle3d) + qy3d * Math.sin(stemAngle3d)) * stemDist3d);
+        const sz3d = Math.round(pBranch3d.z + zOffset + (pz3d * Math.cos(stemAngle3d) + qz3d * Math.sin(stemAngle3d)) * stemDist3d);
 
         const treePath = sMem.treePath || (parentNode ? [...(parentNode.treePath || []), names.title] : [coreName, meta.short, names.title]);
 
@@ -575,7 +635,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
           hierarchyLevel: 3,
           treePath,
           x: sx,
-          y: sy
+          y: sy,
+          x3d: sx3d,
+          y3d: sy3d,
+          z3d: sz3d
         };
 
         nodes.push(stemNode);
@@ -991,26 +1054,45 @@ function KgExplorerContent() {
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
 
-  // Default overview placing center (1000, 1000) dead-center on phone screen
-  const defaultScale = Math.min((SCREEN_WIDTH - 24) / 1100, 0.38);
-  const defaultTranslateX = (SCREEN_WIDTH - WORLD_SIZE) / 2;
-  const defaultTranslateY = (GRAPH_HEIGHT - WORLD_SIZE) / 2;
+  // Default 3D perspective camera state
+  const defaultCamera = {
+    pitch: 0.24, // ~14 deg tilt (X-axis)
+    yaw: 0.35,   // ~20 deg orbit (Y-axis)
+    roll: 0.0,   // 0 deg roll (Z-axis)
+    panX: 0,
+    panY: 0,
+    scale: 0.85
+  };
 
-  const translateX = useSharedValue(defaultTranslateX);
-  const translateY = useSharedValue(defaultTranslateY);
-  const savedTranslateX = useSharedValue(defaultTranslateX);
-  const savedTranslateY = useSharedValue(defaultTranslateY);
+  const pendingCameraRef = useRef(defaultCamera);
+  const [camera, setCamera] = useState(defaultCamera);
+  const rafRef = useRef<number | null>(null);
 
-  const scale = useSharedValue(defaultScale);
-  const savedScale = useSharedValue(defaultScale);
+  const pitch = useSharedValue(0.24);
+  const yaw = useSharedValue(0.35);
+  const roll = useSharedValue(0.0);
+  const panX = useSharedValue(0);
+  const panY = useSharedValue(0);
+  const scale = useSharedValue(0.85);
 
-  const pitch = useSharedValue(0.24); // ~14 deg tilt (X-axis)
-  const yaw = useSharedValue(0.35);   // ~20 deg angle (Y-axis)
-  const roll = useSharedValue(0.0);   // 0 deg angle (Z-axis)
   const savedPitch = useSharedValue(0.24);
   const savedYaw = useSharedValue(0.35);
   const savedRoll = useSharedValue(0.0);
+  const savedPanX = useSharedValue(0);
+  const savedPanY = useSharedValue(0);
+  const savedScale = useSharedValue(0.85);
+
   const [isAutoOrbit, setIsAutoOrbit] = useState(false);
+
+  // Throttled 60/120 FPS camera sync to JS thread for mathematical 3D projection
+  const syncCamera = useCallback((y: number, p: number, r: number, px: number, py: number, s: number) => {
+    pendingCameraRef.current = { yaw: y, pitch: p, roll: r, panX: px, panY: py, scale: s };
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setCamera({ ...pendingCameraRef.current });
+    });
+  }, []);
 
   const fetchGraph = useCallback(async (isBackground = false) => {
     try {
@@ -1079,12 +1161,14 @@ function KgExplorerContent() {
         'worklet';
         const next = Math.max(0.25, Math.min(5.0, savedScale.value * e.scale));
         scale.value = next;
+        runOnJS(syncCamera)(yaw.value, pitch.value, roll.value, panX.value, panY.value, next);
       })
       .onEnd(() => {
         'worklet';
         savedScale.value = scale.value;
+        runOnJS(syncCamera)(yaw.value, pitch.value, roll.value, panX.value, panY.value, scale.value);
       });
-  }, [scale, savedScale]);
+  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera]);
 
   const panGesture = useMemo(() => {
     return Gesture.Pan()
@@ -1092,13 +1176,14 @@ function KgExplorerContent() {
       .onUpdate((e) => {
         'worklet';
         if (viewMode === '3d' && gestureMode === 'orbit') {
-          // Full 360-degree free continuous rotation around Y (yaw) and X (pitch) with zero clamping!
-          yaw.value = savedYaw.value + (e.translationX * 0.008);
-          pitch.value = savedPitch.value - (e.translationY * 0.008);
+          // Continuous 360-degree rotation around Y (yaw) and X (pitch) with zero clamping!
+          yaw.value = savedYaw.value + (e.translationX * 0.007);
+          pitch.value = savedPitch.value - (e.translationY * 0.007);
         } else {
-          translateX.value = savedTranslateX.value + e.translationX;
-          translateY.value = savedTranslateY.value + e.translationY;
+          panX.value = savedPanX.value + e.translationX;
+          panY.value = savedPanY.value + e.translationY;
         }
+        runOnJS(syncCamera)(yaw.value, pitch.value, roll.value, panX.value, panY.value, scale.value);
       })
       .onEnd(() => {
         'worklet';
@@ -1106,11 +1191,12 @@ function KgExplorerContent() {
           savedYaw.value = yaw.value;
           savedPitch.value = pitch.value;
         } else {
-          savedTranslateX.value = translateX.value;
-          savedTranslateY.value = translateY.value;
+          savedPanX.value = panX.value;
+          savedPanY.value = panY.value;
         }
+        runOnJS(syncCamera)(yaw.value, pitch.value, roll.value, panX.value, panY.value, scale.value);
       });
-  }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, translateX, translateY, savedTranslateX, savedTranslateY]);
+  }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, panX, panY, savedPanX, savedPanY, roll, scale, syncCamera]);
 
   const rotationGesture = useMemo(() => {
     return Gesture.Rotation()
@@ -1119,188 +1205,87 @@ function KgExplorerContent() {
         if (viewMode === '3d') {
           // Free 360-degree continuous roll around Z-axis!
           roll.value = savedRoll.value + e.rotation;
+          runOnJS(syncCamera)(yaw.value, pitch.value, roll.value, panX.value, panY.value, scale.value);
         }
       })
       .onEnd(() => {
         'worklet';
         if (viewMode === '3d') {
           savedRoll.value = roll.value;
+          runOnJS(syncCamera)(yaw.value, pitch.value, roll.value, panX.value, panY.value, scale.value);
         }
       });
-  }, [viewMode, roll, savedRoll]);
+  }, [viewMode, roll, savedRoll, yaw, pitch, panX, panY, scale, syncCamera]);
 
   const composedGesture = useMemo(() => {
     return Gesture.Simultaneous(pinchGesture, panGesture, rotationGesture);
   }, [pinchGesture, panGesture, rotationGesture]);
 
-  const animatedUniverseStyle = useAnimatedStyle(() => {
-    'worklet';
-    const tx = isNaN(translateX.value) ? defaultTranslateX : translateX.value;
-    const ty = isNaN(translateY.value) ? defaultTranslateY : translateY.value;
-    const s = isNaN(scale.value) ? defaultScale : scale.value;
-
-    if (viewMode === '3d') {
-      const p = isNaN(pitch.value) ? 0.24 : pitch.value;
-      const y = isNaN(yaw.value) ? 0.35 : yaw.value;
-      const r = isNaN(roll.value) ? 0.0 : roll.value;
-      const pDeg = `${(p * 57.2958).toFixed(1)}deg`;
-      const yDeg = `${(y * 57.2958).toFixed(1)}deg`;
-      const rDeg = `${(r * 57.2958).toFixed(1)}deg`;
-
-      return {
-        transform: [
-          { perspective: 1200 },
-          { translateX: tx },
-          { translateY: ty },
-          { scale: s },
-          { rotateX: pDeg },
-          { rotateY: yDeg },
-          { rotateZ: rDeg }
-        ]
-      };
-    }
-
-    return {
-      transform: [
-        { translateX: tx },
-        { translateY: ty },
-        { scale: s }
-      ]
-    };
-  });
-
-  // True Camera-Facing 3D Spherical Billboarding:
-  // Counter-rotates by the exact inverse of universe rotation so each bubble
-  // is ALWAYS 100% perpendicular to the camera. This ensures every bubble remains
-  // a flawless, luminous 3D sphere/ball at ANY angle, completely eliminating the "coin" effect!
-  const animatedPinStyle = useAnimatedStyle(() => {
-    'worklet';
-    const s = isNaN(scale.value) || scale.value <= 0.05 ? 1 : scale.value;
-    const inv = 1 / Math.max(0.85, s);
-
-    if (viewMode === '3d') {
-      const p = isNaN(pitch.value) ? 0.24 : pitch.value;
-      const y = isNaN(yaw.value) ? 0.35 : yaw.value;
-      const r = isNaN(roll.value) ? 0.0 : roll.value;
-      const pDeg = `${(-p * 57.2958).toFixed(1)}deg`;
-      const yDeg = `${(-y * 57.2958).toFixed(1)}deg`;
-      const rDeg = `${(-r * 57.2958).toFixed(1)}deg`;
-
-      return {
-        transform: [
-          { rotateZ: rDeg },
-          { rotateY: yDeg },
-          { rotateX: pDeg },
-          { scale: inv }
-        ]
-      };
-    }
-
-    return {
-      transform: [{ scale: inv }]
-    };
-  });
-
-  const glideCameraTo = useCallback((targetX: number, targetY: number, targetScale: number = 1.35) => {
-    const destX = (SCREEN_WIDTH - WORLD_SIZE) / 2 - (targetX - CENTER) * targetScale;
-    const destY = (GRAPH_HEIGHT - WORLD_SIZE) / 2 - (targetY - CENTER) * targetScale;
-
-    translateX.value = withSpring(destX, { damping: 18 });
-    translateY.value = withSpring(destY, { damping: 18 });
-    savedTranslateX.value = destX;
-    savedTranslateY.value = destY;
-
-    scale.value = withSpring(targetScale, { damping: 18 });
-    savedScale.value = targetScale;
-  }, [translateX, translateY, savedTranslateX, savedTranslateY, scale, savedScale]);
-
   const handleResetView = useCallback(() => {
-    translateX.value = withSpring(defaultTranslateX, { damping: 18 });
-    translateY.value = withSpring(defaultTranslateY, { damping: 18 });
-    savedTranslateX.value = defaultTranslateX;
-    savedTranslateY.value = defaultTranslateY;
-
-    scale.value = withSpring(defaultScale, { damping: 18 });
-    savedScale.value = defaultScale;
-
     pitch.value = withSpring(0.24, { damping: 18 });
     yaw.value = withSpring(0.35, { damping: 18 });
     roll.value = withSpring(0.0, { damping: 18 });
+    panX.value = withSpring(0, { damping: 18 });
+    panY.value = withSpring(0, { damping: 18 });
+    scale.value = withSpring(0.85, { damping: 18 });
+
     savedPitch.value = 0.24;
     savedYaw.value = 0.35;
     savedRoll.value = 0.0;
-  }, [defaultTranslateX, defaultTranslateY, defaultScale, translateX, translateY, savedTranslateX, savedTranslateY, scale, savedScale, pitch, yaw, roll, savedPitch, savedYaw, savedRoll]);
+    savedPanX.value = 0;
+    savedPanY.value = 0;
+    savedScale.value = 0.85;
+
+    syncCamera(0.35, 0.24, 0.0, 0, 0, 0.85);
+  }, [pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
 
   const handleSpinY = useCallback(() => {
-    const next = yaw.value + 1.5708; // +90 deg
+    const next = yaw.value + Math.PI / 2;
     yaw.value = withSpring(next, { damping: 16 });
     savedYaw.value = next;
-  }, [yaw, savedYaw]);
-
-  const handleSpinX = useCallback(() => {
-    const next = pitch.value + 1.5708; // +90 deg
-    pitch.value = withSpring(next, { damping: 16 });
-    savedPitch.value = next;
-  }, [pitch, savedPitch]);
-
-  const toggleAutoOrbit = useCallback(() => {
-    if (isAutoOrbit) {
-      yaw.value = yaw.value;
-      savedYaw.value = yaw.value;
-      setIsAutoOrbit(false);
-    } else {
-      setIsAutoOrbit(true);
-      yaw.value = withRepeat(
-        withTiming(yaw.value + 6.28318, { duration: 22000, easing: Easing.linear }),
-        -1,
-        false
-      );
-    }
-  }, [isAutoOrbit, yaw, savedYaw]);
-
-  const handleFocusDept = useCallback((deptId: string) => {
-    const dept = departments.find(d => d.id === deptId);
-    if (!dept) return;
-
-    setSelectedDept(deptId);
-    setSelectedNode(null);
-    setSelectedEdge(null);
-    glideCameraTo(dept.x, dept.y, 1.4);
-  }, [departments, glideCameraTo]);
+    syncCamera(next, pitch.value, roll.value, panX.value, panY.value, scale.value);
+  }, [yaw, savedYaw, pitch, roll, panX, panY, scale, syncCamera]);
 
   const handleZoomIn = useCallback(() => {
-    const next = Math.min(scale.value + 0.35, 5.0);
+    const next = Math.min(scale.value * 1.3, 5.0);
     scale.value = withSpring(next);
     savedScale.value = next;
-  }, [scale, savedScale]);
+    syncCamera(yaw.value, pitch.value, roll.value, panX.value, panY.value, next);
+  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera]);
 
   const handleZoomOut = useCallback(() => {
-    const next = Math.max(scale.value - 0.35, 0.25);
+    const next = Math.max(scale.value / 1.3, 0.25);
     scale.value = withSpring(next);
     savedScale.value = next;
-  }, [scale, savedScale]);
+    syncCamera(yaw.value, pitch.value, roll.value, panX.value, panY.value, next);
+  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera]);
 
-  const handleNodePress = (node: GraphNode) => {
-    setSelectedEdge(null);
-    if (selectedNode?.id === node.id) {
-      setSelectedNode(null);
-    } else {
-      setSelectedNode(node);
-      glideCameraTo(node.x, node.y, Math.max(scale.value, 1.35));
-    }
-  };
+  const toggleAutoOrbit = useCallback(() => {
+    setIsAutoOrbit(prev => !prev);
+  }, []);
 
-  const handleEdgePress = (edge: GraphEdge) => {
-    setSelectedNode(null);
-    if (selectedEdge?.id === edge.id) {
-      setSelectedEdge(null);
-    } else {
-      setSelectedEdge(edge);
-      if (edge.midX && edge.midY) {
-        glideCameraTo(edge.midX, edge.midY, Math.max(scale.value, 1.4));
-      }
-    }
-  };
+  useEffect(() => {
+    if (!isAutoOrbit) return;
+    let active = true;
+    let lastTime = Date.now();
+
+    const loop = () => {
+      if (!active) return;
+      const now = Date.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      const nextYaw = yaw.value + 0.35 * dt;
+      yaw.value = nextYaw;
+      savedYaw.value = nextYaw;
+      syncCamera(nextYaw, pitch.value, roll.value, panX.value, panY.value, scale.value);
+      requestAnimationFrame(loop);
+    };
+    const handle = requestAnimationFrame(loop);
+    return () => {
+      active = false;
+      cancelAnimationFrame(handle);
+    };
+  }, [isAutoOrbit, yaw, savedYaw, pitch, roll, panX, panY, scale, syncCamera]);
 
   const parentNode = useMemo(() => {
     if (!selectedNode?.parentEntityId) return null;
@@ -1329,6 +1314,393 @@ function KgExplorerContent() {
     }
     return set;
   }, [selectedNode, selectedNodeEdges, selectedEdge]);
+
+  // ----------------------------------------------------
+  // TRUE 3D PROJECTION ENGINE (EULER 360 ROTATION + PERSPECTIVE)
+  // ----------------------------------------------------
+  function project3DPoint(
+    x: number, y: number, z: number,
+    pitchAngle: number, yawAngle: number, rollAngle: number,
+    camScale: number, pX: number, pY: number,
+    viewportW: number, viewportH: number
+  ) {
+    // 1. Yaw rotation around Y axis (horizontal 360 orbit)
+    const cy = Math.cos(yawAngle);
+    const sy = Math.sin(yawAngle);
+    const x1 = x * cy + z * sy;
+    const y1 = y;
+    const z1 = -x * sy + z * cy;
+
+    // 2. Pitch rotation around X axis (vertical 360 tilt)
+    const cp = Math.cos(pitchAngle);
+    const sp = Math.sin(pitchAngle);
+    const x2 = x1;
+    const y2 = y1 * cp - z1 * sp;
+    const z2 = y1 * sp + z1 * cp;
+
+    // 3. Roll rotation around Z axis (banking roll)
+    const cr = Math.cos(rollAngle);
+    const sr = Math.sin(rollAngle);
+    const x3 = x2 * cr - y2 * sr;
+    const y3 = x2 * sr + y2 * cr;
+    const z3 = z2;
+
+    // 4. Perspective projection
+    const cameraDistance = 1100;
+    const dist = Math.max(200, cameraDistance - z3);
+    const perspective = cameraDistance / dist; // ~0.7 to 1.5
+
+    // 5. Projected screen plane coordinates
+    const screenX = (viewportW / 2) + pX + (x3 * perspective * camScale);
+    const screenY = (viewportH / 2) + pY + (y3 * perspective * camScale);
+
+    return {
+      screenX,
+      screenY,
+      depth: z3,
+      perspective
+    };
+  }
+
+  // ----------------------------------------------------
+  // 3D GRAPH PROJECTION & PUBG/GTA DYNAMIC NAMEPLATE COLLISION AVOIDANCE
+  // ----------------------------------------------------
+  const projectedGraph = useMemo(() => {
+    const is3d = viewMode === '3d';
+    const curPitch = is3d ? camera.pitch : 0;
+    const curYaw = is3d ? camera.yaw : 0;
+    const curRoll = is3d ? camera.roll : 0;
+    const curScale = camera.scale;
+    const curPanX = camera.panX;
+    const curPanY = camera.panY;
+
+    // 1. Project all nodes
+    const projectedNodesRaw = nodes.map(n => {
+      const x = is3d ? (n.x3d ?? (n.x - CENTER)) : (n.x - CENTER);
+      const y = is3d ? (n.y3d ?? (n.y - CENTER)) : (n.y - CENTER);
+      const z = is3d ? (n.z3d ?? 0) : 0;
+
+      const proj = project3DPoint(
+        x, y, z,
+        curPitch, curYaw, curRoll,
+        curScale, curPanX, curPanY,
+        SCREEN_WIDTH, GRAPH_HEIGHT
+      );
+
+      const baseSize = n.isHub ? 42 : n.isDepartment ? 36 : (n.hierarchyLevel === 2 ? 28 : 20);
+      const circleSize = Math.round(baseSize * Math.min(1.4, Math.max(0.65, proj.perspective)));
+
+      const isSelected = selectedNode?.id === n.id;
+      const isConnected = connectedNodeIds.has(n.id);
+      const isFocus = isSelected || isConnected;
+
+      let opacity = 1.0;
+      if (selectedNode || selectedEdge) {
+        opacity = isFocus ? 1.0 : 0.2;
+      } else if (is3d) {
+        // Atmospheric neural depth attenuation
+        opacity = Math.max(0.38, Math.min(1.0, 0.42 + 0.58 * ((proj.depth + 400) / 800)));
+      }
+
+      return {
+        node: n,
+        screenX: proj.screenX,
+        screenY: proj.screenY,
+        depth: proj.depth,
+        perspective: proj.perspective,
+        circleSize,
+        opacity,
+        zIndex: Math.round(proj.depth + 1000)
+      };
+    });
+
+    const projectedNodeMap = new Map<string, typeof projectedNodesRaw[0]>();
+    for (const pn of projectedNodesRaw) {
+      projectedNodeMap.set(pn.node.id, pn);
+    }
+
+    // 2. PUBG / GTA Dynamic 360 Collision Avoidance Pass for Nameplates
+    interface PlacedBox {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+    }
+
+    function boxesOverlap(b1: PlacedBox, b2: PlacedBox, pad = 3): boolean {
+      return !(
+        b1.right + pad < b2.left ||
+        b1.left - pad > b2.right ||
+        b1.bottom + pad < b2.top ||
+        b1.top - pad > b2.bottom
+      );
+    }
+
+    const occupiedBoxes: PlacedBox[] = [];
+
+    // Prioritize: Selected > Connected > Hub > Department > Branch > Stem
+    const sortedForCollision = [...projectedNodesRaw].sort((a, b) => {
+      const aPrio = selectedNode?.id === a.node.id ? 100
+        : connectedNodeIds.has(a.node.id) ? 80
+        : a.node.isHub ? 60
+        : a.node.isDepartment ? 50
+        : a.node.hierarchyLevel === 2 ? 30
+        : 10;
+      const bPrio = selectedNode?.id === b.node.id ? 100
+        : connectedNodeIds.has(b.node.id) ? 80
+        : b.node.isHub ? 60
+        : b.node.isDepartment ? 50
+        : b.node.hierarchyLevel === 2 ? 30
+        : 10;
+
+      if (aPrio !== bPrio) return bPrio - aPrio;
+      return b.depth - a.depth;
+    });
+
+    // Reserve circular areas so labels don't collide with node bubbles
+    for (const pn of sortedForCollision) {
+      const r = pn.circleSize / 2;
+      occupiedBoxes.push({
+        left: pn.screenX - r - 2,
+        top: pn.screenY - r - 2,
+        right: pn.screenX + r + 2,
+        bottom: pn.screenY + r + 2
+      });
+    }
+
+    const placementMap = new Map<string, 'bottom' | 'top' | 'right' | 'left' | 'compact'>();
+
+    for (const pn of sortedForCollision) {
+      const isSelected = selectedNode?.id === pn.node.id;
+      const isConnected = connectedNodeIds.has(pn.node.id);
+      const isImportant = isSelected || isConnected || pn.node.isHub || pn.node.isDepartment;
+
+      const r = pn.circleSize / 2;
+      const labelW = Math.min(130, Math.max(48, pn.node.name.length * 7.2 + 16));
+      const labelH = pn.node.subLabel ? 28 : 18;
+
+      const candidates: Array<{ placement: 'bottom' | 'top' | 'right' | 'left'; box: PlacedBox }> = [
+        {
+          placement: 'bottom',
+          box: {
+            left: pn.screenX - labelW / 2,
+            top: pn.screenY + r + 3,
+            right: pn.screenX + labelW / 2,
+            bottom: pn.screenY + r + 3 + labelH
+          }
+        },
+        {
+          placement: 'top',
+          box: {
+            left: pn.screenX - labelW / 2,
+            top: pn.screenY - r - 3 - labelH,
+            right: pn.screenX + labelW / 2,
+            bottom: pn.screenY - r - 3
+          }
+        },
+        {
+          placement: 'right',
+          box: {
+            left: pn.screenX + r + 4,
+            top: pn.screenY - labelH / 2,
+            right: pn.screenX + r + 4 + labelW,
+            bottom: pn.screenY + labelH / 2
+          }
+        },
+        {
+          placement: 'left',
+          box: {
+            left: pn.screenX - r - 4 - labelW,
+            top: pn.screenY - labelH / 2,
+            right: pn.screenX - r - 4,
+            bottom: pn.screenY + labelH / 2
+          }
+        }
+      ];
+
+      let chosenPlacement: 'bottom' | 'top' | 'right' | 'left' | 'compact' = 'bottom';
+      let foundClean = false;
+
+      for (const cand of candidates) {
+        const collides = occupiedBoxes.some(box => boxesOverlap(cand.box, box));
+        if (!collides) {
+          chosenPlacement = cand.placement;
+          occupiedBoxes.push(cand.box);
+          foundClean = true;
+          break;
+        }
+      }
+
+      if (!foundClean) {
+        if (isImportant) {
+          chosenPlacement = 'bottom';
+          occupiedBoxes.push(candidates[0].box);
+        } else {
+          // Gracefully collapse crowded stems to luminous synaptic dots
+          chosenPlacement = 'compact';
+        }
+      }
+
+      placementMap.set(pn.node.id, chosenPlacement);
+    }
+
+    // Sort nodes back-to-front (painter's algorithm)
+    const finalNodes = projectedNodesRaw.map(pn => ({
+      ...pn,
+      labelPlacement: placementMap.get(pn.node.id) || 'bottom'
+    })).sort((a, b) => a.depth - b.depth);
+
+    // 3. Project all edges
+    const projectedEdges: Array<{
+      edge: GraphEdge;
+      sourceNode: typeof projectedNodesRaw[0];
+      targetNode: typeof projectedNodesRaw[0];
+      isCross: boolean;
+      pathD?: string;
+      midX: number;
+      midY: number;
+      avgDepth: number;
+    }> = [];
+
+    for (const e of edges) {
+      const sNode = projectedNodeMap.get(e.source);
+      const tNode = projectedNodeMap.get(e.target);
+      if (!sNode || !tNode) continue;
+
+      const isCross = !!e.isCrossDomain;
+      let pathD: string | undefined;
+      let midX = Math.round((sNode.screenX + tNode.screenX) / 2);
+      let midY = Math.round((sNode.screenY + tNode.screenY) / 2);
+
+      if (isCross) {
+        if (is3d) {
+          // 3D arched neural bridge
+          const sx = sNode.node.x3d ?? (sNode.node.x - CENTER);
+          const sy = sNode.node.y3d ?? (sNode.node.y - CENTER);
+          const sz = sNode.node.z3d ?? 0;
+          const tx = tNode.node.x3d ?? (tNode.node.x - CENTER);
+          const ty = tNode.node.y3d ?? (tNode.node.y - CENTER);
+          const tz = tNode.node.z3d ?? 0;
+
+          const mx3d = (sx + tx) / 2;
+          const my3d = (sy + ty) / 2;
+          const mz3d = (sz + tz) / 2;
+          const mLen = Math.sqrt(mx3d * mx3d + my3d * my3d + mz3d * mz3d) || 1;
+          const archHeight = 90;
+          const cx3d = mx3d + (mx3d / mLen) * archHeight;
+          const cy3d = my3d + (my3d / mLen) * archHeight;
+          const cz3d = mz3d + (mz3d / mLen) * archHeight;
+
+          const ctrlProj = project3DPoint(
+            cx3d, cy3d, cz3d,
+            curPitch, curYaw, curRoll,
+            curScale, curPanX, curPanY,
+            SCREEN_WIDTH, GRAPH_HEIGHT
+          );
+
+          pathD = `M ${Math.round(sNode.screenX)} ${Math.round(sNode.screenY)} Q ${Math.round(ctrlProj.screenX)} ${Math.round(ctrlProj.screenY)} ${Math.round(tNode.screenX)} ${Math.round(tNode.screenY)}`;
+          midX = Math.round(0.25 * sNode.screenX + 0.5 * ctrlProj.screenX + 0.25 * tNode.screenX);
+          midY = Math.round(0.25 * sNode.screenY + 0.5 * ctrlProj.screenY + 0.25 * tNode.screenY);
+        } else {
+          // 2D Bézier
+          const dx = tNode.screenX - sNode.screenX;
+          const dy = tNode.screenY - sNode.screenY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 1) {
+            const nx = -dy / dist;
+            const ny = dx / dist;
+            const curveAmount = Math.min(80, Math.max(30, dist * 0.18));
+            const ctrlX = Math.round((sNode.screenX + tNode.screenX) / 2 + nx * curveAmount);
+            const ctrlY = Math.round((sNode.screenY + tNode.screenY) / 2 + ny * curveAmount);
+            pathD = `M ${Math.round(sNode.screenX)} ${Math.round(sNode.screenY)} Q ${ctrlX} ${ctrlY} ${Math.round(tNode.screenX)} ${Math.round(tNode.screenY)}`;
+            midX = Math.round(0.25 * sNode.screenX + 0.5 * ctrlX + 0.25 * tNode.screenX);
+            midY = Math.round(0.25 * sNode.screenY + 0.5 * ctrlY + 0.25 * tNode.screenY);
+          }
+        }
+      }
+
+      const avgDepth = (sNode.depth + tNode.depth) / 2;
+
+      projectedEdges.push({
+        edge: e,
+        sourceNode: sNode,
+        targetNode: tNode,
+        isCross,
+        pathD,
+        midX,
+        midY,
+        avgDepth
+      });
+    }
+
+    return {
+      nodes: finalNodes,
+      edges: projectedEdges,
+      nodeMap: projectedNodeMap
+    };
+  }, [nodes, edges, camera, viewMode, selectedNode, selectedEdge, connectedNodeIds]);
+
+  const handleNodePress = useCallback((node: GraphNode) => {
+    setSelectedEdge(null);
+    if (selectedNode?.id === node.id) {
+      setSelectedNode(null);
+    } else {
+      setSelectedNode(node);
+      const pn = projectedGraph.nodeMap.get(node.id);
+      if (pn) {
+        const dx = pn.screenX - SCREEN_WIDTH / 2;
+        const dy = pn.screenY - GRAPH_HEIGHT / 2;
+        const nextPanX = panX.value - dx;
+        const nextPanY = panY.value - dy;
+        const nextScale = Math.max(scale.value, 1.25);
+
+        panX.value = withSpring(nextPanX, { damping: 18 });
+        panY.value = withSpring(nextPanY, { damping: 18 });
+        savedPanX.value = nextPanX;
+        savedPanY.value = nextPanY;
+        scale.value = withSpring(nextScale, { damping: 18 });
+        savedScale.value = nextScale;
+
+        syncCamera(yaw.value, pitch.value, roll.value, nextPanX, nextPanY, nextScale);
+      }
+    }
+  }, [selectedNode, projectedGraph, panX, panY, savedPanX, savedPanY, scale, savedScale, yaw, pitch, roll, syncCamera]);
+
+  const handleEdgePress = useCallback((edge: GraphEdge) => {
+    setSelectedNode(null);
+    if (selectedEdge?.id === edge.id) {
+      setSelectedEdge(null);
+    } else {
+      setSelectedEdge(edge);
+      const pe = projectedGraph.edges.find(e => e.edge.id === edge.id);
+      if (pe && pe.midX && pe.midY) {
+        const dx = pe.midX - SCREEN_WIDTH / 2;
+        const dy = pe.midY - GRAPH_HEIGHT / 2;
+        const nextPanX = panX.value - dx;
+        const nextPanY = panY.value - dy;
+        const nextScale = Math.max(scale.value, 1.3);
+
+        panX.value = withSpring(nextPanX, { damping: 18 });
+        panY.value = withSpring(nextPanY, { damping: 18 });
+        savedPanX.value = nextPanX;
+        savedPanY.value = nextPanY;
+        scale.value = withSpring(nextScale, { damping: 18 });
+        savedScale.value = nextScale;
+
+        syncCamera(yaw.value, pitch.value, roll.value, nextPanX, nextPanY, nextScale);
+      }
+    }
+  }, [selectedEdge, projectedGraph, panX, panY, savedPanX, savedPanY, scale, savedScale, yaw, pitch, roll, syncCamera]);
+
+  const handleFocusDept = useCallback((deptId: string) => {
+    setSelectedDept(deptId);
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    const hubNode = nodes.find(n => n.id === `dept-${deptId}`);
+    if (hubNode) {
+      handleNodePress(hubNode);
+    }
+  }, [nodes, handleNodePress]);
 
   if (loading) {
     return (
@@ -1490,17 +1862,17 @@ function KgExplorerContent() {
         {/* GALAXY CANVAS */}
         <View style={styles.canvasContainer}>
           <GestureDetector gesture={composedGesture}>
-            <Animated.View style={[styles.universe, animatedUniverseStyle]}>
-              {/* 1. Vector Connection Lines (SVG Canvas with non-scaling stroke) */}
+            <View style={StyleSheet.absoluteFill}>
+              {/* 1. Vector Connection Lines (SVG Canvas with depth styling & non-scaling stroke) */}
               <Svg
-                width={WORLD_SIZE}
-                height={WORLD_SIZE}
-                viewBox={`0 0 ${WORLD_SIZE} ${WORLD_SIZE}`}
+                width={SCREEN_WIDTH}
+                height={GRAPH_HEIGHT}
                 style={StyleSheet.absoluteFill}
               >
                 <G>
-                  {edges.map((e) => {
-                    const isCross = !!e.isCrossDomain;
+                  {projectedGraph.edges.map((pe) => {
+                    const e = pe.edge;
+                    const isCross = pe.isCross;
                     if (lineFilter === 'cross' && !isCross) return null;
 
                     const isDirectlySelected = selectedEdge?.id === e.id;
@@ -1533,36 +1905,38 @@ function KgExplorerContent() {
                       strokeColor = e.color || '#C084FC';
                       strokeWidth = 2.8;
                       strokeOpacity = 0.85;
+                    } else if (viewMode === '3d') {
+                      // 3D Depth weighting
+                      const depthNorm = Math.max(0.3, Math.min(1.0, (pe.avgDepth + 400) / 800));
+                      strokeOpacity = 0.25 + 0.45 * depthNorm;
+                      strokeWidth = Math.max(0.8, strokeWidth * depthNorm);
                     }
 
-                    if (isCross && e.pathD) {
-                      // Curved Bézier Arch for Cross-Domain Connections
+                    if (isCross && pe.pathD) {
                       return (
                         <G key={`edge-${e.id}`}>
                           {isHighlight && (
                             <Path
-                              d={e.pathD}
+                              d={pe.pathD}
                               stroke="#38BDF8"
                               strokeWidth={10}
                               strokeLinecap="round"
                               fill="none"
                               opacity={0.35}
-                              vectorEffect="non-scaling-stroke"
                             />
                           )}
                           <Path
-                            d={e.pathD}
+                            d={pe.pathD}
                             stroke={strokeColor}
                             strokeWidth={strokeWidth}
                             strokeDasharray={isHighlight ? undefined : '5, 5'}
                             strokeLinecap="round"
                             fill="none"
                             opacity={strokeOpacity}
-                            vectorEffect="non-scaling-stroke"
                           />
-                          {/* Invisible 28px hit-box for easy tap */}
+                          {/* Invisible hit-box */}
                           <Path
-                            d={e.pathD}
+                            d={pe.pathD}
                             stroke="transparent"
                             strokeWidth={28}
                             fill="none"
@@ -1572,40 +1946,44 @@ function KgExplorerContent() {
                       );
                     }
 
-                    // Straight radial tree spokes & stem lines
-                    if (!e.sourceNode || !e.targetNode) return null;
                     return (
                       <G key={`edge-${e.id}`}>
                         {isHighlight && (
                           <Line
-                            x1={e.sourceNode.x}
-                            y1={e.sourceNode.y}
-                            x2={e.targetNode.x}
-                            y2={e.targetNode.y}
+                            x1={pe.sourceNode.screenX}
+                            y1={pe.sourceNode.screenY}
+                            x2={pe.targetNode.screenX}
+                            y2={pe.targetNode.screenY}
                             stroke="#38BDF8"
                             strokeWidth={10}
                             strokeLinecap="round"
                             opacity={0.35}
-                            vectorEffect="non-scaling-stroke"
                           />
                         )}
                         <Line
-                          x1={e.sourceNode.x}
-                          y1={e.sourceNode.y}
-                          x2={e.targetNode.x}
-                          y2={e.targetNode.y}
+                          x1={pe.sourceNode.screenX}
+                          y1={pe.sourceNode.screenY}
+                          x2={pe.targetNode.screenX}
+                          y2={pe.targetNode.screenY}
                           stroke={strokeColor}
                           strokeWidth={strokeWidth}
                           opacity={strokeOpacity}
                           strokeLinecap="round"
-                          vectorEffect="non-scaling-stroke"
                         />
-                        {/* Invisible 28px hit-box for easy tap */}
+                        {/* Synaptic Terminal Dots at filament junctions */}
+                        <Circle
+                          cx={pe.targetNode.screenX}
+                          cy={pe.targetNode.screenY}
+                          r={2}
+                          fill={strokeColor}
+                          opacity={strokeOpacity * 0.9}
+                        />
+                        {/* Invisible hit-box */}
                         <Line
-                          x1={e.sourceNode.x}
-                          y1={e.sourceNode.y}
-                          x2={e.targetNode.x}
-                          y2={e.targetNode.y}
+                          x1={pe.sourceNode.screenX}
+                          y1={pe.sourceNode.screenY}
+                          x2={pe.targetNode.screenX}
+                          y2={pe.targetNode.screenY}
                           stroke="transparent"
                           strokeWidth={28}
                           strokeLinecap="round"
@@ -1617,13 +1995,14 @@ function KgExplorerContent() {
                 </G>
               </Svg>
 
-              {/* 2. Interactive Midpoint Relationship Badges (Constant Google Maps Pin Size) */}
-              {edges.map((e) => {
+              {/* 2. Interactive Midpoint Relationship Badges */}
+              {projectedGraph.edges.map((pe) => {
+                const e = pe.edge;
                 const isDirectlySelected = selectedEdge?.id === e.id;
                 const isNodeConnected = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
                 const shouldShowBadge = isDirectlySelected || isNodeConnected || (e.isCrossDomain && !selectedNode && !selectedEdge);
 
-                if (!shouldShowBadge || !e.relation || !e.midX || !e.midY) {
+                if (!shouldShowBadge || !e.relation || !pe.midX || !pe.midY) {
                   return null;
                 }
 
@@ -1631,12 +2010,11 @@ function KgExplorerContent() {
                 const badgeColor = isDirectlySelected ? '#38BDF8' : (e.isCrossDomain ? '#C084FC' : '#38BDF8');
 
                 return (
-                  <Animated.View
+                  <View
                     key={`badge-${e.id}`}
                     style={[
                       styles.badgeAnchor,
-                      { left: e.midX, top: e.midY },
-                      animatedPinStyle
+                      { left: pe.midX, top: pe.midY }
                     ]}
                     pointerEvents="box-none"
                   >
@@ -1653,30 +2031,58 @@ function KgExplorerContent() {
                         {label}
                       </Text>
                     </TouchableOpacity>
-                  </Animated.View>
+                  </View>
                 );
               })}
 
-              {/* 3. Interactive Nodes (Constant Google Maps Pin Size, Wide Gaps on Zoom) */}
-              {nodes.map((n) => {
+              {/* 3. Interactive Nodes (100% Round Spheres at Any Angle, Dynamic Non-Overlapping Nameplates) */}
+              {projectedGraph.nodes.map((pn) => {
+                const n = pn.node;
                 const isSelected = selectedNode?.id === n.id;
                 const isConnected = connectedNodeIds.has(n.id);
-                const isFocus = isSelected || isConnected;
+                const circleSize = pn.circleSize;
+                const r = circleSize / 2;
+                const isCompact = pn.labelPlacement === 'compact';
 
-                const opacity = (selectedNode || selectedEdge)
-                  ? (isFocus ? 1.0 : 0.22)
-                  : 1.0;
-
-                const circleSize = n.isHub ? 42 : n.isDepartment ? 36 : (n.hierarchyLevel === 2 ? 28 : 22);
+                // Dynamic PUBG/GTA label positioning based on collision test
+                let labelStyle: any = {
+                  position: 'absolute',
+                  top: r + 3,
+                  alignSelf: 'center'
+                };
+                if (pn.labelPlacement === 'top') {
+                  labelStyle = {
+                    position: 'absolute',
+                    bottom: r + 3,
+                    alignSelf: 'center'
+                  };
+                } else if (pn.labelPlacement === 'right') {
+                  labelStyle = {
+                    position: 'absolute',
+                    left: r + 4,
+                    top: -14,
+                    alignSelf: 'center'
+                  };
+                } else if (pn.labelPlacement === 'left') {
+                  labelStyle = {
+                    position: 'absolute',
+                    right: r + 4,
+                    top: -14,
+                    alignSelf: 'center'
+                  };
+                }
 
                 return (
-                  <Animated.View
+                  <View
                     key={`node-${n.id}`}
                     style={[
                       styles.nodeAnchor,
-                      { left: n.x, top: n.y, marginTop: -circleSize / 2 },
-                      animatedPinStyle,
-                      { opacity }
+                      {
+                        left: pn.screenX,
+                        top: pn.screenY,
+                        opacity: pn.opacity,
+                        zIndex: isSelected ? 9999 : (n.isHub ? 8000 : (n.isDepartment ? 5000 : pn.zIndex))
+                      }
                     ]}
                     pointerEvents="box-none"
                   >
@@ -1701,7 +2107,7 @@ function KgExplorerContent() {
                         />
                       )}
 
-                      {/* Core Node 3D Spherical Orb */}
+                      {/* 100% Round Spherical Orb from ANY viewing angle */}
                       <View
                         style={[
                           styles.nodeCircle,
@@ -1722,7 +2128,7 @@ function KgExplorerContent() {
                           }
                         ]}
                       >
-                        {/* 3D Specular Highlight Crescent (renders ball curvature from any angle) */}
+                        {/* 3D Specular Highlight Crescent (renders 3D ball curvature from any angle) */}
                         <View
                           style={{
                             position: 'absolute',
@@ -1731,7 +2137,7 @@ function KgExplorerContent() {
                             width: circleSize * 0.38,
                             height: circleSize * 0.22,
                             borderRadius: circleSize * 0.18,
-                            backgroundColor: 'rgba(255, 255, 255, 0.65)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.7)',
                             transform: [{ rotate: '-35deg' }]
                           }}
                         />
@@ -1745,7 +2151,7 @@ function KgExplorerContent() {
                             width: circleSize * 0.72,
                             height: circleSize * 0.72,
                             borderRadius: circleSize * 0.36,
-                            backgroundColor: 'rgba(0, 0, 0, 0.26)'
+                            backgroundColor: 'rgba(0, 0, 0, 0.3)'
                           }}
                         />
 
@@ -1768,34 +2174,38 @@ function KgExplorerContent() {
                         )}
                       </View>
 
-                      {/* Label Pill with Dark Background for 100% legibility */}
-                      <View
-                        style={[
-                          styles.labelPill,
-                          isSelected && styles.labelPillSelected,
-                          isConnected && styles.labelPillConnected
-                        ]}
-                      >
-                        <Text
+                      {/* Dynamic Non-Overlapping Nameplate (PUBG / GTA 360 Vision) */}
+                      {!isCompact && (
+                        <View
                           style={[
-                            styles.labelText,
-                            isSelected && styles.labelTextSelected,
-                            n.isDepartment && { color: n.color }
+                            styles.labelPill,
+                            labelStyle,
+                            isSelected && styles.labelPillSelected,
+                            isConnected && styles.labelPillConnected
                           ]}
                         >
-                          {n.name}
-                        </Text>
-                        {n.subLabel ? (
-                          <Text style={styles.subLabelText}>
-                            {n.subLabel}
+                          <Text
+                            style={[
+                              styles.labelText,
+                              isSelected && styles.labelTextSelected,
+                              n.isDepartment && { color: n.color }
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {n.name}
                           </Text>
-                        ) : null}
-                      </View>
+                          {n.subLabel ? (
+                            <Text style={styles.subLabelText} numberOfLines={1}>
+                              {n.subLabel}
+                            </Text>
+                          ) : null}
+                        </View>
+                      )}
                     </TouchableOpacity>
-                  </Animated.View>
+                  </View>
                 );
               })}
-            </Animated.View>
+            </View>
           </GestureDetector>
 
           {/* Floating Compact HUD Zoom & Center Controls */}
@@ -2132,32 +2542,31 @@ const styles = StyleSheet.create({
   canvasContainer: { flex: 1, overflow: 'hidden', backgroundColor: '#09090B' },
   universe: { width: WORLD_SIZE, height: WORLD_SIZE },
 
-  // Google Maps Pin Overlay Styles
+  // Screen Space Projected Elements
   nodeAnchor: {
     position: 'absolute',
-    width: 140,
-    height: 80,
-    marginLeft: -70,
+    width: 0,
+    height: 0,
     alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 5
   },
   nodeTouchable: {
     alignItems: 'center',
-    justifyContent: 'flex-start'
+    justifyContent: 'center'
   },
   glowRing: {
     position: 'absolute',
-    top: -4,
     zIndex: -1
   },
   nodeCircle: {
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
-    elevation: 4
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.5,
+    shadowRadius: 5,
+    elevation: 6
   },
   nodeEmoji: {
     textAlign: 'center'
@@ -2166,32 +2575,32 @@ const styles = StyleSheet.create({
     opacity: 0.95
   },
   labelPill: {
-    backgroundColor: 'rgba(15,23,42,0.92)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(15,23,42,0.95)',
+    borderColor: 'rgba(255,255,255,0.18)',
     borderWidth: 1,
     borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginTop: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
     alignItems: 'center',
-    maxWidth: 340,
-    minWidth: 48,
+    justifyContent: 'center',
+    maxWidth: 150,
+    minWidth: 44,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.5,
     shadowRadius: 4,
-    elevation: 4
+    elevation: 6
   },
   labelPillSelected: {
     borderColor: '#38BDF8',
-    backgroundColor: 'rgba(14,116,144,0.95)'
+    backgroundColor: 'rgba(14,116,144,0.96)'
   },
   labelPillConnected: {
     borderColor: '#38BDF8',
     backgroundColor: 'rgba(15,23,42,0.96)'
   },
   labelText: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: '700',
     color: '#F4F4F5',
     textAlign: 'center'
@@ -2201,7 +2610,7 @@ const styles = StyleSheet.create({
     fontWeight: '800'
   },
   subLabelText: {
-    fontSize: 8.5,
+    fontSize: 8,
     fontWeight: '500',
     color: '#A1A1AA',
     textAlign: 'center',
@@ -2210,10 +2619,8 @@ const styles = StyleSheet.create({
 
   badgeAnchor: {
     position: 'absolute',
-    width: 140,
-    height: 30,
-    marginLeft: -70,
-    marginTop: -15,
+    width: 0,
+    height: 0,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10
