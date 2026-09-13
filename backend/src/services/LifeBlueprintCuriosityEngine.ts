@@ -42,6 +42,8 @@ export interface BlueprintItemDefinition {
   valueEvidencePatterns?: RegExp[];
   /** Warm, high-EQ Hinglish phrasing options */
   promptTemplates: string[];
+  /** Warm, high-EQ English phrasing options */
+  promptTemplatesEn?: string[];
   /** Why Nova needs this to improve the user's life */
   companionValue: string;
 }
@@ -54,6 +56,7 @@ export interface EvaluatedBlueprintGap {
   isKnown: boolean;
   knownValue?: string;
   suggestedPrompt: string;
+  suggestedPromptEn?: string;
   companionValue: string;
   timingAffinity: CuriosityTimingAffinity;
   timingScore: number;
@@ -83,6 +86,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Arey ek basic cheez miss ho gayi — tumhara birthday ya birth date kab aata hai? Taaki dates aur special milestones pe main hamesha tuned rahoon.",
       "Waise ek baat puchhni thi — tumhara DOB kya hai? Birthday celebrations aur milestone tracking ke lie yaad rakhna chahti hoon."
     ],
+    promptTemplatesEn: [
+      "By the way, I realized I never asked — when's your birthday? Just so I can keep special milestones on my radar.",
+      "Quick question — when is your birthday? I'd love to remember it for your celebrations."
+    ],
     companionValue: "Essential for marking personal milestones, astrology/zodiac context if desired, and annual celebrations."
   },
   {
@@ -96,6 +103,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     valueEvidencePatterns: [/\b\d{2}\s*(?:years|saal|yr|years old)\b/i, /^\d{2}$/],
     promptTemplates: [
       "Waise tumhari age kitni hai? Bas islie puchh rahi hoon taaki tumhare career stage aur life pace ke sath sahi cadence bana sakoon."
+    ],
+    promptTemplatesEn: [
+      "By the way, how old are you? Just asking so I can tune into your pace and career stage better."
     ],
     companionValue: "Helps tailor career advice, energy rhythms, and long-term health pacing."
   },
@@ -111,6 +121,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     promptTemplates: [
       "Waise tum usually kaunse city me based ho? Taaki local context, weather aur timing ka exact dhyan rakh sakoon."
     ],
+    promptTemplatesEn: [
+      "Which city are you currently based in? Just so I have local context, weather, and timing right on point."
+    ],
     companionValue: "Grounds weather awareness, local time, regional nuances, and cultural moments."
   },
   {
@@ -124,6 +137,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     valueEvidencePatterns: [/hindi|tulu|kannada|marathi|gujarati|bengali|tamil|telugu|malayalam|punjabi/i],
     promptTemplates: [
       "Waise ghar pe mostly kaunsi language bolte ho — Hindi ke alawa mother tongue kya hai?"
+    ],
+    promptTemplatesEn: [
+      "What native languages or cultural roots do you speak at home?"
     ],
     companionValue: "Allows Nova to naturally sprinkle warm cultural phrases and respect heritage."
   },
@@ -142,6 +158,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Waise ek zaroori baat puchhni thi — tumhara usual sone ka time kya rehta hai? Taaki main kabhi raat ko untimely ping na karun aur wind-down sahi se plan kar sakein.",
       "Raat ko usually kitne baje sote ho? Taaki tumhare rest hours me strict quiet mode on rakh sakoon aur late night disturbing msgs bilkul na jaayein."
     ],
+    promptTemplatesEn: [
+      "What time do you usually head to sleep? That way I never send untimely pings and we can protect your quiet hours.",
+      "What's your typical bedtime? Want to make sure your rest hours stay undisturbed."
+    ],
     companionValue: "Prevents late-night interruptions and automatically sets the system sleep quiet window."
   },
   {
@@ -156,6 +176,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     promptTemplates: [
       "Subah usually kis time uthte ho? Taaki morning sync aur daily priorities ka timing ekdum perfect rahe.",
       "Tumhara morning wake-up time kya rehta hai usually?"
+    ],
+    promptTemplatesEn: [
+      "What time do you usually wake up to start your day? Want to keep our morning sync perfectly aligned.",
+      "What's your typical morning wake-up time?"
     ],
     companionValue: "Aligns morning greeting and day-planning touchpoints with the user's natural awakening."
   },
@@ -172,6 +196,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Subah ka starter kya hota hai tumhara — garam chai, strong coffee, ya simple warm water?",
       "Chai person ho ya coffee person? Subah kickstart karne ke lie kya pasand hai?"
     ],
+    promptTemplatesEn: [
+      "What's your go-to morning kickstarter — hot chai, strong coffee, or just fresh water?",
+      "Are you a coffee or tea person to kick off your day?"
+    ],
     companionValue: "Enables natural, relatable morning camaraderie and mindful daily check-ins."
   },
   {
@@ -185,6 +213,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     valueEvidencePatterns: [/\b(?:8|9|10|11)\s*(?::\d{2})?\s*(?:pm|baje|raat)?\b/i],
     promptTemplates: [
       "Tumhara family ke sath dinner ka time usually kab rehta hai? Taaki us window me work ya alerts pause rakh sakoon."
+    ],
+    promptTemplatesEn: [
+      "What time do you usually have dinner with family? So I can pause work and alerts during that window."
     ],
     companionValue: "Protects family dining time from proactive interruptions."
   },
@@ -203,6 +234,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Waise khane me tumhara kya preference hai — pure vegetarian, non-veg, ya eggetarian?",
       "Food choices me preference kya rehti hai tumhari — veg ya non-veg dono chalte hain?"
     ],
+    promptTemplatesEn: [
+      "What are your dietary preferences — vegetarian, non-veg, or something specific?",
+      "What kind of food preferences do you follow day to day?"
+    ],
     companionValue: "Crucial for recommending food ideas, venture menu considerations (Shetty's Dhaba), and health tips."
   },
   {
@@ -217,6 +252,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     promptTemplates: [
       "Jab lamba din ho aur stress ho, to tumhara go-to comfort food kya hota hai?",
       "Sabse pasandida khana kya hai tumhara jise khakar maza aa jaye?"
+    ],
+    promptTemplatesEn: [
+      "After a long, exhausting day, what's your ultimate comfort food to recharge?",
+      "What's your all-time favorite meal that always hits the spot?"
     ],
     companionValue: "Helps lift user's mood on tough days and contextualizes culinary passions."
   },
@@ -235,6 +274,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Tumhara daily fitness ya physical activity ka kya scene hai — gym, walk, ya abhi busy schedule me paused hai?",
       "Physical routine me kuch follow karte ho jaise morning walk ya workout, ya pure office focus rehta hai?"
     ],
+    promptTemplatesEn: [
+      "What's your daily fitness or workout routine like — gym, running, walking, or currently on pause?",
+      "Do you have an active fitness habit like morning walks or workouts?"
+    ],
     companionValue: "Allows gentle wellness pacing, posture/walk reminders, and burnout prevention."
   },
   {
@@ -249,6 +292,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     promptTemplates: [
       "Jab din bohot hectic aur dimag full ho jaye, to tumhein sabse zyada relax kya karta hai — music, lambi drive, ya bas shanti me baithna?",
       "Tension ya stress me tumhara instant mood-lifter kya hota hai?"
+    ],
+    promptTemplatesEn: [
+      "When your day gets hectic and overwhelming, what helps you decompress best — music, a drive, gaming, or quiet time?",
+      "What's your go-to way to unwind when life gets stressful?"
     ],
     companionValue: "Equips Nova with the right calming intervention when high stress or frustration is detected."
   },
@@ -267,6 +314,10 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Weekend ya weekoff pe tumhara usual routine kya hota hai — pura din rest aur family time, ya kuch exploration?",
       "Weekend pe tumhein sabse zyada kya karna pasand hai?"
     ],
+    promptTemplatesEn: [
+      "How do you usually like to spend your weekends — pure rest and family time, or exploring and working on passions?",
+      "What's your favorite way to recharge over the weekend?"
+    ],
     companionValue: "Enables weekend mode personalization and ensures off-days feel restorative."
   },
   {
@@ -281,6 +332,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     promptTemplates: [
       "Gaane sunne ka shauk hai? Kaunsa genre ya artist sabse zyada loop pe rehta hai tumhare headphone me?"
     ],
+    promptTemplatesEn: [
+      "What kind of music or artists do you have on repeat in your headphones while working or relaxing?"
+    ],
     companionValue: "Great for building deep emotional rapport and focus music recommendations."
   },
   {
@@ -294,6 +348,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     valueEvidencePatterns: [/\b(?:bike|motorcycle|scooter|activa|car|metro|train|auto|cab|walk)\b/i],
     promptTemplates: [
       "Daily commute kaise karte ho office ke lie — bike, car, metro ya cab?"
+    ],
+    promptTemplatesEn: [
+      "How do you usually commute to work or meetings — driving, transit, bike, or working remote?"
     ],
     companionValue: "Helps tailor travel safety reminders, traffic awareness, and departure timings."
   },
@@ -310,6 +367,9 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     valueEvidencePatterns: [/\b(?:family|freedom|independence|success|wealth|stability|impact|growth)\b/i],
     promptTemplates: [
       "Itni mehnat aur multi-venture hustle ke peeche tumhara sabse bada drive kya hai — family ki stability, personal freedom, ya kuch bada build karna?"
+    ],
+    promptTemplatesEn: [
+      "Behind all your hard work and hustle, what's your biggest driving force — family security, personal freedom, or building something meaningful?"
     ],
     companionValue: "Aligns Nova's long-term motivational nudges directly with the user's deepest inner fire."
   }
@@ -471,6 +531,9 @@ export class LifeBlueprintCuriosityEngine {
       }
 
       const suggestedPrompt = def.promptTemplates[Math.floor(Math.random() * def.promptTemplates.length)];
+      const suggestedPromptEn = (def.promptTemplatesEn && def.promptTemplatesEn.length > 0)
+        ? def.promptTemplatesEn[Math.floor(Math.random() * def.promptTemplatesEn.length)]
+        : undefined;
 
       const evaluated: EvaluatedBlueprintGap = {
         key: def.key,
@@ -480,6 +543,7 @@ export class LifeBlueprintCuriosityEngine {
         isKnown,
         knownValue,
         suggestedPrompt,
+        suggestedPromptEn,
         companionValue: def.companionValue,
         timingAffinity: def.timingAffinity,
         timingScore
@@ -516,14 +580,15 @@ export class LifeBlueprintCuriosityEngine {
   /**
    * Helper to format a Situational Awareness briefing note for discovery.
    */
-  formatDiscoveryPromptGuideline(summary: BlueprintGapSummary): string | null {
+  formatDiscoveryPromptGuideline(summary: BlueprintGapSummary, options?: { isEnglishUser?: boolean }): string | null {
     if (!summary.nextBestCuriosity) return null;
 
     const top = summary.nextBestCuriosity;
+    const promptText = (options?.isEnglishUser && top.suggestedPromptEn) ? top.suggestedPromptEn : top.suggestedPrompt;
     return `- 💡 COMPANION LIFE BLUEPRINT DISCOVERY (${summary.completionPercentage}% known):
   Missing Anchor: "${top.title}" [${top.key}]
   Companion Value: ${top.companionValue}
-  Suggested Natural Inquiry: "${top.suggestedPrompt}"
+  Suggested Natural Inquiry: "${promptText}"
   Rule: Weave this inquiry in warmly towards the end of your response ONLY if the conversation is casual, relaxed, or winding down. NEVER force it if the user is in a hurry, stressed, asking about work, or executing a task.`;
   }
 }

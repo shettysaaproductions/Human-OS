@@ -282,6 +282,12 @@ export function validateAndRepairGrounding(
     .replace(/\bmere\s+pati\b/gi, 'tumhare pati');
 
   // Build searchable context text to verify grounded assertions
+  const isEnglish = Boolean(
+    context?.isEnglishUser ||
+    context?.language === 'en' ||
+    (!/\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|meri|mere|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(userMessage) && /[a-zA-Z]{3,}/.test(userMessage))
+  );
+
   const allContextStrings: string[] = [userMessage];
   if (Array.isArray(context.memories)) {
     context.memories.forEach((m: any) => allContextStrings.push(m.value || m.content || JSON.stringify(m)));
@@ -311,7 +317,9 @@ export function validateAndRepairGrounding(
       });
 
       // If the reply contains a hallucinated child age or development milestone based on invented age:
-      text = 'Mujhe uski age ya details abhi nahi pata yaar, kitne saal ka hai woh?';
+      text = isEnglish
+        ? "I don't know their age or details yet, how old are they?"
+        : 'Mujhe uski age ya details abhi nahi pata yaar, kitne saal ka hai woh?';
     }
   }
 
@@ -319,6 +327,7 @@ export function validateAndRepairGrounding(
   const lowerUser = userMessage.toLowerCase();
   const isAskingUnknownPersonalFact =
     /\b(mera|meri|hum|humne|hum log)\s+(?:favourite|favorite|fav|kahan|kab|kaunsa)\b/i.test(lowerUser) ||
+    /\b(what is my|what's my)\s+(?:favourite|favorite|fav)\b/i.test(lowerUser) ||
     /\b(kal hum kahan gaye the|hum kal kahan the|mera favourite colour|mera favourite khana)\b/i.test(lowerUser);
 
   if (isAskingUnknownPersonalFact) {
@@ -329,15 +338,19 @@ export function validateAndRepairGrounding(
     // If context is completely empty of relevant memories, ensure model doesn't fabricate an assertive specific answer
     if (!hasGroundedAnswerInContext) {
       const isFabricatingSpecificAnswer =
-        /\b(gaye the|gayee thi|tha hum|tumhara favourite|tera favourite)\s+([a-zA-Z]+)/i.test(text) &&
-        !/\b(yaad nahi|pata nahi|tu hi bata|batao na|yaad nahi aa raha)\b/i.test(text);
+        /\b(gaye the|gayee thi|tha hum|tumhara favourite|tera favourite|your favourite(?:\s+[a-zA-Z]+)?\s+is|your favorite(?:\s+[a-zA-Z]+)?\s+is)\s+([a-zA-Z]+)/i.test(text) &&
+        !/\b(yaad nahi|pata nahi|tu hi bata|batao na|yaad nahi aa raha|don't remember|tell me)\b/i.test(text);
 
       if (isFabricatingSpecificAnswer) {
         logger.warn('[GroundingValidator] Detected confident answer to unknown personal fact, replacing with grounded admission');
         if (lowerUser.includes('kahan gaye') || lowerUser.includes('kahan the') || lowerUser.includes('kal')) {
-          text = 'Mujhe yaad nahi aa raha — kal humari baat hui thi kya? Tu hi bata na!';
+          text = isEnglish
+            ? "I don't recall that yet — did we talk about it yesterday? Tell me!"
+            : 'Mujhe yaad nahi aa raha — kal humari baat hui thi kya? Tu hi bata na!';
         } else {
-          text = 'Mujhe abhi yaad nahi aa raha yaar, tu hi bata na!';
+          text = isEnglish
+            ? "I don't remember that right now, tell me!"
+            : 'Mujhe abhi yaad nahi aa raha yaar, tu hi bata na!';
         }
       }
     }
@@ -355,7 +368,9 @@ export function validateAndRepairGrounding(
   const hasPrematureCelebrationPrompt = /\b(?:subah uthke|kal hi plan|kal bday|kal celebrate|subah celebrate|subah hi kya)\b/i.test(text);
   if (hasDobDeclaration && hasPrematureCelebrationPrompt) {
     logger.warn('[GroundingValidator] Intercepted premature birthday celebration hallucination on DOB statement, repairing');
-    text = "Got it! Maine Sakshi aur Tiku (Shreshth) dono ke birthday date achhe se save kar liye hain 😊";
+    text = isEnglish
+      ? "Got it! I've noted both birthdays safely 😊"
+      : "Got it! Maine Sakshi aur Tiku (Shreshth) dono ke birthday date achhe se save kar liye hain 😊";
   }
 
   // 6. Confusion / User Mistake Callout Recovery
@@ -365,10 +380,14 @@ export function validateAndRepairGrounding(
   if (isUserCallingOutMistake) {
     if (/\b(aaj rata|umeed dene lagi|2006|subah hi kya|galat kaha)\b/i.test(text)) {
       logger.warn('[GroundingValidator] Intercepted compounding error on mistake callout, providing humble grounded recovery');
-      text = "Arre sorry yaar! Mera dimag thoda ghoom gaya tha 🤦‍♀️ Tiku (Shreshth) ka bday 17th February hai aur Sakshi ka 7th August — maine dono dates achhe se note kar li hain!";
+      text = isEnglish
+        ? "Sorry about that! My thoughts got jumbled 🤦‍♀️ Tiku's birthday is February 17th and Sakshi's is August 7th — I've noted both dates clearly!"
+        : "Arre sorry yaar! Mera dimag thoda ghoom gaya tha 🤦‍♀️ Tiku (Shreshth) ka bday 17th February hai aur Sakshi ka 7th August — maine dono dates achhe se note kar li hain!";
     } else if (!/\b(?:shreshth|tiku|baby|son)\b/i.test(userMessage) && /\b(?:shreshth|tiku)\b/i.test(text)) {
       logger.warn('[GroundingValidator] Intercepted unprompted baby jump on mistake callout, providing humble grounded apology');
-      text = "Arre sorry yaar! Mera thoda dhyan bhatak gaya tha 🤦‍♀️ Tu kya keh raha tha, mujhe dobara bata de please?";
+      text = isEnglish
+        ? "Sorry about that! My thoughts got mixed up 🤦‍♀️ What were you saying? Please tell me again!"
+        : "Arre sorry yaar! Mera thoda dhyan bhatak gaya tha 🤦‍♀️ Tu kya keh raha tha, mujhe dobara bata de please?";
     }
   }
 
@@ -669,8 +688,11 @@ export class NovaBrainService {
     const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
 
     const isUserCallingOutMistake = /\b(i didn't understood|didn't understand|are u idiot|are you an idiot|pagal ho kya|kuch bhi mat bolo|ye galat hai|aisa nahi hai|maine kab bola|kya bol rahi ho|kya bol rahe ho|galat bol rahi ho|galat kaha)\b/i.test(combinedUserMessage);
+    const isEnglishContext = Boolean(context.language === 'en' || context.isEnglishUser);
     const userCorrectionDirective = (isUserCallingOutMistake || context.hasCorrections)
-      ? `\n\n## USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is calling out a mistake, misunderstanding, or hallucination in Nova's previous reply.\n1. Humbly and warmly apologize and admit the mistake like a real best friend ("Arre sorry yaar! Mera dhyan kahan tha...", "Arre meri galti!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).\n`
+      ? isEnglishContext
+        ? `\n\n## USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is calling out a mistake, misunderstanding, or hallucination in Nova's previous reply.\n1. Humbly and warmly apologize and admit the mistake like a real best friend ("Sorry about that! My mind slipped for a moment...", "My mistake!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).\n`
+        : `\n\n## USER MISTAKE CALLOUT & RECONCILIATION DIRECTIVE (TOP PRIORITY)\nThe user is calling out a mistake, misunderstanding, or hallucination in Nova's previous reply.\n1. Humbly and warmly apologize and admit the mistake like a real best friend ("Arre sorry yaar! Mera dhyan kahan tha...", "Arre meri galti!").\n2. State the user's confirmed facts accurately without arguing, making defensive excuses, or inventing new details.\n3. Smoothly move forward in continuity.\n4. Keep it concise (1-2 WhatsApp sentences).\n`
       : '';
 
     const conversationFullPrompt = [

@@ -1281,13 +1281,44 @@ export class TurnAnalyzer {
     const lower = text.toLowerCase();
     const hasMarker = /\b(actually|correction|instead|wait no|wrong|incorrect|no, that is wrong|nahi|galat)\b/i.test(lower);
     if (hasMarker) return null;
+    if (/\?/.test(text)) return null;
+    if (/\b(kya|kaunsa|what|which)\b/i.test(lower)) return null;
 
-    const m = lower.match(/\b(?:my\s+)?(?:favourite|favorite)\s+(?:colour|color)\s+is\s+([a-z0-9][a-z0-9\s-]*)(?:[.,;!]|$)/i);
-    if (m) {
-      const value = m[1].trim().replace(/[.,;!]+$/, '');
-      if (!value) return null;
-      return { key: 'favourite_color', value };
+    // Pattern 1: English "my favourite/favorite [item] is [value]"
+    const engMatch = text.match(/\b(?:my\s+)?(?:favourite|favorite|fav)\s+([a-z\s_-]+?)\s+is\s+([a-zA-Z0-9][a-zA-Z0-9\s-]*?)(?:[.,;!]|$)/i);
+    if (engMatch) {
+      const category = engMatch[1].trim();
+      const value = engMatch[2].trim().replace(/[.,;!]+$/, '');
+      if (value) {
+        const key = this.mapFavouriteCategoryToKey(category);
+        if (key) return { key, value };
+      }
     }
+
+    // Pattern 2: Hinglish "mera favourite/favorite [item] [value] hai"
+    const hingMatch = text.match(/\b(?:mera|meri)\s+(?:favourite|favorite|fav)\s+([a-z\s_-]+?)\s+([a-zA-Z0-9][a-zA-Z0-9\s-]*?)\s+hai(?:[.,;!]|$)/i);
+    if (hingMatch) {
+      const category = hingMatch[1].trim();
+      const value = hingMatch[2].trim().replace(/[.,;!]+$/, '');
+      if (value) {
+        const key = this.mapFavouriteCategoryToKey(category);
+        if (key) return { key, value };
+      }
+    }
+
+    return null;
+  }
+
+  private static mapFavouriteCategoryToKey(category: string): string | null {
+    const cleanCat = category.replace(/[\s_-]+/g, ' ').trim().toLowerCase();
+    if (/^(?:colour|color)$/.test(cleanCat)) return 'favourite_color';
+    if (/^(?:beverage|drink|tea|coffee|juice)$/.test(cleanCat)) return 'favourite_beverage';
+    if (/^(?:food|dish|street food|cuisine|khana|snack)$/.test(cleanCat)) return 'favourite_street_food';
+    if (/^(?:sport|game|khel)$/.test(cleanCat)) return 'favourite_sport';
+    if (/^(?:movie|film|cinema)$/.test(cleanCat)) return 'favourite_movie';
+    if (/^(?:music|song|band|artist|singer|gaana)$/.test(cleanCat)) return 'favourite_music';
+    if (/^(?:book|novel|kitab)$/.test(cleanCat)) return 'favourite_book';
+    if (/^(?:hobby|pastime|passion|shauk)$/.test(cleanCat)) return 'passions';
     return null;
   }
 

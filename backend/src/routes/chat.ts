@@ -647,14 +647,14 @@ chatRouter.post(
       }
 
       // Legacy extraction for the primary message (used for logging and some logic)
-      const primaryMessage = normalizedMessages[normalizedMessages.length - 1].message;
+      let primaryMessage = normalizedMessages[normalizedMessages.length - 1].message;
       client_message_id = normalizedMessages[normalizedMessages.length - 1].client_message_id;
 
       // Detect language preference dynamically
       const isExplicitEnglish = language === 'en';
-      const isHindiMarker = /\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(primaryMessage);
-      const isEnglishUser = isExplicitEnglish || (language !== 'hi' && !isHindiMarker && /[a-zA-Z]{3,}/.test(primaryMessage));
-      const requestFallbackReply = getFallbackReply(isEnglishUser);
+      let isHindiMarker = /\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|meri|mere|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(primaryMessage);
+      let isEnglishUser = isExplicitEnglish || (language !== 'hi' && !isHindiMarker && /[a-zA-Z]{3,}/.test(primaryMessage));
+      let requestFallbackReply = getFallbackReply(isEnglishUser);
 
       const request_received_ms = Date.now();
       let context_started_ms: number | null = null;
@@ -744,6 +744,10 @@ chatRouter.post(
           }
         }
         effectiveMessage = effectiveParts.join('\n\n');
+        primaryMessage = effectiveMessage;
+        isHindiMarker = /\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|meri|mere|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(primaryMessage);
+        isEnglishUser = isExplicitEnglish || (language !== 'hi' && !isHindiMarker && /[a-zA-Z]{3,}/.test(primaryMessage));
+        requestFallbackReply = getFallbackReply(isEnglishUser);
       }
 
       // ── Degraded Mode: serve from in-memory buffer ─────────────
@@ -1085,6 +1089,10 @@ chatRouter.post(
                   ];
                   normalizedMessages = merged;
                   effectiveMessage = normalizedMessages.map(m => m.message).join('\n\n');
+                  primaryMessage = effectiveMessage;
+                  isHindiMarker = /\b(kya|hai|ho|kar|raha|rahi|bhai|yaar|nahi|hain|mujhe|mera|meri|mere|teri|tere|thoda|accha|theek|suno|bolo|kaise|karo|batao|aaj|kal|parso)\b/i.test(primaryMessage);
+                  isEnglishUser = isExplicitEnglish || (language !== 'hi' && !isHindiMarker && /[a-zA-Z]{3,}/.test(primaryMessage));
+                  requestFallbackReply = getFallbackReply(isEnglishUser);
                   logger.info('[Chat] Burst detected: aggregated preceding unreplied messages into turn', {
                     userId,
                     burstCount: normalizedMessages.length,
@@ -1325,7 +1333,7 @@ chatRouter.post(
           workingMemories,
           { localHour: nowLocal.getUTCHours(), isWeekend }
         );
-        const guideline = lifeBlueprintCuriosityEngine.formatDiscoveryPromptGuideline(blueprintSummary);
+        const guideline = lifeBlueprintCuriosityEngine.formatDiscoveryPromptGuideline(blueprintSummary, { isEnglishUser });
         if (guideline) {
           blueprintDiscoveryNote = guideline;
         }
@@ -1610,7 +1618,8 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
         turnId,
         // P0-B: question clause texts — forwarded to memory extraction jobs
         questionClauses: turnAnalysis.questionClauses || [],
-        language: language || 'auto',
+        language: language || (isEnglishUser ? 'en' : 'auto'),
+        isEnglishUser,
         todayDayName: DAY_NAMES[dayIdx],
       };
 
@@ -2336,7 +2345,8 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
       // OPTIMIZED: All 7 memory types are extracted in ONE LLM call via ConsolidatedMemoryAgent.
       // This reduces per-message LLM load from ~7 calls to ~2 (1 main + 1 consolidated extraction).
       if (process.env.DISABLE_MEMORY !== 'true' && memoryEnabledForChat) {
-        const isFiller = primaryMessage.length < 10 && !shouldExtractShortTermMemory(primaryMessage);
+        const messageForMemory = (effectiveMessage && effectiveMessage.trim().length > primaryMessage.length) ? effectiveMessage : primaryMessage;
+        const isFiller = messageForMemory.length < 10 && !shouldExtractShortTermMemory(messageForMemory);
 
         if (!isFiller) {
           // P0-A + P0-B: include turnId (traceability) and questionClauses (admission guard)
@@ -2348,7 +2358,7 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
           const payload = {
             userId,
             messageId: userMessageId,
-            message: (effectiveMessage && effectiveMessage.trim().length > primaryMessage.length) ? effectiveMessage : primaryMessage,
+            message: messageForMemory,
             turnId,                           // P0-A
             questionClauses: brainContext.questionClauses,  // P0-B
             hasExplicitRemember: turnAnalysis.hasExplicitRemember,

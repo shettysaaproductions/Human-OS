@@ -191,7 +191,19 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'favorite_beverage', 'favorite_drink', 'favourite_drink'
   ],
   favourite_street_food: [
-    'favorite_street_food', 'favourite_food'
+    'favorite_street_food', 'favourite_food', 'favorite_dish', 'favourite_dish', 'favorite_cuisine', 'favourite_cuisine'
+  ],
+  favourite_sport: [
+    'favorite_sport', 'fav_sport', 'favorite_game', 'favourite_game'
+  ],
+  favourite_movie: [
+    'favorite_movie', 'fav_movie', 'favorite_film', 'favourite_film'
+  ],
+  favourite_music: [
+    'favorite_music', 'fav_music', 'favorite_song', 'favourite_song', 'favorite_band', 'favorite_genre', 'favorite_artist'
+  ],
+  favourite_book: [
+    'favorite_book', 'fav_book', 'favorite_novel', 'favourite_novel'
   ],
   // ── Foundational Onboarding & Lifestyle Domains ─────────────────────────────
   passions: [
