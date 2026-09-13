@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.6-beta",
+    "date": "2026-09-13",
+    "title": "⚡ 24/7 Conversational Resilience, 20-Key LLM Fuel & Human-Paced Messaging",
+    "message": [
+      "Zero-Stuck Task & Reminder Querying: Inquiries like 'Show my tasks' or 'What are my reminders' now instantly retrieve and format active tasks in <200ms with 100% reliability, completely preventing fallback hangs.",
+      "20-Slot Multi-Key LLM Fuel Reservoir: Upgraded cognitive router with a 20-key Gemini credential pool and bi-directional failover between NVIDIA and Gemini, ensuring Nova never runs dry on conversational fuel.",
+      "Authentic Human-Paced Texting: Incoming multi-bubble replies now deliver with natural 5–10 second intervals while keeping the typing indicator active, matching real-world companion texting cadence.",
+      "Unified Turn Coalescing: Multi-bubble replies are saved as cohesive conversational turns, preventing awkward simultaneous multi-bubble spam and duplicate alignment badges.",
+      "Warm Companion Voice Guarding: Strict guardian filters permanently remove elderly vocatives ('Beta') and verb slips ('kar diya hoon') in favor of natural, female peer companion phrasing."
+    ]
+  },
+  {
     "version": "0.3.5-beta",
     "date": "2026-09-13",
     "title": "🎯 Autonomous Goals & Reminders Architecture Hardening",

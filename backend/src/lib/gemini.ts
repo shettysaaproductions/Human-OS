@@ -65,8 +65,13 @@ export interface GeminiMessage {
   content: string;
 }
 
-export type GeminiSlot = 'KEY_1' | 'KEY_2' | 'KEY_3' | 'KEY_4';
-export type GeminiKeyRole = 'primary' | 'failover_1' | 'failover_2' | 'failover_3' | 'reserve' | 'failover' | 'benchmark';
+export type GeminiSlot =
+  | 'KEY_1'  | 'KEY_2'  | 'KEY_3'  | 'KEY_4'  | 'KEY_5'
+  | 'KEY_6'  | 'KEY_7'  | 'KEY_8'  | 'KEY_9'  | 'KEY_10'
+  | 'KEY_11' | 'KEY_12' | 'KEY_13' | 'KEY_14' | 'KEY_15'
+  | 'KEY_16' | 'KEY_17' | 'KEY_18' | 'KEY_19' | 'KEY_20'
+  | string;
+export type GeminiKeyRole = 'primary' | 'failover_1' | 'failover_2' | 'failover_3' | 'reserve' | 'failover' | 'benchmark' | string;
 
 export interface GeminiOptions {
   model?: string;
@@ -97,12 +102,43 @@ export class GeminiPool {
   private static readonly COOLDOWN_OVERLOAD_MS  = 30_000;  // 30s for 503/overload
 
   constructor(customKeys?: Array<{ slot: GeminiSlot; role: GeminiKeyRole; key: string }>) {
-    const keyConfigs: Array<{ slot: GeminiSlot; role: GeminiKeyRole; key: string }> = customKeys ?? [
-      { slot: 'KEY_1', role: 'primary',    key: config.gemini.apiKey1 },
-      { slot: 'KEY_2', role: 'failover_1', key: config.gemini.apiKey2 },
-      { slot: 'KEY_3', role: 'failover_2', key: config.gemini.apiKey3 },
-      { slot: 'KEY_4', role: 'failover_3', key: config.gemini.apiKey4 },
-    ];
+    let keyConfigs: Array<{ slot: GeminiSlot; role: GeminiKeyRole; key: string }>;
+
+    if (customKeys) {
+      keyConfigs = customKeys;
+    } else {
+      const rawKeyList: string[] = [];
+      const addKey = (k?: string) => {
+        if (k && k.trim() !== '' && !rawKeyList.includes(k.trim())) {
+          rawKeyList.push(k.trim());
+        }
+      };
+
+      // 1. Primary config keys
+      addKey(config.gemini.apiKey1);
+      addKey(config.gemini.apiKey2);
+      addKey(config.gemini.apiKey3);
+      addKey(config.gemini.apiKey4);
+
+      // 2. Default single GEMINI_API_KEY
+      addKey(process.env.GEMINI_API_KEY);
+
+      // 3. Comma-separated GEMINI_API_KEYS
+      if (process.env.GEMINI_API_KEYS) {
+        process.env.GEMINI_API_KEYS.split(',').forEach(k => addKey(k));
+      }
+
+      // 4. Arbitrary GEMINI_API_KEY_1 through GEMINI_API_KEY_20
+      for (let i = 1; i <= 20; i++) {
+        addKey(process.env[`GEMINI_API_KEY_${i}`]);
+      }
+
+      keyConfigs = rawKeyList.map((key, idx) => {
+        const slot = `KEY_${idx + 1}` as GeminiSlot;
+        const role = idx === 0 ? 'primary' : `failover_${idx}`;
+        return { slot, role, key };
+      });
+    }
 
     keyConfigs.forEach(({ slot, role, key }) => {
       if (key && key.trim() !== '') {
@@ -116,7 +152,7 @@ export class GeminiPool {
       }
     });
 
-    logger.info(`[Gemini] Pool initialized with ${this.keys.size} key(s) [Roles: 1=primary, 2=failover_1, 3=failover_2, 4=failover_3]`);
+    logger.info(`[Gemini] Pool initialized with ${this.keys.size} key(s) [Slots: ${Array.from(this.keys.keys()).join(', ')}]`);
   }
 
   get available(): boolean {
@@ -166,8 +202,8 @@ export class GeminiPool {
       }
     }
 
-    // 2. Production Conversational 4-Key Failover: KEY_1 -> KEY_2 -> KEY_3 -> KEY_4
-    const productionSlots: GeminiSlot[] = ['KEY_1', 'KEY_2', 'KEY_3', 'KEY_4'];
+    // 2. Production Conversational Multi-Key Failover across all registered slots
+    const productionSlots: GeminiSlot[] = Array.from(this.keys.keys());
     let lastError: any = null;
 
     for (const slot of productionSlots) {
@@ -212,7 +248,7 @@ export class GeminiPool {
     }
 
     if (!lastError) {
-      lastError = new Error('[Gemini] All production keys (KEY_1..4) on cooldown or deadline expired');
+      lastError = new Error(`[Gemini] All ${this.keys.size} production keys on cooldown or deadline expired`);
     }
     throw lastError;
   }

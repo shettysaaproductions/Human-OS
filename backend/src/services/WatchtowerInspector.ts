@@ -68,9 +68,38 @@ export class WatchtowerInspector {
       text = deduped;
     }
 
+    // ── 1B. ANTI-ELDERLY / ANTI-PARENTAL VOCATIVE FILTER (NOVA IS A PEER FRIEND, NEVER A MOTHER/AUNT) ──
+    const vocativePatterns: Array<[RegExp, string, string]> = [
+      [/^(?:Arre\s+)?Beta,\s*/i, 'Arre, ', 'PARENTAL_VOCATIVE_BETA_START'],
+      [/^(?:Arre\s+)?Bache,\s*/i, 'Arre, ', 'PARENTAL_VOCATIVE_BACHE_START'],
+      [/^(?:Arre\s+)?Bete,\s*/i, 'Arre, ', 'PARENTAL_VOCATIVE_BETE_START'],
+      [/^(?:Arre\s+)?Beti,\s*/i, 'Arre, ', 'PARENTAL_VOCATIVE_BETI_START'],
+      [/\b(?:haan|arre|theek\s+hai)\s+beta,\s*/gi, 'Haan, ', 'PARENTAL_VOCATIVE_BETA_MID'],
+      [/\b(?:haan|arre|theek\s+hai)\s+bache,\s*/gi, 'Haan, ', 'PARENTAL_VOCATIVE_BACHE_MID'],
+      [/\b,\s*beta([.?!,\s]|$)/gi, '$1', 'PARENTAL_VOCATIVE_BETA_END'],
+      [/\b,\s*bache([.?!,\s]|$)/gi, '$1', 'PARENTAL_VOCATIVE_BACHE_END'],
+      [/\bBeta,\s*/g, '', 'PARENTAL_VOCATIVE_BETA'],
+      [/\bBache,\s*/g, '', 'PARENTAL_VOCATIVE_BACHE'],
+    ];
+
+    for (const [pattern, replacement, flawLabel] of vocativePatterns) {
+      if (pattern.test(text)) {
+        flaws.push(flawLabel);
+        text = text.replace(pattern, replacement).trim();
+      }
+    }
+
     // ── 2. FEMININE CONJUGATION & GENDER REPAIR (NOVA IS FEMALE) ─────────────
-    // Male Hindi -> Female Hindi replacements
+    // Male Hindi -> Female Hindi replacements & Transitive past participle repair
     const genderReplacements: Array<[RegExp, string, string]> = [
+      [/\b(?:main|mai)\s+(?:aapko\s+)?(?:ek\s+)?reminder\s+set\s+kar\s+diya\s+hoon\b/gi, 'Maine reminder set kar diya hai', 'UNGRAMMATICAL_REMINDER_SET_KAR_DIYA_HOON'],
+      [/\bset\s+kar\s+diya\s+hoon\b/gi, 'set kar diya hai', 'UNGRAMMATICAL_SET_KAR_DIYA_HOON'],
+      [/\bkar\s+diya\s+hoon\b/gi, 'kar diya hai', 'UNGRAMMATICAL_KAR_DIYA_HOON'],
+      [/\bkar\s+liya\s+hoon\b/gi, 'kar liya hai', 'UNGRAMMATICAL_KAR_LIYA_HOON'],
+      [/\bde\s+diya\s+hoon\b/gi, 'de diya hai', 'UNGRAMMATICAL_DE_DIYA_HOON'],
+      [/\ble\s+liya\s+hoon\b/gi, 'le liya hai', 'UNGRAMMATICAL_LE_LIYA_HOON'],
+      [/\bbata\s+diya\s+hoon\b/gi, 'bata diya hai', 'UNGRAMMATICAL_BATA_DIYA_HOON'],
+      [/\bmain\s+aapko\s+reminder\s+set\s+kar\s+diya\b/gi, 'Maine reminder set kar diya', 'UNGRAMMATICAL_MAIN_AAPKO_SET'],
       [/\b(?:main|mai)\s+samajh\s+gaya\b/gi, 'main samajh gayi', 'MALE_SAMJH_GAYA'],
       [/\bmaine\s+samajh\s+gaya\b/gi, 'main samajh gayi', 'UNGRAMMATICAL_MAINE_SAMJH_GAYA'],
       [/\bmaine\s+samajh\s+gayi\b/gi, 'main samajh gayi', 'UNGRAMMATICAL_MAINE_SAMJH_GAYI'],

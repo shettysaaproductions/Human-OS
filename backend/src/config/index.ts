@@ -88,7 +88,7 @@ export const config = {
     // Key 2: Conversational failover
     // Key 3: Isolated benchmark / evaluation credential
     // Key 4: Reserve / controlled testing capacity
-    apiKey1: optionalEnv('GEMINI_API_KEY_1', ''),
+    apiKey1: optionalEnv('GEMINI_API_KEY_1', optionalEnv('GEMINI_API_KEY', '')),
     apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
     apiKey3: optionalEnv('GEMINI_API_KEY_3', ''),
     apiKey4: optionalEnv('GEMINI_API_KEY_4', ''),

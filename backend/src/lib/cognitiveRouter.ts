@@ -226,6 +226,44 @@ class CognitiveModelRouter {
         }
       }
 
+      // NVIDIA primary — fallback to Gemini if keys are available
+      if (primaryProvider === 'nvidia') {
+        const geminiStatus = getGeminiStatus();
+        if (geminiStatus.keyCount > 0) {
+          logger.warn(`[CognitiveRouter] NVIDIA primary failed for ${workload} (${result.errorCategory}), falling back to Gemini pool (${geminiStatus.keyCount} keys)`, {
+            error: primaryErr.message,
+            elapsedMs: result.latencyMs,
+          });
+
+          try {
+            const geminiOpts = {
+              maxTokens: options.maxTokens,
+              temperature: options.temperature,
+              jsonMode: options.jsonMode,
+              timeoutMs: 10000,
+            };
+            const text = options.jsonMode
+              ? await geminiComplete(messages, { ...geminiOpts, jsonMode: true })
+              : await geminiComplete(messages, geminiOpts);
+
+            result.fallbackUsed = true;
+            result.fallbackProvider = 'gemini';
+            result.latencyMs = Date.now() - startMs;
+            result.success = true;
+            this.logResult(result);
+            return text;
+          } catch (geminiFallbackErr: any) {
+            result.latencyMs = Date.now() - startMs;
+            logger.error(`[CognitiveRouter] Both NVIDIA and Gemini fallback failed for ${workload}`, {
+              nvidiaError: primaryErr.message,
+              geminiError: geminiFallbackErr.message,
+            });
+            this.logResult(result);
+            throw geminiFallbackErr;
+          }
+        }
+      }
+
       // NVIDIA primary — re-throw (BrainKeyRouter has already exhausted all keys)
       this.logResult(result);
       throw primaryErr;
@@ -234,7 +272,7 @@ class CognitiveModelRouter {
 
   /**
    * Route a streaming completion to the appropriate provider.
-   * Falls back to NVIDIA for Gemini failures.
+   * Falls back to NVIDIA for Gemini failures, and to Gemini for NVIDIA failures.
    */
   async *stream(
     workload: CognitiveWorkload,
@@ -288,12 +326,36 @@ class CognitiveModelRouter {
       temperature: options.temperature,
       timeoutMs: workload === 'CONVERSATION' ? 6000 : undefined,
     };
-    for await (const chunk of nvidiaStream(nvidiaProfile, messages, nvidiaOpts)) {
-      yield chunk;
+    let nvidiaOk = false;
+    try {
+      for await (const chunk of nvidiaStream(nvidiaProfile, messages, nvidiaOpts)) {
+        nvidiaOk = true;
+        yield chunk;
+      }
+      logger.info('[CognitiveRouter] NVIDIA stream completed', {
+        workload, latencyMs: Date.now() - startMs, provider: 'nvidia'
+      });
+    } catch (nvidiaErr: any) {
+      if (nvidiaOk) throw nvidiaErr;
+      if (primaryProvider === 'nvidia') {
+        const geminiStatus = getGeminiStatus();
+        if (geminiStatus.keyCount > 0) {
+          logger.warn(`[CognitiveRouter] NVIDIA stream failed for ${workload}, falling back to Gemini stream`, {
+            error: nvidiaErr.message,
+          });
+          const geminiOpts = {
+            maxTokens: options.maxTokens,
+            temperature: options.temperature,
+            timeoutMs: 10000,
+          };
+          for await (const chunk of geminiStream(messages, geminiOpts)) {
+            yield chunk;
+          }
+          return;
+        }
+      }
+      throw nvidiaErr;
     }
-    logger.info('[CognitiveRouter] NVIDIA stream completed', {
-      workload, latencyMs: Date.now() - startMs, provider: 'nvidia'
-    });
   }
 
   // ── Observability ─────────────────────────────────────────────────────────

@@ -447,27 +447,28 @@ function parseLLMResponse(rawReply: string): string[] {
     return [rawReply];
   }
 
-  // Level 2: Paragraph splitting (double newlines)
-  if (rawReply.includes('\n\n')) {
+  // Level 2: Paragraph splitting (double newlines) - only for substantial length (>260 chars)
+  // Short casual thoughts with linebreaks should stay together in one cohesive bubble.
+  if (rawReply.length > 260 && rawReply.includes('\n\n')) {
     const paragraphs = rawReply
       .split(/\n{2,}/)
       .map(p => p.trim())
-      .filter(Boolean);
+      .filter(p => p.length > 30);
     if (paragraphs.length > 1) {
-      return paragraphs;
+      return paragraphs.slice(0, 3);
     }
   }
 
-  // Level 3: Natural WhatsApp sentence-group chunking for long single-paragraph casual replies (>140 chars)
-  if (rawReply.length > 140) {
+  // Level 3: Natural WhatsApp sentence-group chunking for very long casual replies (>320 chars)
+  if (rawReply.length > 320) {
     const sentences = splitIntoSentences(rawReply);
-    if (sentences.length > 1) {
+    if (sentences.length > 2) {
       const bubbles: string[] = [];
       let current = '';
       for (const s of sentences) {
         if (!current) {
           current = s;
-        } else if ((current + ' ' + s).length <= 160) {
+        } else if ((current + ' ' + s).length <= 220) {
           current += ' ' + s;
         } else {
           bubbles.push(current.trim());
@@ -490,6 +491,125 @@ function parseLLMResponse(rawReply: string): string[] {
   }
 
   return [rawReply];
+}
+
+/**
+ * Detects if the user is asking to view, list, or check their active tasks, reminders, or goals.
+ */
+export function isTaskOrReminderQuery(msg: string): boolean {
+  const lower = (msg || '').trim().toLowerCase();
+  if (!lower) return false;
+
+  // 1. Direct commands / buttons
+  if (/^(?:show\s+(?:me\s+)?(?:my\s+)?(?:tasks?|reminders?|goals?|agenda|schedule|to-?dos?)|what\s+(?:are|is)\s+(?:my\s+)?(?:tasks?|reminders?|goals?|agenda|schedule)|list\s+(?:my\s+)?(?:tasks?|reminders?|goals?)|view\s+(?:my\s+)?(?:tasks?|reminders?|goals?)|check\s+(?:my\s+)?(?:tasks?|reminders?|goals?|schedule))\??$/i.test(lower)) {
+    return true;
+  }
+
+  // 2. Hinglish task/reminder query phrases
+  if (/\b(?:mere|mera|apne)\s+(?:tasks?|reminders?|goals?|agenda|schedule|kaam)\s*(?:batao|dikhao|kya\s+hai|list\s+karo|show\s+karo)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(?:kya\s+kya|kaun\s+kaun\s*se)\s+(?:tasks?|reminders?|kaam)\s*(?:hai|pending\s+hai|bache\s+hai|scheduled\s+hai)\b/i.test(lower)) {
+    return true;
+  }
+  if (/^(?:tasks?|reminders?|my\s+tasks?|my\s+reminders?|agenda|schedule)\??$/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Fast deterministic query executor for active tasks, reminders, and goals.
+ * Guarantees instantaneous, 100% grounded response with zero LLM timeout risk.
+ */
+export async function executeTaskOrReminderQuery(
+  userId: string,
+  isEnglishUser: boolean,
+  tzMs: number,
+): Promise<{ reply: string; options: string[]; remindersCount: number; threadsCount: number }> {
+  const [remindersRes, threadsRes] = await Promise.all([
+    supabaseAdmin
+      .from('reminders')
+      .select('*')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'active'])
+      .order('trigger_at', { ascending: true })
+      .limit(10),
+    supabaseAdmin
+      .from('life_threads')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('updated_at', { ascending: false })
+      .limit(5)
+  ]);
+
+  const activeReminders = remindersRes.data || [];
+  const activeThreads = threadsRes.data || [];
+
+  const remindersCount = activeReminders.length;
+  const threadsCount = activeThreads.length;
+
+  if (remindersCount === 0 && threadsCount === 0) {
+    const reply = isEnglishUser
+      ? "You're all clear right now! You don't have any pending tasks or active reminders on your schedule. Want me to set one for you? 😊"
+      : "Abhi tere koi pending tasks ya active reminders nahi hain yaar, sab all clear hai! Kuch schedule karna hai toh bata? 😊";
+    const options = isEnglishUser
+      ? ['Set a reminder', 'Add a goal', 'All clear, thanks!']
+      : ['Reminder laga do', 'Goal add karo', 'Sab theek hai, thanks!'];
+    return { reply, options, remindersCount, threadsCount };
+  }
+
+  const reminderLines = activeReminders.map(r => {
+    let whenStr = '';
+    if (r.trigger_at) {
+      const d = new Date(new Date(r.trigger_at).getTime() + tzMs);
+      const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+      const monthName = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+      const hours = d.getUTCHours();
+      const mins = d.getUTCMinutes().toString().padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const h12 = hours % 12 || 12;
+      whenStr = ` (${dayName}, ${monthName} ${d.getUTCDate()} at ${h12}:${mins} ${ampm})`;
+    }
+    const recurrenceStr = r.recurrence_type && r.recurrence_interval
+      ? ` [repeats every ${r.recurrence_interval} ${r.recurrence_type}]`
+      : '';
+    return `⏰ ${r.text || r.title}${whenStr}${recurrenceStr}`;
+  });
+
+  const threadLines = activeThreads.map(t => {
+    const cat = t.category ? ` [${t.category}]` : '';
+    return `🎯 ${t.title || t.topic}${cat}`;
+  });
+
+  let reply = '';
+  if (isEnglishUser) {
+    reply = "Here's what you've got active right now:\n\n";
+    if (reminderLines.length > 0) {
+      reply += reminderLines.join('\n') + '\n\n';
+    }
+    if (threadLines.length > 0) {
+      reply += "Active Goals & Focus:\n" + threadLines.join('\n') + '\n\n';
+    }
+    reply += "Let me know if you want to check off anything or add something new! 😊";
+  } else {
+    reply = "Yeh rahe tere active tasks aur reminders:\n\n";
+    if (reminderLines.length > 0) {
+      reply += reminderLines.join('\n') + '\n\n';
+    }
+    if (threadLines.length > 0) {
+      reply += "Active Goals & Focus:\n" + threadLines.join('\n') + '\n\n';
+    }
+    reply += "Kuch update karna hai ya naya reminder lagana hai toh bol! 😊";
+  }
+
+  const options = isEnglishUser
+    ? ['Set another reminder', 'All set, thanks!']
+    : ['Ek aur reminder lagao', 'Sab theek hai, thanks!'];
+
+  return { reply: reply.trim(), options, remindersCount, threadsCount };
 }
 
 /**
@@ -1736,6 +1856,7 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
 
       let extractedActions: any[] = [];
       let rawReply = '';
+      let optionsArray: string[] | undefined;
       if (isExcessiveRequest(effectiveMessage)) {
         rawReply = "That's quite a large request. I can help with one section at a time. Please break it into smaller parts.";
         if (isStreaming) {
@@ -1749,6 +1870,20 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
       } else if (semanticClarificationQuestion) {
         // Semantic clarification short-circuit
         rawReply = semanticClarificationQuestion;
+        if (isStreaming) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.flushHeaders();
+          res.write(`data: ${JSON.stringify({ type: 'setup', conversation_id: activeConversationId })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'chunk', content: rawReply })}\n\n`);
+        }
+      } else if (isTaskOrReminderQuery(effectiveMessage)) {
+        // Deterministic tasks and reminders query handler (instant 100% grounded response)
+        const queryRes = await executeTaskOrReminderQuery(userId, isEnglishUser, tzMs);
+        rawReply = queryRes.reply;
+        optionsArray = queryRes.options;
+        logger.info('[Chat] Deterministic task/reminder query executed', { userId, remindersCount: queryRes.remindersCount, threadsCount: queryRes.threadsCount });
         if (isStreaming) {
           res.setHeader('Content-Type', 'text/event-stream');
           res.setHeader('Cache-Control', 'no-cache');
@@ -1902,12 +2037,31 @@ Use casual "tu/tum", never formal "Aap". Plain conversational text only.`;
                     },
                     ...(recentSnippet ? [{ role: 'user' as const, content: `Recent Context:\n${recentSnippet}\n\nUser: ${primaryMessage}` }] : [{ role: 'user' as const, content: primaryMessage }])
                   ];
-                  const fastReply = await complete('TIMEOUT_FALLBACK', fastRetryMessages, {
-                    maxTokens: 256,
-                    temperature: 0.65
-                  });
+                  let fastReply = '';
+                  try {
+                    fastReply = await complete('TIMEOUT_FALLBACK', fastRetryMessages, {
+                      maxTokens: 256,
+                      temperature: 0.65
+                    });
+                  } catch (nvidiaRetryErr: any) {
+                    logger.warn('[Chat] Fast 8B retry threw, trying Gemini fallback', { error: nvidiaRetryErr?.message });
+                  }
+
+                  if (!fastReply || fastReply.trim().length === 0 || isPromptLeak(fastReply)) {
+                    try {
+                      const { geminiComplete } = await import('../lib/gemini');
+                      fastReply = await geminiComplete(fastRetryMessages, {
+                        maxTokens: 256,
+                        temperature: 0.65,
+                        timeoutMs: 5000
+                      });
+                    } catch (geminiRetryErr: any) {
+                      logger.error('[Chat] Gemini fast retry also failed', { error: geminiRetryErr?.message });
+                    }
+                  }
+
                   if (fastReply && fastReply.trim().length > 0 && !isPromptLeak(fastReply)) {
-                    logger.info('[Chat] Fast 8B retry succeeded', { userId });
+                    logger.info('[Chat] Fast retry succeeded', { userId });
                     // Sanitize and validate grounding
                     const sanitizedFastReply = validateAndRepairGrounding(sanitizeReply(fastReply.trim()), primaryMessage, brainContext);
                     result = { reply: sanitizedFastReply || NOVA_EMPTY_REPLY, subconscious_actions: [] };
@@ -1915,7 +2069,7 @@ Use casual "tu/tum", never formal "Aap". Plain conversational text only.`;
                     result = { reply: requestFallbackReply, subconscious_actions: [] };
                   }
                 } catch (retryErr) {
-                  logger.error('[Chat] Fast 8B retry also failed', { userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
+                  logger.error('[Chat] Fast retry handler also failed', { userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
                   result = { reply: requestFallbackReply, subconscious_actions: [] };
                 }
               } else {
@@ -1987,7 +2141,44 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
           const errStr = nvidiaError instanceof Error ? nvidiaError.message : String(nvidiaError);
           const isContentPolicy = errStr.toLowerCase().includes('policy') || errStr.toLowerCase().includes('moderation') || nvidiaError?.status === 400 || nvidiaError?.status === 422 || errStr.includes('400') || errStr.includes('422');
           logger.error('[NVIDIA] LLM call failed', { error: errStr, async_mode });
-          if (isStreaming) {
+
+          // ATTEMPT GEMINI EMERGENCY RECOVERY BEFORE RESORTING TO FALLBACK
+          let recoveredReply: string | null = null;
+          if (!isContentPolicy) {
+            try {
+              const { geminiComplete } = await import('../lib/gemini');
+              const emergencyPrompt = isEnglishUser
+                ? `You are Nova, a female virtual best friend texting on WhatsApp.
+Reply in 1-2 SHORT, natural English sentences. Max 1 emoji.
+Output ONLY conversational text. NEVER output rule names or bullet points.`
+                : `You are Nova, a female virtual best friend texting on WhatsApp.
+Reply in 1-2 SHORT, natural Hinglish sentences. Max 1 emoji.
+Nova is female: use "Main samajh gayi", "Main batati hoon".
+Casual "tu/tum". Plain conversational text only.`;
+              const emergencyMessages = [
+                { role: 'system' as const, content: emergencyPrompt },
+                { role: 'user' as const, content: primaryMessage }
+              ];
+              const geminiRes = await geminiComplete(emergencyMessages, {
+                maxTokens: 256,
+                timeoutMs: 6000
+              });
+              if (geminiRes && geminiRes.trim().length > 0 && !isPromptLeak(geminiRes)) {
+                recoveredReply = validateAndRepairGrounding(sanitizeReply(geminiRes.trim()), primaryMessage, brainContext);
+                logger.info('[Chat] Recovered via Gemini key pool after NVIDIA failure', { userId });
+              }
+            } catch (geminiErr: any) {
+              logger.error('[Chat] Gemini emergency recovery failed as well', { error: geminiErr instanceof Error ? geminiErr.message : String(geminiErr) });
+            }
+          }
+
+          if (recoveredReply) {
+            rawReply = recoveredReply;
+            if (isStreaming) {
+              res.write(`data: ${JSON.stringify({ type: 'chunk', content: recoveredReply })}\n\n`);
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            }
+          } else if (isStreaming) {
             // Persist the fallback (the raw errStr shown live must NOT be stored — it would
             // render as a broken bubble in history). The user message stays orphaned otherwise.
             await persistAssistantMessage(userId, activeConversationId, requestFallbackReply, is_proactive ? undefined : userMessageId, {
@@ -2052,7 +2243,6 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
         res.end();
       }
 
-      let optionsArray: string[] | undefined;
       const optionsMatch = rawReply.match(/<OPTIONS>([\s\S]*?)<\/OPTIONS>/i);
       if (optionsMatch) {
         const rawOptionsContent = optionsMatch[1].trim();
@@ -2318,125 +2508,120 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
           detail: 'Speaking naturally — like a real friend, not a robot'
         });
 
-        // Create separate DB rows for each bubble
-        for (let idx = 0; idx < finalBubbles.length; idx++) {
-          const msgText = finalBubbles[idx];
-          // Proactive triggers have no real user message — never reference the fake
-          // 'proactive_<ts>' id (it is not a uuid and the reply_to_id column is uuid),
-          // which otherwise makes every insert fail and fall into the emergency path.
-          const replyTargetId = is_proactive ? null : userMessageId;
+        // Save as a single cohesive turn with <NOVA_MESSAGE_BREAK>
+        // Progressively unrolled on mobile with human delays (5-10s) and reflected on as a single whole.
+        const replyTargetId = is_proactive ? null : userMessageId;
+        const combinedContent = finalBubbles.join('\n<NOVA_MESSAGE_BREAK>\n');
 
-          const rowData = {
-            user_id: userId,
-            conversation_id: activeConversationId,
-            role: 'assistant',
-            content: msgText,
-            reply_to_id: idx === 0 ? replyTargetId : null,
-            reply_to_content: null,
-            // P0-C: causal attribution — this is a direct conversational reply
-            source_type: 'conversational',
-            meta: idx === finalBubbles.length - 1 ? {
-              situationBrief: situationBrief || null,
-              subconsciousActions: extractedActions,
-              options: optionsArray,
-              hasThoughts: thoughts.length > 0,
-              coverage_repair_invoked
-            } : null
-          };
+        const rowData = {
+          user_id: userId,
+          conversation_id: activeConversationId,
+          role: 'assistant',
+          content: combinedContent,
+          reply_to_id: replyTargetId,
+          reply_to_content: null,
+          // P0-C: causal attribution — this is a direct conversational reply
+          source_type: 'conversational',
+          meta: {
+            situationBrief: situationBrief || null,
+            subconsciousActions: extractedActions,
+            options: optionsArray,
+            hasThoughts: thoughts.length > 0,
+            coverage_repair_invoked
+          }
+        };
+        
+        const saveResult = await qt.track('save_ai_response', 'chat_history', () => 
+          supabaseAdmin.from('chat_history').insert(rowData).select().single()
+        );
+        
+        if (saveResult.error) {
+          logger.error('[Chat] FAILED to save AI response to DB', { 
+            requestId, 
+            userId, 
+            error: saveResult.error.message || saveResult.error,
+            errorCode: saveResult.error.code,
+            rowData: { 
+              user_id: rowData.user_id, 
+              conversation_id: rowData.conversation_id, 
+              role: rowData.role,
+              contentLength: rowData.content?.length 
+            }
+          });
           
-          const saveResult = await qt.track('save_ai_response', 'chat_history', () => 
-            supabaseAdmin.from('chat_history').insert(rowData).select().single()
-          );
-          
-          if (saveResult.error) {
-            logger.error('[Chat] FAILED to save AI response to DB', { 
+          // EMERGENCY: Try to save without the .select().single() — just raw insert
+          const emergencyResult = await saveAssistantMessage(userId, activeConversationId, combinedContent, 'EmergencyFallback').then(() => ({ error: null })).catch((e: any) => ({ error: e }));
+            
+          if (emergencyResult.error) {
+            logger.error('[Chat] EMERGENCY insert also failed', { 
               requestId, 
               userId, 
-              error: saveResult.error.message || saveResult.error,
-              errorCode: saveResult.error.code,
-              rowData: { 
-                user_id: rowData.user_id, 
-                conversation_id: rowData.conversation_id, 
-                role: rowData.role,
-                contentLength: rowData.content?.length 
-              }
+              error: emergencyResult.error.message 
             });
-            
-            // EMERGENCY: Try to save without the .select().single() — just raw insert
-            const emergencyResult = await saveAssistantMessage(userId, activeConversationId, msgText, 'EmergencyFallback').then(() => ({ error: null })).catch((e: any) => ({ error: e }));
-              
-            if (emergencyResult.error) {
-              logger.error('[Chat] EMERGENCY insert also failed', { 
-                requestId, 
-                userId, 
-                error: emergencyResult.error.message 
-              });
-            } else {
-              logger.info('[Chat] EMERGENCY insert succeeded', { requestId, userId });
-            }
-            
-            // Always try to send push notification even if DB save failed
-            if (pushToken) {
-              await sendNovaReplyNotification(pushToken, msgText, activeConversationId, 'emergency_' + Date.now())
-                .catch(err => logger.warn('[Push] Emergency notification failed', { error: err?.message }));
-            }
-          } else if (saveResult.data) {
-            const savedMsg = saveResult.data;
-            logger.info('[Chat] AI response saved to DB', { requestId, userId, messageId: savedMsg.id });
-            
-            // If this is the last bubble (where meta is attached), save thoughts asynchronously (never block reply)
-            if (idx === finalBubbles.length - 1 && thoughts.length > 0) {
-              Promise.resolve(
-                supabaseAdmin.from('nova_thoughts').insert({
-                  chat_message_id: savedMsg.id,
-                  user_id: userId,
-                  thoughts: thoughts
-                })
-              ).then(({ error }: any) => {
-                if (error) {
-                  logger.error('[Chat] FAILED to save thoughts to nova_thoughts', {
-                    requestId,
-                    userId,
-                    messageId: savedMsg.id,
-                    error: error.message
-                  });
-                }
-              }).catch((err: any) => {
-                logger.error('[Chat] nova_thoughts insert threw', { error: err });
-              });
-            }
-
-            // Send push notification asynchronously (never block reply)
-            if (pushToken) {
-              sendNovaReplyNotification(pushToken, msgText, activeConversationId, savedMsg.id)
-                .catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
-            }
-
-            // Watchtower Post-Reply Reflection & Self-Correction (only on latest assistant reply)
-            if (idx === finalBubbles.length - 1 && !is_proactive) {
-              watchtowerReflectionService.scheduleReflection({
-                userId,
-                conversationId: activeConversationId,
-                messageId: savedMsg.id,
-                content: msgText,
-                userMessage: primaryMessage,
-              });
-
-              // Trigger instant upfront self-healing if fallback was saved
-              if (msgText.includes('mujhe thoda sochne de') || msgText.includes('moment to think')) {
-                import('../services/InstantFallbackRecoveryService').then(({ instantFallbackRecoveryService }) => {
-                  instantFallbackRecoveryService.triggerInstantUpfrontRecovery({
-                    userId,
-                    conversationId: activeConversationId,
-                    userMessageText: primaryMessage || '',
-                    replyToId: is_proactive ? undefined : userMessageId,
-                  });
-                }).catch(recErr => logger.warn('[Chat] Failed to trigger instant upfront recovery', { error: recErr }));
-              }
-            }
           } else {
-            logger.warn('[Chat] AI response save returned no data and no error', { requestId, userId });
+            logger.info('[Chat] EMERGENCY insert succeeded', { requestId, userId });
           }
+          
+          // Always try to send push notification even if DB save failed
+          if (pushToken) {
+            await sendNovaReplyNotification(pushToken, finalBubbles[0], activeConversationId, 'emergency_' + Date.now())
+              .catch(err => logger.warn('[Push] Emergency notification failed', { error: err?.message }));
+          }
+        } else if (saveResult.data) {
+          const savedMsg = saveResult.data;
+          logger.info('[Chat] AI response saved to DB', { requestId, userId, messageId: savedMsg.id });
+          
+          if (thoughts.length > 0) {
+            Promise.resolve(
+              supabaseAdmin.from('nova_thoughts').insert({
+                chat_message_id: savedMsg.id,
+                user_id: userId,
+                thoughts: thoughts
+              })
+            ).then(({ error }: any) => {
+              if (error) {
+                logger.error('[Chat] FAILED to save thoughts to nova_thoughts', {
+                  requestId,
+                  userId,
+                  messageId: savedMsg.id,
+                  error: error.message
+                });
+              }
+            }).catch((err: any) => {
+              logger.error('[Chat] nova_thoughts insert threw', { error: err });
+            });
+          }
+
+          // Send push notification asynchronously with first bubble preview
+          if (pushToken) {
+            sendNovaReplyNotification(pushToken, finalBubbles[0], activeConversationId, savedMsg.id)
+              .catch(err => logger.warn('[Push] sendNovaReplyNotification failed', { error: err?.message }));
+          }
+
+          // Watchtower Post-Reply Reflection & Self-Correction (evaluates whole turn)
+          if (!is_proactive) {
+            watchtowerReflectionService.scheduleReflection({
+              userId,
+              conversationId: activeConversationId,
+              messageId: savedMsg.id,
+              content: combinedContent,
+              userMessage: primaryMessage,
+            });
+
+            // Trigger instant upfront self-healing if fallback was saved
+            if (combinedContent.includes('mujhe thoda sochne de') || combinedContent.includes('moment to think')) {
+              import('../services/InstantFallbackRecoveryService').then(({ instantFallbackRecoveryService }) => {
+                instantFallbackRecoveryService.triggerInstantUpfrontRecovery({
+                  userId,
+                  conversationId: activeConversationId,
+                  userMessageText: primaryMessage || '',
+                  replyToId: is_proactive ? undefined : userMessageId,
+                });
+              }).catch(recErr => logger.warn('[Chat] Failed to trigger instant upfront recovery', { error: recErr }));
+            }
+          }
+        } else {
+          logger.warn('[Chat] AI response save returned no data and no error', { requestId, userId });
         }
       } else {
         logger.warn('[Chat] Prevented saving duplicate assistant message', { userId, conversation_id: activeConversationId });

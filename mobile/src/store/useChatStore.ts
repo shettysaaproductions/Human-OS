@@ -354,6 +354,17 @@ const MOBILE_FALLBACK_FILTER = [
 export const isBadMessage = (content: string) =>
   MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
 
+export const isFallbackMessage = (content?: string): boolean => {
+  if (!content) return false;
+  return (
+    content.startsWith('Hmm... mujhe thoda sochne de') ||
+    content.startsWith('Hmm... give me a moment') ||
+    content.startsWith('Hmm... let me think') ||
+    content.includes("I'll text you right back in a bit") ||
+    content.includes("main abhi batati hu thodi der me")
+  );
+};
+
 // DB rows carry UUID ids; locally-generated messages (SSE `msg_…`, proactive
 // `${ts}_proactive_…`, optimistic sends) never do. Used to distinguish them for dedup.
 export const isUuidLike = (id: string) =>
@@ -1013,6 +1024,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         const newMessages: Message[] = [];
         const delayedChunks: Message[] = [];
         let updatedExisting = false;
+        let seenAssistantInBatch = false;
 
         for (const msg of history) {
           const role = msg.role === 'nova' ? 'assistant' : msg.role;
@@ -1093,7 +1105,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               : [msg.content];
             chunks.forEach((chunkContent: string, idx: number) => {
               const newMsg: Message = {
-                id: `${msgId}_part_${idx + 1}`,
+                id: chunks.length > 1 ? `${msgId}_part_${idx + 1}` : msgId,
                 role: 'assistant',
                 content: chunkContent,
                 status: 'responded',
@@ -1101,9 +1113,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
                 hasThoughts: msg.meta?.hasThoughts,
+                meta: msg.meta,
               };
-              if (idx === 0) {
+              if (!seenAssistantInBatch) {
                 newMessages.push(newMsg);
+                seenAssistantInBatch = true;
               } else {
                 delayedChunks.push(newMsg);
               }
@@ -1129,7 +1143,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             console.log('[PROACTIVE] Synced metadata (thoughts/options) for existing messages');
           }
           set((s) => {
-            const hasRealAssistantMessage = newMessages.some(m => m.role === 'assistant' && !m.content.startsWith('Hmm... mujhe thoda sochne de') && !m.content.startsWith('Hmm... give me a moment'));
+            const hasRealAssistantMessage = newMessages.some(m => m.role === 'assistant' && !isFallbackMessage(m.content));
             const cleanedCurrent = hasRealAssistantMessage
               ? s.messages.filter(m => !m.isSystemMessage || !m.content.includes('Connection toh hai yaar'))
               : s.messages;
@@ -1150,9 +1164,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (msgsNow[i].role === 'user') { lastUserIdx = i; break; }
           }
           const assistantMsgsAfter = msgsNow.slice(lastUserIdx + 1).filter(m => m.role === 'assistant');
-          // Use startsWith because MessageFormatter appends random emojis (e.g., ✨) to all replies
-          const FALLBACK_PREFIX = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
-          const isOnlyFallback = assistantMsgsAfter.length > 0 && assistantMsgsAfter.every(m => m.content.startsWith(FALLBACK_PREFIX));
+          const isOnlyFallback = assistantMsgsAfter.length > 0 && assistantMsgsAfter.every(m => isFallbackMessage(m.content));
           const assistantAfterLastUser = lastUserIdx >= 0
             ? assistantMsgsAfter.length > 0 && !isOnlyFallback
             : true;
@@ -1193,9 +1205,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (newMessages.length === 0 && get().isTyping) {
           const storeMsgs = get().messages;
           const lastStoreMsg = storeMsgs[storeMsgs.length - 1];
-          // Use startsWith because MessageFormatter appends random emojis (e.g., ✨) to all replies
-          const FALLBACK_PREFIX = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
-          if (lastStoreMsg?.role === 'assistant' && !lastStoreMsg.content.startsWith(FALLBACK_PREFIX)) {
+          if (lastStoreMsg?.role === 'assistant' && !isFallbackMessage(lastStoreMsg.content)) {
             console.log('[PROACTIVE] Self-healing: isTyping stuck true but reply already in store');
             set({ isTyping: false });
             stopReplyPolling();
