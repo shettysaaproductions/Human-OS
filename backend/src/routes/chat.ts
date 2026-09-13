@@ -30,7 +30,8 @@ import { watchtowerReflectionService } from '../services/WatchtowerReflectionSer
 import { reminderIntentDetector } from '../services/ReminderIntentDetector';
 import { userLifeStageEngine } from '../services/UserLifeStageEngine';
 import { lifeBlueprintCuriosityEngine } from '../services/LifeBlueprintCuriosityEngine';
-import { entityRelationshipCorrectionService } from '../services/EntityRelationshipCorrectionService';
+import { entityRelationshipCorrectionService, EntityCorrection } from '../services/EntityRelationshipCorrectionService';
+import { universalBranchRelocationService } from '../services/UniversalBranchRelocationService';
 import { DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import crypto from 'crypto';
 
@@ -1579,6 +1580,90 @@ chatRouter.post(
         }
       }
 
+      // ── Universal Branch & Stem Relocation Engine with Confirmation Protocol ──
+      const pendingRelocation = await universalBranchRelocationService.getPendingRelocation(userId);
+      let relocationHandled = false;
+
+      if (pendingRelocation) {
+        if (universalBranchRelocationService.isAffirmativeResponse(effectiveMessage)) {
+          // User confirmed! Execute relocation atomically
+          const execRes = await universalBranchRelocationService.executeBranchRelocation(userId, pendingRelocation);
+          const oldTitle = DOMAIN_TAXONOMY[pendingRelocation.oldDomain]?.title || pendingRelocation.oldDomain;
+          const newTitle = DOMAIN_TAXONOMY[pendingRelocation.newDomain]?.title || pendingRelocation.newDomain;
+
+          const confirmDirective = `\n\n## 🌿 CONFIRMED BRANCH & STEM RELOCATION (CRITICAL - TOP PRIORITY)
+The user has CONFIRMED moving "${pendingRelocation.entityName}" from ${oldTitle} (${pendingRelocation.oldRelation}) to ${newTitle} (${pendingRelocation.newRelation})!
+You have ALREADY atomically moved "${pendingRelocation.entityName}", all its ${execRes.movedStemsCount} sub-branches/stems, and updated ${execRes.movedRemindersCount} connected reminders to the ${newTitle} branch in the database.
+CRITICAL INSTRUCTIONS:
+1. Warmly and smoothly confirm to the user (in natural WhatsApp Hinglish or English matching user) that ${pendingRelocation.entityName} along with all its details and reminders has been moved to ${newTitle} (${pendingRelocation.newRelation}) and connected to the main branch!
+2. Example response: "Done Saa! Maine ${pendingRelocation.entityName} ko uske saare details aur reminders ke sath ${newTitle} (${pendingRelocation.newRelation}) branch me shift kar diya hai 😊"
+3. Do NOT ask for confirmation again. Keep it natural, confident, and warm (1-2 sentences).`;
+
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + confirmDirective;
+          relocationHandled = true;
+        } else if (universalBranchRelocationService.isNegativeResponse(effectiveMessage)) {
+          // User rejected/cancelled
+          await universalBranchRelocationService.clearPendingRelocation(userId);
+          const oldTitle = DOMAIN_TAXONOMY[pendingRelocation.oldDomain]?.title || pendingRelocation.oldDomain;
+
+          const cancelDirective = `\n\n## 🌿 CANCELLED BRANCH RELOCATION (CRITICAL - TOP PRIORITY)
+The user declined moving "${pendingRelocation.entityName}".
+CRITICAL INSTRUCTIONS:
+1. Reassure the user warmly like a friend that no changes were made: "${pendingRelocation.entityName}" remains under ${oldTitle} exactly as before.
+2. Example response: "Theek hai yaar, maine ${pendingRelocation.entityName} ko kahin move nahi kiya, wo waise hi hai 😊"
+3. Keep it brief and natural (1 sentence).`;
+
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + cancelDirective;
+          relocationHandled = true;
+        }
+      }
+
+      // Detect New Relocation Intent (Requires Confirmation Protocol)
+      if (!relocationHandled) {
+        const relocationProposal = await universalBranchRelocationService.detectRelocationIntent(
+          userId,
+          effectiveMessage,
+          (recentMessages || []).map((m: any) => ({ role: m.role || 'user', content: m.content || '' }))
+        );
+
+        if (relocationProposal) {
+          // Stage proposal in working_memory
+          await universalBranchRelocationService.stagePendingRelocation(userId, relocationProposal);
+
+          const doubtDirective = `\n\n## 🌿 BRANCH RELOCATION CONFIRMATION PROTOCOL (CRITICAL - MANDATORY "ARE YOU SURE?")
+The user indicated that "${relocationProposal.entityName}" is actually "${relocationProposal.newRelation}" (${DOMAIN_TAXONOMY[relocationProposal.newDomain]?.title}), not "${relocationProposal.oldRelation}" (${DOMAIN_TAXONOMY[relocationProposal.oldDomain]?.title}).
+CRITICAL INSTRUCTIONS (DO NOT MOVE YET):
+1. You MUST explain your doubt to the user and ask for confirmation ("Are you sure?") before anything is moved.
+2. Explain what you previously thought vs what they are clarifying now:
+   "${relocationProposal.doubtExplanation}"
+3. Explain that if they confirm ("haan" / "yes"), you will move "${relocationProposal.entityName}" along with all its ${relocationProposal.stemsCount} stems/details and ${relocationProposal.remindersCount} reminders to ${DOMAIN_TAXONOMY[relocationProposal.newDomain]?.title}.
+4. Ask clearly: "Are you sure?" / "Kya tum sure ho?"
+5. DO NOT claim it has already moved. Await their confirmation!`;
+
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + doubtDirective;
+          relocationHandled = true;
+        }
+      }
+
+      // Phantom Entity Eradication (e.g. Suresh friend vs Suresh father)
+      const phantomMatch = effectiveMessage.match(/\b(?:mera\s+koi|no|koi)\s+([A-Z][a-z]+)\s+(?:naam\s+ka\s+)?(dost|friend)\s+(?:nai|nahi|not)\s+(?:hai|tha)?\b.*?\b(?:papa|father|dad)\s+(?:ka\s+name|ka\s+naam|is)\s+([A-Z][a-z]+)/i) ||
+        effectiveMessage.match(/\b([A-Z][a-z]+)\s+(?:mera\s+dost\s+nahi|is\s+not\s+my\s+friend).*?\b(?:mere\s+papa|my\s+father)\b/i);
+
+      if (phantomMatch) {
+        const entityName = phantomMatch[1] || phantomMatch[3] || 'Suresh';
+        await universalBranchRelocationService.eradicatePhantomEntity(userId, entityName, 'friend', 'father');
+
+        const phantomDirective = `\n\n## 👻 PHANTOM ENTITY ERADICATION DIRECTIVE (CRITICAL - TOP PRIORITY)
+The user explicitly stated that they do NOT have any friend named ${entityName}; ${entityName} is ONLY their father!
+You have ALREADY eradicated the phantom "friend ${entityName}" memory from the knowledge base.
+CRITICAL INSTRUCTIONS:
+1. Apologize sincerely for the silly mix-up ("Arre sorry yaar! Mera dhyan kahan tha, ${entityName} uncle toh tumhare papa hain, koi dost nahi!").
+2. NEVER mention or claim there are two people with that name or that you thought they had both a friend and a father. Accept that only the father ${entityName} exists.
+3. Keep it warm, natural, and concise (1-2 sentences).`;
+
+        turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + phantomDirective;
+      }
+
       // Conversational Bubble & Stem Cascading Deletion
       const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(effectiveMessage);
       if (deleteIntent) {
@@ -1602,27 +1687,30 @@ CRITICAL INSTRUCTIONS:
         }
       }
 
-      // Entity Relationship & Universal Reclassification Execution & Directive
-      const entityCorrection = turnAnalysis.entityCorrection || await entityRelationshipCorrectionService.detectOrInferCorrection(effectiveMessage);
-      if (entityCorrection) {
-        try {
-          await entityRelationshipCorrectionService.severAndReclassifyEntity(userId, entityCorrection);
-        } catch (corrErr: any) {
-          logger.warn('[Chat] Entity reclassification execution warning', { error: corrErr?.message });
-        }
+      // Entity Relationship & Universal Reclassification Execution & Directive (Only if not already handled by relocation)
+      let entityCorrection: EntityCorrection | null = null;
+      if (!relocationHandled) {
+        entityCorrection = turnAnalysis.entityCorrection || await entityRelationshipCorrectionService.detectOrInferCorrection(effectiveMessage);
+        if (entityCorrection) {
+          try {
+            await entityRelationshipCorrectionService.severAndReclassifyEntity(userId, entityCorrection);
+          } catch (corrErr: any) {
+            logger.warn('[Chat] Entity reclassification execution warning', { error: corrErr?.message });
+          }
 
-        const oldLabel = entityCorrection.oldRelation || entityCorrection.oldDomain;
-        const newDomainTitle = DOMAIN_TAXONOMY[entityCorrection.newDomain]?.title || entityCorrection.newDomain;
-        const branchShiftDirective = entityCorrection.isAttributeTransfer
-          ? `\n\n## 🌿 UNIVERSAL ATTRIBUTE & TIMING TRANSFER (CRITICAL - TOP PRIORITY)
+          const oldLabel = entityCorrection.oldRelation || entityCorrection.oldDomain;
+          const newDomainTitle = DOMAIN_TAXONOMY[entityCorrection.newDomain]?.title || entityCorrection.newDomain;
+          const branchShiftDirective = entityCorrection.isAttributeTransfer
+            ? `\n\n## 🌿 UNIVERSAL ATTRIBUTE & TIMING TRANSFER (CRITICAL - TOP PRIORITY)
 The user explicitly updated their schedule/attribute: "${entityCorrection.transferredValue || entityCorrection.entityName}" is NOT for "${oldLabel}", but belongs to "${entityCorrection.newRelation}" (${newDomainTitle})!
 You have ALREADY severed it from "${oldLabel}" and reclassified it under "${entityCorrection.newRelation}" (${newDomainTitle}).
 CRITICAL INSTRUCTIONS:
 1. Warmly, smoothly, and casually confirm this update (e.g. "Got it Saa! Maine ${entityCorrection.transferredValue || entityCorrection.entityName} ko ${oldLabel} se hata kar tumhare ${entityCorrection.newRelation} (${newDomainTitle}) me shift kar diya hai 😊").
 2. Keep it natural, concise (1-2 sentences).`
-          : `\n\n## 🌿 UNIVERSAL ENTITY & TOPIC RECLASSIFICATION (CRITICAL - TOP PRIORITY)
+            : `\n\n## 🌿 UNIVERSAL ENTITY & TOPIC RECLASSIFICATION (CRITICAL - TOP PRIORITY)
 The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${oldLabel}", but is "${entityCorrection.newRelation}" (${newDomainTitle})!\nYou have ALREADY severed ${entityCorrection.entityName} from the ${entityCorrection.oldDomain} compartment/branch and reclassified it into ${entityCorrection.newDomain} (${entityCorrection.newRelation}).\nCRITICAL INSTRUCTIONS:\n1. Warmly, smoothly, and casually confirm that you've updated this in your memory: acknowledge that ${entityCorrection.entityName} is now filed under ${entityCorrection.newRelation} (${newDomainTitle}) and no longer under ${oldLabel}.\n2. Example response: "Arre got it Saa! Maine ${entityCorrection.entityName} ko ${oldLabel} se hata kar tumhare ${entityCorrection.newRelation} (${newDomainTitle}) me move kar diya hai 😊"\n3. Do NOT debate or question the user. Keep it natural, warm, and concise (1-2 sentences).`;
-        turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + branchShiftDirective;
+          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + branchShiftDirective;
+        }
       }
 
       // User Mistake Callout & Misunderstanding Reconciliation Directive

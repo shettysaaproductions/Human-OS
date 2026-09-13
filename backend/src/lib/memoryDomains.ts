@@ -141,15 +141,21 @@ export function classifyDomain(rawKey: string, memoryType?: string | null): Doma
     return DOMAIN_TAXONOMY.lifestyle;
   }
 
-  // 0b. Explicit office friends, colleagues, coworkers are ALWAYS Career & Professional (work), NEVER family!
+  // 0b. Explicit office friends, colleagues, coworkers, characters, scripts are ALWAYS Career & Professional (work), NEVER family!
   if (
     k.startsWith('colleague_') ||
     k.startsWith('coworker_') ||
     k.startsWith('office_friend_') ||
+    k.startsWith('character_') ||
+    k.startsWith('project_character_') ||
+    k.startsWith('script_character_') ||
     k.includes('office_friend') ||
     k.includes('work_friend') ||
+    k.includes('short_film') ||
+    k.includes('film_script') ||
     ((k.includes('office') || k.includes('colleague') || k.includes('coworker')) && (k.includes('friend') || k.includes('dost') || k.includes('name') || k.startsWith('entity:'))) ||
-    mt === 'work'
+    mt === 'work' ||
+    mt === 'career'
   ) {
     return DOMAIN_TAXONOMY.work;
   }

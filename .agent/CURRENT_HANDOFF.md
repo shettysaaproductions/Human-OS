@@ -1,35 +1,43 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-14 — v0.3.9-beta: Smart Contextual Continuity, Zero-Vagueness Re-engagement & Modern Lifestyle Expansion
+2026-09-14 — v0.3.10-beta: Universal Branch & Stem Relocation Engine, Confirmation Protocol & Attribution Invariants
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: COMPLETE — Resolved conversational gaps, eradicated empty filler queries ("kya hua?", "kuch toh bola tha", "sochne de"), implemented smart contextual continuity across gaps, expanded modern lifestyle classification, and published production OTA:
+Task: COMPLETE — Implemented the Universal Memory Branch & Stem Relocation Engine with mandatory Confirmation Protocol ("Are you sure?"), resolved bizarre attribution / perspective confusion bug, eradicated phantom duplicate entities, and published production EAS OTA update:
 
-1. **Root Causes of Empty Filler / "Kya Hua" / "Sochne De" Identified & Fixed**:
-   - **SituationalAwareness RE-ENTRY Phase**: Previously commanded the LLM: `Do NOT pick up the old thread like no time passed. Start fresh from this new context.` When user said "haan" or "hi" after a gap, the model was forbidden from continuing the prior discussion and was forced to output empty fillers ("kya hua?", "kuch toh bola tha"). Fixed to seamlessly continue prior threads or bridge smoothly.
-   - **24-Hour Gap Chat History Wipeout (`chat.ts`)**: When `gapMinutes > 1440`, `recentMessages` was set to `[]`, wiping out all context of yesterday's conversations. Fixed to preserve the last 4 messages across 24h+ gaps.
-   - **Short Affirmations Stifled (`chat.ts`)**: Messages matching affirmative regex (`haan`, `ha`, `sure`, `yup`) were previously instructed: `KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny close-ended message.` Fixed to actively interpret affirmations as agreeing with the previous suggestion and advancing the topic forward.
-   - **InstantFallbackRecoveryService Isolated Prompting**: Recovery previously passed only 1 isolated user message with no history and hardcoded deprecated `gemini-1.5-flash`. Upgraded to fetch the last 6 messages and routed via `cognitiveRouter.complete('CONVERSATION', ...)` with multi-provider cascade.
-   - **Consciousness & Followup Engine Prompts**: Removed explicit instructions suggesting `kuch soch raha hai?` and `busy hai kya?` in `NovaConsciousnessEngine.ts`, `NovaFollowupService.ts`, and `promptBuilder.ts`. Enforced strict Zero-Vagueness Persona Directive.
+1. **Universal Memory Branch & Stem Relocation Engine (`UniversalBranchRelocationService.ts`)**:
+   - **Dynamic Cross-Domain Branch Relocation**: Users can move ANY memory bubble from ANY department (e.g. `Family & Relationships`) to ANY other department (e.g. `Work & Career`, `Pets`, `Lifestyle`, `Goals`).
+   - **Full Hierarchy & Reminder Reparenting**: When an entity is moved, all its connected sub-branches, microbranches, attribute leaves (`stems`), and active `reminders` are atomically reparented and reconnected to the target department trunk.
+   - **Antecedent Entity Resolution**: Supports pronoun and conversational references (e.g., *"the one I was talking about was not my friend, he was my character of a project on which I am working on to create a short film"* or *"jiski baat kar raha tha wo dost nahi tha, meri film ka character tha"*). Resolves the target entity name from recent conversation history while filtering Hindi and English copula stop words.
+   - **Specialized Revelation Patterns**: Dedicated support for Fictional Project Characters (`work`), Pet Revelations (`family/pets`), and explicit cross-department commands (*"move X from family to work and career"*).
 
-2. **Diverse Lifestyle Classification & Companion Alignment (`UserLifeStageEngine.ts`)**:
-   - Added first-class support for `CREATIVE_CREATOR` (artists, YouTube creators, writers, designers, music producers) and `HEALTH_ATHLETE` (gym, bodybuilding, powerlifting, marathon, nutrition tracking).
-   - Tailored Nova's core mission and companion responses to match creative brainstorming and athletic consistency.
+2. **Doubt Explanation & Mandatory Confirmation Protocol ("Are you sure?")**:
+   - Because reclassifying a branch alters Nova's worldview, Nova never moves a branch silently.
+   - Nova calculates all connected stems and reminders, explains its doubt clearly:
+     *"Wait, earlier I thought Ramesh was under Family & Relationships as a Friend, thinking it was a real-life relationship. But are you saying Ramesh is actually a fictional character for your project (Short Film Character) under Career & Professional? If you confirm, I will move Ramesh, all connected stems (2 details), and 1 reminder to Career & Professional. Are you sure?"*
+   - Staged in `working_memory` under `__pending_branch_relocation:{userId}`.
+   - **Affirmative Response ("haan", "yes", "sure", "pakka", "kardo")**: Atomically executes the relocation in Supabase, invalidates analytics cache, updates `kg_nodes` / `kg_edges`, and confirms warmly.
+   - **Negative Response ("nahi", "no", "rehne do", "cancel")**: Cancels the pending proposal, leaving the entity intact.
 
-3. **Verification**:
-   - Added unit test suite `BackendZeroVaguenessAndContinuity.test.ts` (4 passed, 100% success).
+3. **Phantom Duplicate Entity Eradication & Attribution Truth**:
+   - When user clarifies *"mera koi suresh naam ka dost nahi hai.. mere papa ka name suresh hai"*, Nova immediately purges the phantom `friend_suresh` memory from the database and working memory so it never claims both exist simultaneously.
+   - **Attribution Truth Invariant (`promptBuilder.ts`)**: Strictly forbids Nova from adopting user/relative schedules (e.g., *"wo kaam se 11 baje aate hai"*) as its own routine (*"Main 11 baje kam se aa jaati hoon"*). Nova is strictly grounded as an AI companion living in the app.
+   - **Neutral Companion Address Invariant (`promptBuilder.ts`)**: Prohibits unprompted female grammatical inflections (*"kahaan thi tu?", "kya kar rahi thi?"*) unless the profile explicitly specifies `gender: female`.
+
+4. **Verification & Tests**:
+   - Added unit test suite `UniversalBranchRelocation.test.ts` (11 tests passed, 100% success).
    - Pre-flight verification: `backend/npm run build` (exit 0) and `mobile/npx tsc --noEmit` (exit 0).
 
 ## OTA Deployment & Notification Protocol
-- **Version**: `v0.3.9-beta`
+- **Version**: `v0.3.10-beta`
 - **Changelog**: Inserted at index 0 of `mobile/src/config/updateHistory.json`.
 - **Pre-flight**: `mobile/npx tsc --noEmit` (exit 0), `backend/npm run build` (exit 0).
-- **EAS Update Group ID**: `b95e1d3a-37e6-4dfd-8379-11eb1eeefbd8`
-- **Android Update ID**: `01a09c12-2cea-74ff-8473-2eb3930b24af`
-- **iOS Update ID**: `01a09c12-2cea-7a60-acd2-e24669885752`
+- **EAS Update Group ID**: `50c52a0b-16bc-41e1-aabe-5cace6ac0605`
+- **Android Update ID**: `01a09c26-1f4d-75b7-875a-48f9ddcac60e`
+- **iOS Update ID**: `01a09c26-1f4d-7085-87ab-332c07f68844`
 - **Broadcast Push Notification**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ## NEXT ACTION
