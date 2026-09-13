@@ -37,14 +37,17 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
     registerBackgroundFetchAsync();
 
     // ── Notification tap handler: user tapped a Nova notification ──────────────
-    // Navigates to Chat and refreshes messages so Nova's follow-up is visible.
-    // NOTE: We do NOT register a foreground notification received listener or
-    // AppState listener here — both are handled exclusively by notificationService
-    // and ChatScreen to avoid duplicate checkProactiveMessages() calls that cause
-    // ghost duplicate messages.
     const tapSub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as any;
       const type = data?.type;
+
+      if (type === 'nova_update') {
+        // User tapped the update notification on the notification plate: show changelog details immediately
+        setModalType('changelog');
+        setModalVisible(true);
+        return;
+      }
+
       // Navigate to Chat for any Nova notification type
       const novaTypes = ['nova_reply', 'nova_followup', 'nova_reminder', 'nova_auto_reminder', 'nova_moment', 'nova_consciousness'];
       
@@ -71,8 +74,18 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
       }
     });
 
+    const notifSub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as any;
+      if (data?.type === 'nova_update') {
+        // If an update push arrives in foreground, show update changelog plate
+        setModalType('changelog');
+        setModalVisible(true);
+      }
+    });
+
     return () => {
       tapSub.remove();
+      notifSub.remove();
     };
   }, []);
 
@@ -85,8 +98,20 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
           await Updates.fetchUpdateAsync();
-          // Show update-ready popup (replaces changelog popup if both triggered)
-          setModalType('downloaded');
+          // Post local notification to the device notification plate so user never misses update ready!
+          try {
+            await (Notifications.scheduleNotificationAsync as any)({
+              content: {
+                title: `✨ Nova Update Ready!`,
+                body: `New update downloaded. Tap to restart and apply new features!`,
+                data: { type: 'nova_update' },
+                channelId: 'nova_updates',
+              },
+              trigger: null,
+            });
+          } catch {}
+          // Show update-ready popup (only if user is not already reading changelog)
+          setModalType(prev => (prev === 'changelog' ? prev : 'downloaded'));
           setModalVisible(true);
         }
       } catch (e: any) {
@@ -104,7 +129,9 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
         setModalVisible(true);
       }
     } catch {
-      // Non-fatal
+      // Safe fallback so user never misses update details
+      setModalType('changelog');
+      setModalVisible(true);
     }
   };
 
@@ -135,23 +162,36 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
       {modalVisible && (
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>
           <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{latestUpdate.title}</Text>
-            <Text style={styles.versionTag}>v{latestUpdate.version}</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {modalType === 'downloaded' ? '🚀 New Update Ready!' : latestUpdate.title}
+            </Text>
+            <Text style={styles.versionTag}>
+              {modalType === 'downloaded' ? 'Pending Restart' : `v${latestUpdate.version}`}
+            </Text>
             
             <ScrollView style={styles.notesContainer} showsVerticalScrollIndicator={false}>
-              {latestUpdate.message.map((note, index) => (
-                <View key={index} style={styles.noteRow}>
+              {modalType === 'downloaded' ? (
+                <View style={styles.noteRow}>
                   <Text style={styles.bullet}>•</Text>
-                  <Text style={[styles.noteText, { color: colors.textSecondary }]}>{note}</Text>
+                  <Text style={[styles.noteText, { color: colors.textSecondary }]}>
+                    A new version of HumanOS has been downloaded. Restart now to activate the latest features and improvements!
+                  </Text>
                 </View>
-              ))}
+              ) : (
+                latestUpdate.message.map((note, index) => (
+                  <View key={index} style={styles.noteRow}>
+                    <Text style={styles.bullet}>•</Text>
+                    <Text style={[styles.noteText, { color: colors.textSecondary }]}>{note}</Text>
+                  </View>
+                ))
+              )}
             </ScrollView>
 
             <View style={styles.buttonContainer}>
               {modalType === 'downloaded' ? (
                 <>
                   <TouchableOpacity style={styles.primaryBtn} onPress={handleUpdateNow}>
-                    <Text style={styles.primaryBtnText}>Update Now</Text>
+                    <Text style={styles.primaryBtnText}>Restart & Update Now</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.secondaryBtn} onPress={() => setModalVisible(false)}>
                     <Text style={[styles.secondaryBtnText, { color: colors.textSecondary }]}>Later</Text>

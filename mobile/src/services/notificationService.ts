@@ -37,17 +37,18 @@ export function setChatScreenActive(active: boolean) {
 }
 
 // ── Show notifications when app is open BUT suppress when on ChatScreen ────────
-// When user is actively reading the chat, showing a banner is redundant noise.
-// shouldShowList: false when on chat ensures NO heads-up banner on Android.
+// Update notifications (nova_update) are critical and always shown.
 Notifications.setNotificationHandler({
-  handleNotification: async () => {
+  handleNotification: async (notification) => {
+    const type = notification?.request?.content?.data?.type;
+    const isUpdate = type === 'nova_update';
     const isActuallyActive = _isChatScreenActive && AppState.currentState === 'active';
     return {
-      shouldShowAlert: !isActuallyActive,
-      shouldPlaySound: !isActuallyActive,
-      shouldSetBadge: !isActuallyActive,
-      shouldShowBanner: !isActuallyActive,
-      shouldShowList: !isActuallyActive,
+      shouldShowAlert: isUpdate || !isActuallyActive,
+      shouldPlaySound: isUpdate || !isActuallyActive,
+      shouldSetBadge: true,
+      shouldShowBanner: isUpdate || !isActuallyActive,
+      shouldShowList: true,
     };
   },
 });
@@ -61,6 +62,7 @@ async function _ensureAndroidChannels() {
     await Notifications.deleteNotificationChannelAsync('nova_messages').catch(() => {});
     await Notifications.deleteNotificationChannelAsync('nova_moments').catch(() => {});
     await Notifications.deleteNotificationChannelAsync('nova_reminders').catch(() => {});
+    await Notifications.deleteNotificationChannelAsync('nova_updates').catch(() => {});
     await Notifications.setNotificationChannelAsync('nova_messages', {
       name: 'Nova Messages',
       importance: Notifications.AndroidImportance.HIGH,
@@ -87,6 +89,15 @@ async function _ensureAndroidChannels() {
       sound: 'default',
       enableVibrate: true,
       showBadge: false,
+    });
+    await Notifications.setNotificationChannelAsync('nova_updates', {
+      name: 'Nova System & Feature Updates',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 300, 200, 300],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
     });
     // Silent channel for autonomous vision snap triggers — no sound, no banner
     await Notifications.setNotificationChannelAsync('nova_silent', {
@@ -372,6 +383,16 @@ class NotificationService {
       sound: 'default',
       enableVibrate: true,
       showBadge: false,
+    });
+
+    await Notifications.setNotificationChannelAsync('nova_updates', {
+      name: 'Nova System & Feature Updates',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 300, 200, 300],
+      lightColor: '#8B5CF6',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
     });
 
     // Silent channel for autonomous vision snap — no sound, no banner, no badge

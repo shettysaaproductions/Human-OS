@@ -1455,6 +1455,26 @@ export function ChatScreen() {
               </View>
             </View>
             <View style={s.headerRight}>
+              {/* Voice Mode Live Pill Button */}
+              <TouchableOpacity
+                onPress={() => setIsVoiceModeVisible(true)}
+                style={[s.headerBtn, {
+                  backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                  borderColor: '#8B5CF6',
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingHorizontal: 8,
+                  paddingVertical: 5,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  marginRight: 4
+                }]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={{ fontSize: 15 }}>🎙️</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#8B5CF6' }}>Live</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setIsLifestyleModalVisible(true)}
                 style={[s.headerBtn, { backgroundColor: 'rgba(139, 92, 246, 0.12)', borderRadius: 8, marginRight: 4 }]}
@@ -1814,10 +1834,20 @@ export function ChatScreen() {
             {/* Mic button — launches Nova Voice Mode */}
             <TouchableOpacity
               onPress={() => setIsVoiceModeVisible(true)}
-              style={{ padding: 10 }}
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 19,
+                backgroundColor: 'rgba(139, 92, 246, 0.22)',
+                borderWidth: 1,
+                borderColor: '#8B5CF6',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 2,
+              }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={{ fontSize: 24 }}>🎙️</Text>
+              <Text style={{ fontSize: 20 }}>🎙️</Text>
             </TouchableOpacity>
             <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
               <TextInput
