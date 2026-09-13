@@ -204,6 +204,7 @@ class CognitiveModelRouter {
           const nvidiaOpts = {
             maxTokens: options.maxTokens,
             temperature: options.temperature,
+            timeoutMs: workload === 'CONVERSATION' ? 6000 : undefined,
             ...(options.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
           };
           const text = await nvidiaComplete(nvidiaProfile, messages, nvidiaOpts);
@@ -282,7 +283,11 @@ class CognitiveModelRouter {
     }
 
     // NVIDIA stream (primary or fallback)
-    const nvidiaOpts = { maxTokens: options.maxTokens, temperature: options.temperature };
+    const nvidiaOpts = {
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+      timeoutMs: workload === 'CONVERSATION' ? 6000 : undefined,
+    };
     for await (const chunk of nvidiaStream(nvidiaProfile, messages, nvidiaOpts)) {
       yield chunk;
     }

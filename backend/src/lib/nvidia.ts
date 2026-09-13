@@ -101,6 +101,7 @@ export interface ChatOptions {
   response_format?: { type: 'json_object' | 'text' };
   tools?: any[];
   tool_choice?: 'auto' | 'none' | { type: 'function', function: { name: string } };
+  timeoutMs?: number;
 }
 
 /**
@@ -206,12 +207,16 @@ class BrainRegion {
    * Keys that recently failed are placed on cooldown so they're skipped entirely
    * instead of burning a retry on a known-bad key.
    */
-  async execute<T>(operation: (client: OpenAI, signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
+  async execute<T>(
+    operation: (client: OpenAI, signal: AbortSignal, attempt: number) => Promise<T>,
+    timeoutMs?: number
+  ): Promise<T> {
     this.activeRequests++;
     try {
       let lastError: any = null;
       const total = this.clients.length;
       const now = Date.now();
+      const perAttemptTimeoutMs = timeoutMs ?? NVIDIA_TIMEOUT_MS;
 
       // Build the rotation order once, starting at the current index.
       const order: number[] = [];
@@ -240,7 +245,7 @@ class BrainRegion {
 
       try {
         const client = this.clients[keyIdx];
-        const result = await withTimeout((signal) => operation(client, signal, attempt));
+        const result = await withTimeout((signal) => operation(client, signal, attempt), perAttemptTimeoutMs);
         // Success — clear any lingering cooldown for this key.
         this.cooldowns.delete(keyIdx);
         return result;
@@ -513,6 +518,7 @@ async function executeWithFailover(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options?: ChatOptions,
 ): Promise<string> {
+  const effectiveTimeout = options?.timeoutMs ?? (primary.name === 'frontal' ? 6000 : NVIDIA_TIMEOUT_MS);
   const run = async (region: BrainRegion) => {
     return region.execute(async (client, signal, attempt) => {
       const payload = buildPayload(messages, options, attempt);
@@ -523,7 +529,7 @@ async function executeWithFailover(
       }
       if (!message?.content) throw new Error('NVIDIA API returned an empty response');
       return message.content;
-    });
+    }, effectiveTimeout);
   };
 
   try {
@@ -660,18 +666,19 @@ export async function* stream(
 
   const primary = getRegion(decision.region);
   const fallback = getFallback(decision.region);
+  const streamTimeoutMs = (decision.region === 'frontal' || profile === 'USER_FAST') ? 6000 : NVIDIA_TIMEOUT_MS;
   let stream: any;
   try {
     stream = await primary.execute(async (client, signal) => {
       return await client.chat.completions.create(payload, { signal }) as any;
-    });
+    }, streamTimeoutMs);
   } catch (frontalErr: any) {
     if (!fallback) throw frontalErr;
     logger.warn(`[Brain:${primary.name}] Streaming failed, falling over to reserve`, { error: frontalErr.message });
     try {
       stream = await fallback.execute(async (client, signal) => {
         return await client.chat.completions.create(payload, { signal }) as any;
-      });
+      }, streamTimeoutMs);
     } catch (reserveErr: any) {
       logger.error('[Brain:reserve] Streaming failover also failed', { error: reserveErr.message });
       throw reserveErr;

@@ -20,6 +20,10 @@ function optionalEnv(key: string, defaultValue: string): string {
   if (lower.includes('70b-instruct') || lower.includes('3.1-8b-instruct') || lower.includes('nemotron-super-49b') || lower.includes('nemotron-70b')) {
     return 'meta/llama-3.2-11b-vision-instruct';
   }
+  // Auto-upgrade experimental preview gemini-3.6-flash (20 RPD cap) to production-ready gemini-2.0-flash (1500 RPD)
+  if (lower.includes('3.6-flash')) {
+    return 'gemini-2.0-flash';
+  }
   return resolved;
 }
 
@@ -88,10 +92,10 @@ export const config = {
     apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
     apiKey3: optionalEnv('GEMINI_API_KEY_3', ''),
     apiKey4: optionalEnv('GEMINI_API_KEY_4', ''),
-    // Primary Gemini model for conversational workloads
-    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-3.6-flash'),
-    // Hard interactive timeout for conversation workloads (default 8s)
-    conversationTimeoutMs: parseInt(optionalEnv('GEMINI_CONVERSATION_TIMEOUT_MS', '8000'), 10),
+    // Primary Gemini model for conversational workloads (1500 RPD, fast)
+    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-2.0-flash'),
+    // Hard interactive timeout for conversation workloads (default 5s for snappy chat)
+    conversationTimeoutMs: parseInt(optionalEnv('GEMINI_CONVERSATION_TIMEOUT_MS', '5000'), 10),
   },
 
   // Cognitive Model Router — maps workloads to providers.

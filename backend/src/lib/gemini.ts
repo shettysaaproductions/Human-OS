@@ -300,17 +300,39 @@ function extractSystem(messages: OAIMessage[]): string {
     .join('\n\n');
 }
 
+function extractResponseText(response: any): string {
+  try {
+    const text = response?.response?.text();
+    if (text && text.trim().length > 0) return text.trim();
+  } catch (err: any) {
+    logger.warn('[Gemini] response.text() failed, inspecting candidates directly', { error: err?.message });
+  }
+
+  const candidate = response?.response?.candidates?.[0];
+  if (candidate) {
+    if (candidate.finishReason === 'SAFETY') {
+      throw new Error('[Gemini] Candidate was blocked due to SAFETY');
+    }
+    const partText = candidate.content?.parts?.map((p: any) => p.text || '').join('').trim();
+    if (partText) return partText;
+  }
+
+  throw new Error('[Gemini] Empty response received');
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Text completion via Gemini.
  * Accepts OpenAI-compatible message format for drop-in use.
+ * Automatically cascades across models (gemini-2.0-flash -> gemini-1.5-flash -> gemini-2.0-flash-lite)
+ * across the 4-key pool.
  */
 export async function geminiComplete(
   messages: OAIMessage[],
   options: GeminiOptions = {},
 ): Promise<string> {
-  const modelName = options.model ?? config.gemini.chatModel;
+  const primaryModel = options.model ?? config.gemini.chatModel;
   const systemInstruction = extractSystem(messages);
   const history = toGeminiHistory(messages);
 
@@ -321,53 +343,68 @@ export async function geminiComplete(
   // Last message is the current user turn; rest is history
   const lastMessage = history[history.length - 1];
   const historyMsgs = history.slice(0, -1);
-  let text: string;
   const timeoutMs = options.timeoutMs ?? (options.jsonMode ? 30_000 : config.gemini.conversationTimeoutMs);
+  const modelsToTry = options.model
+    ? [options.model]
+    : [primaryModel, 'gemini-1.5-flash', 'gemini-2.0-flash-lite'].filter((m, i, a) => a.indexOf(m) === i);
 
-  return pool.execute(async (client, _slot, remainingTimeoutMs) => {
-    const effectiveTimeoutMs = Math.min(timeoutMs, remainingTimeoutMs);
-    const model = client.getGenerativeModel({
-      model: modelName,
-      systemInstruction: systemInstruction || undefined,
-      safetySettings: SAFETY_SETTINGS,
-      generationConfig: {
-        // 512 default — 300 was truncating Nova's conversational replies mid-sentence.
-        maxOutputTokens: options.maxTokens ?? 512,
-        temperature: options.temperature ?? 0.85,
-        ...(options.jsonMode ? { responseMimeType: 'application/json' } : {}),
-      },
-    });
+  let lastErr: any = null;
 
-    if (historyMsgs.length === 0) {
-      // Single-turn: use generateContent() directly with just the user text string.
-      // systemInstruction is already embedded on the model via getGenerativeModel().
-      // generateContent() accepts string | Part[] for single-turn (not Content[] with role).
-      const response = await withGeminiTimeout(() =>
-        model.generateContent(lastMessage.content),
-        effectiveTimeoutMs
-      );
-      text = response.response.text();
-    } else {
-      // Multi-turn: use startChat() to preserve conversation history.
-      const chat = model.startChat({
-        history: historyMsgs.map(m => ({
-          role: m.role,
-          parts: [{ text: m.content }],
-        })),
+  for (const currentModel of modelsToTry) {
+    try {
+      return await pool.execute(async (client, _slot, remainingTimeoutMs) => {
+        const effectiveTimeoutMs = Math.min(timeoutMs, remainingTimeoutMs);
+        const model = client.getGenerativeModel({
+          model: currentModel,
+          systemInstruction: systemInstruction || undefined,
+          safetySettings: SAFETY_SETTINGS,
+          generationConfig: {
+            // 512 default — 300 was truncating Nova's conversational replies mid-sentence.
+            maxOutputTokens: options.maxTokens ?? 512,
+            temperature: options.temperature ?? 0.85,
+            ...(options.jsonMode ? { responseMimeType: 'application/json' } : {}),
+          },
+        });
+
+        let response: any;
+        if (historyMsgs.length === 0) {
+          // Single-turn: use generateContent() directly with just the user text string.
+          response = await withGeminiTimeout(() =>
+            model.generateContent(lastMessage.content),
+            effectiveTimeoutMs
+          );
+        } else {
+          // Multi-turn: use startChat() to preserve conversation history.
+          const chat = model.startChat({
+            history: historyMsgs.map(m => ({
+              role: m.role,
+              parts: [{ text: m.content }],
+            })),
+          });
+
+          response = await withGeminiTimeout(() =>
+            chat.sendMessage([{ text: lastMessage.content }]),
+            effectiveTimeoutMs
+          );
+        }
+
+        return extractResponseText(response);
+      }, options.targetSlot, options.deadlineMs, timeoutMs);
+    } catch (err: any) {
+      lastErr = err;
+      if (options.targetSlot || err.status === 400 || err.status === 401 || err.status === 403) {
+        throw err;
+      }
+      if (options.deadlineMs && options.deadlineMs - Date.now() < 800) {
+        break;
+      }
+      logger.warn(`[Gemini] Model ${currentModel} failed, trying intra-provider fallback`, {
+        error: err.message,
       });
-
-      const response = await withGeminiTimeout(() =>
-        chat.sendMessage([{ text: lastMessage.content }]),
-        effectiveTimeoutMs
-      );
-      text = response.response.text();
     }
+  }
 
-    if (!text || text.trim() === '') {
-      throw new Error('[Gemini] Empty response received');
-    }
-    return text.trim();
-  }, options.targetSlot, options.deadlineMs, timeoutMs);
+  throw lastErr || new Error('[Gemini] All models failed');
 }
 
 /**
@@ -399,7 +436,7 @@ export async function* geminiStream(
   messages: OAIMessage[],
   options: GeminiOptions = {},
 ): AsyncGenerator<string, void, unknown> {
-  const modelName = options.model ?? config.gemini.chatModel;
+  const primaryModel = options.model ?? config.gemini.chatModel;
   const systemInstruction = extractSystem(messages);
   const history = toGeminiHistory(messages);
 
@@ -411,61 +448,87 @@ export async function* geminiStream(
   const historyMsgs = history.slice(0, -1);
   const timeoutMs = options.timeoutMs ?? config.gemini.conversationTimeoutMs;
 
-  // For streaming we can't use pool.execute() (generator can't be wrapped easily)
-  // so we check availability first, then use first available key.
   if (!pool.available) {
     throw new Error('[Gemini] All keys are on cooldown or unconfigured');
   }
 
-  // Collect chunks from execute callback
+  const modelsToTry = options.model
+    ? [options.model]
+    : [primaryModel, 'gemini-1.5-flash', 'gemini-2.0-flash-lite'].filter((m, i, a) => a.indexOf(m) === i);
+
   let streamErr: any = null;
   const chunks: string[] = [];
 
-  await pool.execute(async (client, _slot, remainingTimeoutMs) => {
-    const effectiveTimeoutMs = Math.min(timeoutMs, remainingTimeoutMs);
-    const model = client.getGenerativeModel({
-      model: modelName,
-      systemInstruction: systemInstruction || undefined,
-      safetySettings: SAFETY_SETTINGS,
-      generationConfig: {
-        maxOutputTokens: options.maxTokens ?? 512,
-        temperature: options.temperature ?? 0.85,
-      },
-    });
+  for (const currentModel of modelsToTry) {
+    chunks.length = 0;
+    streamErr = null;
 
-    if (historyMsgs.length === 0) {
-      const result = await withGeminiTimeout(
-        () => model.generateContentStream(lastMessage.content),
-        effectiveTimeoutMs
-      );
-      for await (const chunk of result.stream) {
-        const t = chunk.text();
-        if (t) chunks.push(t);
-      }
-    } else {
-      const chat = model.startChat({
-        history: historyMsgs.map(m => ({
-          role: m.role,
-          parts: [{ text: m.content }],
-        })),
+    await pool.execute(async (client, _slot, remainingTimeoutMs) => {
+      const effectiveTimeoutMs = Math.min(timeoutMs, remainingTimeoutMs);
+      const model = client.getGenerativeModel({
+        model: currentModel,
+        systemInstruction: systemInstruction || undefined,
+        safetySettings: SAFETY_SETTINGS,
+        generationConfig: {
+          maxOutputTokens: options.maxTokens ?? 512,
+          temperature: options.temperature ?? 0.85,
+        },
       });
 
-      const result = await withGeminiTimeout(
-        () => chat.sendMessageStream([{ text: lastMessage.content }]),
-        effectiveTimeoutMs
-      );
+      if (historyMsgs.length === 0) {
+        const result = await withGeminiTimeout(
+          () => model.generateContentStream(lastMessage.content),
+          effectiveTimeoutMs
+        );
+        for await (const chunk of result.stream) {
+          try {
+            const t = chunk.text();
+            if (t) chunks.push(t);
+          } catch (chunkErr: any) {
+            const partText = chunk.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('');
+            if (partText) chunks.push(partText);
+            else logger.warn('[GeminiStream] Chunk text error', { error: chunkErr?.message });
+          }
+        }
+      } else {
+        const chat = model.startChat({
+          history: historyMsgs.map(m => ({
+            role: m.role,
+            parts: [{ text: m.content }],
+          })),
+        });
 
-      for await (const chunk of result.stream) {
-        const t = chunk.text();
-        if (t) chunks.push(t);
+        const result = await withGeminiTimeout(
+          () => chat.sendMessageStream([{ text: lastMessage.content }]),
+          effectiveTimeoutMs
+        );
+
+        for await (const chunk of result.stream) {
+          try {
+            const t = chunk.text();
+            if (t) chunks.push(t);
+          } catch (chunkErr: any) {
+            const partText = chunk.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('');
+            if (partText) chunks.push(partText);
+            else logger.warn('[GeminiStream] Chunk text error', { error: chunkErr?.message });
+          }
+        }
       }
-    }
-    return null;
-  }, options.targetSlot, options.deadlineMs, timeoutMs).catch(err => {
-    streamErr = err;
-  });
+      return null;
+    }, options.targetSlot, options.deadlineMs, timeoutMs).catch(err => {
+      streamErr = err;
+    });
 
-  if (streamErr) {
+    if (!streamErr && chunks.length > 0) {
+      break;
+    }
+
+    if (options.targetSlot || options.deadlineMs && (options.deadlineMs - Date.now() < 800)) {
+      break;
+    }
+  }
+
+  if (streamErr && chunks.length === 0) {
     throw streamErr;
   }
 

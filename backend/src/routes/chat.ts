@@ -101,11 +101,23 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
  * will appear unanswered on next hydrate, and the frontend will poll for 120s before giving up.
  * This function now logs a CRITICAL alert so developers are immediately aware.
  */
-async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string, context?: { asyncMode?: boolean; source?: string }): Promise<void> {
+async function persistAssistantMessage(userId: string, conversationId: string, content: string, replyToId?: string, context?: { asyncMode?: boolean; source?: string; userMessageText?: string }): Promise<void> {
   try {
     await saveAssistantMessage(userId, conversationId, content, 'SystemFallback', replyToId, {
       sourceType: 'conversational',   // P0-C: fallback still originated from a user turn
     });
+
+    // Autonomous Upfront Self-Healing: If a fallback was persisted, instantly recover using the 21-LLM pool!
+    if (content.includes('mujhe thoda sochne de') || content.includes('moment to think')) {
+      import('../services/InstantFallbackRecoveryService').then(({ instantFallbackRecoveryService }) => {
+        instantFallbackRecoveryService.triggerInstantUpfrontRecovery({
+          userId,
+          conversationId,
+          userMessageText: context?.userMessageText || '',
+          replyToId,
+        });
+      }).catch(recErr => logger.warn('[Chat] Failed to trigger instant upfront recovery', { error: recErr }));
+    }
   } catch (err) {
     const isAsync = context?.asyncMode === true;
     const source = context?.source || 'unknown';
@@ -2344,6 +2356,18 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
                 content: msgText,
                 userMessage: primaryMessage,
               });
+
+              // Trigger instant upfront self-healing if fallback was saved
+              if (msgText.includes('mujhe thoda sochne de') || msgText.includes('moment to think')) {
+                import('../services/InstantFallbackRecoveryService').then(({ instantFallbackRecoveryService }) => {
+                  instantFallbackRecoveryService.triggerInstantUpfrontRecovery({
+                    userId,
+                    conversationId: activeConversationId,
+                    userMessageText: primaryMessage || '',
+                    replyToId: is_proactive ? undefined : userMessageId,
+                  });
+                }).catch(recErr => logger.warn('[Chat] Failed to trigger instant upfront recovery', { error: recErr }));
+              }
             }
           } else {
             logger.warn('[Chat] AI response save returned no data and no error', { requestId, userId });

@@ -1129,7 +1129,11 @@ export const useChatStore = create<ChatState>((set, get) => {
             console.log('[PROACTIVE] Synced metadata (thoughts/options) for existing messages');
           }
           set((s) => {
-            const combined = [...s.messages, ...newMessages];
+            const hasRealAssistantMessage = newMessages.some(m => m.role === 'assistant' && !m.content.startsWith('Hmm... mujhe thoda sochne de') && !m.content.startsWith('Hmm... give me a moment'));
+            const cleanedCurrent = hasRealAssistantMessage
+              ? s.messages.filter(m => !m.isSystemMessage || !m.content.includes('Connection toh hai yaar'))
+              : s.messages;
+            const combined = [...cleanedCurrent, ...newMessages];
             combined.sort(compareMessagesDeterministic);
             return {
               messages: combined,
