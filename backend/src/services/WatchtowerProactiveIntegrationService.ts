@@ -375,7 +375,23 @@ export const watchtowerProactiveIntegrationService = new WatchtowerProactiveInte
 outboundDispatcherService.registerStrategy('watchtower_tier2', async (context: any) => {
   const { att, topic } = context;
   const uid = att.userId || att.user_id;
-  const tContext = await temporalAwarenessService.getContext(uid, 0);
+
+  let tzOffset = 5.5;
+  let isNonIndianOrEnglish = false;
+  try {
+    const { resolveUserTzOffsetHours } = await import('./ReminderEngine');
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('timezone, timezone_offset, country')
+      .eq('id', uid)
+      .maybeSingle();
+    tzOffset = resolveUserTzOffsetHours(profile || undefined);
+    isNonIndianOrEnglish = !!(profile?.country && profile.country !== 'IN');
+  } catch {
+    // Default fallback
+  }
+
+  const tContext = await temporalAwarenessService.getContext(uid, tzOffset);
   
   let lifeStageBlock = '';
   try {
@@ -386,12 +402,16 @@ outboundDispatcherService.registerStrategy('watchtower_tier2', async (context: a
     // Non-critical
   }
 
+  const langDirective = isNonIndianOrEnglish
+    ? 'natural English'
+    : 'natural conversational language preferred by user (English or Hinglish)';
+
   const tier2Context = `Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
 Watchtower Target: ${att.targetType || att.target_type}
 Topic: ${topic}
 Urgency: ${att.scores?.urgency || 0}/100${lifeStageBlock}
 
-Generate a short, natural proactive message in conversational Hinglish asking the user about this topic. Be helpful, empathetic, and grounded in their real stakes.`;
+Generate a short, natural proactive message in ${langDirective} asking the user about this topic. Be helpful, empathetic, and grounded in their real stakes.`;
 
   const generated = await novaBrain.evaluateConsciousnessTier2(tier2Context);
   return generated.message || `[Watchtower ${att.targetType || att.target_type}: ${topic}]`;

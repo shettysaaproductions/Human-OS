@@ -72,14 +72,17 @@ onboardingRouter.get('/status', async (req: Request, res: Response, next: NextFu
 onboardingRouter.patch('/profile', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user!.id;
-    const ALLOWED_FIELDS = ['country', 'preferred_name', 'companion_personality'];
+    const ALLOWED_STRING_FIELDS = ['country', 'preferred_name', 'companion_personality', 'timezone', 'language'];
 
     // Only pick fields that are explicitly allowed — never let raw body touch the DB directly
-    const updates: Record<string, string> = {};
-    for (const field of ALLOWED_FIELDS) {
+    const updates: Record<string, any> = {};
+    for (const field of ALLOWED_STRING_FIELDS) {
       if (req.body[field] !== undefined && typeof req.body[field] === 'string') {
         updates[field] = req.body[field].trim().substring(0, 100); // max 100 chars per field
       }
+    }
+    if (req.body.timezone_offset !== undefined && typeof req.body.timezone_offset === 'number') {
+      updates.timezone_offset = req.body.timezone_offset;
     }
 
     if (Object.keys(updates).length === 0) {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ValidationError } from '../types/errors';
 import { supabaseAdmin } from '../lib/supabase';
 import crypto from 'crypto';
+import { reminderSchedulerService } from '../services/ReminderSchedulerService';
 
 export const remindersRouter: import('express').Router = Router();
 
@@ -205,6 +206,79 @@ remindersRouter.post(
       const userId = (req as any).user.id;
       const { id } = req.params;
 
+      // 1. Fetch current reminder state
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from('reminders')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (fetchErr) throw fetchErr;
+      if (!existing) {
+        res.status(404).json({ success: false, error: 'Reminder not found' });
+        return;
+      }
+
+      // 2. Handle active recurring reminder lifecycle
+      if (existing.recurrence_type && existing.recurrence_interval && existing.status === 'active') {
+        const currentCount = (existing.recurrence_count || 0) + 1;
+        const hitLimit = existing.recurrence_limit && currentCount >= existing.recurrence_limit;
+
+        const baseTime = existing.trigger_at ? new Date(existing.trigger_at) : new Date();
+        const rawNextTrigger = reminderSchedulerService.calculateNextTrigger(
+          baseTime,
+          existing.recurrence_type,
+          existing.recurrence_interval
+        );
+        const nextTrigger = reminderSchedulerService.applyDayMonthFilters(
+          rawNextTrigger,
+          existing.active_days || null,
+          existing.active_months || null,
+          existing.active_year || null
+        );
+        const hitEndAt = existing.end_at && nextTrigger >= new Date(existing.end_at);
+
+        if (hitLimit || hitEndAt) {
+          const { data: updated, error } = await supabaseAdmin
+            .from('reminders')
+            .update({
+              status: 'completed',
+              accountability_status: 'completed_confirmed',
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .eq('user_id', userId)
+            .select('*')
+            .single();
+
+          if (error) throw error;
+          res.status(200).json({ success: true, reminder: updated, message: 'Recurring reminder completed (limit reached)' });
+          return;
+        }
+
+        // Reschedule for next cycle
+        const { data: updated, error } = await supabaseAdmin
+          .from('reminders')
+          .update({
+            trigger_at: nextTrigger.toISOString(),
+            recurrence_count: currentCount,
+            accountability_status: 'completed_confirmed',
+            last_completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .eq('user_id', userId)
+          .select('*')
+          .single();
+
+        if (error) throw error;
+        res.status(200).json({ success: true, reminder: updated, rescheduled: true, nextTrigger });
+        return;
+      }
+
+      // 3. Single / non-recurring reminder completion
       const { data: updated, error } = await supabaseAdmin
         .from('reminders')
         .update({
@@ -219,11 +293,6 @@ remindersRouter.post(
         .maybeSingle();
 
       if (error) throw error;
-      if (!updated) {
-        res.status(404).json({ success: false, error: 'Reminder not found' });
-        return;
-      }
-
       res.status(200).json({ success: true, reminder: updated });
     } catch (err) {
       next(err);

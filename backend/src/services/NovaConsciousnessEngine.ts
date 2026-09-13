@@ -258,6 +258,7 @@ export class NovaConsciousnessEngine {
 
   async processUser(userId: string, opts?: { trigger?: string; awayDurationMinutes?: number | null }, _result?: { dispatched: number; suppressed: number; eligible: number }): Promise<void> {
     const isSessionStart = opts?.trigger === 'session_start';
+    const isSessionEnd = opts?.trigger === 'session_end';
     const awayDurationMinutes = opts?.awayDurationMinutes ?? null;
     // Coma awareness: Don't reach out right after server boot to avoid spam
     if (Date.now() - serverBootTime < SERVER_BOOT_COOLDOWN_MS) {
@@ -528,10 +529,10 @@ export class NovaConsciousnessEngine {
     }
 
     if (gapMinutes < effectiveMinGap && !shouldReachSilentVisit && !isSleepWindowOverridden) {
-      // BUG-07: session_start evaluations bypass the gap check entirely.
+      // BUG-07 & Amendment 5: session_start and session_end evaluations bypass the gap check entirely.
       // ProactiveGate enforces cooldown via a 30-min logical key bucket.
-      if (!isSessionStart) return;
-      logger.info('[NACE] session_start: bypassing gap check — ProactiveGate will enforce 30-min bucket', { userId, gapMinutes: Math.round(gapMinutes), effectiveMinGap });
+      if (!isSessionStart && !isSessionEnd) return;
+      logger.info(`[NACE] ${opts?.trigger}: bypassing gap check — ProactiveGate will enforce 30-min bucket`, { userId, gapMinutes: Math.round(gapMinutes), effectiveMinGap });
     }
 
     // 4. Pending Agenda
@@ -748,7 +749,7 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
 - PROACTIVE RESTRAINT: If there is no specific, grounded reason to message (e.g. no agenda, no recent context to follow up on, no missing fact to ask about), choose NO. Time of day alone is NOT a sufficient reason to check in.`;
 
     let shouldReach = false;
-    let triggerType = isSessionStart ? 'session_start' : 'engagement';
+    let triggerType = isSessionStart ? 'session_start' : isSessionEnd ? 'session_end' : 'engagement';
     let seenNoReplyContext = ''; // Injected into Tier2 if user saw message but didn't reply
 
     // ── READ RECEIPT AWARENESS ─────────────────────────────────────────────────
@@ -852,10 +853,12 @@ DECISION RULES (use actual gap values above, not hardcoded numbers):
 
     // BUG-07: returning-user context note for Tier 2
     const sessionStartContextNote = isSessionStart && shouldReach
-      ? `RETURNING USER OPENING: User just came back online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' min' : 'some time'} away. Do NOT use a generic greeting like "hey" or "kaise ho". Open with ONE specific thing you know about them that is genuinely unresolved, a warm question about their family / missing facts (e.g. asking about Shreshth's age/school or Sakshi), or relevant RIGHT NOW. If there is nothing specific, STAY SILENT (return empty message).`
-      : '';
+      ? `RETURNING USER OPENING: User just came back online after ${awayDurationMinutes !== null ? awayDurationMinutes + ' min' : 'some time'} away. Do NOT use a generic greeting like "hey" or "kaise ho". Open with ONE specific thing you know about them that is genuinely unresolved, a warm question about their goals/family/missing facts, or relevant RIGHT NOW. If there is nothing specific, STAY SILENT (return empty message).`
+      : isSessionEnd && shouldReach
+        ? `SESSION WRAP-UP: User just completed their session. If there was an actionable commitment made, offer a brief, encouraging sign-off; otherwise stay silent.`
+        : '';
 
-    const tier2Context = `Name: ${profile.preferred_name || stageCtx.userName || 'yaar'}
+    const tier2Context = `Name: ${profile.preferred_name || stageCtx.userName || 'Friend'}
 Time/Day: ${tContext.dayOfWeek}, ${tContext.timeOfDayLabel} (${tContext.hour}:00)
 User Life Stage & Real Stakes: ${stageCtx.stageLabel}
 Core Purpose & Mission: ${stageCtx.corePurposeSummary}
@@ -884,10 +887,11 @@ ${midSleepWakeNote}
 ${escalationTone}
 ${sessionStartContextNote}
 PURPOSE-DRIVEN COMPANION DIRECTIVE:
-- Speak as a perceptive, supportive life companion who understands their real-world stakes (father of baby Shreshth, family provider, Conviction HR lead, aspiring founder of Shetty's Dhaba).
-- NEVER ask questions about facts already known (Sakshi's cooking talent and nail art are known; Shreshth's infant age is known).
-- If exploring ventures or family, connect the dots (e.g. how Sakshi's recipes anchor Shetty's Dhaba, or gentle check-in on baby).
-- Keep it short (1-2 sentences in natural conversational Hinglish).`;
+- Speak as a perceptive, supportive life companion who understands their real-world stakes: ${stageCtx.stageLabel}.
+- Core Mission: ${stageCtx.corePurposeSummary}
+- NEVER ask questions about facts already established in Recent Memories or Working Memory.
+- If exploring ventures, career, or family, connect the dots authentically to their stated goals and real life context.
+- Keep it short (1-2 sentences in natural conversational ${profile.country && profile.country !== 'IN' ? 'English' : 'language preferred by user (English or Hinglish)'}).`;
 
 
     try {
@@ -906,14 +910,16 @@ PURPOSE-DRIVEN COMPANION DIRECTIVE:
       // across all proactive engines. Replaces in-memory dedup maps.
       const agendaId = agendaItem?.id ?? 'none';
       // BUG-07: session_start uses its own 30-min bucket so it is never blocked by
-      // the routine engagement 1-hour bucket. Each session-start is a distinct event.
+      // the routine engagement 1-hour bucket. Each session-start/end is a distinct event.
       const logicalKey = agendaItem
         ? `nace:agenda:${agendaId}`
         : isSessionStart
           ? `nace:session_start:${userId}:${Math.floor(Date.now() / (30 * 60 * 1000))}` // 30-min bucket
-          : `nace:engagement:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`; // 1-hour bucket
+          : isSessionEnd
+            ? `nace:session_end:${userId}:${Math.floor(Date.now() / (30 * 60 * 1000))}` // 30-min bucket
+            : `nace:engagement:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`; // 1-hour bucket
 
-      const intentType = agendaItem ? 'agenda_followup' : (isSessionStart ? 'session_start' : 'engagement_checkin');
+      const intentType = agendaItem ? 'agenda_followup' : (isSessionStart ? 'session_start' : isSessionEnd ? 'session_end' : 'engagement_checkin');
 
       // Update agenda retry state BEFORE delivery so a crash doesn't re-fire it immediately
       if (agendaItem) {

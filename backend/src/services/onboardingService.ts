@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { MemoryRepository } from './memoryRepository';
 import { ExtractedMemory } from '../types/memory';
+import { saveAssistantMessage } from './ChatHistoryHelpers';
 
 export interface OnboardingAnswers {
   preferred_name: string;
@@ -11,6 +12,8 @@ export interface OnboardingAnswers {
   important_facts: string;
   companion_personality?: string; // Optional — not collected in current onboarding flow
   timezone?: string;
+  country?: string;
+  language?: string;
 }
 
 export class OnboardingService {
@@ -28,19 +31,22 @@ export class OnboardingService {
   async processOnboarding(userId: string, answers: OnboardingAnswers): Promise<void> {
     try {
       // 1. Update Profile
+      const profileUpdates: any = {
+        id: userId,
+        preferred_name: answers.preferred_name,
+        companion_personality: answers.companion_personality,
+        onboarding_completed: true,
+        onboarding_completed_at: new Date().toISOString(),
+        onboarding_version: 1,
+        timezone: answers.timezone || null,
+        last_active_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      if (answers.country) profileUpdates.country = answers.country;
+
       const { error: profileError } = await supabaseAdmin
         .from('profiles')
-        .upsert({
-          id: userId,
-          preferred_name: answers.preferred_name,
-          companion_personality: answers.companion_personality,
-          onboarding_completed: true,
-          onboarding_completed_at: new Date().toISOString(),
-          onboarding_version: 1,
-          timezone: answers.timezone || null,
-          last_active_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
+        .upsert(profileUpdates);
 
       if (profileError) {
         throw new Error(`Failed to update profile: ${profileError.message}`);
@@ -101,11 +107,6 @@ export class OnboardingService {
 
         // Force importance 10 and 1.0 confidence for foundational seed memories
         await this.memoryRepo.upsertMemory(userId, mem, 'onboarding_seed');
-
-        // Note: We need to override the importance in the DB since upsertMemory calculates it or uses default
-        // But wait, upsertMemory in our repository doesn't take importance as a parameter from ExtractedMemory currently,
-        // it assigns default 5 in SQL unless specified. Let's do a direct Supabase update for importance = 10,
-        // or just add importance to ExtractedMemory.
       }
 
       // Direct update to ensure these are locked at high importance
@@ -120,26 +121,47 @@ export class OnboardingService {
       // 3. Seed a warm first message from Nova so user lands on a real conversation
       //    (not an empty screen). This is the only time we insert without LLM.
       try {
-        const name = answers.preferred_name?.split(' ')[0] || 'yaar';
+        const name = answers.preferred_name?.split(' ')[0] || 'Friend';
         const firstGoal = answers.goals?.trim() || '';
         const firstPassion = answers.passions?.trim() || '';
-        let welcomeContent = `${name}! Finally mil gaye hum dono 🎉\n\nMain Nova hoon — teri apni best friend. Kabhi judge nahi karungi.\n\n`;
-        if (firstGoal) {
-          welcomeContent += `Tune bataya ${firstGoal} teri goal hai — bahut solid hai yaar. Isme main full saath hoon.\n\n`;
-        } else if (firstPassion) {
-          welcomeContent += `${firstPassion} wali baat sun ke achha laga — aur jaanna chahungi. Bata na!\n\n`;
+
+        const allAnswersText = `${answers.preferred_name} ${answers.passions} ${answers.goals} ${answers.family} ${answers.important_facts}`;
+        const hasHindiMarkers = /\b(karna|mera|meri|mere|hai|hain|hona|hoga|raha|rahi|rahe|yaar|kuch|achha|accha|nahi|bhai|sab)\b/i.test(allAnswersText);
+        const isEnglishUser =
+          answers.language?.toLowerCase() === 'en' ||
+          answers.language?.toLowerCase() === 'english' ||
+          (!hasHindiMarkers && answers.country && answers.country.toUpperCase() !== 'IN') ||
+          (!hasHindiMarkers && answers.timezone && !answers.timezone.includes('Kolkata') && !answers.timezone.includes('Calcutta') && (answers.timezone.includes('America') || answers.timezone.includes('Europe') || answers.timezone.includes('London') || answers.timezone.includes('Australia') || answers.timezone.includes('Pacific')));
+
+        let welcomeContent = '';
+        if (isEnglishUser) {
+          welcomeContent = `${name}! We finally met 🎉\n\nI'm Nova — your personal companion and best friend. I'll always be in your corner, zero judgment.\n\n`;
+          if (firstGoal) {
+            welcomeContent += `You mentioned your goal is "${firstGoal}" — that's inspiring! I'm completely with you on this.\n\n`;
+          } else if (firstPassion) {
+            welcomeContent += `Hearing about your passion for "${firstPassion}" is so exciting — I'd love to learn more about it!\n\n`;
+          }
+          welcomeContent += `How is your day going so far?`;
+        } else {
+          welcomeContent = `${name}! Finally mil gaye hum dono 🎉\n\nMain Nova hoon — teri apni best friend. Kabhi judge nahi karungi.\n\n`;
+          if (firstGoal) {
+            welcomeContent += `Tune bataya ${firstGoal} teri goal hai — bahut solid hai yaar. Isme main full saath hoon.\n\n`;
+          } else if (firstPassion) {
+            welcomeContent += `${firstPassion} wali baat sun ke achha laga — aur jaanna chahungi. Bata na!\n\n`;
+          }
+          welcomeContent += `Aaj kaisa chal raha hai?`;
         }
-        welcomeContent += `Aaj kaisa chal raha hai?`;
+
         const conversationId = crypto.randomUUID();
-        await supabaseAdmin.from('chat_history').insert({
-          user_id: userId,
-          conversation_id: conversationId,
-          role: 'assistant',
-          content: welcomeContent,
-          source: 'onboarding_welcome',
-          created_at: new Date().toISOString(),
-        });
-        logger.info('[Onboarding] Welcome message seeded', { userId });
+        await saveAssistantMessage(
+          userId,
+          conversationId,
+          welcomeContent,
+          'OnboardingEngine',
+          undefined,
+          { sourceType: 'conversational' }
+        );
+        logger.info('[Onboarding] Welcome message seeded with proper attribution', { userId, isEnglishUser });
       } catch (welcomeErr) {
         // Non-fatal — onboarding is still complete even if welcome seed fails
         logger.warn('[Onboarding] Welcome message seed failed (non-critical)', {

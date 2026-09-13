@@ -189,17 +189,27 @@ export class UserLifeStageEngine {
 
       // 3. Extract Family Dependents (ONLY from verified evidence)
       const familyWardrobes = wardrobes.filter(w => w.domain === 'family');
-      const sonW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('son') || w.name.toLowerCase().includes('shreshth'));
-      const daughterW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('daughter'));
-      const wifeW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('wife') || w.name.toLowerCase().includes('sakshi'));
-      const husbandW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('husband'));
-      const fatherW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('father') || w.name.toLowerCase().includes('suresh'));
-      const motherW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('mother') || w.name.toLowerCase().includes('rajeshree'));
+      const sonMem = memories.find(m => m.key === 'son_name' || m.key === 'child_name');
+      const sonW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('son') || (sonMem && w.name.toLowerCase() === sonMem.value.toLowerCase())) || (sonMem ? { name: sonMem.value, roleTitle: 'Son', traits: [] as any[] } : undefined);
+      const daughterMem = memories.find(m => m.key === 'daughter_name');
+      const daughterW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('daughter') || (daughterMem && w.name.toLowerCase() === daughterMem.value.toLowerCase())) || (daughterMem ? { name: daughterMem.value, roleTitle: 'Daughter', traits: [] as any[] } : undefined);
+      const wifeMem = memories.find(m => m.key === 'wife_name' || m.key === 'spouse_name');
+      const wifeW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('wife') || w.roleTitle?.toLowerCase().includes('spouse') || (wifeMem && w.name.toLowerCase() === wifeMem.value.toLowerCase())) || (wifeMem ? { name: wifeMem.value, roleTitle: 'Wife', traits: [] as any[] } : undefined);
+      const husbandMem = memories.find(m => m.key === 'husband_name');
+      const husbandW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('husband') || (husbandMem && w.name.toLowerCase() === husbandMem.value.toLowerCase())) || (husbandMem ? { name: husbandMem.value, roleTitle: 'Husband', traits: [] as any[] } : undefined);
+      const fatherMem = memories.find(m => m.key === 'father_name');
+      const fatherW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('father') || (fatherMem && w.name.toLowerCase() === fatherMem.value.toLowerCase())) || (fatherMem ? { name: fatherMem.value, roleTitle: 'Father', traits: [] as any[] } : undefined);
+      const motherMem = memories.find(m => m.key === 'mother_name');
+      const motherW = familyWardrobes.find(w => w.roleTitle?.toLowerCase().includes('mother') || (motherMem && w.name.toLowerCase() === motherMem.value.toLowerCase())) || (motherMem ? { name: motherMem.value, roleTitle: 'Mother', traits: [] as any[] } : undefined);
 
-      const sonAgeStr = sonW?.traits?.find(t => (t.value || '').toLowerCase().includes('month') || (t.value || '').toLowerCase().includes('mahine') || (t.value || '').toLowerCase().includes('age'))?.value || '';
-      const hasInfantMem = memories.some(m => /\b(?:6\s*(?:month|mahine)|infant|newborn|baby)\b/i.test(m.value || ''));
-      const hasInfant = !!sonW || hasInfantMem;
-      const infantAge = sonAgeStr ? sonAgeStr.replace(/.*:\s*/, '').trim() : (hasInfant ? '6 months' : undefined);
+      const sonAgeMem = memories.find(m => m.key === 'son_age' || m.key === 'child_age');
+      const sonAgeStr = sonAgeMem?.value || sonW?.traits?.find(t => (t.value || '').toLowerCase().includes('month') || (t.value || '').toLowerCase().includes('mahine') || (t.value || '').toLowerCase().includes('age'))?.value || '';
+
+      const isInfantKeyword = (str: string) => /\b(baby|infant|newborn|toddler|\d+\s*(?:month|mahine)|months?\s*old)\b/i.test(str);
+      const hasInfantMem = memories.some(m => (m.memory_type === 'family' || /son|child|baby|infant/i.test(m.key || '')) && isInfantKeyword(m.value || ''));
+      const isSonInfant = isInfantKeyword(sonAgeStr);
+      const hasInfant = isSonInfant || hasInfantMem;
+      const infantAge = sonAgeStr ? sonAgeStr.replace(/.*:\s*/, '').trim() : (hasInfant ? 'infant' : undefined);
 
       const spouseSkills: string[] = [];
       const spouseW = wifeW || husbandW;
@@ -211,10 +221,10 @@ export class UserLifeStageEngine {
         }
       }
 
-      const hasAnyFamily = hasInfant || !!spouseW || !!fatherW || !!motherW || !!daughterW;
+      const hasAnyFamily = hasInfant || !!spouseW || !!fatherW || !!motherW || !!daughterW || !!sonW;
       const familyDependents: UserLifeStageContext['familyDependents'] = hasAnyFamily ? {
         hasInfant,
-        infantName: sonW?.name || (hasInfant ? (sonAgeStr ? sonW?.name : undefined) : undefined),
+        infantName: hasInfant ? (sonW?.name || daughterW?.name) : undefined,
         infantAge,
         spouseName: spouseW?.name,
         spouseRole: spouseW?.roleTitle || (wifeW ? 'Wife' : husbandW ? 'Husband' : undefined),
@@ -292,13 +302,17 @@ export class UserLifeStageEngine {
       
       if (ventureW || ventureMem) {
         const vName = ventureW?.name || ventureMem?.value || 'Side Venture';
+        const seedMem = memories.find(m => m.key === 'seed_funds' || /seed.*fund|capital/i.test(m.key || ''));
+        const capitalRequirement = seedMem?.value ? seedMem.value : undefined;
+        const spouseCollab = spouseW ? [`${spouseW.name}${spouseSkills.length > 0 ? ` (${spouseSkills[0]})` : ''}`] : undefined;
+
         activeVentures.push({
           name: vName,
           category: vName.toLowerCase().includes('kitchen') || vName.toLowerCase().includes('dhaba') ? 'Cloud Kitchen / Food Venture' : 'Startup Venture',
           description: ventureW?.summary || `Entrepreneurial venture: ${vName}`,
-          capitalRequirement: memories.find(m => m.key === 'seed_funds')?.value ? '₹15,000 seed funds' : undefined,
-          linkedFundingSource: memories.find(m => /pf|portal/i.test(m.value || '')) ? 'PF fund disbursement' : undefined,
-          collaborators: spouseW ? [`${spouseW.name} (Culinary Lead)`] : undefined,
+          capitalRequirement,
+          linkedFundingSource: memories.find(m => /pf|portal|investor|grant|loan|savings/i.test(m.value || '')) ? 'Funding disbursement' : undefined,
+          collaborators: spouseCollab,
           status: 'preparing_funds'
         });
       }
@@ -307,9 +321,11 @@ export class UserLifeStageEngine {
       const financialStakes: UserLifeStageContext['financialStakes'] = [];
       const pfMem = memories.find(m => /pf|provident fund/i.test(m.key || '') || /pf.*bank/i.test(m.value || ''));
       if (pfMem) {
+        const amountMatch = (pfMem.value || '').match(/(\d+\s*k|\d+,\d+|\₹\s*\d+(?:,\d+)*)/i);
+        const amount = amountMatch ? amountMatch[0] : (memories.find(m => m.key === 'seed_funds')?.value?.match(/(\d+\s*k|\d+,\d+|\₹\s*\d+)/i)?.[0] || 'funds');
         financialStakes.push({
           title: 'PF Bank Details Update',
-          amount: '₹15,000',
+          amount: amount,
           actionRequired: 'Update bank details on the PF portal to release funds',
           linkedVentureOrNeed: activeVentures[0] ? `Seed capital for ${activeVentures[0].name}` : 'Personal savings disbursement'
         });
@@ -531,11 +547,15 @@ export class UserLifeStageEngine {
 
     // 1. PF / Bank Update → Venture Seed Funds if venture exists
     if (/pf|provident fund|bank details|portal.*update/i.test(textLower)) {
+      const amountStr = stageCtx.financialStakes?.[0]?.amount || 'seed funds';
       if (venture) {
         const famPart = infantName && spouseName ? ` ${infantName} aur ${spouseName} ke sath plan aage badhane me ye seed fund help karega.` : '';
-        return `Arey ${name}, PF portal pe bank details update ka zaroor dekh lena — wahan se 15k clear hote hi ${venture.name} ke initial setup aur kitchen appliances ka rasta aage badhega!${famPart}`;
+        const ventureContext = venture.category.toLowerCase().includes('kitchen') || venture.category.toLowerCase().includes('dhaba') || venture.category.toLowerCase().includes('food')
+          ? 'initial setup aur kitchen appliances'
+          : 'initial setup aur execution';
+        return `Arey ${name}, PF portal pe bank details update ka zaroor dekh lena — wahan se ${amountStr} clear hote hi ${venture.name} ke ${ventureContext} ka rasta aage badhega!${famPart}`;
       }
-      return `Arey ${name}, PF portal pe bank details update zaroor sort kar lena — funds release hote hi aage ka financial plan smooth ho jayega!`;
+      return `Arey ${name}, PF portal pe bank details update zaroor sort kar lena — ${amountStr} release hote hi aage ka financial plan smooth ho jayega!`;
     }
 
     // 2. Hiring / Candidate Interviews → Career/Agency Scaling

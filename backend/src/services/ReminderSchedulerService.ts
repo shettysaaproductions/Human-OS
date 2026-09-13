@@ -395,7 +395,7 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
     }
   }
 
-  private calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {
+  public calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {
     const next = new Date(currentTrigger);
     if (recurrenceType === 'minutes') {
       next.setMinutes(next.getMinutes() + recurrenceInterval);
@@ -421,7 +421,7 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
    * Given a candidate next trigger date, advance it forward until
    * it falls on a valid day (active_days) and valid month (active_months/year).
    */
-  private applyDayMonthFilters(
+  public applyDayMonthFilters(
     date: Date,
     activeDays: string[] | null,
     activeMonths: string[] | null,
