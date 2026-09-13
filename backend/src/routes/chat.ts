@@ -1445,9 +1445,10 @@ chatRouter.post(
         if (gapMinutes > 1440) {
           activeConversationId = crypto.randomUUID();
           if (!is_proactive && userMessageId && !userMessageId.startsWith('msg_')) supabaseAdmin.from('chat_history').update({ conversation_id: activeConversationId }).eq('id', userMessageId).then(res => res);
-          recentMessages = recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user' ? [recentMessages[recentMessages.length - 1]] : [];
+          // Preserve last 4 messages from previous day so Nova retains seamless conversational awareness and never suffers complete amnesia
+          recentMessages = recentMessages.slice(-4);
         } else if (gapMinutes > 360) {
-          recentMessages = recentMessages.slice(-3);
+          recentMessages = recentMessages.slice(-4);
         }
       }
 
@@ -1833,8 +1834,10 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
             : "The user shared a future plan or habit. Acknowledge it warmly and proactively offer to set a smart reminder, asking for or confirming the time and recurrence. Do NOT give a passive 1-word reply like 'Sahi'.")
           : normalizedMessages.length > 1
           ? "The user sent multiple messages in a burst. Address and acknowledge ALL their points warmly and naturally in a cohesive reply without skipping any detail."
-          : (primaryMessage.length < 20 && /^(?:ok|okay|k|cool|nice|haan|ha|theek hai|thik hai|hmm|hm|achha|acha|sahi|sure|yup|nope|nah|bye|gn)\.?$/i.test(primaryMessage.trim()))
-          ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny close-ended message."
+          : (primaryMessage.length < 20 && /^(?:haan|ha|sure|yup|theek hai|thik hai|sahi|yes|yeah)\.?$/i.test(primaryMessage.trim()))
+          ? "The user agreed or affirmed ('haan'/'yes'/'sure'). Look at your immediately preceding question, suggestion, or topic and actively take the next logical step forward! Do NOT say 'kya hua?' or 'kuch toh bolo' — advance the conversation on that topic with high enthusiasm and companion depth."
+          : (primaryMessage.length < 20 && /^(?:ok|okay|k|cool|nice|hmm|hm|achha|acha|nope|nah|bye|gn)\.?$/i.test(primaryMessage.trim()))
+          ? "Keep it conversational (1-2 sentences). Do NOT say empty fillers like 'kya hua?' or 'kuch soch raha hai?' — if there is an open thread or recent life topic, smoothly bridge to it or keep it warm and companionable."
           : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN',
         conversationId: activeConversationId,
@@ -1967,6 +1970,7 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
                 await persistAssistantMessage(userId, activeConversationId, FALLBACK_REPLY, is_proactive ? undefined : userMessageId, {
                   asyncMode: async_mode,
                   source: 'streaming_retry_failed',
+                  userMessageText: primaryMessage || effectiveMessage || '',
                 });
                 res.write(`data: ${JSON.stringify({ type: 'error', error: FALLBACK_REPLY })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
@@ -2023,12 +2027,14 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
                     ? `You are Nova, a female virtual best friend texting on WhatsApp.
 Reply in 1-2 SHORT, natural English sentences. Max 1 emoji.
 Output ONLY conversational text. NEVER output rule names, labels, guidelines, instructions, or bullet points.
-Plain conversational text only.`
+Plain conversational text only.
+NEVER say "what happened?", "what's wrong?", or empty filler. Answer what was discussed or take the conversation forward naturally.`
                     : `You are Nova, a female virtual best friend texting on WhatsApp.
 Reply in 1-2 SHORT, natural Hinglish sentences. Max 1 emoji.
 Output ONLY conversational text. NEVER output rule names, labels, guidelines, instructions, or bullet points.
 Nova is female: use "Main samajh gayi", "Main batati hoon".
-Use casual "tu/tum", never formal "Aap". Plain conversational text only.`;
+Use casual "tu/tum", never formal "Aap". Plain conversational text only.
+NEVER say "kya hua?", "sab theek hai?", "kuch toh bolo", "kuch soch rahe ho?", or "sochne de". Direct aur grounded reply de based on recent conversation.`;
 
                   const fastRetryMessages = [
                     {

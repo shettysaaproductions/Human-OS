@@ -52,6 +52,8 @@ export type LifeStageType =
   | 'SOLO_FOUNDER'
   | 'FAMILY_PROVIDER'
   | 'STUDENT_ASPIRANT'
+  | 'CREATIVE_CREATOR'
+  | 'HEALTH_ATHLETE'
   | 'EARLY_CAREER_BUILDER'
   | 'MID_CAREER_TRANSITION'
   | 'INDIVIDUAL_EXPLORER';
@@ -248,6 +250,8 @@ export class UserLifeStageEngine {
       const companyMem = memories.find(m => m.key === 'company_name' || m.key === 'work_place');
       const workSchedMem = memories.find(m => m.key === 'work_schedule');
       const isStudent = memories.some(m => /\b(?:student|college|university|exam|exams|study|neet|jee|upsc|gate|cat|semester|coaching)\b/i.test(m.value || '') || (m.key && /study|college|exam/i.test(m.key)));
+      const isCreative = memories.some(m => /\b(?:artist|musician|producer|youtube|creator|designer|writer|freelance|video editing|channel)\b/i.test(m.value || '') || (m.key && /creative|youtube|art|music|channel/i.test(m.key)));
+      const isAthlete = memories.some(m => /\b(?:gym|workout|bodybuilding|powerlifting|trainer|marathon|fitness|calisthenics|crossfit)\b/i.test(m.value || '') || (m.key && /fitness|workout|gym/i.test(m.key)));
 
       let primaryLivelihood: UserLifeStageContext['primaryLivelihood'] | undefined;
       if (isStudent && !companyMem) {
@@ -472,6 +476,12 @@ export class UserLifeStageEngine {
       } else if (isStudent) {
         stage = 'STUDENT_ASPIRANT';
         stageLabel = 'Student & Knowledge Aspirant';
+      } else if (isCreative) {
+        stage = 'CREATIVE_CREATOR';
+        stageLabel = 'Creative Creator & Artist';
+      } else if (isAthlete) {
+        stage = 'HEALTH_ATHLETE';
+        stageLabel = 'Fitness & Health Builder';
       } else if (primaryLivelihood) {
         stage = 'EARLY_CAREER_BUILDER';
         stageLabel = `Working Professional (${primaryLivelihood.name})`;
@@ -488,6 +498,10 @@ export class UserLifeStageEngine {
         corePurposeSummary = `${userName} is navigating a high-stakes life stage balancing family care for their infant (${familyDependents?.infantName || 'baby'}), supporting family, running ${primaryLivelihood?.name || 'their venture'}, and planning future milestones. Every companion touch must respect their time, honor their purpose, and connect daily actions to this mission.`;
       } else if (stage === 'STUDENT_ASPIRANT') {
         corePurposeSummary = `${userName} is dedicated to academic and competitive growth, building discipline, managing study schedules, and preparing for future milestones. Nova acts as an encouraging, attentive study partner and daily guide.`;
+      } else if (stage === 'CREATIVE_CREATOR') {
+        corePurposeSummary = `${userName} is deeply engaged in creative work, content creation, and artistic projects. Nova acts as an inspiring creative sounding board, brainstorming ideas, celebrating creative output, and keeping daily momentum high.`;
+      } else if (stage === 'HEALTH_ATHLETE') {
+        corePurposeSummary = `${userName} is dedicated to physical fitness, athletic discipline, workouts, and nutrition. Nova acts as an energized fitness companion, tracking consistency, workout recovery, and macro goals.`;
       } else if (stage === 'SOLO_FOUNDER') {
         corePurposeSummary = `${userName} is driving entrepreneurial ventures (${activeVentures[0]?.name || 'their business'}), balancing vision, financial discipline, and daily momentum.`;
       } else if (stage === 'EARLY_CAREER_BUILDER') {

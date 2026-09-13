@@ -852,13 +852,13 @@ export class NovaFollowupService {
             }
 
             const escalationPrompts: Record<number, string> = {
-              1: `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied. Send ONE short, warm nudge. Vary the angle — don't just say "busy ho?". E.g., try teasing them, sharing a thought, or asking one specific thing.`,
-              2: `Your first nudge was ignored. User is STILL online. Try a completely DIFFERENT approach — a joke, a new topic, or something curious. Do NOT repeat any phrase from your previous message.`,
+              1: `You sent: "${novaMsg.content.substring(0, 120)}" — ${Math.round(ageMinutes)} min ago. User is ONLINE RIGHT NOW and hasn't replied. Send ONE short, warm nudge. DO NOT say "busy ho?", "kya hua?", or "kuch soch rahe ho?". Either continue the topic naturally, tease gently, or share a curious thought connected to what was being discussed.`,
+              2: `Your first nudge was ignored. User is STILL online. Try a completely DIFFERENT approach — a grounded thought about an active goal/thread or something interesting. Do NOT say generic fillers like "kya hua" or repeat phrases.`,
               3: `User is still not replying despite being online. Send ONE very low-pressure closing note. E.g., "Chal theek hai, jab free ho bata dena.".`
             };
             const escalationFallbacks: Record<number, string> = {
-              1: 'Arey, busy hai kya? Jab time mile tab batana!',
-              2: 'Btw, kuch interesting chal raha tha... baat karte hain?',
+              1: 'Waise jab bhi free ho, batana — curiosity ho rahi thi!',
+              2: 'Btw, kuch interesting chal raha tha... baat karte hain jab time mile.',
               3: 'Chal theek hai yaar, jab free ho toh ping kar dena.'
             };
 
@@ -906,13 +906,13 @@ export class NovaFollowupService {
           const backoffHours = offlineBackoffHours(unseenCount);
           const backoffMinutes = Math.round(backoffHours * 60);
 
-          let deferredMsg = 'Arre, kaisa chal raha? Bas check kar raha tha — kabhi free ho toh bata dena.';
+          let deferredMsg = 'Arre, jab bhi free ho text karna — baat karte hain!';
           try {
             const { novaBrain } = await import('./NovaBrainService');
             const gen = await novaBrain.evaluateConsciousnessTier2(
-              `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User is offline and hasn't replied (attempt ${unseenCount + 1}). Send ONE short, very low-pressure check-in. Vary your angle completely from previous nudges — different energy each time.`
+              `Name: yaar\nSituation: You sent "${novaMsg.content.substring(0, 100)}" ${Math.round(ageMinutes)} min ago. User is offline and hasn't replied (attempt ${unseenCount + 1}). Send ONE short, very low-pressure check-in. NEVER ask "kya hua?", "kuch soch rahe ho?", or "busy ho?". Vary your angle completely from previous nudges — different energy each time.`
             );
-            if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na')) deferredMsg = gen.message;
+            if (gen?.message && gen.message.length < 150 && !gen.message.includes('Bol na') && !gen.message.toLowerCase().includes('kya hua')) deferredMsg = gen.message;
           } catch (e) {
             logger.warn('[NovaFollowup] Offline check-in gen failed, using fallback');
           }

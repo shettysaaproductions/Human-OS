@@ -20,6 +20,7 @@ import { sendNovaReplyNotification } from '../lib/pushNotifications';
 import { sanitizeReply, isPromptLeak, NOVA_EMPTY_REPLY } from './NovaBrainService';
 import { complete as nvidiaComplete } from '../lib/nvidia';
 import { geminiComplete } from '../lib/gemini';
+import { cognitiveRouter } from '../lib/cognitiveRouter';
 
 export interface RecoveryRequest {
   userId: string;
@@ -109,31 +110,59 @@ class InstantFallbackRecoveryService {
       }
     }
 
+    // Fetch last 6 messages from chat_history to provide full contextual continuity
+    const { data: recentHistory } = await supabaseAdmin
+      .from('chat_history')
+      .select('role, content')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(6);
+
+    const orderedHistory = (recentHistory || [])
+      .reverse()
+      .filter(m => !m.content?.includes('mujhe thoda sochne de') && !m.content?.includes('moment to think'));
+
     // Build focused prompt for the recovery LLM
     const systemPrompt = `You are Nova, an intimate, empathetic and warm virtual best friend chatting on WhatsApp in natural Hinglish.
-You just had a momentary 2-second connection glitch, but now you are immediately and warmly replying to what the user just said.
+You just had a momentary 2-second connection glitch, but now you are immediately and warmly replying to what the user just said with full awareness of the conversation history.
 Rules:
-- Directly, naturally, and warmly address what the user said.
-- Sound like a real best friend who cares and is actively listening (e.g. if they mention smoking with friends, casually advise them not to make it a habit while keeping it friendly).
+- Directly, naturally, and warmly address the user's message in the context of what you were discussing.
+- If the user sent a short reply like "haan", "theek", "acha", or "nahi", understand what was being asked or discussed and answer with substantive continuity!
+- NEVER say generic filler like "kya hua?", "sab theek hai?", "kuch toh bola tha", "kuch soch raha hai?", or "mujhe thoda sochne de".
+- Sound like a real best friend who cares and is actively listening.
 - Keep it brief (1-3 short WhatsApp sentences).
 - Casual Hinglish (tu/tera or tum/tumhara). No robotic speech.
 - NEVER say "connection slow tha", "mera network issue tha", or repeat fallback phrases.
 - Plain conversational text only. No markdown headers, no bullets.`;
 
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      { role: 'user' as const, content: userText },
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      ...orderedHistory.map(m => ({
+        role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
+        content: m.content || '',
+      })),
     ];
+
+    // Ensure the very last message is the current user text if not already present
+    if (messages.length === 1 || messages[messages.length - 1].role !== 'user' || messages[messages.length - 1].content !== userText) {
+      messages.push({ role: 'user', content: userText });
+    }
 
     let recoveredText = '';
     let recoveryModelUsed = '';
 
-    // Provider cascade:
-    // If Gemini failed (or unknown), utilize pristine NVIDIA Cerebellum/Reserve pool (keys 3, 4, 11, 12, 15)
-    // If NVIDIA failed, utilize Gemini with gemini-1.5-flash or gemini-2.0-flash
-    const tryNvidiaFirst = failedProvider !== 'nvidia';
-
-    if (tryNvidiaFirst) {
+    // Primary: cognitiveRouter with CONVERSATION workload (auto-swaps Gemini/NVIDIA pool)
+    try {
+      recoveryModelUsed = 'cognitiveRouter/CONVERSATION';
+      recoveredText = await cognitiveRouter.complete('CONVERSATION', messages, {
+        maxTokens: 300,
+        temperature: 0.85,
+        timeoutMs: 4500,
+      });
+    } catch (routeErr: any) {
+      logger.warn('[InstantRecovery] Primary cognitiveRouter recovery failed, trying failover cascade', {
+        error: routeErr.message,
+      });
       try {
         recoveryModelUsed = 'nvidia/cerebellum';
         recoveredText = await nvidiaComplete('PROACTIVE', messages, {
@@ -142,48 +171,19 @@ Rules:
           timeoutMs: 4500,
         });
       } catch (nvidiaErr: any) {
-        logger.warn('[InstantRecovery] Primary recovery via NVIDIA failed, trying Gemini reserve', {
-          error: nvidiaErr.message,
-        });
         try {
           recoveryModelUsed = 'gemini/failover';
           recoveredText = await geminiComplete(messages, {
-            model: 'gemini-1.5-flash',
+            model: 'gemini-2.5-flash',
             maxTokens: 300,
             temperature: 0.85,
             timeoutMs: 4000,
           });
         } catch (geminiErr: any) {
-          logger.error('[InstantRecovery] Both recovery providers failed', {
+          logger.error('[InstantRecovery] All recovery providers failed', {
+            routeError: routeErr.message,
             nvidiaError: nvidiaErr.message,
             geminiError: geminiErr.message,
-          });
-        }
-      }
-    } else {
-      try {
-        recoveryModelUsed = 'gemini/primary';
-        recoveredText = await geminiComplete(messages, {
-          model: 'gemini-1.5-flash',
-          maxTokens: 300,
-          temperature: 0.85,
-          timeoutMs: 4000,
-        });
-      } catch (geminiErr: any) {
-        logger.warn('[InstantRecovery] Primary recovery via Gemini failed, trying NVIDIA reserve', {
-          error: geminiErr.message,
-        });
-        try {
-          recoveryModelUsed = 'nvidia/reserve';
-          recoveredText = await nvidiaComplete('USER_FAST', messages, {
-            maxTokens: 300,
-            temperature: 0.85,
-            timeoutMs: 4500,
-          });
-        } catch (nvidiaErr: any) {
-          logger.error('[InstantRecovery] Both recovery providers failed', {
-            geminiError: geminiErr.message,
-            nvidiaError: nvidiaErr.message,
           });
         }
       }

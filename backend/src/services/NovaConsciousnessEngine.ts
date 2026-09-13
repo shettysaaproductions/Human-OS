@@ -705,14 +705,14 @@ export class NovaConsciousnessEngine {
     let spontaneousThoughtNote = '';
 
     if (userPresence === 'online' && gapMinutes >= 5 && gapMinutes <= 15) {
-      // User is online but not typing — gentle single nudge only (not spam)
-      abandonmentNote = "GENTLE SINGLE NUDGE: User is looking at the chat but hasn't said anything for a few minutes. Send ONE casual message (e.g. 'kuch soch raha hai?', 'bata na...'). Do NOT send multiple messages — they can see you. ";
+      // User is online but not typing — gentle single nudge referencing what was just discussed or an active topic
+      abandonmentNote = "GENTLE NUDGE (ONLINE): User is looking at the chat but hasn't said anything for a few minutes. DO NOT say 'kuch soch raha hai?', 'bata na...', or 'kya hua?'. Instead, either continue the topic from the last conversation naturally, share a relevant observation on what was being discussed, or connect to an active goal/thread. ";
     } else if (userPresence === 'offline' && gapMinutes >= 10 && gapMinutes <= 60) {
-      // User went offline recently — send ONE check-in (bathing, eating, commuting, etc.)
-      abandonmentNote = "USER JUST LEFT: They were here but went offline. They might be doing something (bathing, eating, commuting). Send ONE message acknowledging they might be busy — don't ask 'where are you' directly, just continue the conversation naturally or share something useful. ";
+      // User went offline recently — send ONE check-in (routine, commute, family)
+      abandonmentNote = "USER JUST LEFT: They were here but went offline. They might be busy with routine, family, or work. Do NOT ask 'where are you' or 'kya hua'. Continue the conversation thread naturally or mention something helpful. ";
     } else if (gapMinutes > 120 && !agendaItem && !tContext.isSleepWindow) {
       // Long silence — spontaneous helpful message
-      spontaneousThoughtNote = "LONG SILENCE CHECK-IN: It's been quiet for 2+ hours. Don't ask 'how are you'. Instead, share something useful: a thought about their goals, a reminder about something they mentioned, a quick tip, or just say something funny/interesting. Be genuinely helpful. ";
+      spontaneousThoughtNote = "LONG SILENCE CHECK-IN: It's been quiet for 2+ hours. NEVER ask 'kya hua?' or 'kuch toh bolo'. Instead, share a grounded, interesting thought or observation about their goals, family, or lifestyle. Be genuinely companionable. ";
     }
 
     // BUG-07: Session-start context note for Tier 1
@@ -889,6 +889,7 @@ ${sessionStartContextNote}
 PURPOSE-DRIVEN COMPANION DIRECTIVE:
 - Speak as a perceptive, supportive life companion who understands their real-world stakes: ${stageCtx.stageLabel}.
 - Core Mission: ${stageCtx.corePurposeSummary}
+- 🚫 ZERO-VAGUENESS RULE: NEVER send empty filler questions like "Kya hua?", "Sab theek hai?", "Bata na kya hua?", "Kuch toh bola tha", or "Kuch soch raha hai?". Always ground your message in a concrete recent conversation topic, active life thread, or genuine companion observation.
 - NEVER ask questions about facts already established in Recent Memories or Working Memory.
 - If exploring ventures, career, or family, connect the dots authentically to their stated goals and real life context.
 - Keep it short (1-2 sentences in natural conversational ${profile.country && profile.country !== 'IN' ? 'English' : 'language preferred by user (English or Hinglish)'}).`;

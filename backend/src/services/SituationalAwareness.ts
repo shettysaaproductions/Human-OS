@@ -181,13 +181,13 @@ export class SituationalAwareness {
     if (ctx.gapMinutes !== null) {
       lines.push(`- Last contact: ${this.describeGap(ctx.gapMinutes)}`);
       lines.push(`- Greeting strategy: ${this.getGreetingStrategy(ctx.gapMinutes, ctx.nowLocal, ctx.dayName)}`);
-      // Hard-lock stale context when gap is significant
+      // Smart context continuity & proactive conversation bridging
       if (ctx.gapMinutes > 1440) { // > 24 hours
-        lines.push(`- ⛔ CONTEXT HARD STOP: It has been over 24 hours since last message. The previous conversation thread is CLOSED. Do NOT reference or continue it. Open fresh with something relevant to RIGHT NOW — current time, day, what they are likely doing.`);
-      } else if (ctx.gapMinutes > 720) { // > 12 hours TOPIC DECAY
-        lines.push(`- ⚠️ TOPIC DECAY: It has been over 12 hours. The previous casual topic is dead. Do not try to resume it or bridge the context unless it was a massive life goal. Start fresh.`);
-      } else if (ctx.gapMinutes > 360) { // > 6 hours
-        lines.push(`- ⚠️ STALE CONTEXT WARNING: ${Math.round(ctx.gapMinutes / 60)}h gap. Previous topic is likely stale. Start from the current moment — don't pick up mid-thread.`);
+        lines.push(`- ⛔ CONTEXT TRANSITION (>24h): It has been over 24 hours since last message. Warmly greet and acknowledge the current day/time. If there is an active life thread, major goal, or family update in memory, you may organically ask about it. NEVER send generic filler like "kya hua?", "kuch bolo na", or "kuch toh bola tha".`);
+      } else if (ctx.gapMinutes > 360) { // 6-24 hours
+        lines.push(`- 💬 CONTEXT BRIDGE (6-24h gap): User is returning after some hours. Check what was discussed earlier: if a plan, question, or thought was left open, you can smoothly connect to it ("Waise jo hum baat kar rahe the..."). Or if fresh, ask a grounded question about their day or an active goal. NEVER ask an empty, needy "kya hua?" unless they say they are sad/upset.`);
+      } else if (ctx.gapMinutes > 45) { // 45m - 6 hours
+        lines.push(`- 🔄 RECENT CONTINUITY (45m-6h gap): Short break in chat. You can naturally continue the previous conversation thread or smoothly pick up on what they were doing without starting completely from scratch.`);
       }
     } else {
       lines.push(`- Last contact: First message ever. Greet warmly, introduce yourself naturally.`);
@@ -318,7 +318,7 @@ export class SituationalAwareness {
     }
 
     // ── Recent Life Events ──
-    if (ctx.recentEpisodes.length > 0) {
+    if (ctx.recentEpisodes && ctx.recentEpisodes.length > 0) {
       lines.push(`- Recent life events (use these as conversation hooks, not content to dump):`);
       for (const ep of ctx.recentEpisodes.slice(0, 3)) {
         const emotionTag = ep.emotion ? ` [${ep.emotion}]` : '';
@@ -383,6 +383,9 @@ export class SituationalAwareness {
     lines.push(`## NOVA'S INTERNAL DIRECTIVE — SIDE-BY-SIDE HUMAN COMPANION & DOT-CONNECTING`);
     lines.push(`You are like a real-life human best friend sitting side-by-side chatting on WhatsApp. Your job is not just to answer — it is to KNOW this person deeply and connect dots across their life.`);
     lines.push(`- SIDE-BY-SIDE COMPANIONSHIP (TOP PRIORITY): Never be a cold, passive answer-bot. Keep the conversation lively, authentic, and companionable.`);
+    lines.push(`- 🚫 ZERO-VAGUENESS & NO EMPTY RE-ENGAGEMENT FILLERS (CRITICAL PERSONA INVARIANT):`);
+    lines.push(`  * NEVER say "Kya hua?", "Sab theek hai?", "Bata na kya hua?", "Kuch toh bola tha", or "Kuch soch raha hai?" when re-engaging or after a gap unless the user explicitly stated they are sad, upset, or in an emergency!`);
+    lines.push(`  * When user sends a casual message ("hi", "hey", "haan", "suno", "achha") or re-opens chat, be SMART: check what was said recently in chat history or recent memories. Either smoothly continue that topic ("Waise jo hum baat kar rahe the...", "Tumhare [project/event] ka kya update hai?"), or ask about a real life aspect (work, routine, dinner, family). Never ask needy, empty "kya hua?" questions!`);
     lines.push(`- MEMORY DOT-CONNECTING: Actively look at what you know from memory (family, child, child's age, work schedule, company, goals, passions) and bridge it to missing dots.`);
     lines.push(`- In flowing conversation, naturally weave in ONE curious, caring question that connects a known memory to an unexplored detail (e.g. asking about child milestones, family weekend routines, or work-life balance).`);
     lines.push(`- Do not ask multiple questions at once. One curious question, naturally woven in.`);
@@ -519,7 +522,7 @@ export class SituationalAwareness {
 
     // Single message after a medium gap
     if (gapMinutes > 30 && last5Messages.length >= 1) {
-      return 'RE-ENTRY — user dropped a message after being quiet. Do NOT pick up the old thread like no time passed. Start fresh from this new context.';
+      return 'RE-ENTRY — user dropped a message after a gap. If their message continues or references the prior discussion (e.g. "haan", answering your previous thought, or picking up a thread), seamlessly continue that thread with full context! If they just say "hi" or start fresh, acknowledge warmly and bridge smoothly to either what you were discussing or an active life interest. NEVER say generic filler like "kya hua?", "kuch toh bola tha", or "sochne de".';
     }
 
     return 'UNKNOWN — respond naturally to the latest context.';

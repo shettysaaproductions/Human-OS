@@ -1,46 +1,36 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-13 — v0.3.8-beta: Google Maps Neural Navigation, Progressive LOD Labels, Zoom Gestures & Lifestyle Intelligence
+2026-09-14 — v0.3.9-beta: Smart Contextual Continuity, Zero-Vagueness Re-engagement & Modern Lifestyle Expansion
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: COMPLETE — Hardened mobile 2D/3D neural galaxy, fixed zoom lock, implemented map-style LOD labels, Google Maps department navigation, and upgraded companion lifestyle intelligence:
+Task: COMPLETE — Resolved conversational gaps, eradicated empty filler queries ("kya hua?", "kuch toh bola tha", "sochne de"), implemented smart contextual continuity across gaps, expanded modern lifestyle classification, and published production OTA:
 
-1. **2D & 3D Neural Galaxy Zoom Lock Root Cause & Fix**:
-   - **Root Cause**: `hasUserInteractedRef.current` was never set to `true` during gestures or zoom button taps. The 5-second background sync poll (`fetchGraph(true)`) checked `if (!hasUserInteractedRef.current)` and continuously forced `scale.value = fitScale` (0.17), killing user zoom.
-   - **Gesture Conflicts**: `panGesture` lacked `.maxPointers(1)`, causing simultaneous conflict with `pinchGesture` on 2-finger touches.
-   - **Fix**: Added `markInteracted` callback invoked on `pinchGesture.onBegin`, `panGesture.onBegin`, `twoFingerPanGesture.onBegin`, `rotationGesture.onBegin`, and zoom buttons. Constrained `panGesture` to `maxPointers(1)`. Guarded `fetchGraph` auto-fit so it only runs on initial mount (`!isBackground && nodes.length === 0`).
+1. **Root Causes of Empty Filler / "Kya Hua" / "Sochne De" Identified & Fixed**:
+   - **SituationalAwareness RE-ENTRY Phase**: Previously commanded the LLM: `Do NOT pick up the old thread like no time passed. Start fresh from this new context.` When user said "haan" or "hi" after a gap, the model was forbidden from continuing the prior discussion and was forced to output empty fillers ("kya hua?", "kuch toh bola tha"). Fixed to seamlessly continue prior threads or bridge smoothly.
+   - **24-Hour Gap Chat History Wipeout (`chat.ts`)**: When `gapMinutes > 1440`, `recentMessages` was set to `[]`, wiping out all context of yesterday's conversations. Fixed to preserve the last 4 messages across 24h+ gaps.
+   - **Short Affirmations Stifled (`chat.ts`)**: Messages matching affirmative regex (`haan`, `ha`, `sure`, `yup`) were previously instructed: `KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny close-ended message.` Fixed to actively interpret affirmations as agreeing with the previous suggestion and advancing the topic forward.
+   - **InstantFallbackRecoveryService Isolated Prompting**: Recovery previously passed only 1 isolated user message with no history and hardcoded deprecated `gemini-1.5-flash`. Upgraded to fetch the last 6 messages and routed via `cognitiveRouter.complete('CONVERSATION', ...)` with multi-provider cascade.
+   - **Consciousness & Followup Engine Prompts**: Removed explicit instructions suggesting `kuch soch raha hai?` and `busy hai kya?` in `NovaConsciousnessEngine.ts`, `NovaFollowupService.ts`, and `promptBuilder.ts`. Enforced strict Zero-Vagueness Persona Directive.
 
-2. **Progressive Semantic Level of Detail (LOD) Labels**:
-   - Implemented dynamic label visibility based on camera zoom scale:
-     - `scale < 0.28`: Only main department trunks (`hierarchyLevel === 1`) and `user-core` display labels.
-     - `0.28 <= scale < 0.48`: Entity branches (`hierarchyLevel === 2`) emerge.
-     - `scale >= 0.48`: All micro-branches and leaf attribute stems become visible.
-     - Selected nodes and 1-hop connected neighbors always display labels at any zoom level.
-   - Leader lines and nameplates cleanly toggle with `showLabel`.
+2. **Diverse Lifestyle Classification & Companion Alignment (`UserLifeStageEngine.ts`)**:
+   - Added first-class support for `CREATIVE_CREATOR` (artists, YouTube creators, writers, designers, music producers) and `HEALTH_ATHLETE` (gym, bodybuilding, powerlifting, marathon, nutrition tracking).
+   - Tailored Nova's core mission and companion responses to match creative brainstorming and athletic consistency.
 
-3. **Google Maps Fly-To Department Navigation**:
-   - Fixed camera jump where `handleFocusDept` previously used screen deltas from old zoom to animate to new zoom, throwing nodes 600px offscreen.
-   - Implemented `navigateToNode(node, targetScale)` using exact inverse projection math for both 2D and 3D perspectives.
-   - Department chips now smoothly fly the camera right onto the hub at 0.62 zoom with cubic easing.
-   - Tapping "✨ All Galaxy" resets filters and smoothly glides back to full panoramic view.
-
-4. **Companion Lifestyle Intelligence & Action Routing**:
-   - Added `FESTIVAL_SIGNALS` (Ganpati, Diwali, Eid, Navratri, Pooja, fasting, rituals).
-   - Added `SOLITARY_SIGNALS` (home alone, akela hu, quiet me-time companioning).
-   - Added `FAMILY_CARE_SIGNALS` (parents, child caregiving, family dinner).
-   - Routed `extractCriticalAction` in `NovaBrainService.ts` through `cognitiveRouter.complete('ACTION_INTELLIGENCE', ...)` with Gemini 3.8 Flash failover.
+3. **Verification**:
+   - Added unit test suite `BackendZeroVaguenessAndContinuity.test.ts` (4 passed, 100% success).
+   - Pre-flight verification: `backend/npm run build` (exit 0) and `mobile/npx tsc --noEmit` (exit 0).
 
 ## OTA Deployment & Notification Protocol
-- **Version**: `v0.3.8-beta`
-- **Changelog**: Updated index 0 of `mobile/src/config/updateHistory.json`.
+- **Version**: `v0.3.9-beta`
+- **Changelog**: Inserted at index 0 of `mobile/src/config/updateHistory.json`.
 - **Pre-flight**: `mobile/npx tsc --noEmit` (exit 0), `backend/npm run build` (exit 0).
-- **EAS Update Group ID**: `bdf355a0-a2c8-46ac-8711-346e37b53ab7`
-- **Android Update ID**: `01a09bef-e4a5-7744-89dd-425e2266bbfd`
-- **iOS Update ID**: `01a09bef-e4a5-710c-87b4-96193dc6d678`
-- **Broadcast Push Notification**: Successfully dispatched to all registered user devices via `broadcast_update_push.ts`.
+- **EAS Update Group ID**: `b95e1d3a-37e6-4dfd-8379-11eb1eeefbd8`
+- **Android Update ID**: `01a09c12-2cea-74ff-8473-2eb3930b24af`
+- **iOS Update ID**: `01a09c12-2cea-7a60-acd2-e24669885752`
+- **Broadcast Push Notification**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ## NEXT ACTION
 Commit and push changes to `origin main` (triggers automatic Render backend build & deploy).
