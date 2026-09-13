@@ -234,28 +234,27 @@ export class EntityResolutionService {
         let rest = directMatch[2]?.trim() || '';
         const isPet = this.isPetRelation(relation);
 
-        // Check if an explicit name immediately follows the relation (e.g. "My dog Bruno is ...", "My girlfriend Priya loves ...")
-        const NON_NAME_PREFIXES = new Set([
-          'is', 'was', 'are', 'were', 'has', 'had', 'have', 'works', 'worked', 'working',
-          'lives', 'lived', 'living', 'loves', 'loved', 'likes', 'liked', 'enjoys',
-          'told', 'said', 'met', 'visited', 'bought', 'got', 'went', 'stays',
-          'ka', 'ki', 'ke', 'ko', 'se', 'ne', 'me', 'mein', 'par',
-          'a', 'an', 'the', 'in', 'at', 'on', 'to', 'for', 'from', 'with', 'about',
-          'not', 'never', 'always', 'very', 'too', 'retired', 'naam', 'name'
-        ]);
-
         let explicitName: string | null = null;
-        const nameWordMatch = rest.match(/^([a-zA-Z]+)\s*(.*)/);
-        if (nameWordMatch && !NON_NAME_PREFIXES.has(nameWordMatch[1].toLowerCase()) && nameWordMatch[1].length > 1) {
-          explicitName = this.capitalize(nameWordMatch[1]);
-          rest = nameWordMatch[2].trim();
+        const nameWordMatch = rest.match(/^([a-zA-Z]+(?:\s+[a-zA-Z]+)?)\s*(.*)/);
+        if (nameWordMatch) {
+          const parts = nameWordMatch[1].split(/\s+/);
+          const firstWord = parts[0];
+          if (!this.isNonNameWord(firstWord)) {
+            if (parts.length === 2 && !this.isNonNameWord(parts[1])) {
+              explicitName = this.capitalize(parts[0]) + ' ' + this.capitalize(parts[1]);
+              rest = nameWordMatch[2].trim();
+            } else {
+              explicitName = this.capitalize(parts[0]);
+              rest = (parts.slice(1).join(' ') + ' ' + nameWordMatch[2]).trim();
+            }
+          }
         }
 
         let userRelEntityId: string;
         let userRelEntityName: string;
 
         if (explicitName) {
-          userRelEntityId = isPet ? `entity:pet_${explicitName.toLowerCase()}` : (['partner', 'girlfriend', 'boyfriend'].includes(relation) ? `entity:partner_${explicitName.toLowerCase()}` : `entity:person_${explicitName.toLowerCase()}`);
+          userRelEntityId = isPet ? `entity:pet_${explicitName.toLowerCase().replace(/\s+/g, '_')}` : (['partner', 'girlfriend', 'boyfriend'].includes(relation) ? `entity:partner_${explicitName.toLowerCase().replace(/\s+/g, '_')}` : `entity:person_${explicitName.toLowerCase().replace(/\s+/g, '_')}`);
           userRelEntityName = explicitName;
         } else {
           userRelEntityId = isPet ? `user:pet:${relation}` : `user:${relation}`;
@@ -272,6 +271,22 @@ export class EntityResolutionService {
         };
         entitiesById.set(userRelEntityId, relEntity);
         result.primarySubjectId = userRelEntityId;
+
+        if (explicitName) {
+          result.facts.push({
+            subjectEntityId: userRelEntityId,
+            subjectEntityName: userRelEntityName,
+            predicate: 'name',
+            value: explicitName,
+            canonicalKey: `${relation}_name`,
+            confidence: 0.95,
+            groundedInTurn: true,
+            rawQuote: cleanMsg,
+            sourceMessageId: context?.sourceMessageId,
+            isDirectUserFact: true,
+            temporalState: 'CURRENT'
+          });
+        }
 
         // Clean leading auxiliary words from rest (e.g. "is a Golden retriever" -> "a Golden retriever")
         const cleanRest = rest.replace(/^(?:is|was|are|were|ka\s+naam|name\s+is)\s+/i, '');
@@ -334,7 +349,7 @@ export class EntityResolutionService {
             result.facts.push(fact);
           }
         } else {
-          // ── 4. Direct First-Person Statements (Career, Ventures, Plans) ────────
+          // ── 4. Direct First-Person Statements (Career, Ventures, Plans, Lifestyle) ────────
           const pastWorkMatch = cleanMsg.match(/\b(?:i\s+used\s+to\s+work\s+at|pehle\s+kaam\s+karta\s+tha|i\s+worked\s+at)\s+([A-Za-z0-9\s]+)/i);
           const curWorkMatch = cleanMsg.match(/\b(?:i\s+work\s+at|main\s+kaam\s+karta\s+hu|i\s+am\s+working\s+at)\s+([A-Za-z0-9\s]+)/i);
           const futurePlanMatch = cleanMsg.match(/\b(?:i\s+will\s+open|i\s+am\s+planning\s+to\s+open|planning\s+to\s+start|shuru\s+karne\s+ka\s+plan\s+hai)\s+([A-Za-z0-9\s]+)/i);
@@ -382,6 +397,41 @@ export class EntityResolutionService {
               isDirectUserFact: true,
             });
           }
+
+          // Direct First-Person Lifestyle & Habits
+          const smokeMatch = cleanMsg.match(/\b(?:i\s+smoke|main\s+smoke\s+karta\s+hu|i\s+smoke\s+occasionally|sushant\s+ke\s+sath\s+smoke\s+karta\s+hu|i\s+quit\s+smoking|maine\s+smoking\s+chhod\s+di|i\s+used\s+to\s+smoke)\b/i);
+          if (smokeMatch) {
+            const isQuit = /\b(?:quit|chhod|used\s+to|pehle|stopped)\b/i.test(cleanMsg);
+            result.facts.push({
+              subjectEntityId: 'user:self',
+              subjectEntityName: 'User',
+              predicate: 'smoking_habit',
+              value: isQuit ? 'Quit / Non-Smoker' : (cleanMsg.toLowerCase().includes('occasionally') ? 'Occasional Smoker' : 'Smoker'),
+              rawQuote: cleanMsg,
+              canonicalKey: 'smoking_habit',
+              confidence: 0.95,
+              groundedInTurn: true,
+              temporalState: isQuit ? 'PAST' : 'CURRENT',
+              isDirectUserFact: true,
+            });
+          }
+
+          const drinkMatch = cleanMsg.match(/\b(?:i\s+(?:rarely\s+drink|drink\s+occasionally|drink\s+alcohol|don't\s+drink|quit\s+drinking)|main\s+(?:drink\s+karta\s+hu|peena\s+chhod\s+diya))\b/i);
+          if (drinkMatch) {
+            const isNonDrinker = /\b(?:don't|quit|chhod|never|peena\s+chhod)\b/i.test(cleanMsg);
+            result.facts.push({
+              subjectEntityId: 'user:self',
+              subjectEntityName: 'User',
+              predicate: 'drinking_habit',
+              value: isNonDrinker ? 'Non-Drinker' : 'Occasional Drinker',
+              rawQuote: cleanMsg,
+              canonicalKey: 'drinking_habit',
+              confidence: 0.95,
+              groundedInTurn: true,
+              temporalState: isNonDrinker ? 'PAST' : 'CURRENT',
+              isDirectUserFact: true,
+            });
+          }
         }
       }
     }
@@ -409,10 +459,10 @@ export class EntityResolutionService {
     let value = rest;
     let temporalState: 'PAST' | 'CURRENT' | 'FUTURE' | 'UNKNOWN' = 'CURRENT';
 
-    const lowerRest = rest.toLowerCase();
+    const lowerRest = rest.toLowerCase().trim();
 
     // 1. Military Service / Navy / Army / Air Force
-    if (/navy|army|air\s*force|military|fauj|armed\s*forces/i.test(lowerRest)) {
+    if (/\b(?:navy|army|air\s*force|military|fauj|armed\s*forces)\b/i.test(lowerRest)) {
       predicate = 'military_service';
       const branchMatch = lowerRest.match(/\b(navy|army|air\s*force|military|armed\s*forces)\b/i);
       value = branchMatch ? this.capitalize(branchMatch[1]) : 'Military';
@@ -420,38 +470,52 @@ export class EntityResolutionService {
         temporalState = 'PAST';
       }
     }
-    // 2. Occupation / Banking / Corporate / Doctor / Teacher / Engineering
-    else if (/banking|bank|doctor|engineer|teacher|professor|lawyer|police|business|consultant|architect|developer|hr/i.test(lowerRest)) {
+    // 2. Comprehensive Occupation / Role / Profession
+    else if (/\b(banking|banker|bank|doctor|surgeon|physician|dentist|engineer|developer|programmer|coder|teacher|professor|lecturer|student|scholar|lawyer|advocate|judge|police|inspector|cop|business|businessman|businesswoman|consultant|architect|hr|recruiter|housewife|homemaker|nurse|designer|freelancer|accountant|ca|chartered\s+accountant|driver|pilot|chef|cook|baker|artist|painter|trainer|gym\s+trainer|fitness\s+trainer|writer|author|musician|singer|dancer|actor|actress|scientist|researcher|clerk|manager|director|executive|analyst|unemployed)\b/i.test(lowerRest)) {
       predicate = 'occupation';
-      const occMatch = lowerRest.match(/\b(banking|bank|doctor|engineer|teacher|professor|lawyer|police|business|consultant|architect|developer|hr)\b/i);
+      const occMatch = lowerRest.match(/\b(banking|banker|bank|doctor|surgeon|physician|dentist|engineer|developer|programmer|coder|teacher|professor|lecturer|student|scholar|lawyer|advocate|judge|police|inspector|cop|business|businessman|businesswoman|consultant|architect|hr|recruiter|housewife|homemaker|nurse|designer|freelancer|accountant|ca|chartered\s+accountant|driver|pilot|chef|cook|baker|artist|painter|trainer|gym\s+trainer|fitness\s+trainer|writer|author|musician|singer|dancer|actor|actress|scientist|researcher|clerk|manager|director|executive|analyst|unemployed)\b/i);
       value = occMatch ? this.capitalize(occMatch[1]) : rest;
-      if (/was|the|tha|retired/i.test(fullMessage)) {
+      if (/was|the|tha|thi|retired|pehle/i.test(fullMessage)) {
         temporalState = 'PAST';
       }
     }
-    // 3. Retirement
+    // 3. Retirement / Status
     else if (/retired|retire\s+ho\s+gaye|retire/i.test(lowerRest)) {
       predicate = 'status';
       value = 'Retired';
       temporalState = 'PAST';
     }
-    // 4. Location / Living
-    else if (/lives\s+in|living\s+in|rehta\s+hai|rehti\s+hai|rehte\s+hai|shift\s+ho\s+gaya/i.test(lowerRest)) {
+    // 4. Marital / Relationship Status
+    else if (/\b(single|married|unmarried|divorced|widowed|engaged|shadi\s+shuda|kunwara|kunwari)\b/i.test(lowerRest)) {
+      predicate = 'marital_status';
+      const marMatch = lowerRest.match(/\b(single|married|unmarried|divorced|widowed|engaged)\b/i);
+      value = marMatch ? this.capitalize(marMatch[1]) : (lowerRest.includes('shadi') ? 'Married' : 'Single');
+      temporalState = 'CURRENT';
+    }
+    // 5. Dietary Preference
+    else if (/\b(vegetarian|vegan|eggetarian|non-vegetarian|non-veg|veg|jain|keto)\b/i.test(lowerRest)) {
+      predicate = 'dietary_preference';
+      const dietMatch = lowerRest.match(/\b(vegetarian|vegan|eggetarian|non-vegetarian|non-veg|veg|jain|keto)\b/i);
+      value = dietMatch ? this.capitalize(dietMatch[1]) : rest;
+      temporalState = 'CURRENT';
+    }
+    // 6. Breed (for pets)
+    else if (/golden retriever|german shepherd|labrador|beagle|poodle|pug|persian|husky|rottweiler|indie|shih tzu|bulldog|corgi|boxer|dachshund|pomeranian|golden/i.test(lowerRest)) {
+      predicate = 'breed';
+      const breedMatch = lowerRest.match(/\b(golden retriever|german shepherd|labrador|beagle|poodle|pug|persian|husky|rottweiler|indie|shih tzu|bulldog|corgi|boxer|dachshund|pomeranian|golden)\b/i);
+      value = breedMatch ? this.capitalize(breedMatch[1] === 'golden' ? 'Golden Retriever' : breedMatch[1]) : rest;
+      temporalState = 'CURRENT';
+    }
+    // 7. Location / Living
+    else if (/lives\s+in|living\s+in|rehta\s+hai|rehti\s+hai|rehte\s+hai|shift\s+ho\s+gaya|staying\s+in|stays\s+in/i.test(lowerRest)) {
       predicate = 'location';
       const hinLocMatch = rest.match(/([a-zA-Z]+)\s+me\s+(?:rehta|rehti|rehte)\s+hai/i);
-      const engLocMatch = rest.match(/(?:lives\s+in|living\s+in|in)\s+([a-zA-Z\s]+)/i);
+      const engLocMatch = rest.match(/(?:lives\s+in|living\s+in|in|stays\s+in)\s+([a-zA-Z\s]+)/i);
       const locMatch = hinLocMatch ? hinLocMatch[1] : (engLocMatch ? engLocMatch[1] : rest);
-      value = this.capitalize(locMatch.trim());
+      value = this.capitalize(locMatch.trim().replace(/\.$/, ''));
       temporalState = 'CURRENT';
     }
-    // 5. Breed (for pets)
-    else if (/golden retriever|german shepherd|labrador|beagle|poodle|pug|persian|husky|rottweiler|indie|shih tzu|bulldog|corgi/i.test(lowerRest)) {
-      predicate = 'breed';
-      const breedMatch = lowerRest.match(/\b(golden retriever|german shepherd|labrador|beagle|poodle|pug|persian|husky|rottweiler|indie|shih tzu|bulldog|corgi)\b/i);
-      value = breedMatch ? this.capitalize(breedMatch[1]) : rest;
-      temporalState = 'CURRENT';
-    }
-    // 6. Employer / Workplace (e.g. "works at Google", "Microsoft me kaam karta hai")
+    // 8. Employer / Workplace (e.g. "works at Google", "Microsoft me kaam karta hai")
     else if (/works?\s+(?:at|for|in)\s+([a-zA-Z0-9\s]+)/i.test(lowerRest) || /([a-zA-Z0-9\s]+)\s+me\s+(?:kaam\s+karta|job\s+karta)/i.test(lowerRest)) {
       predicate = 'employer';
       const empEng = rest.match(/works?\s+(?:at|for|in)\s+([a-zA-Z0-9\s\.\-]+)/i);
@@ -460,7 +524,7 @@ export class EntityResolutionService {
       value = this.capitalize(matchedComp);
       temporalState = 'CURRENT';
     }
-    // 7. Interests / Passions / Hobbies (e.g. "loves photography", "likes painting")
+    // 9. Interests / Passions / Hobbies (e.g. "loves photography", "likes painting")
     else if (/(?:loves|likes|enjoys|into|fan\s+of)\s+([a-zA-Z\s]+)/i.test(lowerRest)) {
       predicate = 'interest';
       const intMatch = rest.match(/(?:loves|likes|enjoys|into|fan\s+of)\s+([a-zA-Z\s]+)/i);
@@ -468,40 +532,43 @@ export class EntityResolutionService {
       temporalState = 'CURRENT';
     }
 
-    // 8. Name assignment (e.g. "is Suresh", "ka naam Suresh hai", or rest = "Suresh", "Sakshi hai")
+    // 10. Name assignment (e.g. "is Suresh", "ka naam Suresh hai", or rest = "Suresh", "Sakshi hai")
     if (predicate === 'attribute') {
-      const fullNameMatch = fullMessage.match(/\b(?:is|ka\s+naam|name\s+is)\s+([A-Za-z]+)/i);
-      if (fullNameMatch && !/^(?:a|an|the|navy|army|bank|banking|retired|dubai|golden|dog|cat|pet)$/i.test(fullNameMatch[1])) {
+      const fullNameMatch = fullMessage.match(/\b(?:is|ka\s+naam|name\s+is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
+      if (fullNameMatch && !this.isNonNameWord(fullNameMatch[1].split(/\s+/)[0])) {
         predicate = 'name';
-        value = this.capitalize(fullNameMatch[1].trim());
-      } else if (/^[a-zA-Z]+(?:\s+hai)?$/i.test(rest.trim())) {
+        value = fullNameMatch[1].split(/\s+/).map(w => this.capitalize(w)).join(' ').trim();
+      } else if (/^[a-zA-Z]+(?:\s+[a-zA-Z]+)?(?:\s+hai)?$/i.test(rest.trim())) {
         const cleanName = rest.replace(/\s+hai$/i, '').trim();
-        if (cleanName.length >= 2 && !/^(?:the|tha|thi|a|an|in|at|on|good|fine|retired)$/i.test(cleanName)) {
+        const firstWord = cleanName.split(/\s+/)[0];
+        if (cleanName.length >= 2 && !this.isNonNameWord(firstWord)) {
           predicate = 'name';
-          value = this.capitalize(cleanName);
+          value = cleanName.split(/\s+/).map(w => this.capitalize(w)).join(' ').trim();
         }
       }
     }
 
     // Canonical key formatting:
-    // If it's a named entity with entity: prefix, scope by entity id
-    // If it's a DIRECT user relation (e.g. User's father), map to standard canonical key (e.g. father_occupation, father_name)
+    // If it's a DIRECT user relation (e.g. User's father), map to standard canonical key (e.g. father_occupation, father_name, brother_location)
     // If it's a THIRD-PARTY entity (e.g. Ejaz's father), generate entity-scoped key!
     let canonicalKey: string;
-    if (subjectId.startsWith('entity:')) {
-      canonicalKey = `${subjectId}:${predicate}`;
-    } else if (isDirectUserRelation) {
+    if (isDirectUserRelation) {
       if (predicate === 'name') {
         canonicalKey = `${relation}_name`;
       } else if (predicate === 'military_service' || predicate === 'occupation') {
         canonicalKey = `${relation}_occupation`;
       } else if (predicate === 'breed') {
         canonicalKey = `${relation}_breed`;
+      } else if (predicate === 'location') {
+        canonicalKey = `${relation}_location`;
+      } else if (predicate === 'status') {
+        canonicalKey = `${relation}_status`;
       } else {
         canonicalKey = `${relation}_${predicate}`;
       }
+    } else if (subjectId.startsWith('entity:')) {
+      canonicalKey = `${subjectId}:${predicate}`;
     } else {
-      // Third-party entity-scoped canonical key
       canonicalKey = `${subjectId}:${predicate}`;
     }
 
@@ -518,6 +585,91 @@ export class EntityResolutionService {
       sourceMessageId,
       isDirectUserFact: isDirectUserRelation
     };
+  }
+
+  /**
+   * Deterministically returns true if a word or token is a stopword, auxiliary verb,
+   * occupation, role, pet breed, lifestyle habit, status, or adjective that should NEVER
+   * be classified as a personal entity name.
+   */
+  public isNonNameWord(word: string): boolean {
+    if (!word) return true;
+    const lower = word.toLowerCase().trim().replace(/[.,;!?]+$/, '');
+    if (lower.length <= 1) return true;
+
+    // 1. Auxiliary verbs, pronouns, prepositions, articles, stopwords (English & Hinglish)
+    const STOP_WORDS = new Set([
+      'is', 'was', 'are', 'were', 'has', 'had', 'have', 'works', 'worked', 'working',
+      'lives', 'lived', 'living', 'loves', 'loved', 'likes', 'liked', 'enjoys',
+      'told', 'said', 'met', 'visited', 'bought', 'got', 'went', 'stays', 'staying',
+      'ka', 'ki', 'ke', 'ko', 'se', 'ne', 'me', 'mein', 'par', 'pe', 'to', 'aur', 'ya', 'yaa',
+      'a', 'an', 'the', 'in', 'at', 'on', 'for', 'from', 'with', 'about', 'by',
+      'not', 'never', 'always', 'very', 'too', 'nahi', 'mat', 'bhi', 'ek',
+      'hai', 'hain', 'tha', 'thi', 'the', 'hoon', 'hun', 'ho', 'gaya', 'gayi', 'gaye', 'raha', 'rahi', 'rahe',
+      'naam', 'name', 'named', 'called', 'actual', 'real', 'formal', 'nick', 'nickname',
+      'unka', 'unki', 'unke', 'uska', 'uski', 'uske', 'mera', 'meri', 'mere', 'apna', 'apni', 'apne',
+      'hum', 'humara', 'humari', 'humare', 'yeh', 'woh', 'ye', 'wo', 'kya', 'kaun', 'kaunsa',
+      'good', 'fine', 'well', 'bad', 'bura', 'achha', 'acha', 'sahi', 'galat',
+      'yesterday', 'today', 'tomorrow', 'pehle', 'abhi', 'now', 'then',
+      'year', 'years', 'month', 'months', 'day', 'days', 'old', 'saal'
+    ]);
+    if (STOP_WORDS.has(lower)) return true;
+
+    // 2. Relational nouns
+    const RELATIONAL_WORDS = new Set([
+      'father', 'mother', 'dad', 'mom', 'papa', 'maa', 'pitaji', 'mataji', 'baap',
+      'brother', 'bhai', 'bhaiya', 'sister', 'behen', 'didi',
+      'wife', 'biwi', 'patni', 'husband', 'pati', 'shauhar', 'spouse',
+      'son', 'beta', 'daughter', 'beti', 'child', 'bachha',
+      'friend', 'dost', 'yaar', 'colleague', 'coworker', 'roommate', 'flatmate',
+      'boss', 'manager', 'partner', 'girlfriend', 'gf', 'boyfriend', 'bf', 'banda', 'bandi',
+      'dog', 'cat', 'pet', 'puppy', 'kitten', 'kutta', 'billi'
+    ]);
+    if (RELATIONAL_WORDS.has(lower)) return true;
+
+    // 3. Occupations, professions, roles, and employment statuses
+    const OCCUPATIONS = new Set([
+      'doctor', 'dr', 'physician', 'surgeon', 'dentist', 'engineer', 'developer', 'coder', 'programmer',
+      'teacher', 'professor', 'lecturer', 'educator', 'student', 'scholar',
+      'lawyer', 'advocate', 'judge', 'police', 'inspector', 'officer', 'cop',
+      'housewife', 'homemaker', 'nurse', 'designer', 'architect', 'freelancer',
+      'accountant', 'ca', 'auditor', 'banker', 'banking', 'bank',
+      'driver', 'pilot', 'captain', 'chef', 'cook', 'baker',
+      'artist', 'painter', 'trainer', 'coach', 'gym_trainer', 'instructor',
+      'writer', 'author', 'poet', 'musician', 'singer', 'dancer', 'actor', 'actress',
+      'scientist', 'researcher', 'clerk', 'manager', 'lead', 'director',
+      'founder', 'cofounder', 'entrepreneur', 'businessman', 'businesswoman', 'business',
+      'ceo', 'cto', 'cfo', 'coo', 'executive', 'analyst', 'consultant', 'hr', 'recruiter',
+      'intern', 'employee', 'worker', 'unemployed', 'retired', 'peon', 'security', 'guard'
+    ]);
+    if (OCCUPATIONS.has(lower)) return true;
+
+    // 4. Pet breeds and animal traits
+    const PET_BREEDS = new Set([
+      'golden', 'retriever', 'golden retriever', 'german', 'shepherd', 'german shepherd',
+      'labrador', 'lab', 'beagle', 'poodle', 'pug', 'persian', 'husky', 'rottweiler',
+      'indie', 'shih', 'tzu', 'shih tzu', 'bulldog', 'corgi', 'boxer', 'dachshund',
+      'doberman', 'pomeranian', 'chihuahua', 'great dane', 'maltese', 'dalmatian'
+    ]);
+    if (PET_BREEDS.has(lower)) return true;
+
+    // 5. Dietary preferences, habits, and lifestyles
+    const LIFESTYLE_WORDS = new Set([
+      'vegetarian', 'vegan', 'eggetarian', 'non-vegetarian', 'non-veg', 'veg', 'nonveg', 'jain', 'keto',
+      'smoker', 'non-smoker', 'drinker', 'non-drinker', 'alcoholic',
+      'gym', 'fitness', 'workout', 'yoga', 'runner', 'athlete'
+    ]);
+    if (LIFESTYLE_WORDS.has(lower)) return true;
+
+    // 6. Marital, physical, and demographic states
+    const STATUS_WORDS = new Set([
+      'single', 'married', 'unmarried', 'divorced', 'widowed', 'engaged',
+      'sick', 'ill', 'bimar', 'fit', 'healthy', 'tall', 'short', 'fat', 'slim',
+      'young', 'old', 'teenager', 'adult', 'alive', 'dead', 'passed away'
+    ]);
+    if (STATUS_WORDS.has(lower)) return true;
+
+    return false;
   }
 
   private normalizeRelation(raw: string): string {

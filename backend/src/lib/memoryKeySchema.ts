@@ -157,6 +157,21 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   sister_occupation: [
     'sisters_occupation', 'sister_profession', 'sister_job', 'behen_ka_kaam'
   ],
+  father_status: [
+    'fathers_status', 'dad_status', 'papa_status', 'father_retirement_status', 'father_retired'
+  ],
+  mother_status: [
+    'mothers_status', 'mom_status', 'maa_status', 'mother_retirement_status', 'mother_retired'
+  ],
+  brother_location: [
+    'brothers_location', 'bhai_location', 'brother_city', 'brother_lives_in'
+  ],
+  sister_location: [
+    'sisters_location', 'behen_location', 'sister_city', 'sister_lives_in'
+  ],
+  pet_breed: [
+    'dog_breed', 'cat_breed', 'breed', 'pet_breed_type'
+  ],
   // ── Friends & Associates ────────────────────────────────────────────────────
   friend_name: [
     'friends_name', 'friend', 'dost_ka_naam', 'dost'
@@ -246,6 +261,15 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   education_degree: [
     'college_name', 'university_name', 'school_name', 'degree',
     'course_name', 'study_subject', 'major_subject', 'education'
+  ],
+  smoking_habit: [
+    'smoking', 'smoker_status', 'smokes', 'cigarette_habit', 'quit_smoking', 'smoker', 'smoking_status'
+  ],
+  drinking_habit: [
+    'drinking', 'alcohol_habit', 'drinks_alcohol', 'drinker_status', 'alcohol', 'drinking_status'
+  ],
+  beverage_routine: [
+    'morning_tea', 'morning_coffee', 'chai_routine', 'coffee_routine', 'daily_beverage', 'daily_tea', 'daily_coffee'
   ],
 };
 

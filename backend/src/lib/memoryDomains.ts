@@ -2469,46 +2469,228 @@ export function buildDynamicKnowledgeGraph(
         relation = (k.includes('birth') || k.includes('bday') || k.includes('dob') || k.includes('date_of_birth')) ? 'BIRTHDAY' : k.includes('age') ? 'AGE' : (k.includes('nick') || k.includes('tiku') || k.includes('tuku')) ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Son (Shreshth / Tuku) in Family Tree`;
-      } else if (k.startsWith('father_') && allKeys.has('father_name')) {
+      } else if (k.startsWith('father_')) {
         // Guard against friend's father or unrelated narrative
         if (item.value.toLowerCase().includes('ijaz') || item.value.toLowerCase().includes('navi')) {
           continue;
         }
-        parentId = 'mem-father_name';
+        const fatherNodeId = allKeys.has('father_name') ? 'mem-father_name' : 'mem-entity-father';
+        if (!nodeIds.has(fatherNodeId)) {
+          nodes.push({
+            id: fatherNodeId,
+            name: 'Father',
+            entity_type: 'father',
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 20,
+            value: 'Father',
+            raw_key: 'father_name',
+            emoji: '👨‍🦳',
+            parentEntityId: 'dept-family',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', 'Father']
+          });
+          nodeIds.add(fatherNodeId);
+          deptCounts.family++;
+          edges.push({
+            id: `edge-dept-family-${fatherNodeId}`,
+            source: 'dept-family',
+            target: fatherNodeId,
+            relation: 'FAMILY_MEMBER',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Father branch under Family`
+          });
+        }
+        if (item.id === fatherNodeId) continue;
+        parentId = fatherNodeId;
         hierarchyLevel = 3;
-        relation = 'MEMBER_ATTRIBUTE';
+        relation = k.includes('occupation') || k.includes('job') || k.includes('service') ? 'OCCUPATION' : k.includes('status') ? 'STATUS' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Father in Family Tree`;
-      } else if (k.startsWith('mother_') && allKeys.has('mother_name')) {
-        parentId = 'mem-mother_name';
+      } else if (k.startsWith('mother_')) {
+        const motherNodeId = allKeys.has('mother_name') ? 'mem-mother_name' : 'mem-entity-mother';
+        if (!nodeIds.has(motherNodeId)) {
+          nodes.push({
+            id: motherNodeId,
+            name: 'Mother',
+            entity_type: 'mother',
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 20,
+            value: 'Mother',
+            raw_key: 'mother_name',
+            emoji: '👵',
+            parentEntityId: 'dept-family',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', 'Mother']
+          });
+          nodeIds.add(motherNodeId);
+          deptCounts.family++;
+          edges.push({
+            id: `edge-dept-family-${motherNodeId}`,
+            source: 'dept-family',
+            target: motherNodeId,
+            relation: 'FAMILY_MEMBER',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Mother branch under Family`
+          });
+        }
+        if (item.id === motherNodeId) continue;
+        parentId = motherNodeId;
         hierarchyLevel = 3;
-        relation = 'MEMBER_ATTRIBUTE';
+        relation = k.includes('occupation') || k.includes('job') ? 'OCCUPATION' : k.includes('status') ? 'STATUS' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Mother in Family Tree`;
-      } else if (k.startsWith('daughter_') && allKeys.has('daughter_name')) {
-        parentId = 'mem-daughter_name';
+      } else if (k.startsWith('daughter_')) {
+        const daughterNodeId = allKeys.has('daughter_name') ? 'mem-daughter_name' : 'mem-entity-daughter';
+        if (!nodeIds.has(daughterNodeId)) {
+          nodes.push({
+            id: daughterNodeId,
+            name: 'Daughter',
+            entity_type: 'daughter',
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 20,
+            value: 'Daughter',
+            raw_key: 'daughter_name',
+            emoji: '👧',
+            parentEntityId: 'dept-family',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', 'Daughter']
+          });
+          nodeIds.add(daughterNodeId);
+          deptCounts.family++;
+          edges.push({
+            id: `edge-dept-family-${daughterNodeId}`,
+            source: 'dept-family',
+            target: daughterNodeId,
+            relation: 'FAMILY_MEMBER',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Daughter branch under Family`
+          });
+        }
+        if (item.id === daughterNodeId) continue;
+        parentId = daughterNodeId;
         hierarchyLevel = 3;
         relation = 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Daughter in Family Tree`;
-      } else if (k.startsWith('sister_') && allKeys.has('sister_name')) {
-        parentId = 'mem-sister_name';
+      } else if (k.startsWith('sister_')) {
+        const sisterNodeId = allKeys.has('sister_name') ? 'mem-sister_name' : 'mem-entity-sister';
+        if (!nodeIds.has(sisterNodeId)) {
+          nodes.push({
+            id: sisterNodeId,
+            name: 'Sister',
+            entity_type: 'sister',
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 20,
+            value: 'Sister',
+            raw_key: 'sister_name',
+            emoji: '👧',
+            parentEntityId: 'dept-family',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', 'Sister']
+          });
+          nodeIds.add(sisterNodeId);
+          deptCounts.family++;
+          edges.push({
+            id: `edge-dept-family-${sisterNodeId}`,
+            source: 'dept-family',
+            target: sisterNodeId,
+            relation: 'FAMILY_MEMBER',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Sister branch under Family`
+          });
+        }
+        if (item.id === sisterNodeId) continue;
+        parentId = sisterNodeId;
         hierarchyLevel = 3;
-        relation = 'MEMBER_ATTRIBUTE';
+        relation = k.includes('occupation') || k.includes('job') ? 'OCCUPATION' : k.includes('location') ? 'LOCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Sister in Family Tree`;
-      } else if (k.startsWith('brother_') && allKeys.has('brother_name')) {
-        parentId = 'mem-brother_name';
+      } else if (k.startsWith('brother_')) {
+        const brotherNodeId = allKeys.has('brother_name') ? 'mem-brother_name' : 'mem-entity-brother';
+        if (!nodeIds.has(brotherNodeId)) {
+          nodes.push({
+            id: brotherNodeId,
+            name: 'Brother',
+            entity_type: 'brother',
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 20,
+            value: 'Brother',
+            raw_key: 'brother_name',
+            emoji: '👦',
+            parentEntityId: 'dept-family',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', 'Brother']
+          });
+          nodeIds.add(brotherNodeId);
+          deptCounts.family++;
+          edges.push({
+            id: `edge-dept-family-${brotherNodeId}`,
+            source: 'dept-family',
+            target: brotherNodeId,
+            relation: 'FAMILY_MEMBER',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Brother branch under Family`
+          });
+        }
+        if (item.id === brotherNodeId) continue;
+        parentId = brotherNodeId;
         hierarchyLevel = 3;
-        relation = 'MEMBER_ATTRIBUTE';
+        relation = k.includes('occupation') || k.includes('job') ? 'OCCUPATION' : k.includes('location') ? 'LOCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Brother in Family Tree`;
-      } else if ((k.startsWith('pet_') || k.startsWith('dog_') || k.startsWith('cat_')) && (allKeys.has('pet_name') || allKeys.has('dog_name') || allKeys.has('cat_name'))) {
-        const petKey = allKeys.has('pet_name') ? 'mem-pet_name' : allKeys.has('dog_name') ? 'mem-dog_name' : 'mem-cat_name';
+      } else if (k.startsWith('pet_') || k.startsWith('dog_') || k.startsWith('cat_')) {
+        const petKey = allKeys.has('pet_name') ? 'mem-pet_name' : allKeys.has('dog_name') ? 'mem-dog_name' : (allKeys.has('cat_name') ? 'mem-cat_name' : 'mem-entity-pet');
+        if (!nodeIds.has(petKey)) {
+          const isDog = k.startsWith('dog_') || item.value.toLowerCase().includes('dog') || item.value.toLowerCase().includes('retriever') || item.value.toLowerCase().includes('shepherd');
+          const isCat = k.startsWith('cat_') || item.value.toLowerCase().includes('cat') || item.value.toLowerCase().includes('persian');
+          const pName = isDog ? 'Pet Dog' : (isCat ? 'Pet Cat' : 'Pet');
+          const pEmoji = isDog ? '🐕' : (isCat ? '🐈' : '🐾');
+          nodes.push({
+            id: petKey,
+            name: pName,
+            entity_type: isDog ? 'dog' : (isCat ? 'cat' : 'pet'),
+            department: 'family',
+            color: DOMAIN_TAXONOMY.family.color,
+            radius: 18,
+            value: pName,
+            raw_key: isDog ? 'dog_name' : (isCat ? 'cat_name' : 'pet_name'),
+            emoji: pEmoji,
+            parentEntityId: 'dept-family',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Family & Relationships', pName]
+          });
+          nodeIds.add(petKey);
+          deptCounts.family++;
+          edges.push({
+            id: `edge-dept-family-${petKey}`,
+            source: 'dept-family',
+            target: petKey,
+            relation: 'PET_MEMBER',
+            color: DOMAIN_TAXONOMY.family.color,
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: `Pet branch under Family`
+          });
+        }
         if (item.id !== petKey) {
           parentId = petKey;
           hierarchyLevel = 3;
-          relation = 'PET_ATTRIBUTE';
+          relation = k.includes('breed') ? 'BREED' : 'PET_ATTRIBUTE';
           edgeType = 'ATTRIBUTE_STEM';
           explanation = `Detail stem of Pet in Family Tree`;
         }
