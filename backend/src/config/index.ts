@@ -93,9 +93,9 @@ export const config = {
     apiKey3: optionalEnv('GEMINI_API_KEY_3', ''),
     apiKey4: optionalEnv('GEMINI_API_KEY_4', ''),
     // Primary Gemini model for conversational workloads (1500 RPD, fast)
-    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-2.0-flash'),
-    // Hard interactive timeout for conversation workloads (default 5s for snappy chat)
-    conversationTimeoutMs: parseInt(optionalEnv('GEMINI_CONVERSATION_TIMEOUT_MS', '5000'), 10),
+    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-3.8-flash'),
+    // Hard interactive timeout for conversation workloads (default 12s for reliable chat reasoning)
+    conversationTimeoutMs: parseInt(optionalEnv('GEMINI_CONVERSATION_TIMEOUT_MS', '12000'), 10),
   },
 
   // Cognitive Model Router — maps workloads to providers.

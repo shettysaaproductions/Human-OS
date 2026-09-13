@@ -154,10 +154,10 @@ class CognitiveModelRouter {
         const elapsedSoFar = Date.now() - startMs;
         const totalRemainingBudget = overallTimeoutMs - elapsedSoFar;
 
-        // If interactive conversation, bound Gemini to at most ~3000ms (or totalBudget - 3500ms),
-        // guaranteeing that NVIDIA has sufficient remaining budget before the 8000ms deadline.
+        // If interactive conversation (default 12s budget), bound Gemini to up to 8500ms,
+        // guaranteeing that NVIDIA has sufficient remaining budget before deadline.
         const geminiMaxTimeout = workload === 'CONVERSATION'
-          ? Math.max(1200, Math.min(3000, totalRemainingBudget - 3500))
+          ? Math.max(3000, Math.min(8500, totalRemainingBudget - 3500))
           : totalRemainingBudget;
 
         const geminiDeadline = Date.now() + geminiMaxTimeout;

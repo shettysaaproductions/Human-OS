@@ -2339,6 +2339,10 @@ Casual "tu/tum". Plain conversational text only.`;
       const messagesWithEmoji = parsedMessages.map(msg => {
         // Don't add emoji to very short messages
         if (msg.length < 15) return msg;
+        // Never add celebratory/random emojis (e.g. 🎉) to safety-net fallback messages!
+        if (msg.includes('mujhe thoda sochne de') || msg.includes('moment to think')) {
+          return msg;
+        }
         return MessageFormatter.addEmoji(msg, emotion);
       });
       

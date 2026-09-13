@@ -36,6 +36,14 @@ const SAFETY_SETTINGS = [
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
+export const DEFAULT_GEMINI_FALLBACK_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-2.5-flash',
+  'gemini-flash-latest'
+];
+
 export class GeminiTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Gemini API did not respond within ${timeoutMs}ms`);
@@ -99,7 +107,7 @@ export class GeminiPool {
   readonly keys: Map<GeminiSlot, PoolKey> = new Map();
 
   private static readonly COOLDOWN_RATELIMIT_MS = 60_000;  // 60s for 429
-  private static readonly COOLDOWN_OVERLOAD_MS  = 30_000;  // 30s for 503/overload
+  private static readonly COOLDOWN_OVERLOAD_MS  = 8_000;   // 8s for 503/high demand spike
 
   constructor(customKeys?: Array<{ slot: GeminiSlot; role: GeminiKeyRole; key: string }>) {
     let keyConfigs: Array<{ slot: GeminiSlot; role: GeminiKeyRole; key: string }>;
@@ -114,14 +122,14 @@ export class GeminiPool {
         }
       };
 
-      // 1. Primary config keys
+      // 1. Primary default single GEMINI_API_KEY (most reliable active key)
+      addKey(process.env.GEMINI_API_KEY);
+
+      // 2. Primary config keys
       addKey(config.gemini.apiKey1);
       addKey(config.gemini.apiKey2);
       addKey(config.gemini.apiKey3);
       addKey(config.gemini.apiKey4);
-
-      // 2. Default single GEMINI_API_KEY
-      addKey(process.env.GEMINI_API_KEY);
 
       // 3. Comma-separated GEMINI_API_KEYS
       if (process.env.GEMINI_API_KEYS) {
@@ -225,10 +233,10 @@ export class GeminiPool {
       }
 
       // Dynamically allocate budget for this slot attempt:
-      // If deadlineMs is specified (interactive chat), use fast 2.5s slot rotation.
+      // If deadlineMs is specified (interactive chat), use up to 6.0s slot timeout.
       // Otherwise (background/guardian reasoning), allow full slot timeout.
       const slotTimeoutMs = deadlineMs
-        ? Math.min(2500, Math.max(600, remainingMs - 500))
+        ? Math.min(6000, Math.max(1200, remainingMs - 500))
         : remainingMs;
 
       try {
@@ -239,8 +247,15 @@ export class GeminiPool {
       } catch (err: any) {
         lastError = err;
         const status = err.status ?? err.httpErrorCode ?? 0;
+        const msg = (err.message || '').toLowerCase();
         const isBadRequest = status === 400 || status === 401 || status === 403;
         if (isBadRequest) throw err; // Don't retry bad request across keys
+
+        const isModelNotFound = status === 404 || msg.includes('not found') || msg.includes('no longer available');
+        if (isModelNotFound) {
+          // Model does not exist on endpoint — retrying other keys won't help; caller should try next model
+          throw err;
+        }
 
         this.handleKeyFailure(keyEntry, err);
         // Next healthy slot in productionSlots will be attempted immediately
@@ -255,10 +270,14 @@ export class GeminiPool {
 
   handleKeyFailure(keyEntry: PoolKey, err: any): void {
     const status = err.status ?? err.httpErrorCode ?? 0;
-    const msg = (err.message || '').toLowerCase();
+    const rawMsg = err.message || '';
+    const msg = rawMsg.toLowerCase();
 
-    const isRateLimit = status === 429 || msg.includes('quota') || msg.includes('rate') || msg.includes('resource_exhausted');
-    const isOverload  = status === 503 || msg.includes('overload') || msg.includes('unavailable');
+    // Prevent false positives: "generateContent" in Google endpoint URLs must NEVER trigger rate limit detection!
+    const isRateLimit = status === 429 ||
+      /\b(rate[ -]?limit|quota[ -]?exceeded|resource[ -]?exhausted|too many requests)\b/i.test(rawMsg) ||
+      (msg.includes('quota') && !msg.includes('generatecontent'));
+    const isOverload  = status === 503 || msg.includes('overload') || msg.includes('service unavailable');
 
     if (isRateLimit || isOverload) {
       const cooldownMs = isRateLimit ? GeminiPool.COOLDOWN_RATELIMIT_MS : GeminiPool.COOLDOWN_OVERLOAD_MS;
@@ -380,9 +399,10 @@ export async function geminiComplete(
   const lastMessage = history[history.length - 1];
   const historyMsgs = history.slice(0, -1);
   const timeoutMs = options.timeoutMs ?? (options.jsonMode ? 30_000 : config.gemini.conversationTimeoutMs);
+
   const modelsToTry = options.model
     ? [options.model]
-    : [primaryModel, 'gemini-1.5-flash', 'gemini-2.0-flash-lite'].filter((m, i, a) => a.indexOf(m) === i);
+    : [primaryModel, ...DEFAULT_GEMINI_FALLBACK_MODELS].filter((m, i, a) => Boolean(m) && a.indexOf(m) === i);
 
   let lastErr: any = null;
 
@@ -490,7 +510,7 @@ export async function* geminiStream(
 
   const modelsToTry = options.model
     ? [options.model]
-    : [primaryModel, 'gemini-1.5-flash', 'gemini-2.0-flash-lite'].filter((m, i, a) => a.indexOf(m) === i);
+    : [primaryModel, ...DEFAULT_GEMINI_FALLBACK_MODELS].filter((m, i, a) => Boolean(m) && a.indexOf(m) === i);
 
   let streamErr: any = null;
   const chunks: string[] = [];

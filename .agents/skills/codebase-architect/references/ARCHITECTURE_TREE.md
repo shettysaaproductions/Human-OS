@@ -1,0 +1,913 @@
+# HumanOS Module Architecture Map (MAM) & Codebase Tree
+
+> **Optimized for Gemini 3.8 Flash & Antigravity Architects**
+> This map provides a zero-waste, token-efficient roadmap of the entire HumanOS ecosystem.
+> Use it to immediately target files and understand architectural boundaries without bloated directory scans.
+
+---
+
+## 1. High-Level Architectural Layers
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        MOBILE CLIENT (React Native)                     │
+│  ChatScreen (WhatsApp style) │ KgExplorerScreen (2D/3D Neural Galaxy)   │
+│  LifeTree │ EmotionLandscape │ GoalsHabits │ Zustand useChatStore      │
+└────────────────────────────────────┬───────────────────────────────────┘
+                                     │  HTTP / SSE Streaming / OTA Updates
+┌────────────────────────────────────▼───────────────────────────────────┐
+│                        BACKEND SERVICE (Node / Express)                │
+│  routes/chat.ts (Turn Ingress, Debounce, Coalescing, Fallback Guard)   │
+│  services/NovaBrainService.ts (Prompt Assembly, Grounding, Reflection) │
+│  services/WatchtowerInspector.ts (Anti-Parental, Verb Repairs)         │
+└────────────────────────────────────┬───────────────────────────────────┘
+                                     │
+           ┌─────────────────────────┴─────────────────────────┐
+           ▼                                                   ▼
+┌───────────────────────────────┐               ┌───────────────────────────────┐
+│     COGNITIVE ROUTER (LLM)    │               │     SUPABASE POSTGRES DB      │
+│  Gemini 3.8 Flash (Primary)   │               │  chat_history (coalesced rows)│
+│  20-Key Credential Pool       │               │  profiles (push_tokens, voice)│
+│  NVIDIA NIM (Failover Backup) │               │  knowledge_nodes / edges      │
+│  Auto-Model Fallback Cascade  │               │  reminders / life_threads     │
+└───────────────────────────────┘               └───────────────────────────────┘
+```
+
+---
+
+## 2. Fast Route & File Lookup
+
+| Subsystem | Critical File Path | Purpose / Responsibilities |
+|---|---|---|
+| **Chat & Routing** | `backend/src/routes/chat.ts` | Turn debouncing, burst aggregation, message coalescing, fallback safety-net. |
+| **Cognitive Router** | `backend/src/lib/cognitiveRouter.ts` | Workload dispatch (Gemini primary ↔ NVIDIA failover), deadline budgeting. |
+| **Gemini Pool** | `backend/src/lib/gemini.ts` | 20-slot key pool, Gemini 3.8 Flash primary, 404 fast-fail, strict rate-limit regex. |
+| **Voice & Persona** | `backend/src/services/WatchtowerInspector.ts` | Strips "Beta", repairs Hindi verbs, prevents model instruction leaks. |
+| **Prompt Builder** | `backend/src/services/promptBuilder.ts` | Feminine peer friendship tone, WhatsApp formatting rules, memory grounding. |
+| **Neural Galaxy** | `mobile/src/screens/analytics/KgExplorerScreen.tsx` | Default 2D tactical view, auto-fit scale for outer bubbles, 36 live synaptic pulses. |
+| **Mobile Chat Store** | `mobile/src/store/useChatStore.ts` | 5–10s human-paced texting intervals, multi-bubble delivery, optimistic cache. |
+| **Update History** | `mobile/src/config/updateHistory.json` | Release notes index, in-app update notification modal triggers. |
+
+---
+
+## 3. Database Schema Blueprint (Supabase Postgres)
+
+| Table | Key Columns | Purpose |
+|---|---|---|
+| `chat_history` | `id, user_id, conversation_id, role, content, meta, created_at, reply_to_id` | Coalesced turns with `<NOVA_MESSAGE_BREAK>`, prevents bubble spam. |
+| `profiles` | `id, preferred_name, companion_personality, grammatical_gender, push_token` | User identity, preferences, and push notification tokens. |
+| `knowledge_nodes` | `id, user_id, label, department, confidence, stability, last_synapsed_at` | Neural Galaxy hubs, entity branches, and leaf attribute stems. |
+| `knowledge_edges` | `id, user_id, source_id, target_id, relation_type, weight` | Department trunks, hierarchical branches, and cross-domain bridges. |
+| `reminders` | `id, user_id, title, due_at, status, recurrence` | Scheduled and active reminders (deterministic query < 200ms). |
+| `life_threads` | `id, user_id, title, status, category, last_updated_at` | Ongoing user projects, relationships, and emotional threads. |
+
+---
+
+## 4. Complete Project Directory Hierarchy
+
+- 📁 **.agents/**
+  - 📁 **rules/**
+    - 📄 `test_chat.md`
+  - 📁 **skill-observations/**
+    - 📄 `log.md`
+  - 📁 **skills/**
+    - 📁 **codebase-architect/**
+      - 📁 **references/**
+        - 📄 `ARCHITECTURE_TREE.md`
+      - 📁 **scripts/**
+        - 📄 `generate_architecture_map.js`
+      - 📄 `SKILL.md`
+  - 📄 `AGENTS.md`
+  - 📄 `HI_AGENT_RAM.md`
+  - 📄 `KNOWN_ISSUES.md`
+  - 📄 `LEARNING_LOOP.md`
+  - 📄 `UPDATE_DIARY.md`
+- 📁 **backend/**
+  - 📁 **brain/**
+    - 📁 **SESSION_LOGS/**
+      - 📄 `2026-06-27.md`
+  - 📁 **scratch/**
+    - 📄 `audit_db.ts`
+    - 📄 `audit_jobs.ts`
+    - 📄 `audit_safety.ts`
+    - 📄 `check_ijaz.ts`
+    - 📄 `check_queue.ts`
+    - 📄 `edit_chat.js`
+    - 📄 `fix_chat.js`
+    - 📄 `fix_chat2.js`
+    - 📄 `fix_chat3.js`
+    - 📄 `list_tables.js`
+    - 📄 `stress_test.ts`
+    - 📄 `test_flow.ts`
+    - 📄 `test_kg_nodes.ts`
+    - 📄 `test_moments.ts`
+    - 📄 `test_nvidia.ts`
+    - 📄 `test_rpc.ts`
+    - 📄 `test_table.ts`
+    - 📄 `time_range_check.ts`
+    - 📄 `verify_db.ts`
+    - 📄 `verify_schema.ts`
+  - 📁 **scripts/**
+    - 📄 `alter_reminders.ts`
+    - 📄 `analyze_admin_forensics_2.ts`
+    - 📄 `analyze_admin_forensics_3.ts`
+    - 📄 `analyze_admin_forensics.ts`
+    - 📄 `analyze_forensics.ts`
+    - 📄 `apply_041_042.ts`
+    - 📄 `apply_047.ts`
+    - 📄 `apply_048.ts`
+    - 📄 `apply_051.ts`
+    - 📄 `apply_052.ts`
+    - 📄 `apply_053.ts`
+    - 📄 `apply_054.ts`
+    - 📄 `apply_062.ts`
+    - 📄 `audit_baseline.ts`
+    - 📄 `audit_batch1.ts`
+    - 📄 `audit_identity.ts`
+    - 📄 `audit_post_fix_state.ts`
+    - 📄 `baseline_check.ts`
+    - 📄 `check_reminders.ts`
+    - 📄 `checkTokenTimestamp.ts`
+    - 📄 `cleanup_zombie_accounts.ts`
+    - 📄 `cleanupTestMemories.ts`
+    - 📄 `clear_user_data.ts`
+    - 📄 `cognitive_forensics_2.ts`
+    - 📄 `cognitive_forensics.ts`
+    - 📄 `create_test_user.ts`
+    - 📄 `db_backup.ts`
+    - 📄 `db_migrate.ts`
+    - 📄 `db_reset.ts`
+    - 📄 `db_schema_check.ts`
+    - 📄 `db_verify.ts`
+    - 📄 `debug_memory_synthesis.ts`
+    - 📄 `delete_accidental_user.ts`
+    - 📄 `delete_backend_test_user.ts`
+    - 📄 `doctor.ts`
+    - 📄 `dump_forensic_snapshot.js`
+    - 📄 `dump_forensics.ts`
+    - 📄 `execute_shoot_dead.ts`
+    - 📄 `fetch_recent_chats.ts`
+    - 📄 `fix_user_corrupted_reminders.ts`
+    - 📄 `fixStuckNova.ts`
+    - 📄 `forensic_analyzer.ts`
+    - 📄 `forensic_audit.ts`
+    - 📄 `forensic_extraction.ts`
+    - 📄 `forensic_p2.js`
+    - 📄 `forensic_p3.js`
+    - 📄 `forensic_resume_trace.ts`
+    - 📄 `forensic_shoot_dead_audit.ts`
+    - 📄 `forensic_snapshot_full.json`
+    - 📄 `forensic_snapshot_raw.json`
+    - 📄 `FORENSIC_SNAPSHOT_REPORT.md`
+    - 📄 `forensics_chat.ts`
+    - 📄 `forensics_proactive.ts`
+    - 📄 `forensics.ts`
+    - 📄 `forensics2.ts`
+    - 📄 `generate_full_forensic_report.js`
+    - 📄 `inspect_faulty_messages.ts`
+    - 📄 `inspect_followups.ts`
+    - 📄 `inspect_memory_provenance.js`
+    - 📄 `inspect_production_user.js`
+    - 📄 `inspect_wm_row.ts`
+    - 📄 `investigate_normal_memory.ts`
+    - 📄 `live_diagnostic_auth.ts`
+    - 📄 `live_diagnostic.ts`
+    - 📄 `live_verify.ts`
+    - 📄 `migrate_035.js`
+    - 📄 `migrate_nova_thoughts.ts`
+    - 📄 `migrate_user_presence_history.ts`
+    - 📄 `nova_benchmark.ts`
+    - 📄 `pg_migrate.js`
+    - 📄 `post_fix_audit.ts`
+    - 📄 `post_onboarding_audit.ts`
+    - 📄 `print_forensic_markdown.js`
+    - 📄 `prod_smoke_test_phase2a.ts`
+    - 📄 `prod_smoke_test_phase2b.ts`
+    - 📄 `prod_smoke_test_phase2c.ts`
+    - 📄 `prod_smoke_test_phase2d.ts`
+    - 📄 `prod_smoke_test_phase2eb.ts`
+    - 📄 `prod_smoke_test_phase2ec_concurrency.ts`
+    - 📄 `prod_smoke_test_phase2ec.ts`
+    - 📄 `prod_smoke_test_phase2ed.ts`
+    - 📄 `prod_smoke_test_phase2ee.ts`
+    - 📄 `prod_smoke_test_phase2ef.ts`
+    - 📄 `prod_smoke_test_phase2fa.ts`
+    - 📄 `prod_smoke_test_phase2fb.ts`
+    - 📄 `prod_smoke_test_phase2fc.ts`
+    - 📄 `prod_smoke_test_phase2fd.ts`
+    - 📄 `prod_smoke_test_phase2fe.ts`
+    - 📄 `prod_smoke_test_phase3c_final_validation.ts`
+    - 📄 `prod_smoke_test_phase3c_hardening.ts`
+    - 📄 `prod_smoke_test_phase3d_conversation_weaver.ts`
+    - 📄 `prod_smoke_test_phase3d_cultivation_engine.ts`
+    - 📄 `prod_smoke_test_phase3d_e2e_validation.ts`
+    - 📄 `prod_smoke_test_phase3d_synthesis_engine.ts`
+    - 📄 `prod_smoke_test_universal_burden.ts`
+    - 📄 `prod_smoke_test_watchtower_attention.ts`
+    - 📄 `prod_smoke_test_watchtower_heartbeat.ts`
+    - 📄 `prod_smoke_test_watchtower_proactive_integration.ts`
+    - 📄 `prod_smoke_test_watchtower_timing.ts`
+    - 📄 `prod_smoke_test_wm_invalidation.ts`
+    - 📄 `prod_test_nova.ts`
+    - 📄 `prod_test_repair_pass_v2.ts`
+    - 📄 `prod_test_semantic_resume.ts`
+    - 📄 `reconcile_alias_keys.ts`
+    - 📄 `reconcile_corrupted_state.ts`
+    - 📄 `reconcile_lifethreads.ts`
+    - 📄 `reconcile_memory_aliases.ts`
+    - 📄 `reconcile_provenance_bug_06.ts`
+    - 📄 `remediate_corrupted_versions.ts`
+    - 📄 `run_forensic_audit.ts`
+    - 📄 `session_boot.ts`
+    - 📄 `shoot_dead_real_test.ts`
+    - 📄 `test_burst_local.ts`
+    - 📄 `test_chat_analyzer.ts`
+    - 📄 `test_live_correction.ts`
+    - 📄 `test_normal_memory_promotion.ts`
+    - 📄 `test_nvidia_api.ts`
+    - 📄 `test_push.ts`
+    - 📄 `test_raw_nvidia.ts`
+    - 📄 `test_regex.js`
+    - 📄 `test_regex2.js`
+    - 📄 `test_turn_analyzer.ts`
+    - 📄 `testPush.ts`
+    - 📄 `testPushReceipt.ts`
+    - 📄 `verify_bug_negation_live.ts`
+    - 📄 `verify_family_semantics_live.ts`
+    - 📄 `verify_proactive_gate.ts`
+    - 📄 `verify_remediation.ts`
+    - 📄 `wipe_all.ts`
+    - 📄 `wipe_orphans.ts`
+  - 📁 **src/**
+    - 📁 **__tests__/**
+      - 📄 `BurstMessageComprehension.test.ts`
+      - 📄 `BurstMessageReliability.test.ts`
+      - 📄 `ChatIngressAndFormatting.test.ts`
+      - 📄 `LifestyleSituationalAwareness.test.ts`
+      - 📄 `MemoryIntegration.test.ts`
+      - 📄 `MemoryPersistenceIntegration.test.ts`
+      - 📄 `MemorySemanticIntegrity.test.ts`
+      - 📄 `setup.ts`
+    - 📁 **agents/**
+      - 📁 **__tests__/**
+        - 📄 `LifeThreadAgent.test.ts`
+        - 📄 `LifeThreadAgentGoalCorrectedPhase10.test.ts`
+        - 📄 `memoryRoutingPhase2eb.test.ts`
+        - 📄 `runTests.ts`
+        - 📄 `semanticCorrection.test.ts`
+      - 📄 `BaseAgent.ts`
+      - 📄 `ConsolidatedMemoryAgent.ts`
+      - 📄 `DeterministicFactAgent.ts`
+      - 📄 `EmotionalAgent.ts`
+      - 📄 `EpisodicAgent.ts`
+      - 📄 `KgAgent.ts`
+      - 📄 `LifeThreadAgent.ts`
+      - 📄 `MilestoneAgent.ts`
+      - 📄 `ReflectionAgent.ts`
+      - 📄 `SemanticAgent.ts`
+      - 📄 `SemanticTurnAgent.ts`
+      - 📄 `ShortTermMemoryAgent.ts`
+      - 📄 `SubconsciousAgent.ts`
+      - 📄 `WorkingMemoryAgent.ts`
+    - 📁 **config/**
+      - 📄 `index.ts` — *Central configuration (Gemini, NVIDIA, Supabase, timeouts, routing flags)*
+    - 📁 **consumers/**
+      - 📁 **__tests__/**
+        - 📄 `Phase11Consumers.test.ts`
+      - 📄 `FactAssertionConsumer.ts`
+      - 📄 `GoalAssertedConsumer.ts`
+      - 📄 `ScheduleEventConsumer.ts`
+    - 📁 **lib/**
+      - 📁 **__tests__/**
+        - 📄 `cognitiveRouter.test.ts`
+        - 📄 `correctionSemantics.test.ts`
+        - 📄 `geminiFailover.test.ts`
+        - 📄 `memoryFilters.test.ts`
+        - 📄 `nvidiaRouting.test.ts`
+        - 📄 `SemanticValidator.test.ts`
+      - 📄 `cache.ts`
+      - 📄 `cognitiveEventBus.ts`
+      - 📄 `cognitiveRouter.ts` — *Unified Cognitive Model Router (Gemini primary -> NVIDIA failover)*
+      - 📄 `correctionSemantics.ts`
+      - 📄 `doubtFingerprint.ts`
+      - 📄 `encryption.ts`
+      - 📄 `gemini.ts` — *20-slot Gemini pool, model cascades, rate-limit classification, timeout budgeting*
+      - 📄 `geminiPool.ts`
+      - 📄 `guardianFingerprint.ts`
+      - 📄 `lifeThreadKeySchema.ts`
+      - 📄 `logger.ts`
+      - 📄 `memoryDomains.ts`
+      - 📄 `memoryFilters.ts`
+      - 📄 `memoryKeySchema.ts`
+      - 📄 `MemorySemanticResolver.ts`
+      - 📄 `nvidia.ts` — *NVIDIA NIM provider, 49B/11B/8B model clients, BrainKeyRouter*
+      - 📄 `pushNotifications.ts`
+      - 📄 `queryTracker.ts`
+      - 📄 `repairFingerprint.ts`
+      - 📄 `SemanticInterpreter.ts`
+      - 📄 `SemanticValidator.ts`
+      - 📄 `supabase.ts` — *Supabase client and admin client initialized with service role key*
+    - 📁 **middleware/**
+      - 📄 `auth.ts`
+      - 📄 `errorHandler.ts`
+      - 📄 `requestLogger.ts`
+    - 📁 **routes/**
+      - 📁 **__tests__/**
+        - 📄 `health.test.ts`
+        - 📄 `memoryManagement.test.ts`
+        - 📄 `memoryPrivacy.test.ts`
+        - 📄 `shoot_dead.test.ts`
+      - 📄 `admin.ts`
+      - 📄 `analytics.ts` — *User analytics, cognitive telemetry, and emotion telemetry*
+      - 📄 `auth.ts`
+      - 📄 `betaAnalytics.ts`
+      - 📄 `chat.ts` — *Core chat router: turns, bursts, intent handling, fallbacks, reflection*
+      - 📄 `diagnostics.ts`
+      - 📄 `export.ts`
+      - 📄 `feedback.ts`
+      - 📄 `founder.ts`
+      - 📄 `health.ts` — *Health endpoints: DB, Redis, NVIDIA NIM, and Gemini cognitive pool status*
+      - 📄 `memoryDebug.ts`
+      - 📄 `memoryManagement.ts`
+      - 📄 `moments.ts`
+      - 📄 `onboarding.ts`
+      - 📄 `presence.ts`
+      - 📄 `reminders.ts`
+      - 📄 `telemetry.ts`
+      - 📄 `vision.ts`
+    - 📁 **scripts/**
+      - 📄 `broadcast_update_push.ts`
+      - 📄 `fetch_100_chats.ts`
+      - 📄 `fetch_recent_chats.ts`
+      - 📄 `run-e2e.ts`
+      - 📄 `test_prompt.ts`
+    - 📁 **services/**
+      - 📁 **__tests__/**
+        - 📄 `AccountLifecyclePhase2fe.test.ts`
+        - 📄 `analytics.brainLayers.test.ts`
+        - 📄 `AntiNaggingSilenceRespect.test.ts`
+        - 📄 `AutonomousMemoryGraphCuratorService.test.ts`
+        - 📄 `BackendChatCompanionHardening.test.ts`
+        - 📄 `BackendChatHardeningNewBugs.test.ts`
+        - 📄 `BackendLifestyleCompanionImpactFixes.test.ts`
+        - 📄 `BackendLifestyleCompanionImpactFixesPart2.test.ts`
+        - 📄 `CandidateSynthesisConcurrency.test.ts`
+        - 📄 `CandidateSynthesisService.test.ts`
+        - 📄 `CanonicalStateReconciler.test.ts`
+        - 📄 `CognitiveContextService.test.ts`
+        - 📄 `CognitiveDoubtPhase2fc.test.ts`
+        - 📄 `CognitiveDoubtService.test.ts`
+        - 📄 `cognitiveRetention.test.ts`
+        - 📄 `ComprehensiveNova360RegressionCorpus.test.ts`
+        - 📄 `ContextualTimingEnginePhase3cb.test.ts`
+        - 📄 `CorrectionEngineHardening.test.ts`
+        - 📄 `DayOfWeekHallucinationRepair.test.ts`
+        - 📄 `DeterministicGuardianService.test.ts`
+        - 📄 `DynamicCupboardMemory.test.ts`
+        - 📄 `DynamicTemporalAging.test.ts`
+        - 📄 `EngineSchedulerLiveness.test.ts`
+        - 📄 `EntityRelationshipCorrection.test.ts`
+        - 📄 `EntityResolutionService.test.ts`
+        - 📄 `FamilyNameSemanticsBugFix.test.ts`
+        - 📄 `FullMemoryLifecyclePhase2ef.test.ts`
+        - 📄 `GoalsAndRemindersHardening.test.ts`
+        - 📄 `LifeBlueprintCuriosityEngine.test.ts`
+        - 📄 `LifeThreadConversationWeavingPhase3dd.test.ts`
+        - 📄 `LifeThreadCultivationPhase3da.test.ts`
+        - 📄 `LifeThreadCultivationPhase3db.test.ts`
+        - 📄 `LifeThreadCultivationPhase3de.test.ts`
+        - 📄 `LifeThreadNextStepSynthesisPhase3dc.test.ts`
+        - 📄 `MemoryAndGraphCuratorHardening.test.ts`
+        - 📄 `memoryDomains.test.ts`
+        - 📄 `MemoryEnrichmentAndAntiHallucination.test.ts`
+        - 📄 `memoryRepository.test.ts`
+        - 📄 `MemoryRetentionEngine.test.ts`
+        - 📄 `MemorySupersessionPhase2fa.test.ts`
+        - 📄 `MultiLlmCascadeAndRecovery.test.ts`
+        - 📄 `NovaBrainService.test.ts`
+        - 📄 `NovaConsciousnessEngine.test.ts`
+        - 📄 `NovaConsciousnessEngineCuriosity.test.ts`
+        - 📄 `NovaFollowupService.test.ts`
+        - 📄 `NovaTriggerEngine.test.ts`
+        - 📄 `OutboundDispatcherCrashRecovery.test.ts`
+        - 📄 `OutboundDispatcherPhase8.test.ts`
+        - 📄 `p0_cognitive_reliability.test.ts`
+        - 📄 `P0ProactiveCognitiveSafety.test.ts`
+        - 📄 `P0ProactiveHallucinationFix.test.ts`
+        - 📄 `p1_lifethread_consistency.test.ts`
+        - 📄 `ReminderEngine.test.ts`
+        - 📄 `ReminderEngineBug03Followup.test.ts`
+        - 📄 `ReminderIntentDetector.test.ts`
+        - 📄 `ResponseIntelligence.test.ts`
+        - 📄 `SemanticAuthorityPhase10.test.ts`
+        - 📄 `SemanticCompressionService.test.ts`
+        - 📄 `SemanticGuardianService.test.ts`
+        - 📄 `semanticIntegration.test.ts`
+        - 📄 `SemanticVerificationService.test.ts`
+        - 📄 `shoot_dead_concurrency.test.ts`
+        - 📄 `SituationalAwareness.test.ts`
+        - 📄 `SmartProactiveReminderEngine.test.ts`
+        - 📄 `SonNicknameAndDobAlignment.test.ts`
+        - 📄 `SourceDependencyPhase2fb.test.ts`
+        - 📄 `SubconsciousQueueContract.test.ts`
+        - 📄 `TemporalLifecyclePhase2fd.test.ts`
+        - 📄 `TurnAnalyzer.test.ts`
+        - 📄 `UniversalBurdenEnginePhase3cc.test.ts`
+        - 📄 `UserLifeStageEngine.test.ts`
+        - 📄 `wardrobeClustering.test.ts`
+        - 📄 `WatchtowerActedSemantics.test.ts`
+        - 📄 `WatchtowerAttentionPhase3b.test.ts`
+        - 📄 `WatchtowerHeartbeatPhase3a.test.ts`
+        - 📄 `WatchtowerInspector.test.ts`
+        - 📄 `WatchtowerMemoryAuditor.test.ts`
+        - 📄 `WatchtowerProactiveCognitionPhase3ce.test.ts`
+        - 📄 `WatchtowerProactiveHardeningPhase3c.test.ts`
+        - 📄 `WatchtowerProactiveIntegrationPhase3cd.test.ts`
+        - 📄 `watchtowerReflection.test.ts`
+        - 📄 `WorkingMemoryInvalidationHardening.test.ts`
+      - 📄 `AccountLifecycleService.ts`
+      - 📄 `ActionIntelligenceService.ts`
+      - 📄 `AdaptiveConsciousnessScheduler.ts`
+      - 📄 `AdaptiveRiskScorer.ts`
+      - 📄 `AutonomousMemoryGraphCuratorService.ts` — *Knowledge Graph continuous curation and entity linking*
+      - 📄 `BackgroundActionService.ts`
+      - 📄 `CandidateSynthesisService.ts`
+      - 📄 `CanonicalStateReconciler.ts`
+      - 📄 `ChatHistoryHelpers.ts`
+      - 📄 `ChatHistoryPruningService.ts`
+      - 📄 `CognitiveContextService.ts`
+      - 📄 `CognitiveDoubtService.ts`
+      - 📄 `CognitiveHealthService.ts`
+      - 📄 `ContextualTimingEngine.ts`
+      - 📄 `CorrectionPropagator.ts`
+      - 📄 `DatabaseHealthService.ts`
+      - 📄 `DegradedModeService.ts`
+      - 📄 `DeterministicGuardianService.ts`
+      - 📄 `DoubtEligibilityEngine.ts`
+      - 📄 `EntityRelationshipCorrectionService.ts`
+      - 📄 `EntityResolutionService.ts`
+      - 📄 `FreeTierGuardService.ts`
+      - 📄 `InstantFallbackRecoveryService.ts` — *Self-healing background recovery when fallback messages occur*
+      - 📄 `LifeBlueprintCuriosityEngine.ts`
+      - 📄 `LifeThreadConversationWeaver.ts`
+      - 📄 `LifeThreadCultivationEngine.ts`
+      - 📄 `lifeThreadRepository.ts`
+      - 📄 `LifeThreadSynthesisEngine.ts`
+      - 📄 `MemoryDecayService.ts`
+      - 📄 `MemoryEnrichmentEngine.ts`
+      - 📄 `MemoryPolicyService.ts`
+      - 📄 `memoryRepository.ts`
+      - 📄 `MemoryRetentionEngine.ts`
+      - 📄 `MessageFormatter.ts` — *Conversation markdown formatting, clean spacing, context-aware emoji decoration*
+      - 📄 `ModelRouterService.ts`
+      - 📄 `MomentEngineService.ts`
+      - 📄 `NovaBrainService.ts` — *Turn processing pipeline, prompt assembly, subconscious action extraction*
+      - 📄 `NovaConsciousnessEngine.ts`
+      - 📄 `NovaFollowupService.ts`
+      - 📄 `NovaRealtimeLearningService.ts`
+      - 📄 `NovaSelfImprovementService.ts`
+      - 📄 `NovaTriggerEngine.ts`
+      - 📄 `onboardingService.ts`
+      - 📄 `OutboundDispatcherService.ts`
+      - 📄 `PresencePatternService.ts`
+      - 📄 `ProactiveFactGroundingGate.ts`
+      - 📄 `ProactiveGate.ts`
+      - 📄 `promptBuilder.ts` — *Prompt engineering, persona voice rules, grammatical agreements, memory grounding*
+      - 📄 `QueueService.ts`
+      - 📄 `ReflectionSchedulerService.ts`
+      - 📄 `ReminderEngine.ts`
+      - 📄 `ReminderIntentDetector.ts`
+      - 📄 `ReminderSchedulerService.ts`
+      - 📄 `reminderService.ts`
+      - 📄 `ResponseIntelligence.ts`
+      - 📄 `SemanticCompressionService.ts`
+      - 📄 `SemanticGuardianService.ts`
+      - 📄 `SemanticVerificationService.ts`
+      - 📄 `SettingsService.ts`
+      - 📄 `ShortTermMemoryCleanupService.ts`
+      - 📄 `SituationalAwareness.ts` — *Temporal, presence, and behavioral context synthesis*
+      - 📄 `SourceDependencyService.ts`
+      - 📄 `TemporalAwarenessService.ts`
+      - 📄 `ThoughtPruningService.ts`
+      - 📄 `TurnAnalyzer.ts`
+      - 📄 `UniversalBurdenEngine.ts`
+      - 📄 `UserLifeStageEngine.ts`
+      - 📄 `VisionService.ts`
+      - 📄 `WatchtowerAttentionEngine.ts`
+      - 📄 `WatchtowerHeartbeatService.ts`
+      - 📄 `WatchtowerInspector.ts` — *Automated response filter: strips parental words ("Beta"), repairs verbs, fixes leaks*
+      - 📄 `WatchtowerMemoryAuditor.ts`
+      - 📄 `WatchtowerProactiveIntegrationService.ts`
+      - 📄 `WatchtowerReflectionService.ts`
+      - 📄 `WeatherWatcherService.ts`
+      - 📄 `WebSearchService.ts`
+    - 📁 **types/**
+      - 📁 **__tests__/**
+        - 📄 `memoryLifecycle.test.ts`
+        - 📄 `watchtowerTimingPhase3ca.test.ts`
+      - 📄 `canonicalRepair.ts`
+      - 📄 `cognitiveDoubt.ts`
+      - 📄 `engineExecution.ts`
+      - 📄 `errors.ts`
+      - 📄 `express.d.ts`
+      - 📄 `guardian.ts`
+      - 📄 `lifeThreadCultivation.ts`
+      - 📄 `memory.ts`
+      - 📄 `outbound.ts`
+      - 📄 `semanticEvent.ts`
+      - 📄 `semanticGuardian.ts`
+      - 📄 `universalBurden.ts`
+      - 📄 `watchtowerAttention.ts`
+      - 📄 `watchtowerHeartbeat.ts`
+      - 📄 `watchtowerTiming.ts`
+    - 📁 **utils/**
+      - 📄 `nlp.ts`
+      - 📄 `temporalParser.ts`
+    - 📁 **workers/**
+      - 📄 `queueWorker.ts`
+      - 📄 `semanticTurnWorker.ts`
+    - 📄 `app.ts`
+    - 📄 `index.ts` — *Express server bootstrap, middleware, and route mounting*
+    - 📄 `test.ts`
+  - 📁 **supabase/**
+    - 📁 **migrations/**
+      - 📄 `000_setup_base_tables.sql`
+      - 📄 `001_create_memories.sql`
+      - 📄 `002_v3_schema.sql`
+      - 📄 `003_v3_additions.sql`
+      - 📄 `004_indexes.sql`
+      - 📄 `005_rpc_search_memories.sql`
+      - 📄 `006_grant_permissions_and_reload.sql`
+      - 📄 `007_admin_settings.sql`
+      - 📄 `008_moment_preferences.sql`
+      - 📄 `009_multi_brain_foundation.sql`
+      - 📄 `010_beta_polish.sql`
+      - 📄 `011_milestone_memories.sql`
+      - 📄 `012_reminders.sql`
+      - 📄 `013_fix_reminders_nova_followups.sql`
+      - 📄 `013_short_term_memories.sql`
+      - 📄 `014_nova_consciousness.sql`
+      - 📄 `015_advanced_reminders.sql`
+      - 📄 `015_read_receipts_presence.sql`
+      - 📄 `016_chat_history_meta.sql`
+      - 📄 `016_fix_reminders_status.sql`
+      - 📄 `017_reply_to_feature.sql`
+      - 📄 `018_readd_reminders_trigger_at.sql`
+      - 📄 `019_expand_nova_agenda.sql`
+      - 📄 `020_sync_reminders_schema.sql`
+      - 📄 `021_nova_corrections_log.sql`
+      - 📄 `022_user_presence_table.sql`
+      - 📄 `023_add_source_log_to_patches.sql`
+      - 📄 `024_upgrade_reminders.sql`
+      - 📄 `025_working_memory_unique.sql`
+      - 📄 `026_outreach_log_types.sql`
+      - 📄 `027_action_idempotency.sql`
+      - 📄 `028_fix_claim_next_background_job.sql`
+      - 📄 `029_cognitive_retention.sql`
+      - 📄 `029_strict_user_job_ordering.sql`
+      - 📄 `030_retention_remediation.sql`
+      - 📄 `031_retention_fixes.sql`
+      - 📄 `032_transactional_retention.sql`
+      - 📄 `033_retention_idempotency_fix.sql`
+      - 📄 `034_retention_logical_key.sql`
+      - 📄 `035_life_threads.sql`
+      - 📄 `036_nova_actions.sql`
+      - 📄 `037_reliability_pass.sql`
+      - 📄 `038_proactive_gate.sql`
+      - 📄 `039_source_authority.sql`
+      - 📄 `040_p0_chat_history_attribution.sql`
+      - 📄 `041_p1_lifethread_schema.sql`
+      - 📄 `042_p1_lifethread_unique_index.sql`
+      - 📄 `043_p2a_guardian_schema.sql`
+      - 📄 `044_p2b_cognitive_doubts.sql`
+      - 📄 `045_p2c_canonical_repairs.sql`
+      - 📄 `046_p2e_memory_lifecycle.sql`
+      - 📄 `047_p2ec_candidate_synthesis_leases.sql`
+      - 📄 `048_p2fa_memory_supersession.sql`
+      - 📄 `049_p2fd_temporal_memory.sql`
+      - 📄 `050_p2fe_account_lifecycle_fks.sql`
+      - 📄 `051_p3a_watchtower_heartbeat.sql`
+      - 📄 `052_p3b_watchtower_attention.sql`
+      - 📄 `053_p3c_watchtower_timing.sql`
+      - 📄 `054_p3d_lifethread_cultivation.sql`
+      - 📄 `055_p2fa_rpc_supersede_memory.sql`
+      - 📄 `056_add_source_message_id.sql`
+      - 📄 `056_p2fa_canonicalize_concurrency.sql`
+      - 📄 `057_p2fa_deterministic_canonicalization.sql`
+      - 📄 `058_p2fa_canonical_boundary.sql`
+      - 📄 `059_p2fa_canonical_membership.sql`
+      - 📄 `060_add_memory_enabled.sql`
+      - 📄 `061_add_current_memory_unique_constraint.sql`
+      - 📄 `061_canonical_outbound_dispatcher.sql`
+      - 📄 `062_account_tombstones_and_triggers.sql`
+      - 📄 `062_strict_job_ordering_v2.sql`
+      - 📄 `063_semantic_worker_lease.sql`
+      - 📄 `064_add_profile_columns_and_presence_history.sql`
+      - 📄 `065_create_nova_thoughts.sql`
+      - 📄 `066_expand_canonical_keys.sql`
+      - 📄 `067_entity_scoped_memories_and_correction_ledger.sql`
+      - 📄 `068_reminders_accountability_and_recurrence.sql`
+      - 📄 `20260720000000_add_reminders_status.sql`
+      - 📄 `20260720000001_add_behavioral_patches.sql`
+      - 📄 `20260720021600_add_reactions.sql`
+    - 📄 `create_all_tables.sql`
+    - 📄 `drop_all_tables.sql`
+    - 📄 `missing_base_tables.sql`
+    - 📄 `reset_and_migrate.sql`
+  - 📁 **tests/**
+    - 📄 `critical_actions.test.ts`
+    - 📄 `milestoneMemory.test.ts`
+  - 📄 `_ph8.cjs`
+  - 📄 `_ph8gen.cjs`
+  - 📄 `.env.example`
+  - 📄 `analysis.txt`
+  - 📄 `analysis2.txt`
+  - 📄 `analyze_dump.ts`
+  - 📄 `analyze2.ts`
+  - 📄 `audit_dump.txt`
+  - 📄 `audit.ts`
+  - 📄 `chat_dump.txt`
+  - 📄 `check_auth.js`
+  - 📄 `check_db.js`
+  - 📄 `check_memories.ts`
+  - 📄 `check_orphans.ts`
+  - 📄 `check.ts`
+  - 📄 `check2.ts`
+  - 📄 `check3.ts`
+  - 📄 `check4.ts`
+  - 📄 `drop.ts`
+  - 📄 `dry_run.ts`
+  - 📄 `fetch_chat.ts`
+  - 📄 `forensic_data.json`
+  - 📄 `forensic_dump_admin.json`
+  - 📄 `forensic_dump.json`
+  - 📄 `forensics_chat.json`
+  - 📄 `forensics_proactive.json`
+  - 📄 `forensics_report_2.json`
+  - 📄 `forensics_report.json`
+  - 📄 `generate_report.ts`
+  - 📄 `get_schema.js`
+  - 📄 `jest.config.js`
+  - 📄 `live_chat_forensic_audit_report.md`
+  - 📄 `modify_novabrain.js`
+  - 📄 `package-lock.json`
+  - 📄 `package.json`
+  - 📄 `part_a.md`
+  - 📄 `part_a.ts`
+  - 📄 `pnpm-lock.yaml`
+  - 📄 `pnpm-workspace.yaml`
+  - 📄 `render.yaml`
+  - 📄 `schema_profiles.sql`
+  - 📄 `scratch-test.js`
+  - 📄 `stress-test.ps1`
+  - 📄 `test_action_intelligence.ts`
+  - 📄 `test_insert.ts`
+  - 📄 `test_ipv6_literal.js`
+  - 📄 `test_ipv6.js`
+  - 📄 `test_pooler_ap.js`
+  - 📄 `test_pooler.js`
+  - 📄 `test_reminders.js`
+  - 📄 `test_search.ts`
+  - 📄 `test-auth.ps1`
+  - 📄 `test-chat.ps1`
+  - 📄 `test-diagnostics.ps1`
+  - 📄 `test-memory-part2.ps1`
+  - 📄 `test-memory.ps1`
+  - 📄 `test-nvidia-keys.ts`
+  - 📄 `test-onboarding.ps1`
+  - 📄 `test-results.txt`
+  - 📄 `tsconfig.json`
+- 📁 **brain/**
+  - 📄 `01_VISION.md`
+  - 📄 `02_PRINCIPLES.md`
+  - 📄 `03_CONSCIOUSNESS.md`
+  - 📄 `04_HUMAN_BRAIN_DESIGN.md`
+  - 📄 `05_WORLD_RULES.md`
+  - 📄 `06_MEMORY.md`
+  - 📄 `07_MODEL_ROUTER.md`
+  - 📄 `08_SESSION_BOOT.md`
+  - 📄 `09_ROADMAP.md`
+  - 📄 `10_DREAMS.md`
+  - 📄 `11_PERSONALITY_DNA.md`
+  - 📄 `12_RELATIONSHIP_MODEL.md`
+  - 📄 `13_LIFE_JOURNAL_SYSTEM.md`
+  - 📄 `BOOK_INDEX.md`
+- 📁 **docs/**
+  - 📁 **postmortems/**
+    - 📄 `TEMPLATE.md`
+  - 📄 `ACCOUNT_DELETION_POLICY.md`
+  - 📄 `AI_GUARDRAILS.md`
+  - 📄 `AI_HANDOFF.md`
+  - 📄 `AI_MASTER_PROMPT.md`
+  - 📄 `ARCHITECTURE.md`
+  - 📄 `BETA_RELEASE_PLAN.md`
+  - 📄 `BUGS.md`
+  - 📄 `CHANGE_REQUEST_TEMPLATE.md`
+  - 📄 `COMMAND_CENTER.md`
+  - 📄 `CRASH_MONITORING.md`
+  - 📄 `CURRENT_BASELINE.md`
+  - 📄 `DECISIONS.md`
+  - 📄 `EMERGENCY_RECOVERY.md`
+  - 📄 `ENVIRONMENT.md`
+  - 📄 `FEATURE_FLAGS.md`
+  - 📄 `HINDI_PREFERENCE_IMPLEMENTATION.md`
+  - 📄 `HINDI_PREFERENCE_PLAN.md`
+  - 📄 `HINDI_PREFERENCE_RESULTS.md`
+  - 📄 `INCIDENTS.md`
+  - 📄 `KNOWN_PATTERNS.md`
+  - 📄 `LAUNCH_CHECKLIST.md`
+  - 📄 `METRICS.md`
+  - 📄 `NEXT_SPRINT.md`
+  - 📄 `OTA_HISTORY.md`
+  - 📄 `PERFORMANCE_BASELINE.md`
+  - 📄 `PERFORMANCE_PHASE1.md`
+  - 📄 `PERFORMANCE_RESULTS.md`
+  - 📄 `PERFORMANCE.md`
+  - 📄 `PLAYSTORE_DATA_SAFETY.md`
+  - 📄 `PLAYSTORE_GAP_ANALYSIS.md`
+  - 📄 `PLAYSTORE_LAUNCH_PLAN.md`
+  - 📄 `PLAYSTORE_RELEASE.md`
+  - 📄 `PLAYSTORE_SUBMISSION_CHECKLIST.md`
+  - 📄 `PRIVACY_POLICY.md`
+  - 📄 `PROJECT_STATE.md`
+  - 📄 `RD_TEMPLATE.md`
+  - 📄 `RELEASE.md`
+  - 📄 `ROADMAP.md`
+  - 📄 `SENTRY_PRODUCTION_SETUP.md`
+  - 📄 `SENTRY_SETUP.md`
+  - 📄 `SESSION_LOG.md`
+  - 📄 `STABLE_TAGS.md`
+  - 📄 `STARTUP_FLOW.md`
+  - 📄 `TECH_DEBT.md`
+  - 📄 `TEMPORARY_MEMORY_PLAN.md`
+  - 📄 `TERMS_OF_SERVICE.md`
+  - 📄 `TESTING_PLAN.md`
+  - 📄 `TODO.md`
+- 📁 **mobile/**
+  - 📁 **assets/**
+    - 📄 `android-icon-background.png`
+    - 📄 `android-icon-foreground.png`
+    - 📄 `android-icon-monochrome.png`
+    - 📄 `favicon.png`
+    - 📄 `icon.png`
+    - 📄 `notification-icon.png`
+    - 📄 `splash-icon.png`
+  - 📁 **plugins/**
+    - 📄 `withDisableLint.js`
+  - 📁 **src/**
+    - 📁 **components/**
+      - 📄 `AutonomousEyes.tsx`
+      - 📄 `BrainHeader.tsx`
+      - 📄 `EmptyState.tsx`
+      - 📄 `ErrorBoundary.tsx`
+      - 📄 `LiveThinkingIndicator.tsx`
+      - 📄 `Skeleton.tsx`
+      - 📄 `ThoughtBubble.tsx`
+    - 📁 **config/**
+      - 📄 `changelog.json`
+      - 📄 `updateHistory.json` — *Changelog records and automated in-app update announcement modals*
+    - 📁 **navigation/**
+      - 📄 `AppNavigator.tsx`
+      - 📄 `BrainNavigator.tsx`
+    - 📁 **screens/**
+      - 📁 **analytics/**
+        - 📄 `BetaAdminScreen.tsx`
+        - 📄 `EmotionalBrainScreen.tsx`
+        - 📄 `FounderDashboardScreen.tsx`
+        - 📄 `GoalBrainScreen.tsx`
+        - 📄 `KgExplorerScreen.tsx` — *Neural Galaxy 2D tactical and 3D graph explorer with live synaptic pulses*
+        - 📄 `LifeTimelineScreen.tsx`
+        - 📄 `MemoryBrainScreen.tsx`
+        - 📄 `MemoryBrowserScreen.tsx`
+        - 📄 `MemoryManagementScreen.tsx`
+        - 📄 `ReminderBrainScreen.tsx`
+      - 📄 `ChatScreen.tsx` — *Main WhatsApp-style conversational chat UI with voice, photo, and thinking bubbles*
+      - 📄 `ChatScreen.tsx.stable.backup`
+      - 📄 `DiagnosticsScreen.tsx`
+      - 📄 `FeedbackScreen.tsx`
+      - 📄 `LoginScreen.tsx`
+      - 📄 `OnboardingScreen.tsx`
+      - 📄 `PreferencesScreen.tsx`
+      - 📄 `SettingsScreen.tsx`
+      - 📄 `SignupScreen.tsx`
+      - 📄 `SplashScreen.tsx`
+      - 📄 `UpdateHistoryScreen.tsx`
+    - 📁 **services/**
+      - 📄 `api.ts`
+      - 📄 `authService.ts`
+      - 📄 `backgroundTaskService.ts`
+      - 📄 `chatService.ts`
+      - 📄 `chatService.ts.new`
+      - 📄 `logger.ts`
+      - 📄 `notificationService.ts`
+      - 📄 `onboardingService.ts`
+      - 📄 `presenceService.ts`
+      - 📄 `proactiveReplyService.ts`
+    - 📁 **store/**
+      - 📄 `useAuthStore.ts` — *Authentication state and Supabase session management*
+      - 📄 `useChatStore.ts` — *Zustand chat state: messages, turn coalescing, human-paced 5-10s text intervals*
+      - 📄 `useOnboardingStore.ts`
+      - 📄 `useSettingsStore.ts`
+    - 📁 **theme/**
+      - 📄 `ThemeContext.tsx`
+    - 📁 **types/**
+      - 📄 `react-native-sse.d.ts`
+  - 📄 `AGENTS.md`
+  - 📄 `app.json`
+  - 📄 `App.tsx` — *React Native application root, providers, push notifications, and navigation tree*
+  - 📄 `App.tsx.stable.backup`
+  - 📄 `babel.config.js`
+  - 📄 `CLAUDE.md`
+  - 📄 `eas.json`
+  - 📄 `google-services.json`
+  - 📄 `index.ts`
+  - 📄 `LICENSE`
+  - 📄 `metro.config.js`
+  - 📄 `package-lock.json`
+  - 📄 `package.json`
+  - 📄 `run_eas.bat`
+  - 📄 `tsconfig.json`
+  - 📄 `yarn.lock`
+- 📁 **scratch/**
+  - 📄 `test_md.js`
+  - 📄 `test_table.js`
+- 📁 **scripts/**
+  - 📄 `generate_technical_blueprint_pdf.js`
+  - 📄 `secret-check.js`
+- 📁 **skill-observations/**
+  - 📄 `last-review-date.txt`
+  - 📄 `log.md`
+- 📁 **tools/**
+  - 📁 **forensics/**
+    - 📄 `README.md`
+    - 📄 `safe_account_repair.ts`
+- 📄 `ADMIN_CONTROL_PANEL.md`
+- 📄 `ALPHA_RELEASE_CHECKLIST.md`
+- 📄 `ALPHA_STATUS.md`
+- 📄 `APK_VERIFICATION_REPORT.md`
+- 📄 `BRAIN_VISUALIZATION_SYSTEM.md`
+- 📄 `BUILD_REPORT.md`
+- 📄 `CHANGE_REPORT.md`
+- 📄 `CHAT_HISTORY_IMPLEMENTATION_PLAN.md`
+- 📄 `COGNITIVE_HEALTH_AND_RETENTION.md`
+- 📄 `COMPANION_VISION.md`
+- 📄 `CRASH_LOGS.md`
+- 📄 `DAILY_DOGFOOD_LOG.md`
+- 📄 `DATA_BOUNDARIES.md`
+- 📄 `DATABASE_SETUP.md`
+- 📄 `DEPENDENCY_RULES.md`
+- 📄 `DEPLOYMENT.md`
+- 📄 `DEV_MACHINE.md`
+- 📄 `DOGFOOD_MOMENT_TEST.md`
+- 📄 `DOGFOODING_PLAN.md`
+- 📄 `FILE_TREE.md`
+- 📄 `FOUNDER_DASHBOARD.md`
+- 📄 `HI_AGENT_RAM.md`
+- 📄 `HumanOS_Architecture.md`
+- 📄 `HumanOS_MVP_Scope.md`
+- 📄 `HumanOS_PRD_V1.md`
+- 📄 `implementation_plan.md`
+- 📄 `IMPLEMENTATION_QUEUE.md`
+- 📄 `INSIGHTS_DASHBOARD_IMPLEMENTATION.md`
+- 📄 `KIMI_MEDIATOR.md`
+- 📄 `KNOWN_ISSUES.md`
+- 📄 `LEARNING_LOOP.md`
+- 📄 `MAGICAL_MOMENTS.md`
+- 📄 `memory_e2e_report.md`
+- 📄 `memory_test_report.md`
+- 📄 `MEMORY.md`
+- 📄 `migration_script.ps1`
+- 📄 `MODEL_ROUTER.md`
+- 📄 `MOMENT_ENGINE.md`
+- 📄 `NOTES.md`
+- 📄 `NOVA_15KEY_STRATEGY.md`
+- 📄 `NOVA_ARCHITECTURE.md`
+- 📄 `NOVA_PRINCIPLE.md`
+- 📄 `old_promptBuilder.ts`
+- 📄 `PHASE_SHIFT.md`
+- 📄 `POST_ALPHA_PLAN.md`
+- 📄 `POST_INSTALL_VERIFICATION.md`
+- 📄 `PRODUCT_INSIGHTS.md`
+- 📄 `RECOVERY.md`
+- 📄 `RELEASE_NOTES_BETA_FOUNDATION.md`
+- 📄 `RELEASE_NOTES_BETA_POLISH.md`
+- 📄 `RELEASE_NOTES_v0.1.0-alpha.md`
+- 📄 `SESSION_BOOT.md`
+- 📄 `SESSION_STATUS.md`
+- 📄 `SESSION_UPDATES.md`
+- 📄 `settings.json`
+- 📄 `STORAGE_ARCHITECTURE.md`
+- 📄 `SYSTEM_LAYERS.md`
+- 📄 `TASK_EXECUTION_GUIDE.md`
+- 📄 `TASKS.md`
+- 📄 `TELEMETRY_PLAN.md`
+- 📄 `temp_diary.md`
+- 📄 `transfer_script.ps1`
+- 📄 `UPDATE_DIARY.md`
+- 📄 `USER_FEEDBACK.md`
+- 📄 `V0.2_BETA_ROADMAP.md`
+- 📄 `WEEKLY_BETA_REPORT.md`
+
+
+---
+*Generated automatically by `.agents/skills/codebase-architect/scripts/generate_architecture_map.js`*
