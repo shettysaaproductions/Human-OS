@@ -297,17 +297,17 @@ export class WatchtowerReflectionService {
         }
       }
 
-      // Deterministic Future Plan / Proactive Reminder Safety Net
+      // Deterministic Future Plan / Proactive Reminder Safety Net:
+      // Only intervene if Nova gave a passive 1-word reply ("Sahi", "Ok", etc.)
       const hasFuturePlanSignal = reminderIntentDetector.hasFuturePlanIntent(userMessage);
       const isPassiveOrOneWordReply = candidate.trim().split(/\s+/).length <= 3 && /\b(sahi|ok|theek|mast|haan|achha|acha)\b/i.test(lowerCandidate);
-      const lacksReminderOffer = !/\b(remind|yaad|alarm|baje|time|bataun|laga\s*doon|set\s*kar)\b/i.test(lowerCandidate);
-      if (hasFuturePlanSignal && (isPassiveOrOneWordReply || lacksReminderOffer)) {
+      if (hasFuturePlanSignal && isPassiveOrOneWordReply) {
         const planDetails = reminderIntentDetector.extractFuturePlanDetails(userMessage, tzOffsetHours);
         if (!planDetails.isAmbiguous && planDetails.formattedTime) {
-          const taskName = planDetails.title && planDetails.title.toLowerCase() !== 'reminder' ? planDetails.title : 'workout';
-          candidate = `Mast plan hai yaar! 💪 Kya main ${planDetails.formattedTime} ka ${taskName} reminder set kar doon tere liye, taaki miss na ho?`;
+          const taskName = planDetails.title && planDetails.title.toLowerCase() !== 'reminder' ? planDetails.title : 'routine';
+          candidate = `Mast plan hai yaar! 💪 Chahiye toh ${planDetails.formattedTime} ka ${taskName} reminder set kar doon?`;
         } else {
-          candidate = `Arey badhiya decision hai! Kaunse time pe remind karun tujhe — subah ya shaam ko, aur roz ya specific days pe?`;
+          candidate = `Arey badhiya plan hai! Jab bhi lage ki reminder chahiye ho, bata dena main laga dungi 😊`;
         }
       }
 

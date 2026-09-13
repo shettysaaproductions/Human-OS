@@ -1435,17 +1435,26 @@ chatRouter.post(
       // Smart Reminder Engine: Check if user discussed any future-dated plan, habit, or activity
       const isFuturePlanIntent = !is_proactive && reminderIntentDetector.hasFuturePlanIntent(effectiveMessage);
       if (isFuturePlanIntent) {
-        const planDetails = reminderIntentDetector.extractFuturePlanDetails(effectiveMessage, tzOffset);
-        if (!planDetails.isAmbiguous && planDetails.formattedTime) {
-          const futurePlanDirective = isEnglishUser
-            ? `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Cool" or "Ok"!\nYou MUST warmly encourage this plan and proactively offer to set a reminder or alarm for it (e.g., "Awesome plan! Should I set a reminder for you at ${planDetails.formattedTime} so you stay on track?").`
-            : `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST warmly encourage this plan and proactively ask if you should set a reminder or alarm for it (e.g., "Mast plan hai yaar! Roz subah 8:00 AM ka reminder set kar doon tere liye, taaki miss na ho?").`;
-          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
-        } else {
-          const futurePlanDirective = isEnglishUser
-            ? `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Cool" or "Ok"!\nYou MUST acknowledge their decision warmly and proactively ask if they want you to set a reminder, asking what time, how often (every day or specific days), and for what period they want to be reminded.`
-            : `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST acknowledge their decision warmly and proactively ask if they want you to set a reminder, asking what time, how often (every day or specific days), and for what period they want to be reminded.`;
-          turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
+        // Session deduplication check: check if reminder offer was already made in recent messages
+        const recentAssistantMsgs = (recentMessages || []).filter((m: any) => m?.role === 'assistant').slice(-3);
+        const alreadyOfferedRecently = recentAssistantMsgs.some((m: any) => 
+          reminderIntentDetector.hasReminderOffer(m?.content || '') ||
+          /\b(reminder\s*(?:set|laga)|yaad\s*dila\s*doon|chahiye\s*(?:alarm|reminder))\b/i.test(m?.content || '')
+        );
+
+        if (!alreadyOfferedRecently) {
+          const planDetails = reminderIntentDetector.extractFuturePlanDetails(effectiveMessage, tzOffset);
+          if (!planDetails.isAmbiguous && planDetails.formattedTime) {
+            const futurePlanDirective = isEnglishUser
+              ? `\n\n## ⏰ SMART PROACTIVE REMINDER OPPORTUNITY\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Cool" or "Ok"!\nYou can warmly encourage this plan and casually ask if they'd like a reminder set (e.g., "Awesome plan! Want me to set a reminder for ${planDetails.formattedTime}?"). Keep it natural, not pushy.`
+              : `\n\n## ⏰ SMART PROACTIVE REMINDER OPPORTUNITY\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou can warmly encourage this plan and casually ask if they'd like a reminder set (e.g., "Mast plan hai yaar! Chahiye toh ${planDetails.formattedTime} ka reminder laga doon?"). Keep it natural, not pushy.`;
+            turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
+          } else {
+            const futurePlanDirective = isEnglishUser
+              ? `\n\n## ⏰ SMART PROACTIVE REMINDER OPPORTUNITY\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Cool" or "Ok"!\nAcknowledge their decision warmly like a real friend. You can casually mention they can tell you if they ever want a reminder, but DO NOT interrogate them for time, recurrence, or period unless they ask.`
+              : `\n\n## ⏰ SMART PROACTIVE REMINDER OPPORTUNITY\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nAcknowledge their decision warmly like a real friend. You can casually mention they can tell you if they ever want a reminder ("Bata dena agar reminder chahiye ho!"), but DO NOT interrogate them for time, recurrence, or period unless they ask.`;
+            turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
+          }
         }
       }
 

@@ -461,6 +461,34 @@ export class TurnAnalyzer {
       .filter(u => u.type === 'question')
       .map(u => u.text);
 
+    // Merge full-turn facts across clauses (e.g. compound milestone details like "MTV Hustle Season 1 and came in top 5")
+    const turnLevelFacts = this.extractFacts(userFullText);
+    for (const tFact of turnLevelFacts) {
+      const existingUnit = units.find(u => u.factKey === tFact.key);
+      if (!existingUnit) {
+        order++;
+        units.push({
+          unitId: crypto.randomUUID(),
+          sourceMessageId: msgList[0]?.client_message_id || crypto.randomUUID(),
+          order,
+          type: 'fact',
+          text: tFact.text || userFullText,
+          importance: 8,
+          responseRequired: false,
+          acknowledgementPreferred: true,
+          memoryCandidate: true,
+          actionCandidate: false,
+          factKey: tFact.key,
+          factValue: tFact.value,
+          isProtected: tFact.isProtected,
+          factClass: tFact.factClass,
+          temporalMetadata: tFact.temporalMetadata,
+        });
+      } else if (tFact.value && existingUnit.factValue && tFact.value.length > existingUnit.factValue.length) {
+        existingUnit.factValue = tFact.value;
+      }
+    }
+
     const hasCorrections = units.some(u => u.type === 'correction');
     const firstCorrectionWithKey = units.find(u => u.type === 'correction' && !!u.factKey);
     const correctionTarget = hasCorrections ? (firstCorrectionWithKey ? firstCorrectionWithKey.factKey! : null) : null;
@@ -875,7 +903,7 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'mother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
       // Mother name
-      if (facts.every(f => f.key !== 'mother_nickname')) {
+      if (facts.every(f => f.key !== 'mother_name' && f.key !== 'mother_nickname')) {
         m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
         if (m) {
           const val = this.cleanValue(m[1]);
@@ -900,7 +928,7 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'father_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
       // Father name
-      if (facts.every(f => f.key !== 'father_nickname')) {
+      if (facts.every(f => f.key !== 'father_name' && f.key !== 'father_nickname')) {
         m = lower.match(/\b(?:meri|mere|mara|my)?\s*(?:papa|dad|father|baap|pita|daddy)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
         if (m) {
           const val = this.cleanValue(m[1]);
@@ -925,8 +953,8 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'wife_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
       // Wife name
-      if (facts.every(f => f.key !== 'wife_nickname')) {
-        m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (facts.every(f => f.key !== 'wife_name' && f.key !== 'wife_nickname')) {
+        m = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)(?:'s)?\s+(?:ka\s+naam|is|nam|name\s+is|name)\s+([a-zA-Z0-9\s]+?)(?:\s+hai|\s+is|[.,;!]|$)/i);
         if (m) {
           const val = this.cleanValue(m[1]);
           if (!this.isStopPronoun(val) && !entityResolutionService.isNonNameWord(val)) {
@@ -942,7 +970,7 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'husband_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
       // Husband name
-      if (facts.every(f => f.key !== 'husband_nickname')) {
+      if (facts.every(f => f.key !== 'husband_name' && f.key !== 'husband_nickname')) {
         m = lower.match(/\b(?:meri|mere|my)?\s*(?:shauhar|husband|pati)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
         if (m) {
           const val = this.cleanValue(m[1]);
@@ -958,7 +986,7 @@ export class TurnAnalyzer {
       let m = lower.match(/\b(?:meri|mere|my)?\s*(?:girlfriend|gf|bandi)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
       if (m) facts.push({ key: 'girlfriend_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-      if (facts.every(f => f.key !== 'girlfriend_nickname')) {
+      if (facts.every(f => f.key !== 'girlfriend_name' && f.key !== 'girlfriend_nickname')) {
         m = lower.match(/\b(?:meri|mere|my)?\s*(?:girlfriend|gf|bandi)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
         if (m) {
           const val = this.cleanValue(m[1]);
@@ -974,7 +1002,7 @@ export class TurnAnalyzer {
       let m = lower.match(/\b(?:mera|mere|my)?\s*(?:boyfriend|bf|banda)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
       if (m) facts.push({ key: 'boyfriend_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
-      if (facts.every(f => f.key !== 'boyfriend_nickname')) {
+      if (facts.every(f => f.key !== 'boyfriend_name' && f.key !== 'boyfriend_nickname')) {
         m = lower.match(/\b(?:mera|mere|my)?\s*(?:boyfriend|bf|banda)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
         if (m) {
           const val = this.cleanValue(m[1]);
@@ -1002,7 +1030,7 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'sister_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
       // Sister name
-      if (facts.every(f => f.key !== 'sister_nickname')) {
+      if (facts.every(f => f.key !== 'sister_name' && f.key !== 'sister_nickname')) {
         m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
             lower.match(/\b(?:meri|mere|my)\s+(?:behen|sister)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
         if (m) {
@@ -1020,7 +1048,7 @@ export class TurnAnalyzer {
       if (m) facts.push({ key: 'brother_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
 
       // Brother name
-      if (facts.every(f => f.key !== 'brother_nickname')) {
+      if (facts.every(f => f.key !== 'brother_name' && f.key !== 'brother_nickname')) {
         m = lower.match(/\b(?:mera|mere|my)?\s*(?:bhai|brother)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
             lower.match(/\b(?:mera|mere|my)\s+(?:bhai|brother)\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:hai|is)\b/i);
         if (m) {
@@ -1175,6 +1203,112 @@ export class TurnAnalyzer {
         const isCommonRole = /\b(engineer|developer|designer|doctor|lawyer|teacher|professor|student|nurse|architect|consultant|manager|writer|founder|artist|photographer|scientist|analyst|accountant|chef|pilot)\b/i.test(pVal);
         if (isCommonRole && !this.isStopPronoun(pVal)) {
           facts.push({ key: 'profession', value: pVal, text, isProtected: isExplicitRemember, factClass });
+        }
+      }
+    }
+
+    // ── Career Milestones & Creative Achievements (MTV Hustle, Gully Boy, Artist / Rapper) ──
+    // 1. MTV Hustle show / season / rank
+    const hustleMatch = lower.match(/\b(?:in\s+)?(?:mtv\s*hustle|hustle(?:\s*show)?)\b/i);
+    if (hustleMatch) {
+      const seasonMatch = lower.match(/\b(?:season\s*(\d+)|s(\d+))\b/i);
+      const rankMatch = lower.match(/\b(?:in\s+top\s*(\d+)|top\s*(\d+)|rank\s*(\d+)|winner|runner\s*up|finalist)\b/i);
+      const sNum = seasonMatch ? (seasonMatch[1] || seasonMatch[2]) : '';
+      const rNum = rankMatch ? (rankMatch[1] || rankMatch[2] || rankMatch[3]) : '';
+      const seasonStr = sNum ? `Season ${sNum}` : '';
+      const rankStr = rNum ? `Top ${rNum}` : (rankMatch ? this.cleanValue(rankMatch[0]) : '');
+      const parts = ['Contestant on MTV Hustle', seasonStr, rankStr].filter(Boolean);
+      facts.push({
+        key: 'career_milestone_mtv_hustle',
+        value: parts.join(' · '),
+        text,
+        isProtected: isExplicitRemember,
+        factClass
+      });
+      if (rNum || rankMatch) {
+        facts.push({
+          key: 'career_achievement_rank',
+          value: rankStr ? `${rankStr} in MTV Hustle${seasonStr ? ` (${seasonStr})` : ''}` : 'MTV Hustle Finalist',
+          text,
+          isProtected: isExplicitRemember,
+          factClass
+        });
+      }
+      if (facts.every(f => f.key !== 'profession')) {
+        facts.push({ key: 'profession', value: 'Artist / Rapper', text, isProtected: isExplicitRemember, factClass });
+      }
+      if (facts.every(f => f.key !== 'artist_genre')) {
+        facts.push({ key: 'artist_genre', value: 'Hip-Hop / Rap', text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // 2. Gully Boy / Movie Feature
+    if (/\b(?:gully\s*boy|gullyboy)\b/i.test(lower)) {
+      facts.push({
+        key: 'career_milestone_gully_boy',
+        value: 'Featured / Part of Gully Boy movie',
+        text,
+        isProtected: isExplicitRemember,
+        factClass
+      });
+      if (facts.every(f => f.key !== 'profession')) {
+        facts.push({ key: 'profession', value: 'Artist / Rapper', text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // 3. Artist / Rapper / Hip-Hop Role
+    if (facts.every(f => f.key !== 'profession')) {
+      const artistMatch = lower.match(/\b(?:i\s+am\s+(?:an?\s+)?|i'm\s+(?:an?\s+)?|main\s+(?:ek\s+)?)(artist|rapper|mc|musician|singer|producer|hip[- ]hop\s*artist)\b/i) ||
+        lower.match(/\b(artist|rapper|mc|musician|singer)\s+(?:hoon|hun)\b/i);
+      if (artistMatch) {
+        const rawRole = this.cleanValue(artistMatch[1]);
+        const cleanRole = rawRole.toLowerCase().includes('artist') ? 'Artist / Rapper' : rawRole;
+        facts.push({ key: 'profession', value: cleanRole, text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // 4. Artist Genre
+    if (/\b(hip[- ]hop|rap|underground\s*rap|desi\s*hip[- ]hop)\b/i.test(lower) && facts.every(f => f.key !== 'artist_genre')) {
+      facts.push({ key: 'artist_genre', value: 'Hip-Hop / Rap', text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 5. Friends Sub-Branches & Attributes (e.g. Childhood Friend, Smoking Partner)
+    const childhoodFriendMatch = lower.match(/\b([a-zA-Z]+)\s*(?:is\s+(?:my\s+)?|mera\s+)?childhood\s*friend\b/i) ||
+      lower.match(/\bchildhood\s*friend\s+(?:hai\s+|is\s+|)([a-zA-Z]+)\b/i);
+    if (childhoodFriendMatch) {
+      const fName = this.cleanValue(childhoodFriendMatch[1]);
+      if (!this.isStopPronoun(fName) && !entityResolutionService.isNonNameWord(fName)) {
+        const slug = fName.toLowerCase();
+        facts.push({ key: `friend_${slug}_relation`, value: 'Childhood Friend', text, isProtected: isExplicitRemember, factClass });
+        if (facts.every(f => f.key !== 'friend_name' && f.key !== `friend_${slug}`)) {
+          facts.push({ key: `friend_name`, value: fName, text, isProtected: isExplicitRemember, factClass });
+        }
+      }
+    }
+
+    const smokingPartnerMatch = lower.match(/\b([a-zA-Z]+)\s*(?:is\s+(?:my\s+)?|mera\s+)?smoking\s*partner\b/i) ||
+      lower.match(/\b(?:hum|we|dono)\s*(?:bhi\s+)?smoking\s*partners?\b/i) ||
+      lower.match(/\b([a-zA-Z]+)\s*ke\s+sath\s+smoke\s+karta\b/i);
+    if (smokingPartnerMatch) {
+      let fName = smokingPartnerMatch[1] ? this.cleanValue(smokingPartnerMatch[1]) : '';
+      if (!fName || this.isStopPronoun(fName) || entityResolutionService.isNonNameWord(fName)) {
+        // Resolve from active friend facts in this turn
+        const existingFriendFact = facts.find(f => f.key.startsWith('friend_') && !f.key.endsWith('_habit'));
+        if (existingFriendFact) {
+          const matchSlug = existingFriendFact.key.replace(/^friend_/, '').replace(/_relation$/, '').replace(/_name$/, '');
+          fName = matchSlug ? matchSlug : existingFriendFact.value;
+        } else {
+          const anyName = lower.match(/\b([a-zA-Z]{3,20})\s*(?:mera|is\s+my|childhood|dost|friend)\b/i);
+          if (anyName && !this.isStopPronoun(anyName[1])) {
+            fName = anyName[1];
+          }
+        }
+      }
+      if (fName && !this.isStopPronoun(fName) && !entityResolutionService.isNonNameWord(fName)) {
+        const slug = fName.toLowerCase();
+        facts.push({ key: `friend_${slug}_habit`, value: 'Smoking Partner', text, isProtected: isExplicitRemember, factClass });
+        if (facts.every(f => f.key !== 'friend_name' && f.key !== `friend_${slug}`)) {
+          facts.push({ key: `friend_name`, value: this.cleanValue(fName), text, isProtected: isExplicitRemember, factClass });
         }
       }
     }
@@ -1363,7 +1497,7 @@ export class TurnAnalyzer {
   }
 
   private static cleanValue(val: string): string {
-    const trimmed = val.trim().replace(/[.,;!?]+$/, '');
+    const trimmed = val.trim().replace(/[.,;!?]+$/, '').replace(/\s+(?:hai|is|tha|thi|hoon|hun)$/i, '').trim();
     return trimmed.replace(/\b[a-z]/g, c => c.toUpperCase());
   }
 
@@ -1411,9 +1545,12 @@ export class TurnAnalyzer {
         } else if (unit.type === 'emotion') {
           prompt += `Must validate this emotion first.`;
         } else if (unit.type === 'action') {
-          const isFuturePlanOrHabit = /\b(workout|gym|exercise|running|yoga|diet|routine|habit|start karna|shuru karna|karna hai|karni hai|uthna hai|uth ke|roz|daily|har din|every day|\d+\s*baje|kal|parso|plan)\b/i.test(unit.text);
-          if (isFuturePlanOrHabit) {
-            prompt += `[SMART PROACTIVE REMINDER OPPORTUNITY: The user shared a future plan, daily routine, or habit ("${unit.text}"). DO NOT give a passive 1-word answer like "Sahi", "Theek hai", or "Ok". You MUST acknowledge their plan with enthusiasm and proactively ask if you can set a reminder or alarm for it, confirming/inquiring the exact time, frequency (e.g. roz / daily or specific days), and period!]`;
+          const hasSpecificTiming = /\b(\d{1,2}\s*(?:bje|baje|am|pm)|roz\s+\d|daily\s+at|\d+\s*o'?clock)\b/i.test(unit.text);
+          const isFuturePlanOrHabit = /\b(workout|gym|exercise|running|yoga|diet|routine|habit|start karna|shuru karna|karna hai|karni hai|uthna hai|uth ke|roz|daily|har din|every day|kal|parso|plan)\b/i.test(unit.text);
+          if (hasSpecificTiming) {
+            prompt += `[SMART PROACTIVE REMINDER OPPORTUNITY: The user shared a future plan with timing ("${unit.text}"). DO NOT give a passive 1-word answer like "Sahi" or "Ok". Warmly encourage their plan and proactively ask if you can set a reminder or alarm for it. Keep it natural and do not pester.]`;
+          } else if (isFuturePlanOrHabit) {
+            prompt += `[NATURAL PLAN ENGAGEMENT: The user shared a future plan or routine ("${unit.text}"). Engage with their goal warmly and ask about their thoughts. Do NOT push a reminder unless they ask for one.]`;
           } else {
             prompt += `Acknowledge this action/plan. [CLARIFICATION GUARD: If an action is missing a critical parameter (e.g., WHO 'him' refers to, WHERE to go) and it cannot be resolved from context, ask the user directly in normal chat who 'him' refers to with a single concise question.]`;
           }

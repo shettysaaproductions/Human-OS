@@ -137,14 +137,15 @@ export class ReminderIntentDetector {
       return false;
     }
 
-    const hasHabitOrRoutine = /\b(?:roz|daily|har\s*din|every\s*day|subah|sube|sawere|savere|shaam|raat|dopahar)\b/i.test(lower);
+    const hasHabitOrRoutine = /\b(?:roz|daily|har\s*din|every\s*day|routine)\b/i.test(lower);
     const hasActivity = /\b(?:workout|gym|exercise|walk|running|yoga|diet|uthna|uth\s*ke|padhna|study|class|office|meeting|khana|cook|cooking|medication|dawa|doctor|client|project|kitchen|kaam|water|paani|bills?)\b/i.test(lower);
-    const hasFutureIntention = /\b(?:start\s*karna|shuru\s*karna|karna\s*hai|karni\s*hai|jana\s*hai|soch\s*raha|planning|plan\s*hai|routine\s*banan[ai]|kal\s*se|parso\s*se|aaj\s*se)\b/i.test(lower);
-    const hasTimeOrDate = /\b(?:\d{1,2}\s*(?:bje|baje|am|pm)|kal|parso|tarso|tomorrow|morning|evening|night)\b/i.test(lower);
+    const hasStartOrCommitment = /\b(?:start\s*karna|shuru\s*karna|routine\s*banan[ai]|kal\s*se|parso\s*se|aaj\s*se|planning|plan\s*hai)\b/i.test(lower);
+    const hasTimeOrDate = /\b(?:\d{1,2}\s*(?:bje|baje|am|pm)|kal\b|parso|tarso|tomorrow|subah|sube|sawere|savere|shaam|raat|dopahar|morning|evening|night)\b/i.test(lower);
+    const hasObligation = /\b(?:karna\s*hai|karni\s*hai|jana\s*hai|soch\s*raha)\b/i.test(lower);
 
-    if (hasHabitOrRoutine && hasActivity) return true;
-    if (hasActivity && hasFutureIntention) return true;
-    if (hasFutureIntention && hasTimeOrDate) return true;
+    if (hasActivity && hasHabitOrRoutine) return true;
+    if (hasActivity && hasStartOrCommitment) return true;
+    if (hasActivity && (hasObligation || hasStartOrCommitment) && hasTimeOrDate) return true;
     if (hasHabitOrRoutine && hasTimeOrDate) return true;
 
     return false;

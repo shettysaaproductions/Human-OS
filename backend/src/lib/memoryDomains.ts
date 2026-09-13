@@ -76,7 +76,9 @@ const WORK_PATTERNS = [
   'timing', 'candidate', 'interview', 'hiring', 'shift', 'boss', 'client',
   'business', 'startup', 'conviction', 'login', 'logout', 'colleague', 'manager', 'coworker',
   'college', 'university', 'degree', 'course', 'study', 'education', 'project', 'freelance',
-  'tech', 'stack', 'repo', 'code', 'database', 'server', 'app', 'venture', 'saas'
+  'tech', 'stack', 'repo', 'code', 'database', 'server', 'app', 'venture', 'saas',
+  'career_milestone', 'career_achievement', 'artist', 'rapper', 'singer', 'musician', 'artist_genre',
+  'hustle', 'gully', 'movie', 'film', 'album', 'track', 'concert', 'tour', 'discography'
 ];
 
 const GOALS_PATTERNS = [
@@ -1747,7 +1749,8 @@ export function clusterMemoriesIntoWardrobes(
       'book', 'author', 'movie', 'film', 'anime',
       'plant', 'garden', 'bonsai',
       'health', 'medical', 'allergy', 'medication',
-      'travel', 'trip', 'place', 'city', 'destination'
+      'travel', 'trip', 'place', 'city', 'destination',
+      'artist', 'rapper', 'career', 'milestone', 'achievement', 'music', 'album', 'track'
     ]);
 
     const dynamicGroups = new Map<string, {
@@ -2067,8 +2070,8 @@ function toGraphLabel(key: string, value: string): string {
  * Root (Core) -> Dept Trunks -> Entity Branches -> Attribute Stems.
  */
 export function buildDynamicKnowledgeGraph(
-  memories: Array<{ id?: string; key: string; value: string; memory_type?: string }>,
-  workingContext: Array<{ id?: string; key: string; value: string }>,
+  memories: Array<{ id?: string; key: string; value: string; memory_type?: string }> = [],
+  workingContext: Array<{ id?: string; key: string; value: string }> = [],
   preferredName?: string
 ): DynamicKgResult {
   const nodes: DynamicKgNode[] = [];
@@ -2438,12 +2441,20 @@ export function buildDynamicKnowledgeGraph(
       parentId = friendNodeId;
       hierarchyLevel = 3;
       edgeType = 'ATTRIBUTE_STEM';
-      relation = k.includes('since') ? 'FRIEND_SINCE' : (k.includes('father') ? 'FATHER_BACKGROUND' : 'FRIEND_DETAIL');
+      relation = k.includes('relation') ? 'FRIEND_RELATION' :
+                 (k.includes('habit') || k.includes('smoke') ? 'SHARED_HABIT' :
+                 (k.includes('since') ? 'FRIEND_SINCE' :
+                 (k.includes('father') ? 'FATHER_BACKGROUND' : 'FRIEND_DETAIL')));
       explanation = `Detail stem of ${friendName}`;
     }
-    // Family Tree Stems
+    // Family Tree Stems & Social Life
     else if (meta.domain === 'family') {
-      if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'partner_name', 'husband_name', 'sakshi', 'shreshth'].includes(k)) {
+      if (k === 'friends' || k === 'social_life' || k === 'friendship') {
+        hierarchyLevel = 2;
+        relation = 'SOCIAL_NETWORK';
+        edgeType = 'ENTITY_BRANCH';
+        explanation = `Social circle and friendship philosophy`;
+      } else if (['wife_name', 'son_name', 'father_name', 'mother_name', 'daughter_name', 'sister_name', 'brother_name', 'partner_name', 'husband_name', 'sakshi', 'shreshth'].includes(k)) {
         if (k === 'brother_name' && item.value.toLowerCase().includes('ijaz') && allItems.some(i => i.key.includes('colleague') || i.value.toLowerCase().includes('office') || i.value.toLowerCase().includes('colleague'))) {
           continue; // Severed from family!
         }
@@ -2701,8 +2712,52 @@ export function buildDynamicKnowledgeGraph(
     if (meta.domain === 'work') {
       const isCompanyBranch = ['company_name', 'current_company', 'office_name'].includes(k);
       const isVentureBranch = ['venture_name', 'business_venture', 'cloud_kitchen_business', 'dhaba_venture'].includes(k);
+      const isArtistItem = k.startsWith('career_milestone_') || k.startsWith('career_achievement_') || k === 'artist_genre' || (k === 'profession' && /artist|rapper|singer|musician|producer/i.test(item.value));
 
-      if (isCompanyBranch) {
+      if (isArtistItem) {
+        const artistNodeId = 'mem-artist-career';
+        if (!nodeIds.has(artistNodeId)) {
+          const profVal = allItems.find(i => i.key.toLowerCase() === 'profession')?.value || 'Artist / Rapper';
+          nodes.push({
+            id: artistNodeId,
+            name: 'Artist & Music Career',
+            entity_type: 'artist',
+            department: 'work',
+            color: '#EC4899',
+            radius: 22,
+            value: `Creative & Music Career: ${profVal}`,
+            raw_key: 'profession_artist',
+            emoji: '🎤',
+            parentEntityId: 'dept-work',
+            hierarchyLevel: 2,
+            treePath: [cleanUserName, 'Career & Professional', 'Artist & Music Career']
+          });
+          nodeIds.add(artistNodeId);
+          deptCounts.work++;
+          edges.push({
+            id: `edge-dept-work-${artistNodeId}`,
+            source: 'dept-work',
+            target: artistNodeId,
+            relation: 'ARTISTIC_CAREER_BRANCH',
+            color: '#EC4899',
+            weight: 2,
+            edgeType: 'ENTITY_BRANCH',
+            explanation: 'Creative music and artist career branch'
+          });
+        }
+
+        if (item.id !== artistNodeId) {
+          parentId = artistNodeId;
+          hierarchyLevel = 3;
+          edgeType = 'ATTRIBUTE_STEM';
+          relation = k.includes('hustle') ? 'REALITY_SHOW_MILESTONE' :
+                     k.includes('gully') ? 'FILM_FEATURE_MILESTONE' :
+                     k.includes('genre') ? 'ARTIST_GENRE' :
+                     k.includes('rank') ? 'COMPETITION_RANK' :
+                     k === 'profession' ? 'ARTIST_TITLE' : 'CAREER_MILESTONE';
+          explanation = `Milestone stem of Artist Career`;
+        }
+      } else if (isCompanyBranch) {
         hierarchyLevel = 2;
         relation = 'EMPLOYMENT_ORGANIZATION';
         edgeType = 'ENTITY_BRANCH';
@@ -2773,7 +2828,8 @@ export function buildDynamicKnowledgeGraph(
         'book', 'author', 'movie', 'film',
         'plant', 'garden', 'bonsai',
         'health', 'medical', 'allergy',
-        'travel', 'trip'
+        'travel', 'trip',
+        'artist', 'rapper', 'career', 'milestone', 'achievement', 'music', 'album', 'track'
       ]);
 
       if (keyParts.length >= 3 && KNOWN_DYN_PREFIXES.has(keyParts[0])) {

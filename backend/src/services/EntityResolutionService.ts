@@ -535,11 +535,15 @@ export class EntityResolutionService {
     // 10. Name assignment (e.g. "is Suresh", "ka naam Suresh hai", or rest = "Suresh", "Sakshi hai")
     if (predicate === 'attribute') {
       const fullNameMatch = fullMessage.match(/\b(?:is|ka\s+naam|name\s+is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
-      if (fullNameMatch && !this.isNonNameWord(fullNameMatch[1].split(/\s+/)[0])) {
-        predicate = 'name';
-        value = fullNameMatch[1].split(/\s+/).map(w => this.capitalize(w)).join(' ').trim();
+      if (fullNameMatch) {
+        const cleanMatched = fullNameMatch[1].replace(/\s+(?:hai|is|tha|thi|hoon|hun)$/i, '').trim();
+        const firstWord = cleanMatched.split(/\s+/)[0];
+        if (cleanMatched.length >= 2 && !this.isNonNameWord(firstWord)) {
+          predicate = 'name';
+          value = cleanMatched.split(/\s+/).map(w => this.capitalize(w)).join(' ').trim();
+        }
       } else if (/^[a-zA-Z]+(?:\s+[a-zA-Z]+)?(?:\s+hai)?$/i.test(rest.trim())) {
-        const cleanName = rest.replace(/\s+hai$/i, '').trim();
+        const cleanName = rest.replace(/\s+(?:hai|is|tha|thi|hoon|hun)$/i, '').trim();
         const firstWord = cleanName.split(/\s+/)[0];
         if (cleanName.length >= 2 && !this.isNonNameWord(firstWord)) {
           predicate = 'name';

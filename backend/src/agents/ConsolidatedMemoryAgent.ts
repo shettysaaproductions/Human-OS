@@ -291,6 +291,11 @@ Do NOT invent aliases, plurals, or possessive variants. Use ONLY canonical keys:
   preferred_name ← NOT name, user_name, my_name
   passions       ← user's hobbies, interests, coding, music, sports
   goals          ← career goals, fitness goals, personal targets
+  profession     ← e.g. 'artist', 'rapper', 'software engineer'
+  artist_genre   ← e.g. 'hip-hop', 'rap', 'classical'
+  career_milestone_<event>  ← e.g. 'career_milestone_mtv_hustle' (e.g. 'Top 5 in MTV Hustle Season 1'), 'career_milestone_gully_boy' ('Featured in Gully Boy movie')
+  friend_<name>_relation    ← e.g. 'childhood friend', 'college buddy'
+  friend_<name>_habit       ← e.g. 'smoking partner', 'gym buddy'
   family_details ← overview of family structure
   important_facts ← health, allergies, dreams, non-negotiable personal facts
   favourite_color ← NOT favorite_color, favourite_colour, and NEVER favourite_color_<value>

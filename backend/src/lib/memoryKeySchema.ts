@@ -237,6 +237,12 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'office_hours', 'office_days', 'working_schedule', 'work_timing', 'work_hours',
     'nai_morning_schedule', 'office_timing', 'office_timings', 'work_timings'
   ],
+  profession: [
+    'occupation', 'job', 'job_title', 'user_profession', 'career', 'role', 'work_role'
+  ],
+  artist_genre: [
+    'music_genre', 'genre', 'rap_genre', 'hiphop_genre'
+  ],
   // ── Lifestyle Diversity: Pets, Fitness, Wellness, Partner, Education ────────
   pet_name: [
     'pets_name', 'pet', 'dog_name', 'dogs_name', 'cat_name', 'cats_name',
@@ -349,8 +355,8 @@ export function isKnownCanonicalKey(canonicalKey: string): boolean {
   if (CANONICAL_KEYS.has(canonicalKey)) return true;
   // Entity-scoped canonical keys: entity:<subject_id>:<predicate>
   if (/^entity:[a-z0-9_]+:[a-z0-9_]+$/i.test(canonicalKey)) return true;
-  // Dynamic entity relationship and category keys across all life domains (e.g. colleague_ijaz, profession_guitar, dog_coco, project_helios)
-  if (/^(?:colleague|office_friend|coworker|friend|mentor|doctor|pet|dog|cat|bird|profession|career|job|project|venture|stack|tool|skill|instrument|guitar|piano|car|bike|vehicle|sport|game|hobby|routine|habit|diet|medical|goal)_[a-z0-9_]+$/i.test(canonicalKey)) return true;
+  // Dynamic entity relationship and category keys across all life domains (e.g. colleague_ijaz, profession_guitar, dog_coco, project_helios, career_milestone_mtv_hustle)
+  if (/^(?:colleague|office_friend|coworker|friend|mentor|doctor|pet|dog|cat|bird|profession|career|job|project|venture|stack|tool|skill|instrument|guitar|piano|car|bike|vehicle|sport|game|hobby|routine|habit|diet|medical|goal|career_milestone|milestone|achievement|award|artist)_[a-z0-9_]+$/i.test(canonicalKey)) return true;
   return false;
 }
 
