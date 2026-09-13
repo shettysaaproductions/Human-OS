@@ -696,10 +696,28 @@ export const useChatStore = create<ChatState>((set, get) => {
           // The wholesale set() below would silently drop it; keep any local message the
           // fetch did not return. (Queue items are already covered by restoredMessages.)
           const fetchedIds = new Set(freshMessages.map(m => m.id));
-          const localExtra = get().messages.filter(m =>
-            !fetchedIds.has(m.id) && (m.status === 'sending' || m.status === 'sent' || m.status === 'error')
-          );
-          const mergedMessages = [...freshMessages, ...localExtra];
+          const fetchedContentKeys = new Set(freshMessages.map(m => `${m.role}:${m.content.trim()}`));
+
+          const localExtra = get().messages.filter(m => {
+            if (fetchedIds.has(m.id)) return false;
+            // Deduplicate: If backend returned this exact message (matching role and content),
+            // prevent local optimistic copy with a client UUID from duplicating as a ghost bubble.
+            if (m.status === 'sent' && fetchedContentKeys.has(`${m.role}:${m.content.trim()}`)) {
+              return false;
+            }
+            return m.status === 'sending' || m.status === 'sent' || m.status === 'error';
+          });
+          const rawMerged = [...freshMessages, ...localExtra];
+          
+          // Deduplicate IDs cleanly
+          const seenIds = new Set<string>();
+          const mergedMessages: Message[] = [];
+          for (const msg of rawMerged) {
+            if (!seenIds.has(msg.id)) {
+              seenIds.add(msg.id);
+              mergedMessages.push(msg);
+            }
+          }
 
           // Sort merged messages deterministically by timestamp, role, and chunk part
           mergedMessages.sort(compareMessagesDeterministic);
@@ -889,7 +907,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (_queueTimeout) clearTimeout(_queueTimeout);
       _queueTimeout = setTimeout(() => {
         get().processQueue();
-      }, 500);
+      }, 100);
     },
 
     abortGeneration: () => {
@@ -1052,15 +1070,14 @@ export const useChatStore = create<ChatState>((set, get) => {
             continue;
           }
 
-          // For assistant messages, avoid duplicates from SSE streams / proactive injection by
-          // checking if we already have a message with the EXACT same content that was generated
-          // locally (any NON-UUID id: SSE `msg_…`, proactive `${ts}_proactive_…`).
+          // For assistant messages, avoid duplicates from SSE streams / proactive injection / multi-fetch by
+          // checking if we already have a message with the EXACT same content in the store.
           if (role === 'assistant') {
             const localDuplicate = currentMessages.find(m =>
-              m.role === 'assistant' && m.content.trim() === msg.content.trim() && !isUuidLike(m.id)
+              m.role === 'assistant' && m.content.trim() === msg.content.trim()
             );
             if (localDuplicate) {
-              // We found a local stream duplicate. We must sync the backend's metadata into it!
+              // We found an assistant duplicate. Sync backend's metadata into it!
               updateLocalMessageIfNeeded(localDuplicate.id);
               continue;
             }

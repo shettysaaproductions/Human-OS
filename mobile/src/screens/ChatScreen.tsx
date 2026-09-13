@@ -754,6 +754,10 @@ export function ChatScreen() {
   const [mainWidths, setMainWidths] = React.useState({ content: 1, view: 1 });
   const mainScrollY = React.useRef(new Animated.Value(0)).current;
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string } | null>(null);
+  const inputTextRef = useRef(inputText);
+  inputTextRef.current = inputText;
+  const selectedImageRef = useRef(selectedImage);
+  selectedImageRef.current = selectedImage;
   const isFocused = useIsFocused();
   const [isOffline, setIsOffline] = useState(false);
   const [isLifestyleModalVisible, setIsLifestyleModalVisible] = useState(false);
@@ -772,12 +776,82 @@ export function ChatScreen() {
     }, 2200);
   }, []);
 
+  const assistantMdStyle = useMemo(() => ({
+    body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
+    heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold' as const, marginVertical: 12 },
+    heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold' as const, marginVertical: 10 },
+    heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold' as const, marginVertical: 8 },
+    strong: { fontWeight: 'bold' as const, color: colors.assistantText },
+    em: { fontStyle: 'italic' as const, color: colors.assistantText },
+    u: { textDecorationLine: 'underline' as const },
+    blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+    code_block: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
+    hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 },
+    list_item: { flexShrink: 1 },
+    bullet_list_content: { flexShrink: 1 },
+    ordered_list_content: { flexShrink: 1 },
+  }), [colors]);
+
+  const assistantMdRules = useMemo(() => ({
+    fence: (node: any, _c: any, _p: any, _s: any) => {
+      const content = node.content;
+      const language = node.sourceInfo;
+      const isCopyable = language === 'copyable';
+      return (
+        <View key={node.key} style={s.fenceContainer}>
+          <View style={s.fenceHeader}>
+            <Text style={s.fenceLanguage}>{isCopyable ? 'Content' : (language || 'Code')}</Text>
+            <TouchableOpacity
+              style={s.copyButton}
+              onPress={async () => {
+                await Clipboard.setStringAsync(content);
+                showCopyToast('Code copied to clipboard');
+              }}
+            >
+              <Text style={s.copyButtonText}>Copy</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={s.fenceContent}>
+            {isCopyable ? (
+              <SmartMarkdown
+                content={content}
+                colors={colors}
+                mdStyle={{
+                  body: { color: colors.assistantText, fontSize: 16, lineHeight: 24 },
+                  strong: { fontWeight: 'bold' },
+                  em: { fontStyle: 'italic' },
+                  heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
+                  heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
+                  heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
+                  blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
+                }}
+                mdRules={{ text: customTextRule }}
+              />
+            ) : (
+              <Text style={{ color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                {content}
+              </Text>
+            )}
+          </View>
+        </View>
+      );
+    },
+    textgroup: (node: any, children: any, _p: any, styles: any) => (
+      <Text key={node.key} style={styles.textgroup}>{children}</Text>
+    ),
+    text: customTextRule,
+  }), [colors, showCopyToast]);
+
   const displayedMessages = useMemo(() => {
-    if (!isSearchActive || !searchQuery.trim()) {
-      return reversedMessages;
-    }
-    const q = searchQuery.toLowerCase().trim();
-    return reversedMessages.filter(m => m.content && m.content.toLowerCase().includes(q));
+    const list = (!isSearchActive || !searchQuery.trim())
+      ? reversedMessages
+      : reversedMessages.filter(m => m.content && m.content.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+    const seen = new Set<string>();
+    return list.filter(m => {
+      if (!m.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
   }, [reversedMessages, isSearchActive, searchQuery]);
   
   const toggleSelectMessage = useCallback((id: string) => {
@@ -963,22 +1037,26 @@ export function ChatScreen() {
     }
     lastSendTimestampRef.current = now;
 
-    const textToEvaluate = typeof overrideText === 'string' ? overrideText : inputText;
-    if (!textToEvaluate.trim() && !selectedImage) return;
+    const currentImage = selectedImageRef.current;
+    const textToEvaluate = typeof overrideText === 'string' ? overrideText : inputTextRef.current;
+    if (!textToEvaluate.trim() && !currentImage) return;
     
     presenceService.onMessageSent();
     
     // If only image is sent with no text, use a meaningful placeholder so backend min(1) passes
     const textToSend = textToEvaluate.trim() || '📷 (image attached)';
-    sendMessage(textToSend, selectedImage?.base64, selectedImage?.uri);
-    setInputText('');
+    sendMessage(textToSend, currentImage?.base64, currentImage?.uri);
+    // Only clear input draft if the user didn't tap an external prompt/option chip
+    if (typeof overrideText !== 'string') {
+      setInputText('');
+    }
     setSelectedImage(null);
     isNearBottomRef.current = true;
     setNewMessagesWhileScrolled(0);
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
-  }, [inputText, selectedImage, sendMessage]);
+  }, [sendMessage]);
 
   const handlePickImage = useCallback(() => {
     Alert.alert(
@@ -1148,70 +1226,8 @@ export function ChatScreen() {
                     setVersionModalMessage(item);
                   }
                 }}
-                mdStyle={{
-                  body: { color: colors.assistantText, fontSize: 16, lineHeight: 22 },
-                  heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 12 },
-                  heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 10 },
-                  heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
-                  strong: { fontWeight: 'bold', color: colors.assistantText },
-                  em: { fontStyle: 'italic', color: colors.assistantText },
-                  u: { textDecorationLine: 'underline' },
-                  blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
-                  code_block: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 10, borderRadius: 8, marginVertical: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.assistantText },
-                  hr: { backgroundColor: colors.border, height: 1, marginVertical: 12 },
-                  list_item: { flexShrink: 1 },
-                  bullet_list_content: { flexShrink: 1 },
-                  ordered_list_content: { flexShrink: 1 },
-                }}
-                mdRules={{
-                  fence: (node: any, _c: any, _p: any, _s: any) => {
-                    const content = node.content;
-                    const language = node.sourceInfo;
-                    const isCopyable = language === 'copyable';
-                    return (
-                      <View key={node.key} style={s.fenceContainer}>
-                        <View style={s.fenceHeader}>
-                          <Text style={s.fenceLanguage}>{isCopyable ? 'Content' : (language || 'Code')}</Text>
-                          <TouchableOpacity
-                            style={s.copyButton}
-                            onPress={async () => {
-                              await Clipboard.setStringAsync(content);
-                              showCopyToast('Code copied to clipboard');
-                            }}
-                          >
-                            <Text style={s.copyButtonText}>Copy</Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View style={s.fenceContent}>
-                          {isCopyable ? (
-                            <SmartMarkdown
-                              content={content}
-                              colors={colors}
-                              mdStyle={{
-                                body: { color: colors.assistantText, fontSize: 16, lineHeight: 24 },
-                                strong: { fontWeight: 'bold' },
-                                em: { fontStyle: 'italic' },
-                                heading1: { color: colors.assistantText, fontSize: 24, fontWeight: 'bold', marginVertical: 8 },
-                                heading2: { color: colors.assistantText, fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
-                                heading3: { color: colors.assistantText, fontSize: 18, fontWeight: 'bold', marginVertical: 8 },
-                                blockquote: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderLeftWidth: 4, borderLeftColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 8, marginVertical: 8, borderRadius: 4 },
-                              }}
-                              mdRules={{ text: customTextRule }}
-                            />
-                          ) : (
-                            <Text style={{ color: colors.assistantText, fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-                              {content}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                    );
-                  },
-                  textgroup: (node: any, children: any, _p: any, styles: any) => (
-                    <Text key={node.key} style={styles.textgroup}>{children}</Text>
-                  ),
-                  text: customTextRule,
-                }}
+                mdStyle={assistantMdStyle}
+                mdRules={assistantMdRules}
               />
             ) : (
               (() => {
@@ -1332,7 +1348,7 @@ export function ChatScreen() {
         </SwipeableBubble>
       </View>
     );
-  }, [retryMessage, colors, displayedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage, handleSend, setReplyingTo, setVersionModalMessage]);
+  }, [retryMessage, colors, displayedMessages, developerMode, selectedMessageIds, isSelectionMode, toggleSelectMessage, handleSend, setReplyingTo, setVersionModalMessage, assistantMdStyle, assistantMdRules]);
 
   if (!isHydrated) {
     return (
@@ -1346,7 +1362,7 @@ export function ChatScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView
         style={[s.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
         <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top']}>
@@ -1566,7 +1582,7 @@ export function ChatScreen() {
               showsVerticalScrollIndicator={false}
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               extraData={`${displayedMessages.length}_${selectedMessageIds.join(',')}_${isTyping ? '1' : '0'}`}
-              keyExtractor={(item, index) => item.id ? `${item.id}_${index}` : String(index)}
+              keyExtractor={(item) => item.id}
               renderItem={renderItem}
               contentContainerStyle={s.listContent}
               onScroll={handleScroll}
