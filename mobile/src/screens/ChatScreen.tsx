@@ -1362,8 +1362,8 @@ export function ChatScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView
         style={[s.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <SafeAreaView style={[s.safeArea, { backgroundColor: colors.background }]} edges={['top']}>
           <OfflineBanner visible={isOffline} />
