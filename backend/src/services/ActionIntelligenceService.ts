@@ -73,6 +73,9 @@ export class ActionIntelligenceService {
   }
 
   private isActionReady(action: ActionRecord, allActiveActions: ActionRecord[]): boolean {
+    if (action.state === 'blocked' || action.state === 'completed' || action.state === 'cancelled') {
+      return false;
+    }
     if (!action.dependency_ids || action.dependency_ids.length === 0) return true;
     
     // If any dependency is still in the active list (i.e. not completed/cancelled), this action is blocked

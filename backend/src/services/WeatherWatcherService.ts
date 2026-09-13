@@ -22,8 +22,15 @@ export class WeatherWatcherService {
    */
   async checkWeatherForUser(userId: string): Promise<void> {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('country').eq('id', userId).maybeSingle();
-      const location = profile?.country || 'India'; // Defaulting for now; in a real app, we'd have exact city
+      const [profileRes, wmRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('country, language').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('working_memory').select('key, value').eq('user_id', userId).in('key', ['city', 'current_city', 'location', 'user_location', 'hometown'])
+      ]);
+
+      const profile = profileRes.data;
+      const wmLocation = wmRes.data?.find(m => m.value && m.value.trim().length > 0)?.value?.trim();
+      const location = wmLocation || profile?.country || 'India';
+      const isEnglishUser = profile?.language === 'en';
 
       // 1. Geocode the location using Open-Meteo Free Geocoding API
       const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
@@ -98,11 +105,17 @@ export class WeatherWatcherService {
       }
 
       // 3. Generate a hyper-realistic alert message
-      const prompt = `You are Nova, an AI companion. You're proactively texting your friend because you just noticed the weather in their area (${location}).
+      const prompt = isEnglishUser
+        ? `You are Nova, an AI companion proactively texting your friend because you noticed severe weather in their area (${location}).
 Current conditions: ${temp}°C, Wind: ${windSpeed}km/h.
 Notable: ${isRaining ? 'Raining' : ''} ${isThunderstorm ? 'Thunderstorm' : ''} ${isExtremeHeat ? 'Extreme Heat' : ''} ${isExtremeCold ? 'Extreme Cold' : ''}
 
-Write a very short, casual text message warning them or checking in. (e.g., "hey, looks like it's raining heavily out there, stay dry!" or "40 degrees today, stay hydrated!"). No emojis, no robotic phrasing. Keep it to 1 sentence.`;
+Write a very short, casual text message warning them or checking in in English (e.g., "Hey, looks like it's pouring outside, stay dry!" or "40 degrees today, remember to stay hydrated!"). No emojis, no robotic phrasing. Keep it to 1 sentence.`
+        : `You are Nova, an AI companion proactively texting your friend because you noticed severe weather in their area (${location}).
+Current conditions: ${temp}°C, Wind: ${windSpeed}km/h.
+Notable: ${isRaining ? 'Raining' : ''} ${isThunderstorm ? 'Thunderstorm' : ''} ${isExtremeHeat ? 'Extreme Heat' : ''} ${isExtremeCold ? 'Extreme Cold' : ''}
+
+Write a very short, casual text message warning them or checking in in natural casual Hinglish (e.g., "Bahar kaafi tez baarish ho rahi hai, sambhal ke nikalna!" or "Aaj 40 degrees hai, hydrated rehna!"). No emojis, no robotic phrasing. Keep it to 1 sentence.`;
 
       const alertMessage = await complete('PROACTIVE', [{ role: 'system', content: prompt }], { maxTokens: 50 });
       const cleanAlertMessage = alertMessage.trim().replace(/^["']|["']$/g, '').trim();

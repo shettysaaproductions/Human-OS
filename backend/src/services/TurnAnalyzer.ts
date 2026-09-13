@@ -1117,7 +1117,7 @@ export class TurnAnalyzer {
     }
 
     // Fitness Routine (e.g. "I go to gym at 7am", "Main daily workout karta hoon", "I do yoga every morning")
-    const fitnessMatch = lower.match(/\b(?:go\s+to\s+(?:the\s+)?gym|workout|gym\s+jata|gym\s+jati|exercise|do\s+yoga|morning\s+walk)\s*(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning))?\b/i);
+    const fitnessMatch = lower.match(/\b(?:(?:go\s+to\s+(?:the\s+)?gym|gym\s+jata|gym\s+jati|do\s+yoga|morning\s+walk)\s*(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning))?|(?:daily|regularly|roz|har\s+din|every\s+day)\s+(?:workout|exercise|gym)|(?:workout|exercise)\s+(?:daily|regularly|roz|karta\s+hoon|karti\s+hoon|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning)))\b/i);
     if (fitnessMatch) {
       facts.push({ key: 'fitness_routine', value: this.cleanValue(fitnessMatch[0]), text, isProtected: isExplicitRemember, factClass });
     }

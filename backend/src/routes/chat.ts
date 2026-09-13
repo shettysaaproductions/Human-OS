@@ -1341,7 +1341,7 @@ chatRouter.post(
       }
 
       const situationCtx = {
-        nowLocal, tzLabel, country: userCountry, gapMinutes,
+        nowLocal, nowUtc: new Date(), tzLabel, country: userCountry, gapMinutes,
         latestEmotion: emotionResult.data, recentEpisodes: episodicResult.data || [],
         latestReflection: reflectionResult.data, isWeekend, scheduleOverrideNote, dayName: DAY_NAMES[dayIdx],
         dateStr, timeStr, lastUserMessage: effectiveMessage, upcomingReminders,

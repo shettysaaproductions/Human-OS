@@ -27,6 +27,24 @@ import {
   generateTimingFingerprint,
 } from '../types/watchtowerTiming';
 import { WatchtowerAttentionDecision } from '../types/watchtowerAttention';
+import { resolveUserTzOffsetHours } from './ReminderEngine';
+
+function offsetToIanaTimezone(offsetHours: number): string {
+  if (offsetHours === 5.5) return 'Asia/Kolkata';
+  if (offsetHours === 0) return 'UTC';
+  if (offsetHours === -5) return 'America/New_York';
+  if (offsetHours === -8) return 'America/Los_Angeles';
+  if (offsetHours === -6) return 'America/Chicago';
+  if (offsetHours === -7) return 'America/Denver';
+  if (offsetHours === 1) return 'Europe/London';
+  if (offsetHours === 2) return 'Europe/Paris';
+  if (offsetHours === 3) return 'Europe/Moscow';
+  if (offsetHours === 4) return 'Asia/Dubai';
+  if (offsetHours === 8) return 'Asia/Singapore';
+  if (offsetHours === 9) return 'Asia/Tokyo';
+  if (offsetHours === 10) return 'Australia/Sydney';
+  return 'UTC';
+}
 
 export interface TimingEngineSummary {
   userId: string;
@@ -126,7 +144,7 @@ export class ContextualTimingEngine {
     try {
       const [profileRes, presenceRes, sessionRes, chatRes, outreachRes] = await Promise.all([
         qt.track('timing_fetch_profile', 'profiles', () =>
-          supabaseAdmin.from('profiles').select('timezone, preferred_name').eq('id', userId).maybeSingle()
+          supabaseAdmin.from('profiles').select('timezone, timezone_offset, country, preferred_name').eq('id', userId).maybeSingle()
         ),
         qt.track('timing_fetch_presence', 'user_presence', () =>
           supabaseAdmin.from('user_presence').select('status, last_active_at, last_typing_at').eq('user_id', userId).maybeSingle()
@@ -158,18 +176,15 @@ export class ContextualTimingEngine {
         ),
       ]);
 
-      const rawTimezone = profileRes.data?.timezone || '';
+      let rawTimezone = profileRes.data?.timezone || '';
+      if (!this.isValidTimezone(rawTimezone)) {
+        const offset = resolveUserTzOffsetHours(profileRes.data || undefined);
+        rawTimezone = offsetToIanaTimezone(offset);
+      }
       const isTzValid = this.isValidTimezone(rawTimezone);
       const timezone = isTzValid ? rawTimezone.trim() : '';
       const nowLocal = isTzValid ? this.deriveLocalDateTime(nowUtc, timezone) : nowUtc;
       const localHour = isTzValid ? nowLocal.getHours() + nowLocal.getMinutes() / 60 : 0;
-
-      // Quiet Hours Evaluation (Default: 23:00 to 07:30 local)
-      // If timezone is invalid/missing, isQuietHours is true (conservative fail-safe)
-      const isQuietHours =
-        !isTzValid ||
-        localHour >= WATCHTOWER_TIMING_LIMITS.DEFAULT_QUIET_HOURS_START ||
-        localHour < WATCHTOWER_TIMING_LIMITS.DEFAULT_QUIET_HOURS_END;
 
       // Presence & Message Gap Analysis
       const presence = presenceRes.data;
@@ -188,6 +203,15 @@ export class ContextualTimingEngine {
         // Active turn if user spoke within last 3 minutes or is currently typing
         isUserInActiveTurn = gapMinutesSinceLastMessage < 3 || presenceStatus === 'typing';
       }
+
+      // Quiet Hours Evaluation (Default: 23:00 to 07:30 local)
+      // If user is actively typing, online, or chatted within the last 15m, they are awake and active!
+      const isUserActiveLive = presenceStatus === 'online' || presenceStatus === 'typing' || (gapMinutesSinceLastMessage !== null && gapMinutesSinceLastMessage < 15);
+      const isQuietHours =
+        !isUserActiveLive &&
+        (!isTzValid ||
+          localHour >= WATCHTOWER_TIMING_LIMITS.DEFAULT_QUIET_HOURS_START ||
+          localHour < WATCHTOWER_TIMING_LIMITS.DEFAULT_QUIET_HOURS_END);
 
       // Outreach History Analysis
       const outreachLogs = outreachRes.data || [];

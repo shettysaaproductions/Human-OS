@@ -9,6 +9,7 @@ import { reminderIntentDetector } from './ReminderIntentDetector';
 
 export interface SituationContext {
   nowLocal: Date;
+  nowUtc?: Date;
   tzLabel: string;
   country: string;
   gapMinutes: number | null;
@@ -211,8 +212,9 @@ export class SituationalAwareness {
       // older than 5 minutes, the stored status is STALE — force OFFLINE/AWAY
       // regardless of what the DB says.
       const STALE_PRESENCE_MS = 5 * 60 * 1000;
+      const nowUtcMs = ctx.nowUtc ? ctx.nowUtc.getTime() : Date.now();
       const lastActiveMs = p.last_active_at ? new Date(p.last_active_at).getTime() : 0;
-      const presenceAgeMs = lastActiveMs > 0 ? (ctx.nowLocal.getTime() - lastActiveMs) : Infinity;
+      const presenceAgeMs = lastActiveMs > 0 ? (nowUtcMs - lastActiveMs) : Infinity;
       let status = p.status;
       let staleNote = '';
       if ((status === 'online' || status === 'typing') && presenceAgeMs > STALE_PRESENCE_MS) {
@@ -221,7 +223,7 @@ export class SituationalAwareness {
         staleNote = ' [stale status corrected — app likely closed without updating]';
       }
 
-      const lastActiveStr = p.last_active_at ? this.describeLastActive(p.last_active_at, ctx.nowLocal) : null;
+      const lastActiveStr = p.last_active_at ? this.describeLastActive(p.last_active_at, new Date(nowUtcMs)) : null;
 
       const statusLabel = status === 'typing'
         ? 'TYPING right now'
@@ -338,7 +340,7 @@ export class SituationalAwareness {
 
     // ── Jarvis Reminder Mode ──
     if (ctx.upcomingReminders && ctx.upcomingReminders.length > 0) {
-      const nowMs = ctx.nowLocal.getTime();
+      const nowMs = ctx.nowUtc ? ctx.nowUtc.getTime() : Date.now();
       const twoHoursMs = 2 * 60 * 60 * 1000;
       const soonReminders = ctx.upcomingReminders.filter(r => {
         if (!r.trigger_at) return false; // event-triggered — no fixed time to preview
