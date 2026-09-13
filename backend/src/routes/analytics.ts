@@ -399,6 +399,7 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
     const [
       { data: kgGoals, error: kgErr },
       { data: memGoals, error: memErr },
+      { data: lifeThreads, error: ltErr },
       { data: activeReminders, error: remErr }
     ] = await Promise.all([
       supabaseAdmin
@@ -414,8 +415,13 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
         .or('memory_type.eq.goals,key.eq.goals,key.ilike.goal_%,key.ilike.%target%,key.eq.passions')
         .order('created_at', { ascending: false }),
       supabaseAdmin
+        .from('life_threads')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false }),
+      supabaseAdmin
         .from('reminders')
-        .select('id, task, trigger_at, status, recurrence, category, urgency, created_at')
+        .select('*')
         .eq('user_id', userId)
         .order('trigger_at', { ascending: true })
     ]);
@@ -423,6 +429,9 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
     if (kgErr && !memGoals) throw kgErr;
     if (memErr) {
       logger.warn('[Analytics/goals] Memory goals query warning', { error: memErr.message });
+    }
+    if (ltErr) {
+      logger.warn('[Analytics/goals] Life threads query warning', { error: ltErr.message });
     }
     if (remErr) {
       logger.warn('[Analytics/goals] Reminders query warning', { error: remErr.message });
@@ -479,7 +488,74 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
       });
     }
 
-    // 2. Synthesize memories goals (e.g. key='goals', value='Scaling Conviction HR and hiring top talent')
+    // 2. Synthesize life_threads (Cultivated deep goals, ambitions, and multi-day plans)
+    for (const lt of (lifeThreads || [])) {
+      const topic = (lt.topic || '').trim();
+      if (!topic || seenTitles.has(topic.toLowerCase())) continue;
+      seenTitles.add(topic.toLowerCase());
+
+      const isComplete = lt.state === 'completed';
+      const isAbandoned = lt.state === 'abandoned';
+      if (isAbandoned) continue;
+
+      let progress = 35;
+      if (isComplete) {
+        progress = 100;
+      } else if (Array.isArray(lt.milestones) && lt.milestones.length > 0) {
+        const completedMilestones = lt.milestones.filter((m: any) => m.completed || m.status === 'completed').length;
+        progress = Math.round((completedMilestones / lt.milestones.length) * 100) || 25;
+      } else {
+        switch (lt.cultivation_stage) {
+          case 'DISCOVERY': progress = 20; break;
+          case 'EXPLORATION': progress = 35; break;
+          case 'PLANNING': progress = 55; break;
+          case 'IN_PROGRESS': progress = 75; break;
+          default: progress = 40; break;
+        }
+      }
+
+      const nextStepText = lt.next_useful_step?.action || lt.next_useful_step?.description || '';
+      const desc = nextStepText ? `Next Step: ${nextStepText}` : (lt.topic || 'Life Goal');
+      const deadline = lt.next_relevant_time || null;
+
+      const threadGoalObj = {
+        id: `thread-${lt.id}`,
+        name: topic,
+        title: topic,
+        entity_type: 'life_thread_goal',
+        description: desc,
+        progress,
+        status: isComplete ? 'completed' : 'active',
+        category: lt.category || 'Life Goal',
+        targetDate: deadline,
+        createdAt: lt.created_at,
+        source: 'life_thread',
+        attributes: {
+          name: topic,
+          description: desc,
+          progress,
+          status: isComplete ? 'completed' : 'active',
+          deadline,
+          cultivation_stage: lt.cultivation_stage,
+          priority: lt.priority
+        }
+      };
+
+      if (isComplete) {
+        completedGoals.push(threadGoalObj);
+      } else {
+        activeGoals.push(threadGoalObj);
+      }
+
+      timeline.push({
+        id: `timeline-lt-${lt.id}`,
+        title: topic,
+        date: lt.last_relevant_at || lt.updated_at || lt.created_at,
+        status: threadGoalObj.status
+      });
+    }
+
+    // 3. Synthesize memories goals (e.g. key='goals', value='Scaling Conviction HR and hiring top talent')
     for (const m of (memGoals || [])) {
       const rawVal = (m.value || '').trim();
       if (!rawVal) continue;
@@ -533,16 +609,17 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
       }
     }
 
-    // 3. Synthesize active reminders (e.g. wife birthday planning, key schedules)
+    // 4. Synthesize active reminders (e.g. wife birthday planning, key schedules)
     for (const r of (activeReminders || [])) {
-      const taskTitle = (r.task || 'Reminder').trim();
+      const taskTitle = (r.text || r.task || r.notes || 'Reminder').trim();
       if (!taskTitle || seenTitles.has(taskTitle.toLowerCase())) continue;
       seenTitles.add(taskTitle.toLowerCase());
 
       const isCompleted = r.status === 'completed' || r.status === 'dismissed' || r.status === 'cancelled';
       const isUrgent = r.urgency === 'high';
       const deadlineStr = r.trigger_at ? new Date(r.trigger_at).toISOString() : null;
-      const desc = `Target Reminder: ${taskTitle}${r.recurrence && r.recurrence !== 'none' ? ` (${r.recurrence})` : ''}`;
+      const recType = r.recurrence_type || r.recurrence;
+      const desc = `Target Reminder: ${taskTitle}${recType && recType !== 'none' ? ` (${recType})` : ''}`;
       const progress = isCompleted ? 100 : (isUrgent ? 60 : 45);
 
       const reminderGoalObj = {
@@ -553,7 +630,7 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
         description: desc,
         progress,
         status: isCompleted ? 'completed' : 'active',
-        category: r.category || (isUrgent ? 'Priority Reminder' : 'Milestone Reminder'),
+        category: isUrgent ? 'Priority Reminder' : 'Milestone Reminder',
         targetDate: deadlineStr,
         createdAt: r.created_at || deadlineStr,
         source: 'reminder',
@@ -562,7 +639,8 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
           description: desc,
           progress,
           status: isCompleted ? 'completed' : 'active',
-          deadline: deadlineStr
+          deadline: deadlineStr,
+          recurrence_type: recType || null
         }
       };
 

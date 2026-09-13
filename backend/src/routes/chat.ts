@@ -1512,6 +1512,21 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
       }
 
       // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
+      // 0. Conversational Reminder Cancellation Guard: Check if user asked to cancel/delete reminders
+      if (!is_proactive) {
+        try {
+          const cancelRes = await reminderIntentDetector.detectAndCancelReminders(userId, effectiveMessage);
+          if (cancelRes.cancelled && cancelRes.count > 0) {
+            const taskList = cancelRes.cancelledReminders.map((r: any) => `"${r.text}"`).join(', ');
+            const cancelDirective = `\n\n## 🛑 REMINDER CANCELLATION EXECUTED (TOP PRIORITY)\nThe user asked to cancel their reminder: "${effectiveMessage}".\nYou have ALREADY cancelled ${cancelRes.count} active reminder(s) in the database: ${taskList}.\nCRITICAL INSTRUCTIONS:\n1. Warmly and directly confirm to the user (in natural conversational Hinglish or English matching user) that their reminder (${taskList}) has been successfully cancelled and removed from their schedule.\n2. Keep it concise (1-2 sentences). Do NOT debate or ask them to repeat.`;
+            turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + cancelDirective;
+            logger.info('[Chat] Conversational reminder cancellation executed', { userId, count: cancelRes.count, tasks: taskList });
+          }
+        } catch (cErr: any) {
+          logger.warn('[Chat] Reminder cancellation error', { error: cErr?.message });
+        }
+      }
+
       // 1. Proactive Offer Affirmation Guard: Check if user affirmed an immediate previous reminder offer
       const lastAssistantMsg = ((historyResult.data || []) as any[])
         .find(m => m.role === 'assistant')?.content || '';
@@ -1571,11 +1586,52 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
 
           if (recentPending && recentPending.length > 0) {
             const rem = recentPending[0];
-            await supabaseAdmin.from('reminders').update({
-              accountability_status: 'completed_confirmed',
-              completed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }).eq('id', rem.id);
+            const nowIso = new Date().toISOString();
+
+            if (rem.recurrence_type && rem.recurrence_interval) {
+              const { reminderSchedulerService } = await import('../services/ReminderSchedulerService');
+              const baseTime = rem.trigger_at ? new Date(rem.trigger_at) : new Date();
+              const nextTrigger = reminderSchedulerService.calculateNextTrigger(
+                baseTime,
+                rem.recurrence_type,
+                rem.recurrence_interval,
+                true
+              );
+              const filteredNext = reminderSchedulerService.applyDayMonthFilters(
+                nextTrigger,
+                rem.active_days || null,
+                rem.active_months || null,
+                rem.active_year || null,
+                Math.round(tzOffset * 60)
+              );
+              const currentCount = (rem.recurrence_count || 0) + 1;
+              const hitLimit = rem.recurrence_limit && currentCount >= rem.recurrence_limit;
+              const hitEndAt = rem.end_at && filteredNext >= new Date(rem.end_at);
+
+              if (hitLimit || hitEndAt) {
+                await supabaseAdmin.from('reminders').update({
+                  status: 'completed',
+                  accountability_status: 'completed_confirmed',
+                  completed_at: nowIso,
+                  updated_at: nowIso
+                }).eq('id', rem.id);
+              } else {
+                await supabaseAdmin.from('reminders').update({
+                  trigger_at: filteredNext.toISOString(),
+                  recurrence_count: currentCount,
+                  accountability_status: 'completed_confirmed',
+                  last_completed_at: nowIso,
+                  updated_at: nowIso
+                }).eq('id', rem.id);
+              }
+            } else {
+              await supabaseAdmin.from('reminders').update({
+                status: 'completed',
+                accountability_status: 'completed_confirmed',
+                completed_at: nowIso,
+                updated_at: nowIso
+              }).eq('id', rem.id);
+            }
 
             const praiseSample = isEnglishUser ? '("Proud of you!", "Awesome consistency!")' : '("Proud of you yaar!", "Super consistency!")';
             const accountabilityDirective = `\n\n## 🏆 ACCOUNTABILITY CELEBRATION (TOP PRIORITY)\nThe user just confirmed they completed their reminder task: "${rem.text}"!\nPraise them warmly with authentic enthusiasm ${praiseSample}, celebrate their streak, and keep them feeling energized!`;
@@ -2510,12 +2566,12 @@ Return ONLY valid JSON:
               if (parsed.task && parsed.trigger_at) {
                 await supabaseAdmin.from('reminders').insert({
                   user_id: userId,
-                  task: parsed.task,
+                  text: parsed.task,
                   trigger_at: parsed.trigger_at,
                   status: 'active',
                   urgency: parsed.urgency || 'high',
-                  category: parsed.category || 'Personal',
-                  source_context: 'zero_hallucination_promise_guardian',
+                  accountability_status: 'pending',
+                  notes: JSON.stringify({ category: parsed.category || 'Personal', source: 'zero_hallucination_promise_guardian' }),
                   created_at: new Date().toISOString()
                 });
 

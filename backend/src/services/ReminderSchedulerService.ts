@@ -414,71 +414,87 @@ Output ONLY the raw text message. No markdown, no quotes, no labels.`;
     }
   }
 
-  public calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number): Date {
+  public calculateNextTrigger(currentTrigger: Date, recurrenceType: string, recurrenceInterval: number, ensureFuture: boolean = true): Date {
     const next = new Date(currentTrigger);
-    if (recurrenceType === 'minutes') {
-      next.setMinutes(next.getMinutes() + recurrenceInterval);
-    } else if (recurrenceType === 'hours') {
-      next.setHours(next.getHours() + recurrenceInterval);
-    } else if (recurrenceType === 'days') {
-      next.setDate(next.getDate() + recurrenceInterval);
-    } else if (recurrenceType === 'weeks') {
-      next.setDate(next.getDate() + (recurrenceInterval * 7));
-    } else if (recurrenceType === 'months') {
-      const day = next.getDate();
-      next.setMonth(next.getMonth() + recurrenceInterval);
-      if (next.getDate() !== day) next.setDate(0);
-    } else if (recurrenceType === 'years') {
-      next.setFullYear(next.getFullYear() + recurrenceInterval);
-    } else {
-      next.setDate(next.getDate() + 1);
+    const advance = (d: Date) => {
+      if (recurrenceType === 'minutes') {
+        d.setMinutes(d.getMinutes() + recurrenceInterval);
+      } else if (recurrenceType === 'hours') {
+        d.setHours(d.getHours() + recurrenceInterval);
+      } else if (recurrenceType === 'days') {
+        d.setDate(d.getDate() + recurrenceInterval);
+      } else if (recurrenceType === 'weeks') {
+        d.setDate(d.getDate() + (recurrenceInterval * 7));
+      } else if (recurrenceType === 'months') {
+        const day = d.getDate();
+        d.setMonth(d.getMonth() + recurrenceInterval);
+        if (d.getDate() !== day) d.setDate(0);
+      } else if (recurrenceType === 'years') {
+        d.setFullYear(d.getFullYear() + recurrenceInterval);
+      } else {
+        d.setDate(d.getDate() + 1);
+      }
+    };
+
+    advance(next);
+
+    // If ensureFuture is enabled, keep advancing until next > now
+    if (ensureFuture) {
+      const now = new Date();
+      let loops = 0;
+      while (next.getTime() <= now.getTime() && loops < 1000) {
+        advance(next);
+        loops++;
+      }
     }
+
     return next;
   }
 
   /**
    * Given a candidate next trigger date, advance it forward until
    * it falls on a valid day (active_days) and valid month (active_months/year).
+   * Supports local timezone offset to avoid UTC date/day shifting.
    */
   public applyDayMonthFilters(
     date: Date,
     activeDays: string[] | null,
     activeMonths: string[] | null,
-    activeYear: number | null
+    activeYear: number | null,
+    timezoneOffsetMinutes: number = 330 // Default to IST (UTC+5:30)
   ): Date {
     const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const MONTH_NAMES = ['january','february','march','april','may','june','july','august','september','october','november','december'];
 
-    const normDays = activeDays ? activeDays.map(d => d.toLowerCase()) : null;
-    const normMonths = activeMonths ? activeMonths.map(m => m.toLowerCase()) : null;
+    const normDays = activeDays && activeDays.length > 0 ? activeDays.map(d => d.toLowerCase()) : null;
+    const normMonths = activeMonths && activeMonths.length > 0 ? activeMonths.map(m => m.toLowerCase()) : null;
 
-    let d = new Date(date);
-    let safetyDay = 0;
-    // Advance to a valid day
-    if (normDays && normDays.length > 0) {
-      while (safetyDay < 14) {
-        const dayName = DAY_NAMES[d.getUTCDay()];
-        if (normDays.includes(dayName)) break;
-        d.setUTCDate(d.getUTCDate() + 1);
-        safetyDay++;
-      }
+    if (!normDays && !normMonths && !activeYear) {
+      return date;
     }
 
-    // Advance to a valid month
-    if (normMonths && normMonths.length > 0) {
-      let safetyMonth = 0;
-      while (safetyMonth < 24) {
-        const monthName = MONTH_NAMES[d.getUTCMonth()];
-        const yearOk = !activeYear || d.getUTCFullYear() === activeYear;
-        if (normMonths.includes(monthName) && yearOk) break;
-        // Jump to 1st of next month, preserve time
-        const hours = d.getUTCHours();
-        const mins = d.getUTCMinutes();
-        d.setUTCMonth(d.getUTCMonth() + 1);
-        d.setUTCDate(1);
-        d.setUTCHours(hours, mins, 0, 0);
-        safetyMonth++;
+    let d = new Date(date);
+    let iterations = 0;
+
+    // Advance day by day until all active filters match simultaneously
+    while (iterations < 730) {
+      const localTimeMs = d.getTime() + timezoneOffsetMinutes * 60 * 1000;
+      const localDate = new Date(localTimeMs);
+
+      const dayName = DAY_NAMES[localDate.getUTCDay()];
+      const monthName = MONTH_NAMES[localDate.getUTCMonth()];
+      const year = localDate.getUTCFullYear();
+
+      const dayMatch = !normDays || normDays.includes(dayName);
+      const monthMatch = !normMonths || normMonths.includes(monthName);
+      const yearMatch = !activeYear || year === activeYear;
+
+      if (dayMatch && monthMatch && yearMatch) {
+        break;
       }
+
+      d.setDate(d.getDate() + 1);
+      iterations++;
     }
 
     return d;

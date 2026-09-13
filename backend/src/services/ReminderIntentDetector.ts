@@ -913,6 +913,145 @@ export class ReminderIntentDetector {
       };
     }
   }
+
+  /**
+   * Checks if user wants to cancel, delete, or remove one or more reminders.
+   */
+  detectCancellationIntent(text: string): { isCancellation: boolean; deleteAll: boolean; taskQuery?: string } | null {
+    if (!text || typeof text !== 'string') return null;
+    const lower = text.toLowerCase().trim();
+
+    // 1. Complaint shield: complaints like "remind kyu nahi kiya" are not cancellation
+    if (this.isComplaint(lower)) return null;
+
+    // 2. Cancellation of all reminders
+    const allPatterns = [
+      /\b(?:cancel|delete|remove|clear|stop)\s+(?:all\s+(?:of\s+my\s+|my\s+)?|every\s+)?reminders?\b/i,
+      /\b(?:saare|sare|sab|sabke\s+sab)\s+reminders?\s+(?:ko\s+)?(?:cancel|delete|hata|hatao|mita|band)\s*(?:kar\s*do|kardo|kar\s*dena|karo|do)?\b/i,
+      /\breminders?\s+(?:saare|sare|sab)\s+(?:cancel|delete|hata|hatao|mita|band)\s*(?:kar\s*do|kardo|kar\s*dena|karo|do)?\b/i
+    ];
+    if (allPatterns.some(p => p.test(lower))) {
+      return { isCancellation: true, deleteAll: true };
+    }
+
+    // 3. Targeted cancellation: e.g. "cancel my gym reminder", "delete reminder to drink water", "gym wala reminder cancel kar do"
+    const targetedEnglish = /\b(?:cancel|delete|remove|stop)\s+(?:the\s+|my\s+)?(?:reminder\s+(?:for|to|about)\s+|reminder\s+)?([a-zA-Z0-9\s:apm]+?)(?:\s+reminder)?(?:[.,;!]|$)/i;
+    const targetedHinglish = /\b([a-zA-Z0-9\s:apm]+?)\s*(?:wala\s+|ka\s+|ki\s+|ke\s+)?reminders?\s*(?:ko\s+)?(?:cancel|delete|hata|hatao|mita|band)\s*(?:kar\s*do|kardo|kar\s*dena|karo|do)\b/i;
+    const generalCancelHindi = /\breminders?\s*(?:ko\s+)?(?:cancel|delete|hata|hatao|mita|band)\s*(?:kar\s*do|kardo|kar\s*dena|karo|do)\b/i;
+
+    if (generalCancelHindi.test(lower)) {
+      const m = lower.match(targetedHinglish);
+      if (m && m[1] && !/^(mera|meri|mere|wo|woh|ye|yeh|ek)$/i.test(m[1].trim())) {
+        return { isCancellation: true, deleteAll: false, taskQuery: m[1].trim() };
+      }
+      return { isCancellation: true, deleteAll: false };
+    }
+
+    const mEng = lower.match(targetedEnglish);
+    if (mEng && mEng[1] && !/^(it|that|this|all|my|the)$/i.test(mEng[1].trim())) {
+      const taskQ = mEng[1].replace(/\breminders?\b/gi, '').trim();
+      return { isCancellation: true, deleteAll: false, taskQuery: taskQ || undefined };
+    }
+
+    const mHing = lower.match(targetedHinglish);
+    if (mHing && mHing[1]) {
+      const taskQ = mHing[1].replace(/^(mera|meri|mere|wo|woh|ye|yeh)\s+/i, '').trim();
+      return { isCancellation: true, deleteAll: false, taskQuery: taskQ || undefined };
+    }
+
+    return null;
+  }
+
+  /**
+   * Autonomously cancels matching active reminders in the database.
+   */
+  async detectAndCancelReminders(userId: string, text: string): Promise<{
+    cancelled: boolean;
+    count: number;
+    cancelledReminders: any[];
+    message: string;
+  }> {
+    const intent = this.detectCancellationIntent(text);
+    if (!intent) {
+      return { cancelled: false, count: 0, cancelledReminders: [], message: '' };
+    }
+
+    try {
+      // Query active reminders for the user
+      const { data: activeReminders, error: fetchErr } = await supabaseAdmin
+        .from('reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active');
+
+      if (fetchErr || !activeReminders || activeReminders.length === 0) {
+        return {
+          cancelled: true,
+          count: 0,
+          cancelledReminders: [],
+          message: 'No active reminders were found to cancel.'
+        };
+      }
+
+      let toCancel: any[] = [];
+
+      if (intent.deleteAll) {
+        toCancel = activeReminders;
+      } else if (intent.taskQuery) {
+        const queryLower = intent.taskQuery.toLowerCase();
+        toCancel = activeReminders.filter(r => {
+          const rText = (r.text || r.notes || '').toLowerCase();
+          return rText.includes(queryLower) || queryLower.includes(rText);
+        });
+        // If no keyword match found, check if only 1 active reminder exists
+        if (toCancel.length === 0 && activeReminders.length === 1) {
+          toCancel = activeReminders;
+        }
+      } else {
+        toCancel = activeReminders.slice(0, 1);
+      }
+
+      if (toCancel.length === 0) {
+        return {
+          cancelled: true,
+          count: 0,
+          cancelledReminders: [],
+          message: `No active reminder matched "${intent.taskQuery}".`
+        };
+      }
+
+      const idsToCancel = toCancel.map(r => r.id);
+      const { error: updateErr } = await supabaseAdmin
+        .from('reminders')
+        .update({
+          status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .in('id', idsToCancel);
+
+      if (updateErr) {
+        logger.error('[ReminderIntentDetector] Failed to cancel reminders', { error: updateErr.message });
+        return { cancelled: false, count: 0, cancelledReminders: [], message: 'Database error during cancellation.' };
+      }
+
+      logger.info('[ReminderIntentDetector] Successfully cancelled reminders', {
+        userId,
+        count: toCancel.length,
+        cancelledIds: idsToCancel,
+        tasks: toCancel.map(r => r.text)
+      });
+
+      return {
+        cancelled: true,
+        count: toCancel.length,
+        cancelledReminders: toCancel,
+        message: `Cancelled ${toCancel.length} reminder(s): ${toCancel.map(r => `"${r.text}"`).join(', ')}.`
+      };
+    } catch (err: any) {
+      logger.error('[ReminderIntentDetector] Exception during cancelReminders', { error: err.message });
+      return { cancelled: false, count: 0, cancelledReminders: [], message: err.message };
+    }
+  }
 }
 
 export const reminderIntentDetector = ReminderIntentDetector.getInstance();

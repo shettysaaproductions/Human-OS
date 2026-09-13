@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.5-beta",
+    "date": "2026-09-13",
+    "title": "🎯 Autonomous Goals & Reminders Architecture Hardening",
+    "message": [
+      "Full Life Threads & Ambitions in Goals Tab: Cultivated life goals, multi-day plans, milestone progress, and next useful actions now seamlessly synthesize into your Goals dashboard.",
+      "Conversational Reminder Cancellation: Say 'Cancel my gym reminder' or 'Reminders delete kar do' in natural English or Hinglish — Nova instantly cancels them in the schedule with zero hallucination.",
+      "Smart Accountability Auto-Complete: Affirming completion in chat ('gym ho gaya', 'dawai kha li', 'done') automatically marks tasks completed and advances recurring routines to the next cycle.",
+      "Intelligent Recurrence Advancing: Recurring reminders never get stuck in the past or send backlog spam — they smoothly advance forward to future cycles with local timezone precision.",
+      "Deterministic Goal & Dream Extraction: Ambitions, life targets, dreams, and milestones shared in chat ('Mera goal hai...', 'Target hai...') are automatically remembered and tracked."
+    ]
+  },
+  {
     "version": "0.3.4-beta",
     "date": "2026-09-13",
     "title": "⚡ Sci-Fi Neural Action Potential Pulses, 2D Galaxy Fix & Goals Reminder Sync",

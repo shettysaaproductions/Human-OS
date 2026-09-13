@@ -1350,6 +1350,20 @@ export class TurnAnalyzer {
       facts.push({ key: 'target_exam', value: this.cleanValue(examMatch[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
+    // General Life & Career Goals / Ambitions / Dreams
+    const goalMatch = lower.match(/\b(?:mera\s+(?:primary\s+|main\s+)?(?:goal|aim|dream|lakshya)|my\s+(?:primary\s+|main\s+)?(?:goal|aim|dream))\s+(?:hai\s+(?:ki\s+)?|is\s+(?:to\s+)?|to\s+)([a-zA-Z0-9\s,._'-]{5,120}?)(?:[.,;!]|$)/i) ||
+      lower.match(/\b(?:target\s+(?:hai|is))\s+(?:ki\s+|to\s+)?([a-zA-Z0-9\s,._'-]{5,120}?)(?:[.,;!]|$)/i);
+    if (goalMatch) {
+      const cleanGoal = this.cleanValue(goalMatch[1]);
+      if (cleanGoal.length >= 5 && !/^(this|that|something|kuch|karna)$/i.test(cleanGoal)) {
+        facts.push({ key: 'goals', value: cleanGoal, text, isProtected: true, factClass: 'PROTECTED_FACT' });
+        const goalSlug = cleanGoal.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').slice(0, 30).replace(/^_|_$/g, '');
+        if (goalSlug && goalSlug !== 'goals') {
+          facts.push({ key: `goal_${goalSlug}`, value: cleanGoal, text, isProtected: true, factClass: 'PROTECTED_FACT' });
+        }
+      }
+    }
+
     // Dietary preference (e.g. "I am vegetarian", "Main pure veg hoon", "I am vegan")
     const dietMatch = lower.match(/\b(?:i\s+am|i'm|mai|main)\s+(?:pure\s+)?(vegetarian|non-vegetarian|vegan|eggetarian|jain|veg|non-veg)\b/i) ||
         lower.match(/\b(?:my\s+diet\s+is|eating\s+habit\s+is)\s+(vegetarian|non-vegetarian|vegan|eggetarian|jain|veg|non-veg)\b/i);
