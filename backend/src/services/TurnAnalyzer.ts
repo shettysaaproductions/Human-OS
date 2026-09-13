@@ -495,7 +495,9 @@ export class TurnAnalyzer {
     const lower = text.toLowerCase();
 
     // Step 1: Check for reminder intent keywords
-    const REMINDER_INTENT_RE = /\b(yaad dila|yaad dilao|remind me|reminder.*set|yaad kara|yaad kar dena|mujhe yaad|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena|bata dena|yaad karna)\b/i;
+    if (/\b(?:you\s+remind\s+me\s+of|reminds?\s+me\s+of)\b/i.test(lower)) return null;
+
+    const REMINDER_INTENT_RE = /\b(yaad\s*dila|yaad\s*dilao|remind(?:\s+(?:me|us|him|her))?|reminder.*set|(?:set|put|add|create|schedule)\s*(?:an?|the)?\s*(?:reminder|alarm)|yaad\s*kara|yaad\s*kar\s*dena|mujhe\s*yaad|alarm\s*laga|wake\s+(?:me|us|him|her)\s+up|utha\s*dena|jaga\s*dena|mujhe\s*remind|yaad\s*rakhna|yaad\s*dena|bata\s*dena|yaad\s*karna)\b/i;
     if (!REMINDER_INTENT_RE.test(lower)) return null;
 
     // Step 2: Extract time phrase.
@@ -518,8 +520,8 @@ export class TurnAnalyzer {
         extractPeriod: m => m[1] },
       // "3 pm" / "9:30 am" / "5 baje" with suffix
       { re: /(\d{1,2}(?::\d{2})?)\s*(?:am|pm|baje)/i, extractRaw: m => m[1] },
-      // "at 5pm" / "at 17:00"
-      { re: /at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i, extractRaw: m => m[1] },
+      // "at 5pm" / "at 17:00" / "for 6am"
+      { re: /(?:at|for)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i, extractRaw: m => m[1] },
       // bare "5 baje" (digit followed by baje)
       { re: /(\d{1,2})\s*baje/i, extractRaw: m => m[1] },
     ];

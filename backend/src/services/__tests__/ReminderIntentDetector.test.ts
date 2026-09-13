@@ -147,4 +147,53 @@ describe('ReminderIntentDetector — High-Precision Natural Reminder Parsing', (
     expect(detector.hasReminderOffer(offer)).toBe(true);
     expect(detector.isAffirmation(userAffirmation)).toBe(true);
   });
+
+  it('14. Parses English reminder "Set a reminder to drink water in 20 minutes"', () => {
+    const text = 'Set a reminder to drink water in 20 minutes';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(false);
+    expect(parsed.title).toBe('Drink water');
+    expect(parsed.formattedTime).toContain('in 20 minutes');
+  });
+
+  it('15. Parses English alarm "Set an alarm for 6am"', () => {
+    const text = 'Set an alarm for 6am';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(false);
+    const localTrigger = new Date(parsed.triggerAt!.getTime() + tzOffset * 3600 * 1000);
+    expect(localTrigger.getUTCHours()).toBe(6);
+    expect(parsed.formattedTime).toContain('6:00 AM');
+  });
+
+  it('16. Parses wake up command and defaults to morning: "Wake me up at 7"', () => {
+    const text = 'Wake me up at 7';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(false);
+    const localTrigger = new Date(parsed.triggerAt!.getTime() + tzOffset * 3600 * 1000);
+    expect(localTrigger.getUTCHours()).toBe(7);
+    expect(parsed.formattedTime).toContain('7:00 AM');
+    expect(parsed.title).toBe('Wake up');
+  });
+
+  it('17. Parses Hindi wake-up command "Subah 6 baje utha dena"', () => {
+    const text = 'Subah 6 baje utha dena';
+    expect(detector.hasReminderIntent(text)).toBe(true);
+
+    const parsed = detector.parseReminderDetails(text, tzOffset);
+    expect(parsed.isAmbiguous).toBe(false);
+    const localTrigger = new Date(parsed.triggerAt!.getTime() + tzOffset * 3600 * 1000);
+    expect(localTrigger.getUTCHours()).toBe(6);
+  });
+
+  it('18. Rejects figurative idioms like "You remind me of my friend"', () => {
+    expect(detector.hasReminderIntent('You remind me of my childhood friend')).toBe(false);
+    expect(detector.hasReminderIntent('This reminds me of a crazy story')).toBe(false);
+  });
 });
+

@@ -5,6 +5,7 @@
  * Covers: time/day, message gap, emotion state, life events, user availability,
  * Jarvis-mode reminder flags, and life-domain curiosity hooks.
  */
+import { reminderIntentDetector } from './ReminderIntentDetector';
 
 export interface SituationContext {
   nowLocal: Date;
@@ -76,15 +77,16 @@ const RELATIONSHIP_SIGNALS = [
 
 // Lifestyle signal patterns — user is engaging in distinct daily living tracks
 const FITNESS_SIGNALS = [
-  'workout', 'gym', 'squat', 'bench', 'deadlift', 'cardio', 'running', 'calories',
+  'workout', 'worked out', 'gym', 'squat', 'bench', 'deadlift', 'cardio', 'running', 'ran', 'calories',
   'protein', 'macros', 'creatine', 'leg day', 'chest day', 'pull day', 'push day',
-  'exercise', 'sets', 'reps', 'bicep', 'tricep', 'muscle', 'diet plan', 'cutting', 'bulking'
+  'exercise', 'sets', 'reps', 'bicep', 'tricep', 'muscle', 'diet plan', 'cutting', 'bulking',
+  'jogging', 'cycling', 'swimming', 'pushups', 'pullups', 'weights', 'lifting'
 ];
 
 const STUDY_SIGNALS = [
-  'exam', 'study', 'studying', 'syllabus', 'revision', 'test', 'assignment',
+  'exam', 'study', 'studying', 'studied', 'syllabus', 'revision', 'test', 'assignment',
   'homework', 'lecture', 'college', 'university', 'semester', 'professor',
-  'midterm', 'finals', 'formula', 'notes bana', 'quiz', 'cgpa', 'marks'
+  'midterm', 'finals', 'formula', 'notes bana', 'quiz', 'cgpa', 'marks', 'course', 'coding'
 ];
 
 const WORK_SIGNALS = [
@@ -101,14 +103,27 @@ const PET_SIGNALS = [
 const CREATIVE_SIGNALS = [
   'youtube', 'script', 'recording', 'podcast', 'blog', 'editing', 'reels',
   'thumbnail', 'photoshoot', 'video shoot', 'creative idea', 'lyrics', 'designing',
-  'art', 'painting', 'draw', 'drawing', 'sketch', 'digital art', 'canvas', 'illustration'
+  'artwork', 'art', 'painting', 'draw', 'drawing', 'sketch', 'digital art', 'canvas', 'illustration'
 ];
 
 const HABIT_SIGNALS = [
   'meditation', 'meditate', 'water intake', 'hydration', 'gratitude', 'journal',
   'journaling', 'wake up early', 'daily routine', 'streak', 'habit tracker', 'affirmations',
-  'steps', '10k steps', 'walked', 'drank water', 'liters of water'
+  'steps', '10k steps', 'walked', 'drank water', 'liters of water', 'sleep', 'slept'
 ];
+
+/**
+ * Robust signal matcher: enforces whole-word boundaries for short words (<=4 chars)
+ * to avoid false substring triggers (e.g. "art" inside "karte", "cat" inside "certificate").
+ */
+function matchesSignalList(lower: string, signals: string[]): boolean {
+  return signals.some(s => {
+    if (s.length <= 4) {
+      return new RegExp(`\\b${s}\\b`, 'i').test(lower);
+    }
+    return lower.includes(s);
+  });
+}
 
 export class SituationalAwareness {
 
@@ -360,20 +375,29 @@ export class SituationalAwareness {
 
   detectAvailability(message: string): 'busy' | 'excited' | 'relationship' | 'fitness' | 'study' | 'work' | 'pet' | 'creative' | 'habit' | 'neutral' {
     const lower = message.toLowerCase();
-    
-    // Check for explicit timeframe (e.g. "20 mins", "30 mins", "2 hours")
-    if (/\b\d+\s*(min|mins|minute|minutes|hr|hrs|hour|hours)\b/i.test(lower)) return 'busy';
 
-    // Check lifestyle signals before generic busy signals so user sharing their routine/progress isn't muted
-    if (FITNESS_SIGNALS.some(s => lower.includes(s))) return 'fitness';
-    if (STUDY_SIGNALS.some(s => lower.includes(s))) return 'study';
-    if (PET_SIGNALS.some(s => lower.includes(s))) return 'pet';
-    if (CREATIVE_SIGNALS.some(s => lower.includes(s))) return 'creative';
-    if (HABIT_SIGNALS.some(s => lower.includes(s))) return 'habit';
-    if (RELATIONSHIP_SIGNALS.some(s => lower.includes(s))) return 'relationship';
-    if (EXCITED_SIGNALS.some(s => lower.includes(s))) return 'excited';
+    // 1. Check lifestyle signals FIRST so user sharing their routine, metrics, habits, or milestones is never muted
+    if (matchesSignalList(lower, FITNESS_SIGNALS)) return 'fitness';
+    if (matchesSignalList(lower, STUDY_SIGNALS)) return 'study';
+    if (matchesSignalList(lower, PET_SIGNALS)) return 'pet';
+    if (matchesSignalList(lower, CREATIVE_SIGNALS)) return 'creative';
+    if (matchesSignalList(lower, HABIT_SIGNALS)) return 'habit';
+    if (matchesSignalList(lower, RELATIONSHIP_SIGNALS)) return 'relationship';
+    if (matchesSignalList(lower, EXCITED_SIGNALS)) return 'excited';
 
-    // Word boundary regex for short acronyms + specific busy phrases
+    // 2. Check if this is a reminder/alarm instruction — asking Nova to remind/wake up is an active command, not unavailability!
+    if (reminderIntentDetector.hasReminderIntent(message)) {
+      return 'neutral';
+    }
+
+    // 3. Check for explicit unavailability timeframe (e.g. "give me 20 mins", "call in 10 mins", "back in 5 mins", "30 mins baad")
+    const isUnavailabilityTimeframe =
+      /\b(?:give me|wait|back in|free in|call (?:you |me )?in|talk in|busy for|connect in|see you in|ping you in)\s+\d+\s*(?:min|mins|minute|minutes|hr|hrs|hour|hours)\b/i.test(lower) ||
+      /\b\d+\s*(?:min|mins|minute|minutes|hr|hrs|hour|hours)\s*(?:baad|mein|me|bad|tak busy|ruk|de)\b/i.test(lower);
+
+    if (isUnavailabilityTimeframe) return 'busy';
+
+    // 4. Word boundary regex for short acronyms + specific busy phrases
     if (SHORT_BUSY_REGEX.test(lower) || BUSY_SIGNALS.some(s => lower.includes(s))) return 'busy';
     if (WORK_SIGNALS.some(s => lower.includes(s))) return 'work';
     return 'neutral';
@@ -390,14 +414,14 @@ export class SituationalAwareness {
   private getTimedPersona(now: Date, isWeekend: boolean, dayName?: string): string {
     const hour = now.getUTCHours();
     const dayPrefix = dayName ? `${dayName}` : (isWeekend ? 'Weekend' : 'Weekday');
-    if (hour >= 0 && hour < 5) return 'It\'s very late / early. User might be having trouble sleeping, studying late, or unwinding. Be low-key, warm, and chill. Don\'t be hyper.';
-    if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ` on ${dayPrefix}` : ''}. ${isWeekend ? 'Might be early riser or insomnia. Casual check-in.' : 'Keep it snappy.'}`;
+    if (hour >= 0 && hour < 5) return 'It\'s very late / early. If user is unwinding, be warm, chill, and low-key. If user is actively studying, coding, or working late, be supportive, sharp, and focused — do NOT scold about sleep or make assumptions.';
+    if (hour >= 5 && hour < 9) return `Early morning${isWeekend ? ` on ${dayPrefix}` : ''}. ${isWeekend ? 'Might be early riser or enjoying a slow morning. Casual check-in.' : 'Keep it snappy and energizing.'}`;
     if (hour >= 9 && hour < 12) return `${dayPrefix} morning. ${isWeekend ? 'Relaxed weekend mode. They might be free.' : 'They might be busy with their day. Don\'t distract unnecessarily.'}`;
     if (hour >= 12 && hour < 14) return 'Lunch time / Mid-day. Good time for a casual conversation.';
     if (hour >= 14 && hour < 17) return `${dayPrefix} afternoon. ${isWeekend ? 'Might be chilling, watching something, out with someone.' : 'Keep responses helpful and respect their time if they are busy.'}`;
     if (hour >= 17 && hour < 20) return `Evening — winding down from the day. ${isWeekend ? 'Evening plans likely.' : 'Most open to chatting now.'}`;
     if (hour >= 20 && hour < 23) return 'Night — prime conversation time. User is relaxed. Best time to have deeper conversations.';
-    return 'Late night — likely tired. Keep it light.';
+    return 'Late night — keep it warm and companionable.';
   }
 
   /**

@@ -3,6 +3,7 @@ import { validateAndRepairGrounding } from '../NovaBrainService';
 import { TurnAnalyzer } from '../TurnAnalyzer';
 import { lifeBlueprintCuriosityEngine } from '../LifeBlueprintCuriosityEngine';
 import { canonicalizeKey, CANONICAL_KEYS } from '../../lib/memoryKeySchema';
+import { SituationalAwareness } from '../SituationalAwareness';
 
 describe('Backend Chat Companion Hardening & Universal Lifestyle Support', () => {
 
@@ -154,4 +155,64 @@ describe('Backend Chat Companion Hardening & Universal Lifestyle Support', () =>
       expect(canonicalizeKey('favorite_novel').canonical).toBe('favourite_book');
     });
   });
+
+  describe('6. SituationalAwareness Lifestyle Availability Detection (No False Busy Muting)', () => {
+    const sa = new SituationalAwareness();
+
+    it('classifies fitness metric durations as fitness, NOT busy', () => {
+      expect(sa.detectAvailability('I worked out for 45 minutes')).toBe('fitness');
+      expect(sa.detectAvailability('I ran 5k in 25 mins')).toBe('fitness');
+      expect(sa.detectAvailability('Did 30 mins cardio today')).toBe('fitness');
+    });
+
+    it('classifies study session durations as study, NOT busy', () => {
+      expect(sa.detectAvailability('Studied for 2 hours today')).toBe('study');
+      expect(sa.detectAvailability('Exam revision for 3 hours')).toBe('study');
+    });
+
+    it('classifies habit and sleep durations as habit, NOT busy', () => {
+      expect(sa.detectAvailability('Meditation for 20 mins done')).toBe('habit');
+      expect(sa.detectAvailability('Slept 8 hours last night')).toBe('habit');
+    });
+
+    it('does not classify reminder commands with durations as busy', () => {
+      expect(sa.detectAvailability('Remind me in 10 minutes to call mom')).toBe('neutral');
+      expect(sa.detectAvailability('Set a reminder in 15 minutes')).toBe('neutral');
+    });
+
+    it('correctly classifies explicit delay/unavailability phrasing as busy', () => {
+      expect(sa.detectAvailability('Give me 15 mins, in a meeting')).toBe('busy');
+      expect(sa.detectAvailability('10 min baad baat karte hain')).toBe('busy');
+      expect(sa.detectAvailability('Call you in 20 mins')).toBe('busy');
+      expect(sa.detectAvailability('gtg')).toBe('busy');
+    });
+  });
+
+  describe('7. TurnAnalyzer Reminder Intent Extraction with English & Wake-Up Support', () => {
+    it('extracts English reminder with relative time', () => {
+      const result = TurnAnalyzer.extractReminderIntent('Set a reminder to drink water in 20 minutes');
+      expect(result).not.toBeNull();
+      expect(result?.isAmbiguous).toBe(false);
+      expect(result?.rawTime).toBe('20min');
+    });
+
+    it('extracts English alarm for morning', () => {
+      const result = TurnAnalyzer.extractReminderIntent('Set an alarm for 6am');
+      expect(result).not.toBeNull();
+      expect(result?.isAmbiguous).toBe(false);
+      expect(result?.rawTime).toBe('6');
+    });
+
+    it('extracts wake up command', () => {
+      const result = TurnAnalyzer.extractReminderIntent('Wake me up at 7');
+      expect(result).not.toBeNull();
+      expect(result?.isAmbiguous).toBe(false);
+    });
+
+    it('rejects figurative expressions from reminder intent', () => {
+      expect(TurnAnalyzer.extractReminderIntent('You remind me of my brother')).toBeNull();
+      expect(TurnAnalyzer.extractReminderIntent('This reminds me of college')).toBeNull();
+    });
+  });
 });
+

@@ -63,7 +63,12 @@ export class ReminderIntentDetector {
       return false;
     }
 
-    // 2. Negative triggers: user explicitly saying do not remind
+    // 2. Figurative expressions that contain "remind" but are not reminder requests
+    if (/\b(?:you\s+remind\s+me\s+of|reminds?\s+me\s+of|reminded\s+me\s+of)\b/i.test(lower)) {
+      return false;
+    }
+
+    // 3. Negative triggers: user explicitly saying do not remind
     if (/\b(?:don'?t|dont|not|mat)\s*(?:remind|yaad\s*(?:dilana|dila|karna|rakhna))\b/i.test(lower)) {
       return false;
     }
@@ -71,8 +76,12 @@ export class ReminderIntentDetector {
       return false;
     }
 
-    // 3. Positive triggers
-    return /\b(yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena|karen)|reminder\s*(?:set|lagao|karo|banao)|alarm\s*(?:lagao|set|karo)|schedule\s*karo)\b/i.test(lower);
+    // 4. Positive triggers: English, Hindi, Hinglish, alarms, and wake-up instructions
+    const englishReminder = /\b(?:(?:set|put|add|create|schedule|make)\s*(?:an?|the)?\s*(?:reminder|alarm)|remind(?:\s+(?:me|us|him|her|them))?(?:\s+(?:to|about|for|that|in|at|on|tomorrow|kal|parso|roz|daily|every))?|wake\s+(?:me|us|him|her)\s+up)\b/i.test(lower);
+    if (englishReminder) return true;
+
+    const hindiReminder = /\b(yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena|karen)|reminder\s*(?:set|lagao|karo|banao|laga\s*dena|kar\s*dena)|alarm\s*(?:lagao|set|karo|laga\s*dena|kar\s*dena)|schedule\s*(?:karo|kar\s*dena|karna)|utha\s*(?:dena|diyo|denaa)|jaga\s*(?:dena|diyo|denaa))\b/i.test(lower);
+    return hindiReminder;
   }
 
   /**
@@ -439,9 +448,10 @@ export class ReminderIntentDetector {
       /\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i,
       /\b(\d{1,2})\s*(?:bje|baje|bJe)\b/i,
       /\b(\d{1,2})\s*(am|pm)\b/i,
-      /\bat\s+(\d{1,2})\b/i
+      /\b(?:at|for)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i
     ];
 
+    let ampmToken: string | null = null;
     for (const pat of timePatterns) {
       const match = lower.match(pat);
       if (match) {
@@ -449,26 +459,29 @@ export class ReminderIntentDetector {
         if (match[2] && /^\d{2}$/.test(match[2])) {
           minute = parseInt(match[2], 10);
         }
-        if (match[3] && match[3].toLowerCase() === 'pm') {
-          if (hour < 12) hour += 12;
-        } else if (match[3] && match[3].toLowerCase() === 'am') {
-          if (hour === 12) hour = 0;
+        const token = match[3] || (match[2] && /^(am|pm)$/i.test(match[2]) ? match[2] : null);
+        if (token) {
+          ampmToken = token.toLowerCase();
+          if (ampmToken === 'pm' && hour < 12) hour += 12;
+          else if (ampmToken === 'am' && hour === 12) hour = 0;
         }
         break;
       }
     }
 
+    const isWakeUp = /\b(?:wake|uthna|uth|jaga|jagana)\b/i.test(lower);
+
     if (hour !== null) {
-      if (hour >= 1 && hour <= 12) {
+      if (hour >= 1 && hour <= 12 && !ampmToken) {
         if (isAfternoon || isEvening || isPM) {
           if (hour < 12) hour += 12;
         } else if (isNight) {
           if (hour >= 7 && hour <= 11) hour += 12;
           else if (hour === 12) hour = 0;
-        } else if (isMorning) {
+        } else if (isMorning || (isWakeUp && hour >= 4 && hour <= 11)) {
           if (hour === 12) hour = 0;
         } else {
-          if (hour >= 1 && hour <= 6) {
+          if (hour >= 1 && hour <= 6 && !isWakeUp) {
             hour += 12;
           }
         }
@@ -562,9 +575,11 @@ export class ReminderIntentDetector {
     let clean = text
       .replace(/\b(?:kal|aaj|parso|tomorrow|today|tonight)\b/gi, '')
       .replace(/\b(?:subah|sube|sawere|savere|morning|afternoon|dopahar|dupeher|shaam|sham|evening|raat|night)\b/gi, '')
-      .replace(/\b\d{1,2}(?::\d{2})?\s*(?:bje|baje|bJe|am|pm)?\b/gi, '')
       .replace(/\b(?:in\s+\d+\s*(?:mins?|minutes?|hours?)|aadhe\s*ghante\s*me)\b/gi, '')
-      .replace(/\b(?:yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena)|reminder\s*(?:set|lagao|karo)|alarm\s*(?:lagao|set)|schedule\s*karo)\b/gi, '')
+      .replace(/\b\d{1,2}(?::\d{2})?\s*(?:bje|baje|bJe|am|pm)?\b/gi, '')
+      .replace(/\b(?:set|put|add|create|schedule|make)\s*(?:an?|the)?\s*(?:reminder|alarm)\b/gi, '')
+      .replace(/\b(?:wake\s+(?:me|us|him|her)\s+up|utha\s*(?:dena|diyo|denaa)|jaga\s*(?:dena|diyo|denaa))\b/gi, '')
+      .replace(/\b(?:yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|us|him|her|karo|karna|kar|dena|karen)?|reminder\s*(?:set|lagao|karo|banao|laga\s*dena|kar\s*dena)|alarm\s*(?:lagao|set|karo|laga\s*dena|kar\s*dena)|schedule\s*karo)\b/gi, '')
       .replace(/\b(?:roz|daily|har\s*din|every\s*day|every\s*morning|har\s*saal|every\s*year|yearly|annually|every\s*month|monthly)\b/gi, '')
       .replace(/\b(?:start\s*karna\s*hai|shuru\s*karna\s*hai|karna\s*hai|karni\s*hai|uth\s*ke|uthna)\b/gi, '')
       .replace(/\b(?:keep\s*reminding\s*me\s*\d+\s*times|\d+\s*times|\d+\s*bar)\b/gi, '')
@@ -572,17 +587,23 @@ export class ReminderIntentDetector {
       .replace(/\b\d+\s*(?:din|days?)\s*(?:pehle|before|prior|ahead)\b/gi, '')
       .replace(/\b(?:date\s*of\s*birth|dob)\s*(?:ko\s*hai|\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?|hai)?\b/gi, '')
       .replace(/\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b/gi, '')
-      .replace(/\b(?:na|yaad\s*se|muje|mujhe|tum|mera|meri|apna|apne|bata\s*dena|bhi|so|ko\s*hai|hai|ko)\b/gi, '')
+      .replace(/\b(?:na|yaad\s*se|muje|mujhe|tum|mera|meri|apna|apne|bata\s*dena|bhi|so|ko\s*hai|hai|ko|please|can\s*you)\b/gi, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
 
-    if (!clean || clean.length < 3) {
-      clean = text
-        .replace(/\b(?:yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena)|remind\s*(?:me|karo|karna))\b/gi, '')
-        .trim();
+    clean = clean.replace(/^(?:to|for|about|at|ke\s*liye|regarding|on)\s*/i, '').trim();
+
+    if (!clean || clean.length < 2) {
+      if (/\b(?:wake|uth|jaga)\b/i.test(text)) {
+        clean = 'Wake up';
+      } else {
+        clean = 'Reminder';
+      }
+    } else {
+      clean = clean.charAt(0).toUpperCase() + clean.slice(1);
     }
 
-    return clean.slice(0, 120) || 'Reminder';
+    return clean.slice(0, 120);
   }
 
   /**

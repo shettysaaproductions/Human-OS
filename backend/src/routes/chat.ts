@@ -1402,10 +1402,14 @@ chatRouter.post(
       if (isFuturePlanIntent) {
         const planDetails = reminderIntentDetector.extractFuturePlanDetails(effectiveMessage, tzOffset);
         if (!planDetails.isAmbiguous && planDetails.formattedTime) {
-          const futurePlanDirective = `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST warmly encourage this plan and proactively ask if you should set a reminder or alarm for it (e.g., "Mast plan hai yaar! Roz subah 8:00 AM ka reminder set kar doon tere liye, taaki miss na ho?").`;
+          const futurePlanDirective = isEnglishUser
+            ? `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Cool" or "Ok"!\nYou MUST warmly encourage this plan and proactively offer to set a reminder or alarm for it (e.g., "Awesome plan! Should I set a reminder for you at ${planDetails.formattedTime} so you stay on track?").`
+            : `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user shared a specific future plan/routine: "${planDetails.title}" scheduled for ${planDetails.formattedTime}${planDetails.isRecurring ? ' (recurring daily)' : ''}.\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST warmly encourage this plan and proactively ask if you should set a reminder or alarm for it (e.g., "Mast plan hai yaar! Roz subah 8:00 AM ka reminder set kar doon tere liye, taaki miss na ho?").`;
           turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
         } else {
-          const futurePlanDirective = `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST acknowledge their decision warmly and proactively ask if they want you to set a reminder, asking what time, how often (every day or specific days), and for what period they want to be reminded.`;
+          const futurePlanDirective = isEnglishUser
+            ? `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Cool" or "Ok"!\nYou MUST acknowledge their decision warmly and proactively ask if they want you to set a reminder, asking what time, how often (every day or specific days), and for what period they want to be reminded.`
+            : `\n\n## ⏰ SMART PROACTIVE REMINDER DIRECTIVE (TOP PRIORITY)\nThe user mentioned starting a future plan, habit, or routine ("${effectiveMessage}").\nCRITICAL: DO NOT give a passive, 1-word reply like "Sahi", "Theek hai", or "Ok"!\nYou MUST acknowledge their decision warmly and proactively ask if they want you to set a reminder, asking what time, how often (every day or specific days), and for what period they want to be reminded.`;
           turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + futurePlanDirective;
         }
       }
@@ -1508,7 +1512,7 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
       }
 
       // 3. Accountability Completion Signal: Check if user completed a recent pending/reminded task
-      const isCompletionSignal = /\b(?:ho\s*gaya|kar\s*diya|kar\s*liya|done|completed|finished|pani\s*pee\s*liya|workout\s*ho\s*gaya|gym\s*ho\s*gaya|bill\s*pay\s*kar\s*diya|dawai\s*le\s*li|dawa\s*kha\s*li)\b/i.test(effectiveMessage);
+      const isCompletionSignal = /\b(?:ho\s*gaya|kar\s*diya|kar\s*liya|done|completed|finished|did\s*it|all\s*done|drank\s*water|pani\s*pee\s*liya|workout\s*(?:ho\s*gaya|done|finished)|gym\s*(?:ho\s*gaya|done)|bill\s*(?:pay\s*kar\s*diya|paid)|dawai?\s*(?:le\s*li|kha\s*li|kha\s*liya)|took\s*(?:the\s*)?(?:medicine|meds|pill|pills|vitamins))\b/i.test(effectiveMessage);
       if (isCompletionSignal) {
         try {
           const fourHoursAgo = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
@@ -1529,7 +1533,8 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
               updated_at: new Date().toISOString()
             }).eq('id', rem.id);
 
-            const accountabilityDirective = `\n\n## 🏆 ACCOUNTABILITY CELEBRATION (TOP PRIORITY)\nThe user just confirmed they completed their reminder task: "${rem.text}"!\nPraise them warmly with authentic enthusiasm ("Proud of you yaar!", "Super consistency!"), celebrate their streak, and keep them feeling energized!`;
+            const praiseSample = isEnglishUser ? '("Proud of you!", "Awesome consistency!")' : '("Proud of you yaar!", "Super consistency!")';
+            const accountabilityDirective = `\n\n## 🏆 ACCOUNTABILITY CELEBRATION (TOP PRIORITY)\nThe user just confirmed they completed their reminder task: "${rem.text}"!\nPraise them warmly with authentic enthusiasm ${praiseSample}, celebrate their streak, and keep them feeling energized!`;
             turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + accountabilityDirective;
             logger.info('[Chat] Reminder completed confirmed by user', { reminderId: rem.id, task: rem.text });
           }
@@ -1603,11 +1608,13 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
         deterministicReminderCreated,
         deterministicReminderNote,
         lengthInstruction: isFuturePlanIntent
-          ? "The user shared a future plan or habit. Acknowledge it warmly and proactively offer to set a smart reminder, asking for or confirming the time and recurrence. Do NOT give a passive 1-word reply like 'Sahi'."
+          ? (isEnglishUser
+            ? "The user shared a future plan or habit. Acknowledge it warmly and proactively offer to set a smart reminder, asking for or confirming the time and recurrence. Do NOT give a passive 1-word reply like 'Ok'."
+            : "The user shared a future plan or habit. Acknowledge it warmly and proactively offer to set a smart reminder, asking for or confirming the time and recurrence. Do NOT give a passive 1-word reply like 'Sahi'.")
           : normalizedMessages.length > 1
           ? "The user sent multiple messages in a burst. Address and acknowledge ALL their points warmly and naturally in a cohesive reply without skipping any detail."
-          : primaryMessage.length < 20
-          ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny message."
+          : (primaryMessage.length < 20 && /^(?:ok|okay|k|cool|nice|haan|ha|theek hai|thik hai|hmm|hm|achha|acha|sahi|sure|yup|nope|nah|bye|gn)\.?$/i.test(primaryMessage.trim()))
+          ? "KEEP IT VERY SHORT. 1-2 sentences max. User sent a tiny close-ended message."
           : "Match the user's depth, but still use short conversational messages.",
         userCountry: profile?.country || 'IN',
         conversationId: activeConversationId,
