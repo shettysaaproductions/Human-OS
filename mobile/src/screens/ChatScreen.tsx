@@ -23,6 +23,7 @@ import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 import { ScrollView as GHScrollView, Swipeable } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
+import { VoiceMode } from '../components/VoiceMode';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -761,6 +762,7 @@ export function ChatScreen() {
   const isFocused = useIsFocused();
   const [isOffline, setIsOffline] = useState(false);
   const [isLifestyleModalVisible, setIsLifestyleModalVisible] = useState(false);
+  const [isVoiceModeVisible, setIsVoiceModeVisible] = useState(false);
   const lastKnownNewestIdRef = useRef<string | null>(null);
   const isSelectionMode = selectedMessageIds.length > 0;
 
@@ -1809,6 +1811,14 @@ export function ChatScreen() {
             <TouchableOpacity onPress={handlePickImage} style={{ padding: 10 }}>
               <Text style={{ fontSize: 24 }}>👁️</Text>
             </TouchableOpacity>
+            {/* Mic button — launches Nova Voice Mode */}
+            <TouchableOpacity
+              onPress={() => setIsVoiceModeVisible(true)}
+              style={{ padding: 10 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={{ fontSize: 24 }}>🎙️</Text>
+            </TouchableOpacity>
             <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
               <TextInput
                 ref={inputRef}
@@ -1867,6 +1877,12 @@ export function ChatScreen() {
         </View>
         </SafeAreaView>
       </KeyboardAvoidingView>
+
+      {/* Nova Voice Mode Overlay */}
+      <VoiceMode
+        visible={isVoiceModeVisible}
+        onClose={() => setIsVoiceModeVisible(false)}
+      />
 
       {/* ── Message Version History & Branching Modal ── */}
       <Modal

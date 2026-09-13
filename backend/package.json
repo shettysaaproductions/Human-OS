@@ -19,6 +19,7 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.44.4",
     "@types/cors": "^2.8.19",

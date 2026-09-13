@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.3.11-beta",
+    "date": "2026-09-14",
+    "title": "🎙️ Nova Voice Mode — Talk to Nova Live!",
+    "message": [
+      "Nova Voice Mode: Tap the 🎙️ mic icon in the chat input bar to start a real-time voice conversation with Nova! Powered by Google Gemini Live API for ultra-low latency bidirectional audio.",
+      "Full Hindi & Hinglish Voice: Nova speaks and understands Hinglish naturally — just like your best friend. Say 'yaar kya scene hai' and she gets it instantly.",
+      "Voice Picker: Choose from 5 different Nova voices (Kore, Aoede, Charon, Fenrir, Puck) in the voice mode overlay — tap the 🎤 button to switch voices anytime.",
+      "Memory & Reminders via Voice: Nova can save memories and set reminders through voice just like text — say 'remind me tomorrow at 8am to workout' and it's done.",
+      "Live Transcript: See the real-time transcript of your voice conversation scrolling as you talk — review everything Nova said and you said.",
+      "Mute Toggle: Mute yourself mid-conversation without ending the session — tap unmute to continue exactly where you left off.",
+      "Smart Session Processing: When you end a voice session, Nova automatically saves the transcript to chat history, extracts new memories, and runs Watchtower reflection in the background."
+    ]
+  },
+  {
+
     "version": "0.3.10-beta",
     "date": "2026-09-14",
     "title": "🌿 Universal Branch & Stem Relocation, Confirmation Protocol & Attribution Invariants",
