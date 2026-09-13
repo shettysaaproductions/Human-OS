@@ -260,7 +260,7 @@ export class CognitiveContextService {
             .eq('user_id', userId)
             .eq('is_archived', false)
             .order('importance', { ascending: false })
-            .limit(50)
+            .limit(150)
         ).then((res: any) => {
           // Defensive in-memory trust boundary & supersession filter
           if (res && Array.isArray(res.data)) {
@@ -813,9 +813,17 @@ export class CognitiveContextService {
       { regex: /(?:my\s+)?(brother|bhai|bhaiya)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'brother', gender: 'masculine' as const, pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
       { regex: /(?:my\s+)?(wife|patni|biwi)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'wife', gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
       { regex: /(?:my\s+)?(husband|pati)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'husband', gender: 'masculine' as const, pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+      { regex: /(?:my\s+)?(girlfriend|gf|bandi)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'girlfriend', gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
+      { regex: /(?:my\s+)?(boyfriend|bf|banda)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'boyfriend', gender: 'masculine' as const, pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+      { regex: /(?:my\s+)?(partner|fiance|fiancee)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'partner', gender: 'neutral' as const, pronouns: ['they', 'them', 'he', 'she', 'wo'] },
       { regex: /(?:my\s+)?(son|beta)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'son', gender: 'masculine' as const, pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
       { regex: /(?:my\s+)?(daughter|beti)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'daughter', gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
-      { regex: /(?:my\s+)?(friend|dost|colleague|partner)\s+(?:is|name is|named|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'associate', gender: 'neutral' as const, pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+      { regex: /(?:my\s+)?(dog|puppy|kutta)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'dog', gender: 'neutral' as const, pronouns: ['it', 'he', 'she', 'wo'] },
+      { regex: /(?:my\s+)?(cat|kitten|billi)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'cat', gender: 'neutral' as const, pronouns: ['it', 'she', 'he', 'wo'] },
+      { regex: /(?:my\s+)?(pet)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'pet', gender: 'neutral' as const, pronouns: ['it', 'he', 'she', 'wo'] },
+      { regex: /(?:my\s+)?(roommate|flatmate|roomie)\s+(?:is|name is|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'roommate', gender: 'neutral' as const, pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+      { regex: /(?:my\s+)?(colleague|coworker|teammate|manager|boss|mentor)\s+(?:is|name is|named|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'colleague', gender: 'neutral' as const, pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+      { regex: /(?:my\s+)?(friend|dost)\s+(?:is|name is|named|ka naam)\s+([A-Z][a-zA-Z\s]+?)(?:\.|\n|$|,|hai)/i, relation: 'friend', gender: 'neutral' as const, pronouns: ['they', 'them', 'he', 'she', 'wo'] },
     ];
 
     for (const p of patterns) {
@@ -834,10 +842,11 @@ export class CognitiveContextService {
       }
     }
 
-    // 1b. Multi-hop possessive entity introduction (e.g. "Ijaz's father", "Sushant ki biwi")
+    // 1b. Multi-hop possessive entity introduction (e.g. "Ijaz's father", "Sushant ki biwi", "Alex's dog")
     const possessivePatterns = [
-      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(father|papa|pitaji|dad|brother|bhai|husband|pati|son|beta)\b/i, gender: 'masculine' as const, pronouns: ['he', 'him', 'his', 'wo', 'usne', 'uska', 'unka'] },
-      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(mother|mom|mummy|sister|didi|behen|wife|biwi|patni|daughter|beti)\b/i, gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski', 'unki'] },
+      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(father|papa|pitaji|dad|brother|bhai|husband|pati|son|beta|boyfriend|bf)\b/i, gender: 'masculine' as const, pronouns: ['he', 'him', 'his', 'wo', 'usne', 'uska', 'unka'] },
+      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(mother|mom|mummy|sister|didi|behen|wife|biwi|patni|daughter|beti|girlfriend|gf)\b/i, gender: 'feminine' as const, pronouns: ['she', 'her', 'wo', 'usne', 'uski', 'unki'] },
+      { regex: /\b([A-Z][a-zA-Z]+)(?:'s|\s+ka|\s+ki|\s+ke)\s+(dog|cat|pet|puppy|kitten|roommate|flatmate|colleague|boss|manager|partner|friend)\b/i, gender: 'neutral' as const, pronouns: ['it', 'they', 'them', 'he', 'she', 'wo'] },
     ];
 
     for (const pp of possessivePatterns) {
@@ -858,21 +867,33 @@ export class CognitiveContextService {
       }
     }
 
-    // 2. Match known family member formal names and nicknames from memories
+    // 2. Match known family & lifestyle member names and nicknames from memories
     if (rawMemories && rawMemories.length > 0 && effectiveMessage) {
       const lowerEffective = effectiveMessage.toLowerCase();
-      const familyMeta: Record<string, { relation: string; gender: 'masculine' | 'feminine' | 'neutral'; pronouns: string[] }> = {
+      const relationMeta: Record<string, { relation: string; gender: 'masculine' | 'feminine' | 'neutral'; pronouns: string[] }> = {
         son: { relation: 'son', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
         daughter: { relation: 'daughter', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
         wife: { relation: 'wife', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
         husband: { relation: 'husband', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+        girlfriend: { relation: 'girlfriend', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
+        boyfriend: { relation: 'boyfriend', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+        partner: { relation: 'partner', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
         mother: { relation: 'mother', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
         father: { relation: 'father', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
         sister: { relation: 'sister', gender: 'feminine', pronouns: ['she', 'her', 'wo', 'usne', 'uski'] },
         brother: { relation: 'brother', gender: 'masculine', pronouns: ['he', 'him', 'wo', 'usne', 'uska'] },
+        dog: { relation: 'dog', gender: 'neutral', pronouns: ['it', 'he', 'she', 'wo'] },
+        cat: { relation: 'cat', gender: 'neutral', pronouns: ['it', 'she', 'he', 'wo'] },
+        pet: { relation: 'pet', gender: 'neutral', pronouns: ['it', 'he', 'she', 'wo'] },
+        roommate: { relation: 'roommate', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+        flatmate: { relation: 'flatmate', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+        colleague: { relation: 'colleague', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+        manager: { relation: 'manager', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+        boss: { relation: 'boss', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
+        friend: { relation: 'friend', gender: 'neutral', pronouns: ['they', 'them', 'he', 'she', 'wo'] },
       };
 
-      for (const [rel, meta] of Object.entries(familyMeta)) {
+      for (const [rel, meta] of Object.entries(relationMeta)) {
         const nameMem = rawMemories.find(m => !m.is_archived && (m.key === `${rel}_name` || m.key === `${rel}_real_name`));
         const nickMem = rawMemories.find(m => !m.is_archived && (m.key === `${rel}_nickname` || m.key === `${rel}_nick_name`));
 

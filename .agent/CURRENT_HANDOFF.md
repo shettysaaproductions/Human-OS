@@ -1,59 +1,44 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-13 — Backend Lifestyle Resilience, Companion Autonomy & Core Bug Fixes (Part 2)
+2026-09-13 — Backend Memory & Knowledge Graph Hardening, Tenant Isolation & Lifestyle Entity Resolution
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: Backend Lifestyle Resilience, Companion Autonomy & Core Bug Fixes across all sections.
+Task: Backend Memory & Knowledge Graph Hardening, Tenant Isolation, and Lifestyle Entity Resolution.
 
 ## Confirmed Findings & Architectural Solutions
-1. **Situational Awareness (`SituationalAwareness.ts`)**:
-   - Fixed raw `.includes('gn')` substring false positive in `detectConversationPhase` using strict word-boundary regex (`/\b(?:gn|bye|goodnight|good\s*night|ttyl|cya|ok\s*bye|alvida|soja|so\s*jao?)\b/i`). Words like `assignment`, `design`, `signal`, and `signature` no longer prematurely shut down conversations into `WINDING_DOWN`.
-   - Defaulted `gapMinutes: number = 1` for consistent phase determination.
-2. **Reminder Scheduler Reliability (`ReminderSchedulerService.ts`)**:
-   - Fixed silent death of one-time reminders on gate suppression: if `finalStatus === 'SUPPRESSED'` and `!reminder.recurrence_type`, `trigger_at` is deferred (+60m for quiet hours, +15m for cooldown) instead of being permanently marked `completed`.
-   - Defaulted `is_auto` to `false` in `scheduleReminder(..., isAuto: boolean = false)` and updated `isUserRequested = reminder.is_auto !== true` in `fireReminder`.
-3. **User Life Stage & Daytime Flow (`UserLifeStageEngine.ts`)**:
-   - Eliminated arbitrary 11am-8pm work focus lock for users without defined job/study schedules (now defaults to open `DAYTIME_FLOW` with `isWorkFocusHours = false` and `proactiveAllowance = 'FULL'`).
-   - Added support for overnight shifts for shift workers where `shiftStartHour > shiftEndHour` (`localHour >= sStart || localHour < sEnd`).
-   - Inspects `memMap` for `weekoff_day`, `day_off`, `weekly_off` to honor non-traditional off-days (e.g. Wednesday).
-4. **Nova Consciousness Engine Awake Night-Owl Support (`NovaConsciousnessEngine.ts`)**:
-   - Line 600 sleep window check updated to `if (tContext.isSleepWindow && !userIsActivelyChatting && !isSleepWindowOverridden)` so awake night owls (`isSleepWindowOverridden = true`) are not suppressed.
-5. **Nova Brain Service Fallback & Grounding (`NovaBrainService.ts`)**:
-   - Replaced hardcoded IST (+5.5) in `validateAndRepairGrounding` with dynamic profile timezone lookup.
-   - Added `getNovaEmptyReply(isEnglish?: boolean)` with natural English empty reply fallback (`NOVA_EMPTY_REPLY_EN`).
-6. **Reminder Engine & Intent Parsing (`ReminderEngine.ts`, `ReminderIntentDetector.ts`)**:
-   - Broadened date parsing in `buildReminderSpecFromIntent` to include `tomorrow`, `tmrw`, `kal`, `parso`, `after N min`, `N minute baad`, `aadhe ghante baad`.
-   - Added single day-of-week parsing (`on Monday`, `this Friday`, `Somwar ko`) calculating days ahead and setting `dateIdentified = true`.
-   - Added recurring day detection (`every Monday`, `har Somwar`) setting `isRecurring = true`, `recurrenceType = 'weekly'`, and populating `activeDays`.
-   - Cleaned weekday and relative time tokens in `cleanTaskTitle`.
-7. **Universal Fact Extraction (`TurnAnalyzer.ts`)**:
-   - Added relation extraction for `girlfriend_name`, `girlfriend_nickname`, `boyfriend_name`, `boyfriend_nickname`, and `partner_name`.
-   - Added extraction for `pet_name` & `pet_type`, `sleep_time`, `wake_time`, and `work_mode`.
-   - Guarded `fitness_routine` against future intentions (`start karna hai`) so they are classified as actions rather than factual habits.
-8. **Render Restart Starvation Fix (`backend/src/index.ts`)**:
-   - Fixed `momentInterval` (runs every 2 hours with initial 2.5 min boot warmup) and `dailyReflectionInterval` / `weeklyReflectionInterval` (checked hourly with date guards and initial 2 min boot warmup) so Render restarts never reset the 24-hour timer and starve background reflections/moments.
-9. **Global Timezone Resolution (`BackgroundActionService.ts`)**:
-   - Replaced hardcoded 3-country offset dictionary (`{ IN: 5.5, US: -5, UK: 0 }`) with dynamic profile timezone resolution via `resolveUserTzOffsetHours`.
-10. **Action Intelligence Tenant Isolation (`ActionIntelligenceService.ts`)**:
-    - Added `.eq('user_id', userId)` constraint to `executeConfirmedAction` update statement to guarantee tenant isolation.
-11. **Curiosity Engine Lifestyle Inclusivity (`LifeBlueprintCuriosityEngine.ts`)**:
-    - Broadened `sleep_time` (0..24h, night owls, shift workers), `wake_time`, `morning_starter` (smoothie, matcha, protein shake, lemon water), and `dinner_time`.
-    - Added `pets_or_animals` registry entry to `FOUNDATIONAL_BLUEPRINT_REGISTRY`.
+1. **Autonomous Memory Graph Curator (`AutonomousMemoryGraphCuratorService.ts`)**:
+   - Replaced hardcoded fallback birth dates (`17/02/2026` and `15/04/1992`) with dynamic chat truth extraction.
+   - Generalized infant contradiction reconciliation (Section 5) to dynamically extract infant birth dates from chats and calculate age in months for any user's child, completely eliminating the forced `'Shreshth'` name constraint.
+   - Generalized nickname/real-name resolution (Section 6) to parse explicit declarations (`[Name] ko pyaar se [Nickname] bulate hai`) and prune duplicate nicknames, eliminating forced `'Shreshth'` and `'Tiku'` overrides.
+   - Generalized employment vs entrepreneurial venture collision (Section 7) to dynamically detect corporate employers and ventures from schedule/chats, eliminating forced `'Conviction HR'` and `"Shetty's Dhaba"` overrides.
+   - Removed `.includes('navi')` check in Section 1c to safely protect Navy veterans' fathers from working memory deletion.
+   - Fixed critical tenant isolation vulnerability in Section 2 by adding `.eq('user_id', userId)` to all `kg_edges` deletion queries.
+2. **Entity Resolution Service (`EntityResolutionService.ts`)**:
+   - Expanded relation patterns and normalization to include modern companions: `partner`, `girlfriend`, `boyfriend`, `fiance`, `dog`, `cat`, `pet`, `roommate`, `flatmate`, `colleague`, `boss`, `manager`, `mentor`.
+   - Added named direct relation extraction for phrases like "My dog Bruno is a Golden retriever", "My girlfriend Priya loves photography", and "My flatmate Rohan works at Google", assigning `entityType: 'pet'` and scoped keys (`entity:pet_bruno:breed`, `entity:partner_priya:interest`, `entity:person_rohan:employer`).
+   - Added `employer` and `interest` predicates, and guarded `name` assignment from overwriting previous predicates.
+3. **Cognitive Context & Prompt Memory Enrichment (`CognitiveContextService.ts`, `chat.ts`)**:
+   - Increased `CognitiveContextService` memory query limit from 50 to 150 items to eliminate memory starvation for active users.
+   - Expanded conversational antecedents to track pets, girlfriends, boyfriends, and roommates for natural pronoun resolution.
+   - In `chat.ts`, merged keyword search memories with CognitiveContext's conflict-resolved durable facts into `enrichedMemories` and passed them to `userLifeStageEngine`, `lifeBlueprintCuriosityEngine`, `situationCtx.goalMemories`, `TurnAnalyzer`, and `brainContext.memories`.
+4. **Subconscious Entity Poisoning Prevention (`memoryRepository.ts`)**:
+   - Added relational nouns (`dog`, `cat`, `pet`, `puppy`, `kitten`, `roommate`, `flatmate`, `colleague`, `manager`, `boss`, `mentor`) to `GENERIC_ENTITY_VALUES` blocklist.
+5. **Memory Domains & Multi-Agent Watchtower Decontamination (`memoryDomains.ts`, `WatchtowerMemoryAuditor.ts`)**:
+   - Decontaminated test fixtures (`Tiku`, `Shreshth`, `Conviction HR`) from generic family son wardrobe generation and audits.
 
 ## Verification Status
 - `npm run build` in `backend`: **EXIT 0** (0 errors).
 - `npx tsc --noEmit` in `mobile`: **EXIT 0** (0 errors).
-- `BackendLifestyleCompanionImpactFixesPart2.test.ts`: **16/16 passed**.
-- `TurnAnalyzer.test.ts`: **41/41 passed**.
-- `SmartProactiveReminderEngine.test.ts`: **9/9 passed**.
-- `SituationalAwareness.test.ts`: **3/3 passed**.
-- `UserLifeStageEngine.test.ts`: **2/2 passed**.
-- `ReminderEngine.test.ts` & `ReminderEngineBug03Followup.test.ts`: **31/31 passed**.
-- `ReminderIntentDetector.test.ts`: **15/15 passed**.
-- `BackendLifestyleCompanionImpactFixes.test.ts`: **8/8 passed**.
+- `MemoryAndGraphCuratorHardening.test.ts`: **7/7 passed**.
+- `AutonomousMemoryGraphCuratorService.test.ts`: **3/3 passed**.
+- `SonNicknameAndDobAlignment.test.ts`: **11/11 passed**.
+- `WatchtowerMemoryAuditor.test.ts`: **4/4 passed**.
+- `EntityResolutionService.test.ts`: **10/10 passed**.
+- `CognitiveContextService.test.ts`: **7/7 passed**.
+- All 6 test suites and 42 tests: **100% PASSED**.
 
 ## NEXT ACTION
-Commit changes and push to `origin main`.
+Commit and push changes to `origin main` autonomously per standing directive.

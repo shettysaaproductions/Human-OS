@@ -47,6 +47,8 @@ const GENERIC_ENTITY_VALUES = new Set([
   'wife', 'husband', 'mom', 'mother', 'dad', 'father', 'bhai', 'brother',
   'sister', 'son', 'daughter', 'didi', 'bhabhi', 'nana', 'nani', 'dada',
   'dadi', 'spouse', 'partner', 'girlfriend', 'boyfriend', 'friend', 'yaar',
+  'dog', 'cat', 'pet', 'puppy', 'kitten', 'roommate', 'flatmate', 'colleague',
+  'manager', 'boss', 'mentor', 'coworker'
 ]);
 
 function isGenericEntityValue(key: string, value: string, authority?: string): boolean {

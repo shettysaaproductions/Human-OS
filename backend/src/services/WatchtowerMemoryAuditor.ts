@@ -253,7 +253,7 @@ export class WatchtowerMemoryAuditor {
         // Search chats to see whose DOB 15/04/1992 actually is
         let userDobFound = false;
         let sonTrueDobFound = false;
-        let sonTrueDob = '17/02/2026';
+        let sonTrueDob: string | null = null;
 
         for (let i = 0; i < recentChats.length; i++) {
           const msg = recentChats[i];
@@ -272,16 +272,20 @@ export class WatchtowerMemoryAuditor {
           }
 
           // Look for son's true birth date in chats
-          if (content.toLowerCase().includes('17/02/2026') || content.toLowerCase().includes('17 feb 2026') || content.toLowerCase().includes('17 february 2026')) {
+          const dateMatch = content.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\b/);
+          if (dateMatch && /\b(202\d)\b/.test(dateMatch[1])) {
+            sonTrueDobFound = true;
+            sonTrueDob = dateMatch[1];
+          } else if (content.toLowerCase().includes('17/02/2026') || content.toLowerCase().includes('17 feb 2026') || content.toLowerCase().includes('17 february 2026')) {
             sonTrueDobFound = true;
             sonTrueDob = '17/02/2026';
           }
         }
 
         // Also check working memory
-        if (wmMap.has('tiku_birthday') && wmMap.get('tiku_birthday').value) {
+        if (!sonTrueDob && wmMap.has('tiku_birthday') && wmMap.get('tiku_birthday').value) {
           sonTrueDobFound = true;
-          sonTrueDob = '17/02/2026';
+          sonTrueDob = wmMap.get('tiku_birthday').value;
         }
 
         logger.info('[WatchtowerMemoryAuditor] Deterministic son DOB audit resolution', {
@@ -290,17 +294,19 @@ export class WatchtowerMemoryAuditor {
           sonTrueDob
         });
 
-        findings.push({
-          entity: 'Shreshth (Son)',
-          flaw: `Son is 6 months old but assigned birth date ${bdayStr} (1992). In chat, user answered ${bdayStr} to question about user's own birth date.`,
-          flawType: 'AGE_DOB_CONTRADICTION',
-          provenChatTruth: `User birth date is ${bdayStr}; Son Shreshth's birth date is ${sonTrueDob} (6 months old).`,
-          action: 'AUTO_RECONCILE',
-          updates: [
-            { key: 'birth_date', value: bdayStr, memoryType: 'personal', entity: 'user' },
-            { key: 'son_birth_date', value: sonTrueDob, memoryType: 'family', entity: 'son' }
-          ]
-        });
+        if (sonTrueDob) {
+          findings.push({
+            entity: 'Son',
+            flaw: `Son is infant but assigned adult birth date ${bdayStr} (1992). In chat, user answered ${bdayStr} to question about user's own birth date.`,
+            flawType: 'AGE_DOB_CONTRADICTION',
+            provenChatTruth: `User birth date is ${bdayStr}; Son birth date is ${sonTrueDob}.`,
+            action: 'AUTO_RECONCILE',
+            updates: [
+              { key: 'birth_date', value: bdayStr, memoryType: 'personal', entity: 'user' },
+              { key: 'son_birth_date', value: sonTrueDob, memoryType: 'family', entity: 'son' }
+            ]
+          });
+        }
       }
     }
 
@@ -311,7 +317,7 @@ export class WatchtowerMemoryAuditor {
 
     if (
       (sonNameMem && (sonNameMem.value.toLowerCase() === 'tiku' || sonNameMem.value.toLowerCase() === 'tuku')) ||
-      (sonNickMem && sonNameMem && sonNickMem.value.toLowerCase() === sonNameMem.value.toLowerCase())
+      (sonNickMem && sonNameMem && sonNickMem.value.toLowerCase() === sonNameMem.value.toLowerCase() && (sonNameMem.value.toLowerCase() === 'shreshth' || /tiku|tuku/i.test(JSON.stringify(recentChats))))
     ) {
       const canonicalSonName = sonNameMem?.value.toLowerCase() === 'tiku' || sonNameMem?.value.toLowerCase() === 'tuku' ? 'Shreshth' : sonNameMem?.value || 'Son';
       findings.push({
@@ -375,6 +381,7 @@ export class WatchtowerMemoryAuditor {
     // ── AUDIT 5: Precise Son Birth Date Preservation ─────────────────────────
     if (
       sonBdayMem &&
+      (sonNameMem?.value.toLowerCase() === 'shreshth' || /17\/02\/2026/i.test(JSON.stringify(recentChats)) || sonBdayMem.value.includes('17th February')) &&
       (sonBdayMem.value === '17th February' ||
        sonBdayMem.value.includes('1992') ||
        sonBdayMem.value.toLowerCase().includes('not available') ||

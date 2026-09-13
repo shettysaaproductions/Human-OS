@@ -816,12 +816,14 @@ export function clusterMemoriesIntoWardrobes(
   );
 
   if (sonNameVal || hasSonMention) {
-    const name = cleanStr(sonNameVal || 'Shreshth');
+    const isExplicitShreshth = /shreshth/i.test(JSON.stringify(Array.from(memMap.values())));
+    const name = cleanStr(sonNameVal || (isExplicitShreshth ? 'Shreshth' : 'Son'));
     ['son_name', 'shreshth', 'shresth'].forEach(k => consumedKeys.add(k));
 
+    const roleTraitId = isExplicitShreshth ? 'trait-shreshth-role' : 'trait-son-role';
     const traits: WardrobeTrait[] = [
       {
-        id: `trait-shreshth-role`,
+        id: roleTraitId,
         key: 'son_name',
         label: 'Relationship',
         value: 'Son',
@@ -832,7 +834,7 @@ export function clusterMemoriesIntoWardrobes(
       }
     ];
 
-    // Nickname Tuku / Tiku (Stem linked to Shreshth, never orphaned!)
+    // Nickname Tuku / Tiku (Stem linked to Son, never orphaned!)
     const nickKeys = [
       'son_nickname', 'tuku', 'tuku_nickname', 'son_tuku', 'shreshth_tuku', 'tuku_shreshth',
       'tiku', 'tiku_nickname', 'son_tiku', 'shreshth_nickname', 'shreshth_nick_name', 'son_shreshth_nickname',
@@ -850,19 +852,22 @@ export function clusterMemoriesIntoWardrobes(
         }
       }
     }
-    if (!nickVal || nickVal.toLowerCase() === 'shreshth') {
+    if (!nickVal && /tiku|tuku/i.test(JSON.stringify(Array.from(memMap.values())))) {
       nickVal = 'Tiku';
     }
-    traits.push({
-      id: `trait-shreshth-nickname`,
-      key: 'son_nickname',
-      label: 'Nickname',
-      value: nickVal,
-      category: 'detail',
-      confidence: 'confirmed',
-      sourceMemoryId: nickSourceId,
-      updatedAt: nowStr
-    });
+    if (nickVal && nickVal.toLowerCase() !== name.toLowerCase()) {
+      const nickTraitId = isExplicitShreshth ? 'trait-shreshth-nickname' : 'trait-son-nickname';
+      traits.push({
+        id: nickTraitId,
+        key: 'son_nickname',
+        label: 'Nickname',
+        value: nickVal,
+        category: 'detail',
+        confidence: 'confirmed',
+        sourceMemoryId: nickSourceId,
+        updatedAt: nowStr
+      });
+    }
 
     // Dedicated Birth Date Trait
     const bdayKeys = [
@@ -892,14 +897,17 @@ export function clusterMemoriesIntoWardrobes(
       const alternateDob = memMap.get('tiku_birthday')?.value || memMap.get('child_dob')?.value;
       if (alternateDob && !/\b(19\d{2}|20[01]\d)\b/.test(alternateDob)) {
         sonBdayVal = alternateDob;
-      } else {
+      } else if (isExplicitShreshth || /17\/02\/2026/i.test(JSON.stringify(Array.from(memMap.values())))) {
         sonBdayVal = '17/02/2026';
+      } else {
+        sonBdayVal = undefined;
       }
     }
 
     if (sonBdayVal && !isPlaceholderValue(sonBdayVal)) {
+      const bdayTraitId = isExplicitShreshth ? 'trait-shreshth-birth-date' : 'trait-son-birth-date';
       traits.push({
-        id: `trait-shreshth-birth-date`,
+        id: bdayTraitId,
         key: 'son_birth_date',
         label: 'Birth Date',
         value: sonBdayVal,
@@ -914,29 +922,31 @@ export function clusterMemoriesIntoWardrobes(
     ['son_age', 'child_age', 'baby_age'].forEach(k => consumedKeys.add(k));
 
     let ageDisplay = sonAgeVal ? (sonAgeVal.includes('old') ? sonAgeVal : `${sonAgeVal} old`) : '';
+    const now = new Date();
     if (!ageDisplay && sonBdayVal) {
       try {
         let bDate: Date | null = null;
         if (sonBdayVal.includes('/')) {
-          const [d, m, y] = sonBdayVal.split('/');
-          bDate = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+          const parts = sonBdayVal.split('/');
+          if (parts.length === 3) {
+            bDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+          }
         } else {
           bDate = new Date(sonBdayVal);
         }
         if (bDate && !isNaN(bDate.getTime())) {
-          const diffMonths = Math.max(1, Math.round((new Date().getTime() - bDate.getTime()) / (1000 * 60 * 60 * 24 * 30.4375)));
+          const diffMonths = Math.max(0, (now.getFullYear() - bDate.getFullYear()) * 12 + (now.getMonth() - bDate.getMonth()));
           ageDisplay = `${diffMonths} months old`;
         }
       } catch {}
     }
-    if (!ageDisplay) ageDisplay = '6 months old';
 
     traits.push({
-      id: `trait-shreshth-age`,
+      id: isExplicitShreshth ? 'trait-shreshth-age' : 'trait-son-age',
       key: 'son_age',
       label: 'Age',
-      value: ageDisplay,
-      category: 'milestone',
+      value: ageDisplay || 'Infant',
+      category: 'detail',
       confidence: 'confirmed',
       sourceMemoryId: memMap.get('son_age')?.id,
       updatedAt: nowStr
@@ -945,12 +955,25 @@ export function clusterMemoriesIntoWardrobes(
     if (memMap.has('notes')) {
       consumedKeys.add('notes');
       traits.push({
-        id: `trait-shreshth-notes`,
+        id: isExplicitShreshth ? 'trait-shreshth-notes' : 'trait-son-notes',
         key: 'notes',
         label: 'Milestone Notes',
         value: memMap.get('notes')?.value || 'User is happy seeing the child grow',
         category: 'detail',
         confidence: 'confirmed'
+      });
+    }
+
+    const sonConnectedDots: any[] = [];
+    const hasConviction = Array.from(memMap.values()).some(e => /conviction/i.test(e.value) || /conviction/i.test(e.key));
+    const isConvictionActive = hasConviction || memMap.has('work_schedule');
+    if (isConvictionActive) {
+      sonConnectedDots.push({
+        targetEntityId: 'wardrobe-biz-conviction-hr',
+        targetEntityName: 'Conviction HR',
+        relation: 'EVENING_ROUTINE',
+        insight: `Wrapping up work shift at 8:00 PM gives dedicated evening playtime and bonding with baby ${name}.`,
+        badge: `👶 ${name} ⇄ 💼 Work`
       });
     }
 
@@ -962,17 +985,9 @@ export function clusterMemoriesIntoWardrobes(
       roleTitle: 'Son',
       avatarEmoji: '👶',
       color: '#EC4899',
-      summary: `Son · Nickname: ${nickVal} · ${ageDisplay}`,
+      summary: nickVal ? `Son · Nickname: ${nickVal} · ${ageDisplay}` : `Son · ${ageDisplay}`,
       traits,
-      connectedDots: [
-        {
-          targetEntityId: 'wardrobe-biz-conviction-hr',
-          targetEntityName: 'Conviction HR',
-          relation: 'EVENING_ROUTINE',
-          insight: 'Wrapping up work shift at 8:00 PM gives dedicated evening playtime and bonding with baby Shreshth (Tiku).',
-          badge: '👶 Shreshth ⇄ 💼 Work'
-        }
-      ],
+      connectedDots: sonConnectedDots,
       lastUpdated: nowStr
     });
   }

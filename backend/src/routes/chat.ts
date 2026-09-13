@@ -1319,16 +1319,51 @@ chatRouter.post(
         }
       }
 
+      // ── Phase 10: Resolve cogCtx and construct enriched conflict-resolved memory fabric ──
+      const cogCtx = await cogCtxPromise;
+      if (cogCtx) {
+        logger.info('[Chat][Phase10] CognitiveContext assembled', {
+          userId,
+          durableFacts: cogCtx.memories.durableFacts.length,
+          conflicts: cogCtx.metadata.conflicts_detected,
+          conflictsResolved: cogCtx.metadata.conflicts_resolved,
+          degradedSources: cogCtx.metadata.degraded_sources,
+          assemblyMs: cogCtx.metadata.assembly_duration_ms,
+        });
+      }
+
+      // Merge search-matched memories with CognitiveContext's conflict-resolved durable facts
+      let enrichedMemories = memories;
+      if (cogCtx?.memories?.durableFacts && cogCtx.memories.durableFacts.length > 0) {
+        const memMap = new Map<string, any>();
+        for (const df of cogCtx.memories.durableFacts) {
+          memMap.set(df.key, {
+            id: df.id,
+            key: df.key,
+            value: df.value,
+            memory_type: df.memory_type,
+            importance: df.importance,
+            confidence: df.confidence,
+          });
+        }
+        for (const sm of memories) {
+          if (!memMap.has(sm.key)) {
+            memMap.set(sm.key, sm);
+          }
+        }
+        enrichedMemories = Array.from(memMap.values());
+      }
+
       const userPresence = presenceResult.data ? { status: presenceResult.data.status || 'offline', last_active_at: presenceResult.data.last_active_at, last_typing_at: presenceResult.data.last_typing_at } : null;
 
       let lifeStageSummary: string | undefined;
       let blueprintDiscoveryNote: string | undefined;
       try {
-        const stageCtx = await userLifeStageEngine.getUserLifeStageContext(userId, memories, workingMemories);
+        const stageCtx = await userLifeStageEngine.getUserLifeStageContext(userId, enrichedMemories, workingMemories);
         lifeStageSummary = `${stageCtx.stageLabel}: ${stageCtx.corePurposeSummary} (Lifestyle Rhythm: ${stageCtx.lifestyleRhythm.phaseDescription})`;
 
         const blueprintSummary = lifeBlueprintCuriosityEngine.evaluateMissingBlueprintGaps(
-          memories,
+          enrichedMemories,
           workingMemories,
           { localHour: nowLocal.getUTCHours(), isWeekend }
         );
@@ -1348,7 +1383,9 @@ chatRouter.post(
         currentVisualContext: profile?.current_visual_context, userPresence,
         unreadNovaMessages: unreadResult.count || 0, behaviorPattern: behaviorPatternResult.pattern !== 'UNKNOWN' ? `${behaviorPatternResult.pattern} (${behaviorPatternResult.description})` : null,
         totalMemoriesCount: totalMemoriesResult.count || 0,
-        goalMemories: memories.filter((m: any) => m.memory_type === 'goals'),
+        goalMemories: (cogCtx?.memories?.goals && cogCtx.memories.goals.length > 0)
+          ? cogCtx.memories.goals.map((g: any) => ({ key: g.key, value: g.value, memory_type: 'goals' }))
+          : enrichedMemories.filter((m: any) => m.memory_type === 'goals'),
         activeLifeThreads: lifeThreadsResult.data || [],
         lifeStageSummary,
         blueprintDiscoveryNote,
@@ -1378,22 +1415,9 @@ chatRouter.post(
       const memoryContext = '';
       const responseConfig = classifyIntent(effectiveMessage, recentMessages.map(m => m.content));
 
-      // ── Phase 10: Resolve cogCtx (if ready) and use unified turn analysis ──
-      const cogCtx = await cogCtxPromise;
-      if (cogCtx) {
-        logger.info('[Chat][Phase10] CognitiveContext assembled', {
-          userId,
-          durableFacts: cogCtx.memories.durableFacts.length,
-          conflicts: cogCtx.metadata.conflicts_detected,
-          conflictsResolved: cogCtx.metadata.conflicts_resolved,
-          degradedSources: cogCtx.metadata.degraded_sources,
-          assemblyMs: cogCtx.metadata.assembly_duration_ms,
-        });
-      }
-
       // Use CognitiveContext's unified turn analysis (avoids duplicate TurnAnalyzer.analyze call).
       // Falls back to a fresh analysis if CognitiveContext assembly failed.
-      const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories });
+      const turnAnalysis = cogCtx?.turn?.turnAnalysis ?? TurnAnalyzer.analyze(normalizedMessages, { recentMessages, memories: enrichedMemories });
       let turnAnalysisBlock = TurnAnalyzer.buildTurnAnalysisPrompt(turnAnalysis);
 
       // Smart Reminder Engine: Check if user discussed any future-dated plan, habit, or activity
@@ -1586,7 +1610,7 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
       }
 
       const brainContext = {
-        memories,
+        memories: enrichedMemories,
         workingMemories,
         profile,
         shortTermMemories,

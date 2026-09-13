@@ -285,6 +285,27 @@ export class AutonomousMemoryGraphCuratorService {
     const updates: CurationUpdate[] = [];
     let kgNodesPruned = 0;
 
+    // Identify established entities across memories and working memory early
+    const knownEntities = new Set<string>();
+    for (const [key, mem] of memMap.entries()) {
+      if (key.startsWith('friend_') || key.startsWith('colleague_') || key.startsWith('pet_') || key.startsWith('dog_')) {
+        const parts = key.split('_');
+        if (parts.length >= 2) knownEntities.add(parts[1].toLowerCase());
+      }
+      if (mem.value && mem.value.length < 25 && !mem.value.includes(' ') && !isPlaceholderValue(mem.value)) {
+        if (key.includes('name') && !key.includes('company') && !key.includes('user') && !key.includes('preferred')) {
+          knownEntities.add(mem.value.toLowerCase().trim());
+        }
+      }
+    }
+
+    for (const [key, wm] of wmMap.entries()) {
+      if (key.startsWith('friend_name_') || key.startsWith('colleague_name')) {
+        const val = wm.value.trim().toLowerCase();
+        if (val && val.length < 25) knownEntities.add(val);
+      }
+    }
+
     // ── 1. PRUNE EMPTY / PLACEHOLDER NODES IN MEMORIES & WORKING MEMORY ───────
     // e.g., shreshth_date_of_birth or son_birth_date with "" or "Not mentioned"
     // ── 1. PRUNE EMPTY, PLACEHOLDER, & TRANSIENT NODES IN MEMORIES & WORKING MEMORY ───────
@@ -328,36 +349,40 @@ export class AutonomousMemoryGraphCuratorService {
       });
     }
 
-    // Auto-repair Shreshth's age from son_birth_date (e.g. 17/02/2026 -> ~7 months)
+    // Auto-repair son's age from son_birth_date if age is missing/placeholder
     if (sonDobEntry && sonDobEntry.value && (!sonAgeEntry || isPlaceholderValue(sonAgeEntry.value) || sonAgeEntry.value.toLowerCase().includes('applicable'))) {
       const dobMatch = sonDobEntry.value.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-      let calculatedAge = '7 months';
       if (dobMatch) {
         const birthYear = parseInt(dobMatch[3], 10);
         const birthMonth = parseInt(dobMatch[2], 10) - 1;
         const now = new Date();
         const diffMonths = (now.getFullYear() - birthYear) * 12 + (now.getMonth() - birthMonth);
         if (diffMonths >= 0 && diffMonths <= 36) {
-          calculatedAge = `${Math.max(1, diffMonths)} months`;
+          const calculatedAge = `${Math.max(1, diffMonths)} months`;
+          updates.push({
+            key: 'son_age',
+            newValue: calculatedAge,
+            provenChatTruth: `Derived from son_birth_date ${sonDobEntry.value}`,
+            memoryType: 'family',
+            entity: 'son'
+          });
         }
       }
-      updates.push({
-        key: 'son_age',
-        newValue: calculatedAge,
-        provenChatTruth: `Derived from son_birth_date ${sonDobEntry.value}`,
-        memoryType: 'family',
-        entity: 'son'
-      });
     }
 
     // ── 1c. PURGE CONTAMINATED FATHER BACKGROUND FROM WORKING MEMORY ──
     const wmFatherBg = wmMap.get('father_background');
-    if (wmFatherBg && (wmFatherBg.value.toLowerCase().includes('ijaz') || wmFatherBg.value.toLowerCase().includes('navi'))) {
-      removals.push({
-        key: 'father_background',
-        target: 'working_memory',
-        reason: 'Removed friend Ijaz father background from generic father_background key'
-      });
+    if (wmFatherBg) {
+      const bgLower = wmFatherBg.value.toLowerCase();
+      // Check if father_background is contaminated with a third-party friend's attribution
+      const isThirdPartyAttribution = Array.from(knownEntities).some(e => bgLower.includes(e) && (bgLower.includes(`${e}'s father`) || bgLower.includes(`${e} ke papa`) || bgLower.includes(`${e} ke father`)));
+      if (isThirdPartyAttribution || bgLower.includes("ijaz's father") || bgLower.includes("ijaz ke papa")) {
+        removals.push({
+          key: 'father_background',
+          target: 'working_memory',
+          reason: 'Removed third-party friend father background from generic father_background key'
+        });
+      }
     }
 
     // ── 1d. PURGE CONVERSATIONAL DIALOGUE FRAGMENTS FROM WORKING MEMORY ──
@@ -407,7 +432,8 @@ export class AutonomousMemoryGraphCuratorService {
     // ── 3. MERGE SPLIT BIRTH DATE ALIASES (e.g. shreshth_date_of_birth -> son_birth_date) ──
     const sonBdayAliases = [
       'shreshth_date_of_birth', 'shresth_date_of_birth', 'shreshth_dob', 'shreshth_birthday',
-      'shreshth_birth_date', 'son_date_of_birth', 'child_date_of_birth', 'child_dob', 'child_birth_date'
+      'shreshth_birth_date', 'son_date_of_birth', 'child_date_of_birth', 'child_dob', 'child_birth_date',
+      'tuku_dob', 'tuku_birthday', 'tuku_birth_date', 'tiku_dob', 'tiku_birthday', 'tiku_birth_date'
     ];
 
     const canonicalSonDobMem = memMap.get('son_birth_date');
@@ -417,19 +443,21 @@ export class AutonomousMemoryGraphCuratorService {
         const aliasVal = aliasMem.value;
         const canonVal = canonicalSonDobMem?.value;
 
-        let effectiveDob = '17/02/2026';
+        let effectiveDob: string | null = null;
         if (canonVal && !isPlaceholderValue(canonVal) && !/\b(19\d{2}|20[01]\d)\b/.test(canonVal)) {
           effectiveDob = canonVal;
         } else if (aliasVal && !isPlaceholderValue(aliasVal) && !/\b(19\d{2}|20[01]\d)\b/.test(aliasVal)) {
           effectiveDob = aliasVal;
         }
 
-        merges.push({
-          sourceKey: alias,
-          targetKey: 'son_birth_date',
-          provenValue: effectiveDob,
-          reason: `Consolidated alias "${alias}" into canonical "son_birth_date" (${effectiveDob})`
-        });
+        if (effectiveDob) {
+          merges.push({
+            sourceKey: alias,
+            targetKey: 'son_birth_date',
+            provenValue: effectiveDob,
+            reason: `Consolidated alias "${alias}" into canonical "son_birth_date" (${effectiveDob})`
+          });
+        }
       }
     }
 
@@ -439,13 +467,17 @@ export class AutonomousMemoryGraphCuratorService {
     for (const alias of userDobAliases) {
       const aliasMem = memMap.get(alias);
       if (aliasMem) {
-        const effectiveVal = canonicalUserDob?.value || aliasMem.value || '15/04/1992';
-        merges.push({
-          sourceKey: alias,
-          targetKey: 'birth_date',
-          provenValue: effectiveVal,
-          reason: `Consolidated alias "${alias}" into canonical "birth_date"`
-        });
+        const effectiveVal = (canonicalUserDob?.value && !isPlaceholderValue(canonicalUserDob.value))
+          ? canonicalUserDob.value
+          : (!isPlaceholderValue(aliasMem.value) ? aliasMem.value : null);
+        if (effectiveVal) {
+          merges.push({
+            sourceKey: alias,
+            targetKey: 'birth_date',
+            provenValue: effectiveVal,
+            reason: `Consolidated alias "${alias}" into canonical "birth_date"`
+          });
+        }
       }
     }
 
@@ -455,19 +487,22 @@ export class AutonomousMemoryGraphCuratorService {
     if (sonDobMem && sonDobMem.value) {
       const isAdultYear = /\b(19\d{2}|20[01]\d)\b/.test(sonDobMem.value);
       const isInfantAge = sonAgeMem?.value && /\b(\d+)\s*(?:mahine|months?|months?\s*old)\b/i.test(sonAgeMem.value);
+      const hasInfantChatDob = recentChats.some(c => /\b(202\d)\b/.test(c.content || ''));
 
-      if (isAdultYear && isInfantAge) {
+      if (isAdultYear && (isInfantAge || hasInfantChatDob)) {
         // Search chats for son's true birth date vs user's birth date
-        let provenSonDob = '17/02/2026';
+        let provenSonDob: string | null = null;
         let provenUserDob = sonDobMem.value;
 
         for (const msg of recentChats) {
-          const text = (msg.content || '').toLowerCase();
-          if (text.includes('17/02/2026') || text.includes('17 feb 2026') || text.includes('17 february 2026')) {
-            provenSonDob = '17/02/2026';
-          }
-          if (text.includes('15/04/1992') || text.includes('15 april 1992')) {
-            provenUserDob = '15/04/1992';
+          const text = (msg.content || '');
+          const dateMatches = text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\b/g) || [];
+          for (const dm of dateMatches) {
+            if (/\b(202\d)\b/.test(dm)) {
+              provenSonDob = dm;
+            } else if (/\b(19\d{2}|20[01]\d)\b/.test(dm)) {
+              provenUserDob = dm;
+            }
           }
         }
 
@@ -479,81 +514,109 @@ export class AutonomousMemoryGraphCuratorService {
           entity: 'user'
         });
 
-        updates.push({
-          key: 'son_birth_date',
-          newValue: provenSonDob,
-          provenChatTruth: `Son Shreshth is 6 months old infant, born ${provenSonDob}`,
-          memoryType: 'family',
-          entity: 'son'
-        });
+        if (provenSonDob) {
+          updates.push({
+            key: 'son_birth_date',
+            newValue: provenSonDob,
+            provenChatTruth: `Son is infant born ${provenSonDob}`,
+            memoryType: 'family',
+            entity: 'son'
+          });
+        } else {
+          removals.push({
+            key: 'son_birth_date',
+            target: 'memory',
+            reason: `Purged erroneous adult year (${sonDobMem.value}) from infant son_birth_date`
+          });
+        }
       }
     }
 
     // ── 6. NICKNAME / REAL NAME INVERSION GUARD ──────────────────────────────
     const sonNameMem = memMap.get('son_name');
     const sonNickMem = memMap.get('son_nickname');
-    if (
-      (sonNameMem && (sonNameMem.value.toLowerCase() === 'tiku' || sonNameMem.value.toLowerCase() === 'tuku')) ||
-      (sonNickMem && sonNameMem && sonNickMem.value.toLowerCase() === sonNameMem.value.toLowerCase())
-    ) {
-      updates.push({
-        key: 'son_name',
-        newValue: 'Shreshth',
-        provenChatTruth: 'Son real name confirmed from chat is Shreshth',
-        memoryType: 'family',
-        entity: 'son'
-      });
-      updates.push({
-        key: 'son_nickname',
-        newValue: 'Tiku',
-        provenChatTruth: 'Son pet nickname at home is Tiku',
-        memoryType: 'family',
-        entity: 'son'
-      });
+    if (sonNameMem) {
+      const nameVal = sonNameMem.value.trim();
+      const nickVal = sonNickMem?.value?.trim();
+
+      // Check if chat explicitly clarifies real name vs nickname
+      let chatRealName: string | null = null;
+      let chatNickName: string | null = null;
+
+      for (const msg of recentChats) {
+        const text = msg.content || '';
+        const callMatch = text.match(/([a-zA-Z]+)\s+ko\s+(?:(?:pya+r|pree?t)\s+se\s+)?(?:ghar\s+pe\s+)?([a-zA-Z]+)\s+bulat[ei]\s+hai/i) ||
+                          text.match(/\b([a-zA-Z]+)'s\s+nick\s*name\s+is\s+([a-zA-Z]+)\b/i) ||
+                          text.match(/call\s+([a-zA-Z]+)\s+([a-zA-Z]+)\s+(?:at\s+home)?/i);
+        if (callMatch) {
+          chatRealName = this.capitalize(callMatch[1]);
+          chatNickName = this.capitalize(callMatch[2]);
+          break;
+        }
+      }
+
+      if (chatRealName && chatNickName) {
+        if (nameVal.toLowerCase() !== chatRealName.toLowerCase()) {
+          updates.push({
+            key: 'son_name',
+            newValue: chatRealName,
+            provenChatTruth: `Son real name confirmed from chat is ${chatRealName}`,
+            memoryType: 'family',
+            entity: 'son'
+          });
+        }
+        if (!nickVal || nickVal.toLowerCase() !== chatNickName.toLowerCase()) {
+          updates.push({
+            key: 'son_nickname',
+            newValue: chatNickName,
+            provenChatTruth: `Son pet nickname at home confirmed from chat is ${chatNickName}`,
+            memoryType: 'family',
+            entity: 'son'
+          });
+        }
+      } else if (nickVal && nameVal.toLowerCase() === nickVal.toLowerCase()) {
+        // Redundant duplicate nickname identical to real name
+        removals.push({
+          key: 'son_nickname',
+          target: 'memory',
+          reason: `Pruned redundant nickname "${nickVal}" identical to real name`
+        });
+      }
     }
 
     // ── 7. CAREER VS VENTURE COLLISION GUARD ─────────────────────────────────
     const companyMem = memMap.get('company_name');
-    if (companyMem && companyMem.value.toLowerCase().includes('dhaba')) {
-      updates.push({
-        key: 'company_name',
-        newValue: 'Conviction HR',
-        provenChatTruth: 'Primary recruitment employment is Conviction HR (11 AM - 8 PM)',
-        memoryType: 'work',
-        entity: 'user'
-      });
-      updates.push({
-        key: 'venture_name',
-        newValue: "Shetty's Dhaba",
-        provenChatTruth: "Entrepreneurial cloud kitchen business venture is Shetty's Dhaba",
-        memoryType: 'goals',
-        entity: 'user'
-      });
-    }
-
-    // ── 8. ENTITY DEDUPLICATION & REDUNDANT WORKING MEMORY PRUNING ───────────
-    // Identify established entities across memories and working memory
-    const knownEntities = new Set<string>();
-    for (const [key, mem] of memMap.entries()) {
-      if (key.startsWith('friend_') || key.startsWith('colleague_') || key.startsWith('pet_') || key.startsWith('dog_')) {
-        const parts = key.split('_');
-        if (parts.length >= 2) knownEntities.add(parts[1].toLowerCase());
-      }
-      if (mem.value && mem.value.length < 25 && !mem.value.includes(' ') && !isPlaceholderValue(mem.value)) {
-        if (key.includes('name') && !key.includes('company') && !key.includes('user') && !key.includes('preferred')) {
-          knownEntities.add(mem.value.toLowerCase().trim());
+    const ventureMem = memMap.get('venture_name');
+    const workSchedMem = memMap.get('work_schedule');
+    if (companyMem && !ventureMem) {
+      const compLower = companyMem.value.toLowerCase();
+      const schedText = (workSchedMem?.value || '').toLowerCase();
+      // If company is a culinary/cloud kitchen/store venture, and schedule or memories mention a distinct corporate employer
+      const isCulinaryVenture = /\b(dhaba|cloud kitchen|kitchen|cafe|bakery|restaurant)\b/i.test(compLower);
+      if (isCulinaryVenture) {
+        // Check if work schedule or recent chats reference an office/corporate employer
+        const corporateMatch = schedText.match(/at\s+([A-Za-z0-9\s]+?)(?:,\s*\d|\s*\d|\s*\(|$)/i);
+        if (corporateMatch && corporateMatch[1].trim() && !/\b(dhaba|kitchen|cafe)\b/i.test(corporateMatch[1])) {
+          const corpEmployer = corporateMatch[1].trim();
+          updates.push({
+            key: 'company_name',
+            newValue: corpEmployer,
+            provenChatTruth: `Primary employment is ${corpEmployer}`,
+            memoryType: 'work',
+            entity: 'user'
+          });
+          updates.push({
+            key: 'venture_name',
+            newValue: companyMem.value,
+            provenChatTruth: `Entrepreneurial business venture is ${companyMem.value}`,
+            memoryType: 'goals',
+            entity: 'user'
+          });
         }
       }
     }
 
-    // Also look for known entities in working memory
-    for (const [key, wm] of wmMap.entries()) {
-      if (key.startsWith('friend_name_') || key.startsWith('colleague_name')) {
-        const val = wm.value.trim().toLowerCase();
-        if (val && val.length < 25) knownEntities.add(val);
-      }
-    }
-
+    // ── 8. ENTITY DEDUPLICATION & REDUNDANT WORKING MEMORY PRUNING ───────────
     // A. Prune redundant working memory items that merely declare an established entity's name or weak fragment
     for (const [key, wm] of wmMap.entries()) {
       const valLower = wm.value.trim().toLowerCase();
@@ -784,10 +847,11 @@ Curate the memory tree and knowledge graph against the conversation proof and re
           .eq('key', r.key);
       } else if (r.target === 'kg_node') {
         if (r.nodeId) {
-          // Delete edges connected to this phantom node
+          // Delete edges connected to this phantom node (strictly tenant isolated)
           await supabaseAdmin
             .from('kg_edges')
             .delete()
+            .eq('user_id', userId)
             .or(`source_node_id.eq.${r.nodeId},target_node_id.eq.${r.nodeId}`);
 
           // Delete the phantom node
@@ -808,6 +872,7 @@ Curate the memory tree and knowledge graph against the conversation proof and re
             await supabaseAdmin
               .from('kg_edges')
               .delete()
+              .eq('user_id', userId)
               .or(`source_node_id.eq.${fn.id},target_node_id.eq.${fn.id}`);
 
             await supabaseAdmin
@@ -1054,6 +1119,10 @@ Curate the memory tree and knowledge graph against the conversation proof and re
         } catch {}
       }
     }
+  }
+
+  private capitalize(s: string): string {
+    return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
   }
 }
 
