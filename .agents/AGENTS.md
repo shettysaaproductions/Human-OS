@@ -22,8 +22,26 @@ The retired `hi agent`, `hi agent init`, `bye agent`, `update agent`, and `train
 ## Git / Production Safety
 - WIP work can be implemented directly or on `agent-checkpoint/<task-name>` branches, and automatically verified and merged into `main`.
 - Production changes must pass `cd backend && npm run build` and `cd mobile && npx tsc --noEmit` before pushing to `origin main`.
-- Pushes to `main` automatically deploy to Render backend and trigger GitHub Actions EAS Mobile OTA updates.
+- Pushes to `main` automatically deploy to Render backend.
 - Never expose or commit secrets, credentials, tokens, or unnecessary PII.
+
+### Mandatory OTA & Update Notification Protocol (NEVER MISS)
+Whenever runtime, mobile, intelligence, or prompt updates are completed:
+1. **Changelog & In-App Update Notification Modal**:
+   - Always insert a new entry at index `0` of `mobile/src/config/updateHistory.json` with the new version (e.g. `v0.x.x-beta`), current date, title, and bullet points.
+   - This ensures the in-app update notification modal triggers automatically on user device launch.
+2. **Pre-flight Typecheck**:
+   - Verify `cd mobile && npx tsc --noEmit` exits with 0.
+   - Verify `cd backend && npm run build` exits with 0.
+3. **EAS Production OTA Publish**:
+   - Must include `--environment production`:
+     `cd mobile && npx eas update --branch production --environment production --message "<commit/feature description>"`
+4. **Broadcast Push Notification**:
+   - Dispatch update notification to all registered user push tokens:
+     `cd backend && npx ts-node src/scripts/broadcast_update_push.ts "v0.x.x-beta"`
+5. **Continuity Logging**:
+   - Record the Update Group ID, Android/iOS Update IDs, and version in `.agent/CURRENT_HANDOFF.md`.
+   - Commit and push to `origin main`.
 
 ## Continuity Checkpoint Protocol
 For quota/session interruption:

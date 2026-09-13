@@ -145,12 +145,19 @@ Supabase (PostgreSQL) is the core nervous system:
 The installed APK listens to the **`production` EAS branch**.
 
 ```bash
-# CORRECT command to push OTA that the APK will receive:
-npx eas update --branch production --message "Description"
+# CORRECT command to push OTA that the APK will receive (ALWAYS include --environment production):
+npx eas update --branch production --environment production --message "Description"
 
 # WRONG — this goes to preview channel which APK does NOT listen to:
 npx eas update --branch preview ...
 ```
+
+**MANDATORY UPDATE NOTIFICATION PROTOCOL (NEVER MISS):**
+1. Add entry to `mobile/src/config/updateHistory.json` (bumps version e.g. `v0.x.x-beta`, triggers in-app modal).
+2. Pre-flight checks: `cd mobile && npx tsc --noEmit` and `cd backend && npm run build`.
+3. Publish OTA: `cd mobile && npx eas update --branch production --environment production --message "..."`.
+4. Send Push Notification: `cd backend && npx ts-node src/scripts/broadcast_update_push.ts "v0.x.x-beta"`.
+5. Record update IDs in `.agent/CURRENT_HANDOFF.md`, commit, and push to `main`.
 
 **If EAS Free Plan Android build limits (15/month) are exhausted**, you cannot run `eas build`. In this case, instruct the user to build the APK from the GitHub Actions tab.
 
@@ -166,7 +173,7 @@ When the user types `"auto upgrade"` or `"upgrade"`:
 5. `npm run build` in `backend/` to verify no TypeScript errors
 6. Restart local backend: kill old task, start fresh
 7. `git add . && git commit -m 'Auto Upgrade: ...' && git push origin main`
-8. If mobile files changed: `npx eas update --branch production --message "..."`
+8. If mobile/intelligence updated: Follow **MANDATORY UPDATE NOTIFICATION PROTOCOL** above.
 9. Present full flaw analysis + fix summary to user
 
 ---

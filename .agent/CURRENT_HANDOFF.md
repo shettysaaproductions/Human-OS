@@ -36,11 +36,27 @@ Task: COMPLETE — Memory Bubble Richness & Graph Branching, Anti-Hallucination 
    - Refined `ReminderIntentDetector.ts:hasFuturePlanIntent` to ignore casual current tasks without time or routine commitments.
    - Refined `WatchtowerReflectionService.ts` to prevent overwriting rich conversational replies with reminder interrogations.
 
-## Verification
-- Unit Tests: 8 suites, 134 tests (100% PASSED)
-- `cd backend && npm run build`: EXIT 0
-- `cd mobile && npx tsc --noEmit`: EXIT 0
+## Deployment & OTA Status
+- **Commit `61a764e`** pushed to `origin main` (Render backend auto-deployment live).
+- **Mobile EAS Production OTA Update**:
+  - **Branch**: `production`
+  - **Environment**: `production`
+  - **Runtime Version**: `1.1.0`
+  - **Platforms**: `android`, `ios`
+  - **Update Group ID**: `ff421f28-31ee-4c2e-82ca-d0ee415d2106`
+  - **Android Update ID**: `01a09b2c-72af-779b-9fc1-bbbbe9d8c25a`
+  - **iOS Update ID**: `01a09b2c-72af-7626-8fa5-8b60420ead33`
+  - **Version**: `v0.3.1-beta`
+  - **EAS Dashboard**: `https://expo.dev/accounts/shettysaa/projects/mobile/updates/ff421f28-31ee-4c2e-82ca-d0ee415d2106`
+  - **Status**: Live on production channel ✅
+- **In-App Update Notification Modal**:
+  - Inserted `v0.3.1-beta` at index `0` of `mobile/src/config/updateHistory.json`. Automatically triggers the update modal on device launch.
+- **Broadcast Push Notification**:
+  - Dispatched via `backend/src/scripts/broadcast_update_push.ts` to all registered user push tokens in Supabase.
+- **Mandatory OTA & Update Notification Protocol**:
+  - Permanently documented in `.agents/AGENTS.md` and `SESSION_BOOT.md` so it is never missed in any future work.
 
 ## NEXT ACTION
-Ready for production push to `origin main` per standing autonomous push directive.
+All deployment, OTA publishing, and update notification actions are COMPLETE.
+
 
