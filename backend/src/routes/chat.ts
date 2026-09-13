@@ -2468,6 +2468,90 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
         }
       }
 
+      // 8.6. ZERO-HALLUCINATION REMINDER PROMISE GUARDIAN
+      // If Nova's reply promises or confirms that a reminder was set or that she will remind the user,
+      // but deterministicReminderCreated is still false:
+      if (!is_proactive && !deterministicReminderCreated) {
+        const promiseRegex = /(?:reminder\s+(?:set\s+kar\s+diya|schedule\s+kar\s+diya|laga\s+diya|ho\s+gaya|ban\s+gaya)|yaad\s+dila\s+dungi|yaad\s+dila\s+dunga|yaad\s+rakhungi|remind\s+(?:kar\s+dungi|kar\s+dunga|you|karunga)|set\s+a\s+reminder|scheduled\s+a\s+reminder)/i;
+        if (promiseRegex.test(reply)) {
+          try {
+            logger.info('[Chat] Reminder Promise Guardian activated: Nova made a reminder promise in reply', { userId, replySnippet: reply.slice(0, 100) });
+            const multiTurnUserText = (historyResult.data || [])
+              .filter((m: any) => m.role === 'user' && typeof m.content === 'string')
+              .slice(-4)
+              .map((m: any) => m.content)
+              .concat([primaryMessage])
+              .join(' · ');
+
+            const { complete } = await import('../lib/nvidia');
+            const guardianPrompt = `You are Nova's Zero-Hallucination Reminder Guardian for HumanOS.
+Nova just told the user: "${reply}"
+Recent user messages: "${multiTurnUserText}"
+Current local date/time reference: "${new Date().toISOString()}".
+
+Extract the exact reminder that Nova promised:
+1. "task": The clean task title/description (e.g. "Sakshi's Birthday Planning (Salary Day)")
+2. "trigger_at": ISO-8601 string for when to remind. If date is upcoming in a specific month or day (e.g. 5th July or 5th of next month), calculate the exact future UTC ISO timestamp. If no time is specified, default to 10:00 AM local (04:30 UTC for IST).
+3. "category": e.g. "Family", "Work", "Personal"
+4. "urgency": "high" or "medium"
+5. "goal_memory": concise statement for long-term goal memory (e.g. "Plan special birthday celebration for wife Sakshi on salary day (5th July)")
+
+Return ONLY valid JSON:
+{"task": "string", "trigger_at": "YYYY-MM-DDTHH:mm:ss.sssZ", "category": "string", "urgency": "high"|"medium", "goal_memory": "string"}`;
+
+            const gRes = await complete('MEMORY', [
+              { role: 'system', content: guardianPrompt }
+            ], { temperature: 0.1, maxTokens: 300 });
+
+            const rawStr = typeof gRes === 'string' ? gRes : ((gRes as any)?.text || (gRes as any)?.content || '');
+            const match = rawStr.match(/\{[\s\S]*\}/);
+            if (match) {
+              const parsed = JSON.parse(match[0]);
+              if (parsed.task && parsed.trigger_at) {
+                await supabaseAdmin.from('reminders').insert({
+                  user_id: userId,
+                  task: parsed.task,
+                  trigger_at: parsed.trigger_at,
+                  status: 'active',
+                  urgency: parsed.urgency || 'high',
+                  category: parsed.category || 'Personal',
+                  source_context: 'zero_hallucination_promise_guardian',
+                  created_at: new Date().toISOString()
+                });
+
+                if (parsed.goal_memory) {
+                  const goalKey = `goal_${parsed.task.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32)}`;
+                  await memoryRepository.upsertMemory(
+                    userId,
+                    {
+                      shouldPersist: true,
+                      type: 'goals',
+                      key: goalKey,
+                      value: parsed.goal_memory,
+                      importance: 9,
+                      confidence: 1.0,
+                      source_authority: 'deterministic',
+                    },
+                    multiTurnUserText
+                  );
+                }
+
+                deterministicReminderCreated = true;
+                const { invalidateAnalyticsCache } = await import('./analytics');
+                invalidateAnalyticsCache(userId);
+                logger.info('[Chat] Reminder Promise Guardian successfully persisted promised reminder and goal', {
+                  userId,
+                  task: parsed.task,
+                  trigger_at: parsed.trigger_at
+                });
+              }
+            }
+          } catch (guardianErr: any) {
+            logger.warn('[Chat] Reminder Promise Guardian fallback error', { error: guardianErr?.message });
+          }
+        }
+      }
+
       // 9. Background extraction — skipped when DISABLE_MEMORY=true or MEMORY_ENABLED=false
       // OPTIMIZED: All 7 memory types are extracted in ONE LLM call via ConsolidatedMemoryAgent.
       // This reduces per-message LLM load from ~7 calls to ~2 (1 main + 1 consolidated extraction).

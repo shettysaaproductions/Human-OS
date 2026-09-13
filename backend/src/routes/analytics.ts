@@ -398,7 +398,8 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
 
     const [
       { data: kgGoals, error: kgErr },
-      { data: memGoals, error: memErr }
+      { data: memGoals, error: memErr },
+      { data: activeReminders, error: remErr }
     ] = await Promise.all([
       supabaseAdmin
         .from('kg_nodes')
@@ -411,12 +412,20 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
         .select('id, key, value, memory_type, created_at, updated_at, is_archived, source_authority')
         .eq('user_id', userId)
         .or('memory_type.eq.goals,key.eq.goals,key.ilike.goal_%,key.ilike.%target%,key.eq.passions')
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabaseAdmin
+        .from('reminders')
+        .select('id, task, trigger_at, status, recurrence, category, urgency, created_at')
+        .eq('user_id', userId)
+        .order('trigger_at', { ascending: true })
     ]);
 
     if (kgErr && !memGoals) throw kgErr;
     if (memErr) {
       logger.warn('[Analytics/goals] Memory goals query warning', { error: memErr.message });
+    }
+    if (remErr) {
+      logger.warn('[Analytics/goals] Reminders query warning', { error: remErr.message });
     }
 
     const activeGoals: any[] = [];
@@ -432,17 +441,28 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
 
       const status = g.status || g.attributes?.status || 'in_progress';
       const isComplete = status === 'completed' || status === 'done' || status === 'achieved';
+      const deadline = g.target_date || g.attributes?.target_date || g.attributes?.deadline || null;
+      const desc = g.description || g.attributes?.description || title;
+      const progress = g.progress ?? g.attributes?.progress ?? (isComplete ? 100 : 35);
 
       const goalObj = {
         id: g.id,
+        name: title,
         title,
-        description: g.description || g.attributes?.description || title,
-        progress: g.progress ?? (isComplete ? 100 : 35),
+        description: desc,
+        progress,
         status: isComplete ? 'completed' : 'active',
         category: g.category || g.department || 'Goals',
-        targetDate: g.target_date || g.attributes?.target_date || null,
+        targetDate: deadline,
         createdAt: g.created_at,
-        source: 'kg'
+        source: 'kg',
+        attributes: {
+          name: title,
+          description: desc,
+          progress,
+          status: isComplete ? 'completed' : 'active',
+          deadline
+        }
       };
 
       if (isComplete) {
@@ -480,6 +500,7 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
         const isComplete = m.is_archived || /completed|done|finished|achieved/i.test(norm);
         const goalObj = {
           id: `mem-goal-${m.id}-${seenTitles.size}`,
+          name: item,
           title: item,
           description: item,
           progress: isComplete ? 100 : 40,
@@ -487,7 +508,14 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
           category: 'Ambition',
           targetDate: null,
           createdAt: m.created_at || m.updated_at,
-          source: 'memory'
+          source: 'memory',
+          attributes: {
+            name: item,
+            description: item,
+            progress: isComplete ? 100 : 40,
+            status: isComplete ? 'completed' : 'active',
+            deadline: null
+          }
         };
 
         if (isComplete) {
@@ -501,6 +529,55 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
           title: item,
           date: m.created_at || m.updated_at,
           status: goalObj.status
+        });
+      }
+    }
+
+    // 3. Synthesize active reminders (e.g. wife birthday planning, key schedules)
+    for (const r of (activeReminders || [])) {
+      const taskTitle = (r.task || 'Reminder').trim();
+      if (!taskTitle || seenTitles.has(taskTitle.toLowerCase())) continue;
+      seenTitles.add(taskTitle.toLowerCase());
+
+      const isCompleted = r.status === 'completed' || r.status === 'dismissed' || r.status === 'cancelled';
+      const isUrgent = r.urgency === 'high';
+      const deadlineStr = r.trigger_at ? new Date(r.trigger_at).toISOString() : null;
+      const desc = `Target Reminder: ${taskTitle}${r.recurrence && r.recurrence !== 'none' ? ` (${r.recurrence})` : ''}`;
+      const progress = isCompleted ? 100 : (isUrgent ? 60 : 45);
+
+      const reminderGoalObj = {
+        id: `reminder-${r.id}`,
+        name: taskTitle,
+        title: taskTitle,
+        entity_type: 'reminder_goal',
+        description: desc,
+        progress,
+        status: isCompleted ? 'completed' : 'active',
+        category: r.category || (isUrgent ? 'Priority Reminder' : 'Milestone Reminder'),
+        targetDate: deadlineStr,
+        createdAt: r.created_at || deadlineStr,
+        source: 'reminder',
+        attributes: {
+          name: taskTitle,
+          description: desc,
+          progress,
+          status: isCompleted ? 'completed' : 'active',
+          deadline: deadlineStr
+        }
+      };
+
+      if (isCompleted) {
+        completedGoals.push(reminderGoalObj);
+      } else {
+        activeGoals.push(reminderGoalObj);
+      }
+
+      if (deadlineStr) {
+        timeline.push({
+          id: `timeline-rem-${r.id}`,
+          title: taskTitle,
+          date: deadlineStr,
+          status: reminderGoalObj.status
         });
       }
     }

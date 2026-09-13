@@ -515,8 +515,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       const frac = branchCount === 1 ? 0 : (bIdx / (branchCount - 1) - 0.5);
       const bAngle = angle + frac * branchSpread;
 
-      const bx = Math.round(hx + branchDist * Math.cos(bAngle));
-      const by = Math.round(hy + branchDist * Math.sin(bAngle));
+      const rawBx = hx + branchDist * Math.cos(bAngle);
+      const rawBy = hy + branchDist * Math.sin(bAngle);
+      const bx = isFinite(rawBx) ? Math.round(rawBx) : hx;
+      const by = isFinite(rawBy) ? Math.round(rawBy) : hy;
 
       const branchAngle3d = frac * Math.PI * 0.82;
       const branchDist3d = 260;
@@ -608,19 +610,19 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
     stemsByParent.forEach((stems, parentId) => {
       const parentNode = nodeMap.get(parentId) || branchItems.find(b => b.id === parentId) || branchItems[0];
-      const px = parentNode ? parentNode.x : hx;
-      const py = parentNode ? parentNode.y : hy;
+      const px = (parentNode && typeof parentNode.x === 'number' && isFinite(parentNode.x)) ? parentNode.x : hx;
+      const py = (parentNode && typeof parentNode.y === 'number' && isFinite(parentNode.y)) ? parentNode.y : hy;
 
       // Base angle pointing away from dept hub (or center)
-      const baseStemAngle = parentNode
-        ? Math.atan2(parentNode.y - hy, parentNode.x - hx)
+      const baseStemAngle = (parentNode && typeof parentNode.x === 'number' && isFinite(parentNode.x))
+        ? Math.atan2(py - hy, px - hx)
         : angle;
 
       const sCount = stems.length;
       const stemDist = 240;
       const stemSpread = Math.min(Math.PI * 0.95, Math.max(0.55, (sCount - 1) * 0.44));
 
-      const pBranch3d = (parentNode && parentNode.x3d !== undefined)
+      const pBranch3d = (parentNode && parentNode.x3d !== undefined && isFinite(parentNode.x3d))
         ? { x: parentNode.x3d, y: parentNode.y3d || 0, z: parentNode.z3d || 0 }
         : h3d;
 
@@ -631,8 +633,10 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
 
         // Radial staggering provides comfortable breathing room for full text badges
         const effectiveStemDist = stemDist + (sIdx % 2 === 0 ? 0 : 70);
-        const sx = Math.round(px + effectiveStemDist * Math.cos(sAngle));
-        const sy = Math.round(py + effectiveStemDist * Math.sin(sAngle));
+        const rawSx = px + effectiveStemDist * Math.cos(sAngle);
+        const rawSy = py + effectiveStemDist * Math.sin(sAngle);
+        const sx = isFinite(rawSx) ? Math.round(rawSx) : hx;
+        const sy = isFinite(rawSy) ? Math.round(rawSy) : hy;
 
         const stemAngle3d = sFrac * Math.PI * 0.95;
         const stemDist3d = 175 + (sIdx % 3) * 45;
@@ -1065,6 +1069,192 @@ class KgErrorBoundary extends React.Component<{ children: React.ReactNode }, { h
   }
 }
 
+// ----------------------------------------------------
+// SCI-FI SYNAPTIC ACTION POTENTIAL LIGHT PULSES (60-120 FPS)
+// Luminous photon impulses traveling continuously along neural filaments
+// ----------------------------------------------------
+interface SynapticPathway {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  ctrlX?: number;
+  ctrlY?: number;
+  color: string;
+  duration: number;
+  delay: number;
+}
+
+const SynapticPulse = React.memo(function SynapticPulse({ pathway }: { pathway: SynapticPathway }) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    let active = true;
+    const t = setTimeout(() => {
+      if (!active) return;
+      progress.value = 0;
+      progress.value = withRepeat(
+        withTiming(1, { duration: pathway.duration, easing: Easing.linear }),
+        -1,
+        false
+      );
+    }, pathway.delay);
+
+    return () => {
+      active = false;
+      clearTimeout(t);
+      cancelAnimation(progress);
+    };
+  }, [pathway.id, pathway.duration, pathway.delay]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    'worklet';
+    const t = progress.value;
+    let curX = 0;
+    let curY = 0;
+
+    if (pathway.ctrlX !== undefined && pathway.ctrlY !== undefined) {
+      const oneMinusT = 1 - t;
+      curX = oneMinusT * oneMinusT * pathway.x1 + 2 * oneMinusT * t * pathway.ctrlX + t * t * pathway.x2;
+      curY = oneMinusT * oneMinusT * pathway.y1 + 2 * oneMinusT * t * pathway.ctrlY + t * t * pathway.y2;
+    } else {
+      curX = pathway.x1 + (pathway.x2 - pathway.x1) * t;
+      curY = pathway.y1 + (pathway.y2 - pathway.y1) * t;
+    }
+
+    if (!isFinite(curX) || !isFinite(curY)) {
+      return { opacity: 0 };
+    }
+
+    const sinT = Math.sin(t * Math.PI);
+    const opacity = Math.min(1.0, Math.max(0, sinT * 1.45));
+    const scale = 0.75 + 0.5 * sinT;
+
+    return {
+      transform: [
+        { translateX: curX - 6 },
+        { translateY: curY - 6 },
+        { scale }
+      ],
+      opacity
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.synapticPhotonWrap, animatedStyle]} pointerEvents="none">
+      <View
+        style={[
+          styles.synapticHalo,
+          {
+            backgroundColor: pathway.color,
+            shadowColor: pathway.color,
+          }
+        ]}
+      />
+      <View style={styles.synapticCore} />
+    </Animated.View>
+  );
+});
+
+const SynapticActionPotentialLayer = React.memo(function SynapticActionPotentialLayer({
+  edges
+}: {
+  edges: Array<{
+    edge: GraphEdge;
+    sourceNode: { screenX: number; screenY: number };
+    targetNode: { screenX: number; screenY: number };
+    isCross: boolean;
+    pathD?: string;
+    midX: number;
+    midY: number;
+  }>;
+}) {
+  const [pulseBatchSeed, setPulseBatchSeed] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPulseBatchSeed(s => (s + 1) % 100);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activePathways = useMemo(() => {
+    if (!edges || edges.length === 0) return [];
+
+    const validEdges = edges.filter(e =>
+      isFinite(e.sourceNode.screenX) &&
+      isFinite(e.sourceNode.screenY) &&
+      isFinite(e.targetNode.screenX) &&
+      isFinite(e.targetNode.screenY)
+    );
+
+    if (validEdges.length === 0) return [];
+
+    const crossEdges = validEdges.filter(e => e.isCross);
+    const standardEdges = validEdges.filter(e => !e.isCross);
+
+    const picked: typeof validEdges = [];
+    if (crossEdges.length > 0) {
+      for (let i = 0; i < Math.min(3, crossEdges.length); i++) {
+        const idx = (pulseBatchSeed + i * 2) % crossEdges.length;
+        picked.push(crossEdges[idx]);
+      }
+    }
+
+    const remainingCount = Math.max(3, 8 - picked.length);
+    for (let i = 0; i < remainingCount && standardEdges.length > 0; i++) {
+      const idx = (pulseBatchSeed * 3 + i * 5) % standardEdges.length;
+      picked.push(standardEdges[idx]);
+    }
+
+    const PALETTE = ['#38BDF8', '#C084FC', '#34D399', '#F472B6', '#FBBF24', '#60A5FA'];
+
+    return picked.map((pe, idx) => {
+      const e = pe.edge;
+      let ctrlX: number | undefined;
+      let ctrlY: number | undefined;
+
+      if (pe.isCross && pe.pathD) {
+        const match = pe.pathD.match(/Q\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);
+        if (match) {
+          const parsedCx = parseFloat(match[1]);
+          const parsedCy = parseFloat(match[2]);
+          if (isFinite(parsedCx) && isFinite(parsedCy)) {
+            ctrlX = parsedCx;
+            ctrlY = parsedCy;
+          }
+        }
+      }
+
+      const color = pe.isCross ? '#C084FC' : (e.color || PALETTE[idx % PALETTE.length]);
+      const duration = 1900 + (idx % 4) * 420;
+      const delay = (idx * 260) % 1100;
+
+      return {
+        id: `pulse-${e.id}-${pulseBatchSeed}-${idx}`,
+        x1: pe.sourceNode.screenX,
+        y1: pe.sourceNode.screenY,
+        x2: pe.targetNode.screenX,
+        y2: pe.targetNode.screenY,
+        ctrlX,
+        ctrlY,
+        color,
+        duration,
+        delay
+      };
+    });
+  }, [edges, pulseBatchSeed]);
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {activePathways.map(p => (
+        <SynapticPulse key={p.id} pathway={p} />
+      ))}
+    </View>
+  );
+});
+
 function KgExplorerContent() {
   const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
@@ -1356,6 +1546,45 @@ function KgExplorerContent() {
     syncCamera(0.35, 0.24, 0.0, 0, 0, 0.70);
   }, [pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
 
+  const handleToggleViewMode = useCallback((mode: '3d' | '2d') => {
+    setViewMode(mode);
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    if (mode === '2d') {
+      pitch.value = withSpring(0, { damping: 18 });
+      yaw.value = withSpring(0, { damping: 18 });
+      roll.value = withSpring(0, { damping: 18 });
+      panX.value = withSpring(0, { damping: 18 });
+      panY.value = withSpring(0, { damping: 18 });
+      scale.value = withSpring(0.70, { damping: 18 });
+
+      savedPitch.value = 0;
+      savedYaw.value = 0;
+      savedRoll.value = 0;
+      savedPanX.value = 0;
+      savedPanY.value = 0;
+      savedScale.value = 0.70;
+
+      syncCamera(0, 0, 0, 0, 0, 0.70);
+    } else {
+      pitch.value = withSpring(0.24, { damping: 18 });
+      yaw.value = withSpring(0.35, { damping: 18 });
+      roll.value = withSpring(0.0, { damping: 18 });
+      panX.value = withSpring(0, { damping: 18 });
+      panY.value = withSpring(0, { damping: 18 });
+      scale.value = withSpring(0.70, { damping: 18 });
+
+      savedPitch.value = 0.24;
+      savedYaw.value = 0.35;
+      savedRoll.value = 0.0;
+      savedPanX.value = 0;
+      savedPanY.value = 0;
+      savedScale.value = 0.70;
+
+      syncCamera(0.35, 0.24, 0.0, 0, 0, 0.70);
+    }
+  }, [pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
+
   const handleSpinY = useCallback(() => {
     const next = yaw.value + Math.PI / 2;
     yaw.value = withSpring(next, { damping: 16 });
@@ -1471,11 +1700,16 @@ function KgExplorerContent() {
     const screenX = (viewportW / 2) + pX + (x3 * perspective * camScale);
     const screenY = (viewportH / 2) + pY + (y3 * perspective * camScale);
 
+    const safeScreenX = isFinite(screenX) ? screenX : (viewportW / 2) + pX;
+    const safeScreenY = isFinite(screenY) ? screenY : (viewportH / 2) + pY;
+    const safeDepth = isFinite(z3) ? z3 : 0;
+    const safePerspective = isFinite(perspective) && perspective > 0 ? perspective : 1.0;
+
     return {
-      screenX,
-      screenY,
-      depth: z3,
-      perspective
+      screenX: safeScreenX,
+      screenY: safeScreenY,
+      depth: safeDepth,
+      perspective: safePerspective
     };
   }
 
@@ -1493,8 +1727,10 @@ function KgExplorerContent() {
 
     // 1. Project all nodes
     const projectedNodesRaw = nodes.map(n => {
-      const x = is3d ? (n.x3d ?? (n.x - CENTER)) : (n.x - CENTER);
-      const y = is3d ? (n.y3d ?? (n.y - CENTER)) : (n.y - CENTER);
+      const safeX = (typeof n.x === 'number' && isFinite(n.x)) ? n.x : CENTER;
+      const safeY = (typeof n.y === 'number' && isFinite(n.y)) ? n.y : CENTER;
+      const x = is3d ? (n.x3d ?? (safeX - CENTER)) : (safeX - CENTER);
+      const y = is3d ? (n.y3d ?? (safeY - CENTER)) : (safeY - CENTER);
       const z = is3d ? (n.z3d ?? 0) : 0;
 
       const proj = project3DPoint(
@@ -1591,12 +1827,14 @@ function KgExplorerContent() {
 
       // Smooth radial clearance offset
       const dist = r + 8 + labelH / 2;
-      const cosA = Math.cos(baseAngle);
-      const sinA = Math.sin(baseAngle);
+      const cosA = isFinite(Math.cos(baseAngle)) ? Math.cos(baseAngle) : 0;
+      const sinA = isFinite(Math.sin(baseAngle)) ? Math.sin(baseAngle) : 1;
+      const safeOffsetX = isFinite(dist * cosA) ? Math.round(dist * cosA) : 0;
+      const safeOffsetY = isFinite(dist * sinA) ? Math.round(dist * sinA) : 20;
 
       placementMap.set(pn.node.id, {
-        labelOffsetX: Math.round(dist * cosA),
-        labelOffsetY: Math.round(dist * sinA),
+        labelOffsetX: safeOffsetX,
+        labelOffsetY: safeOffsetY,
         labelW,
         labelH,
         hasLeaderLine: false,
@@ -1632,6 +1870,7 @@ function KgExplorerContent() {
       const sNode = projectedNodeMap.get(e.source);
       const tNode = projectedNodeMap.get(e.target);
       if (!sNode || !tNode) continue;
+      if (!isFinite(sNode.screenX) || !isFinite(sNode.screenY) || !isFinite(tNode.screenX) || !isFinite(tNode.screenY)) continue;
 
       const isCross = !!e.isCrossDomain;
       let pathD: string | undefined;
@@ -1664,23 +1903,27 @@ function KgExplorerContent() {
             SCREEN_WIDTH, GRAPH_HEIGHT
           );
 
-          pathD = `M ${Math.round(sNode.screenX)} ${Math.round(sNode.screenY)} Q ${Math.round(ctrlProj.screenX)} ${Math.round(ctrlProj.screenY)} ${Math.round(tNode.screenX)} ${Math.round(tNode.screenY)}`;
-          midX = Math.round(0.25 * sNode.screenX + 0.5 * ctrlProj.screenX + 0.25 * tNode.screenX);
-          midY = Math.round(0.25 * sNode.screenY + 0.5 * ctrlProj.screenY + 0.25 * tNode.screenY);
+          if (isFinite(ctrlProj.screenX) && isFinite(ctrlProj.screenY)) {
+            pathD = `M ${Math.round(sNode.screenX)} ${Math.round(sNode.screenY)} Q ${Math.round(ctrlProj.screenX)} ${Math.round(ctrlProj.screenY)} ${Math.round(tNode.screenX)} ${Math.round(tNode.screenY)}`;
+            midX = Math.round(0.25 * sNode.screenX + 0.5 * ctrlProj.screenX + 0.25 * tNode.screenX);
+            midY = Math.round(0.25 * sNode.screenY + 0.5 * ctrlProj.screenY + 0.25 * tNode.screenY);
+          }
         } else {
           // 2D Bézier
           const dx = tNode.screenX - sNode.screenX;
           const dy = tNode.screenY - sNode.screenY;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 1) {
+          if (isFinite(dist) && dist > 1) {
             const nx = -dy / dist;
             const ny = dx / dist;
             const curveAmount = Math.min(80, Math.max(30, dist * 0.18));
             const ctrlX = Math.round((sNode.screenX + tNode.screenX) / 2 + nx * curveAmount);
             const ctrlY = Math.round((sNode.screenY + tNode.screenY) / 2 + ny * curveAmount);
-            pathD = `M ${Math.round(sNode.screenX)} ${Math.round(sNode.screenY)} Q ${ctrlX} ${ctrlY} ${Math.round(tNode.screenX)} ${Math.round(tNode.screenY)}`;
-            midX = Math.round(0.25 * sNode.screenX + 0.5 * ctrlX + 0.25 * tNode.screenX);
-            midY = Math.round(0.25 * sNode.screenY + 0.5 * ctrlY + 0.25 * tNode.screenY);
+            if (isFinite(ctrlX) && isFinite(ctrlY)) {
+              pathD = `M ${Math.round(sNode.screenX)} ${Math.round(sNode.screenY)} Q ${ctrlX} ${ctrlY} ${Math.round(tNode.screenX)} ${Math.round(tNode.screenY)}`;
+              midX = Math.round(0.25 * sNode.screenX + 0.5 * ctrlX + 0.25 * tNode.screenX);
+              midY = Math.round(0.25 * sNode.screenY + 0.5 * ctrlY + 0.25 * tNode.screenY);
+            }
           }
         }
       }
@@ -1983,7 +2226,7 @@ function KgExplorerContent() {
           <View style={styles.viewToggleGroup}>
             <TouchableOpacity
               style={[styles.viewToggleBtn, viewMode === '3d' && styles.viewToggleBtnActive]}
-              onPress={() => setViewMode('3d')}
+              onPress={() => handleToggleViewMode('3d')}
             >
               <Text style={[styles.viewToggleText, viewMode === '3d' && styles.viewToggleTextActive]}>
                 🌐 3D
@@ -1991,7 +2234,7 @@ function KgExplorerContent() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.viewToggleBtn, viewMode === '2d' && styles.viewToggleBtnActive]}
-              onPress={() => setViewMode('2d')}
+              onPress={() => handleToggleViewMode('2d')}
             >
               <Text style={[styles.viewToggleText, viewMode === '2d' && styles.viewToggleTextActive]}>
                 🗺️ 2D
@@ -2252,6 +2495,9 @@ function KgExplorerContent() {
                   })}
                 </G>
               </Svg>
+
+              {/* 1.5. Sci-Fi Animated Synaptic Action Potential Pulses Layer */}
+              <SynapticActionPotentialLayer edges={projectedGraph.edges} />
 
               {/* 2. Interactive Midpoint Relationship Badges */}
               {projectedGraph.edges.map((pe) => {
@@ -2978,6 +3224,38 @@ const styles = StyleSheet.create({
 
   canvasContainer: { flex: 1, overflow: 'hidden', backgroundColor: '#09090B' },
   universe: { width: WORLD_SIZE, height: WORLD_SIZE },
+
+  // Sci-Fi Synaptic Action Potential Energy Pulses
+  synapticPhotonWrap: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6000
+  },
+  synapticHalo: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    opacity: 0.85,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.95,
+    shadowRadius: 8,
+    elevation: 8
+  },
+  synapticCore: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    elevation: 5
+  },
 
   // Screen Space Projected Elements
   nodeAnchor: {

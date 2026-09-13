@@ -90,14 +90,31 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
     await fetchGoals();
   }, []);
 
-  const allGoals: Goal[] = data?.activeGoals || [];
-  const activeGoals = useMemo(() => allGoals.filter(g => g.attributes?.status !== 'completed'), [allGoals]);
-  const completedGoals = useMemo(() => allGoals.filter(g => g.attributes?.status === 'completed'), [allGoals]);
+  const allGoals: any[] = useMemo(() => {
+    const raw = (data?.activeGoals || []).concat(data?.completedGoals || []);
+    const dedupMap = new Map<string, any>();
+    for (const g of raw) {
+      if (!g || !g.id) continue;
+      dedupMap.set(g.id, g);
+    }
+    return Array.from(dedupMap.values());
+  }, [data]);
+
+  const activeGoals = useMemo(() => allGoals.filter(g => {
+    const st = g.attributes?.status || g.status;
+    return st !== 'completed' && st !== 'done';
+  }), [allGoals]);
+
+  const completedGoals = useMemo(() => allGoals.filter(g => {
+    const st = g.attributes?.status || g.status;
+    return st === 'completed' || st === 'done';
+  }), [allGoals]);
+
   const displayGoals = tab === 'active' ? activeGoals : completedGoals;
 
   const overallProgress = useMemo(() => {
     if (activeGoals.length === 0) return 0;
-    const total = activeGoals.reduce((sum, g) => sum + (g.attributes?.progress || 0), 0);
+    const total = activeGoals.reduce((sum, g) => sum + (g.attributes?.progress ?? g.progress ?? 0), 0);
     return total / activeGoals.length;
   }, [activeGoals]);
 
@@ -168,18 +185,29 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
         removeClippedSubviews
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#10B981" />}
         renderItem={({ item }) => {
-          const progress = item.attributes?.progress || 0;
-          const deadline = item.attributes?.deadline;
-          const isCompleted = item.attributes?.status === 'completed';
-          const color = isCompleted ? '#A78BFA' : '#10B981';
+          const goalName = item.name || item.title || 'Milestone';
+          const goalDesc = item.attributes?.description || item.description || '';
+          const progress = item.attributes?.progress ?? item.progress ?? 35;
+          const deadline = item.attributes?.deadline || item.targetDate || item.deadline;
+          const st = item.attributes?.status || item.status;
+          const isCompleted = st === 'completed' || st === 'done';
+          const isReminder = item.source === 'reminder' || item.entity_type === 'reminder_goal' || item.id?.startsWith('reminder-');
+          const color = isCompleted ? '#A78BFA' : (isReminder ? '#38BDF8' : '#10B981');
           return (
             <View style={gr.goalCard}>
               <View style={gr.goalHeader}>
-                <Text style={gr.starIcon}>{isCompleted ? '⭐' : '🌟'}</Text>
+                <Text style={gr.starIcon}>{isCompleted ? '⭐' : (isReminder ? '⏰' : '🌟')}</Text>
                 <View style={{ flex: 1 }}>
-                  <Text style={[gr.goalName, { color }]}>{item.name}</Text>
-                  {item.attributes?.description ? (
-                    <Text style={gr.goalDesc}>{item.attributes.description}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={[gr.goalName, { color }]}>{goalName}</Text>
+                    {isReminder && (
+                      <View style={{ backgroundColor: 'rgba(56,189,248,0.15)', borderColor: '#38BDF8', borderWidth: 0.8, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ color: '#38BDF8', fontSize: 9, fontWeight: '700' }}>REMINDER</Text>
+                      </View>
+                    )}
+                  </View>
+                  {goalDesc ? (
+                    <Text style={gr.goalDesc}>{goalDesc}</Text>
                   ) : null}
                 </View>
                 <ProgressRing progress={progress} color={color} size={44} />
@@ -194,8 +222,8 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
                 {deadline ? (
                   <Text style={gr.deadline}>📅 {formatGoalDeadline(deadline)}</Text>
                 ) : <View />}
-                {item.created_at ? (
-                  <Text style={gr.addedDate}>{formatGoalCreated(item.created_at)}</Text>
+                {(item.created_at || item.createdAt) ? (
+                  <Text style={gr.addedDate}>{formatGoalCreated(item.created_at || item.createdAt)}</Text>
                 ) : null}
               </View>
             </View>

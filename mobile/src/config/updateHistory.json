@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.4-beta",
+    "date": "2026-09-13",
+    "title": "⚡ Sci-Fi Neural Action Potential Pulses, 2D Galaxy Fix & Goals Reminder Sync",
+    "message": [
+      "2D Map View Fixed: Completely resolved the 2D view toggle by sanitizing coordinate math and resetting camera tilt to flat centered perspective, ensuring zero blank screens and butter-smooth panning.",
+      "Sci-Fi Neural Synaptic Pulses: Luminous photon energy pulses (white-hot cores + neon cyan/violet/emerald halos) travel continuously along synaptic filaments, making the brain look like a living, thinking sci-fi neural movie.",
+      "Dynamic Background Thinking: The brain actively cycles synaptic pathways every few seconds, firing impulses across family, career, goals, and cross-domain bridges in real time at 60-120 FPS.",
+      "Zero-Hallucination Reminder Promise Guardian: Any reminder promised or confirmed by Nova in chat (such as wife's birthday planning on salary day) is guaranteed to persist to the database — no promises ever get dropped.",
+      "Unified Goals & Reminders Sync: Active reminders and deadlines now seamlessly appear inside the Goals & Milestones tab with progress indicators and deadline dates."
+    ]
+  },
+  {
     "version": "0.3.3-beta",
     "date": "2026-09-13",
     "title": "🎮 GTA Vice City 3D Movement Engine, Planetary Rings & Primary Galaxy Window",
