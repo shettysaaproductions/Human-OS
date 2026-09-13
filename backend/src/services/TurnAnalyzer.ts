@@ -369,8 +369,9 @@ export class TurnAnalyzer {
             });
           }
         }
-        // 3. Check for questions
-        else if (/\?/.test(clause) || /\b(kya|kahan|kab|kaise|kyun|kaun|who|why|what|where|when|how|can you|will you|tell me)\b/i.test(lower)) {
+        // 3. Check for questions (excluding exclamatory phrases like "kya baat hai", "kya mast", "kya gazab" or pure exclamation marks)
+        const isExclamation = /\b(kya\s+(?:baat|mast|gazab|kamaal|sundar|khoob|sahi|ajab|shandar))\b/i.test(lower) || (!/\?/.test(clause) && /!$/.test(clause.trim()));
+        if (!isExclamation && (/\?/.test(clause) || /\b(kya|kahan|kab|kaise|kyun|kaun|who|why|what|where|when|how|can you|will you|tell me)\b/i.test(lower))) {
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,
@@ -386,7 +387,7 @@ export class TurnAnalyzer {
           });
         }
         // 4. Check for emotions
-        else if (/\b(feel|sad|happy|angry|tension|stress|ro raha|dukhi|pareshan|gussa|thaka|tired|upset|exhausted|depressed|anxious|excited)\b/i.test(lower)) {
+        else if (/\b(feel|sad|happy|angry|tension|stress|ro raha|dukhi|pareshan|gussa|thaka|tired|upset|exhausted|depressed|anxious|excited|kya baat|kya mast|kya gazab|kamaal|shandar|congrats|superb|awesome|proud|glad|blessed)\b/i.test(lower)) {
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,

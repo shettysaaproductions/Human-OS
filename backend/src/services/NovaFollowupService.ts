@@ -31,20 +31,24 @@ import { resolveUserTzOffsetHours } from './ReminderEngine';
 // Shared by queueFollowup's guard, chat.ts's immediate lock (recordUnavailability),
 // and the unseen-check-in path in checkIgnoredNovaMessages.
 const SLEEP_SIGNALS = [
-  'soone ja', 'so ja', 'so raha hoon', 'so rahi hoon', 'neend aa', 'raat ko so',
-  'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
-  'gn ', 'gn\n', 'bye', 'byee', 'byebye', 'chalta hoon', 'chalti hoon',
+  'soone ja', 'so raha hoon', 'so rahi hoon', 'neend aa', 'raat ko so',
+  'going to sleep', 'going to bed', 'sleeping now',
+  'chalta hoon', 'chalti hoon',
   'chalte hai', 'nikal raha', 'nikal rahi', 'baad mein baat', 'baad mein reply',
   'call aaya', 'meeting me hoon', 'busy hoon', 'baad mein baat karta', 'abhi baad me',
   'so jaunga', 'so jaungi', 'sone wala hoon', 'nap le raha', 'nap le rahi'
 ];
+// Standalone departure words (checked with word boundaries so 'bytes', 'bystander' never match)
+const DEPARTURE_REGEX = /\b(bye|byee+|byebye|goodbye|gtg|ttyl|cya)\b/i;
+
 // Subset that means the user is genuinely asleep → long (8h) lock. Everything else in
 // SLEEP_SIGNALS is "busy / stepping away" → short (2h) lock.
 const TRULY_SLEEP_SIGNALS = [
-  'soone ja', 'so ja', 'so raha', 'so rahi', 'neend aa',
-  'going to sleep', 'going to bed', 'sleeping now', 'good night', 'goodnight',
-  'gn ', 'so jaunga', 'so jaungi', 'sone wala', 'nap le'
+  'soone ja', 'so raha', 'so rahi', 'neend aa',
+  'going to sleep', 'going to bed', 'sleeping now',
+  'so jaunga', 'so jaungi', 'sone wala', 'nap le'
 ];
+const TRULY_SLEEP_REGEX = /\b(gn|goodnight|good\s*night|so\s*jao?)\b/i;
 const SLEEP_LOCK_HOURS = 8;
 const BUSY_LOCK_HOURS = 2;
 
@@ -68,8 +72,8 @@ function offlineBackoffHours(attempt: number): number {
 
 export function classifyUnavailability(text: string): { type: 'sleep' | 'busy'; hours: number } | null {
   const lower = text.toLowerCase();
-  if (TRULY_SLEEP_SIGNALS.some(s => lower.includes(s))) return { type: 'sleep', hours: SLEEP_LOCK_HOURS };
-  if (SLEEP_SIGNALS.some(s => lower.includes(s))) return { type: 'busy', hours: BUSY_LOCK_HOURS };
+  if (TRULY_SLEEP_REGEX.test(lower) || TRULY_SLEEP_SIGNALS.some(s => lower.includes(s))) return { type: 'sleep', hours: SLEEP_LOCK_HOURS };
+  if (DEPARTURE_REGEX.test(lower) || SLEEP_SIGNALS.some(s => lower.includes(s))) return { type: 'busy', hours: BUSY_LOCK_HOURS };
   return null;
 }
 

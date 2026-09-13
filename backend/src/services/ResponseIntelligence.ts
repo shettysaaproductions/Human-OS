@@ -94,6 +94,12 @@ export function synthesizeContextualOptions(input: ContextualOptionsInput): stri
 
   // 1. Reminder / Task confirmation or routine check
   if (/\b(remind|reminder|schedule|alarm|task|yaad|routine|target)\b/i.test(lowerMsg) || /\b(reminder set|set kar diya|yaad dila|schedule kiya|noted)\b/i.test(lowerReply)) {
+    const isAlreadyConfirmed = /\b(set kar diya|set ho gaya|schedule ho gaya|schedule kar diya|alarm set|scheduled for|reminder is set)\b/i.test(lowerReply);
+    if (isAlreadyConfirmed) {
+      return isHindi 
+        ? ['Show my tasks', 'Set another reminder', 'All set, thanks!']
+        : ['Show my tasks', 'Set another reminder', 'All set, thanks!'];
+    }
     return isHindi 
       ? ['Kab remind karu?', 'Show my tasks', 'All set, thanks!']
       : ['When should I remind you?', 'Show my tasks', 'All set, thanks!'];
@@ -120,21 +126,35 @@ export function synthesizeContextualOptions(input: ContextualOptionsInput): stri
       : ['Log this workout', 'Give diet tips', 'Remind me to hydrate'];
   }
 
-  // 5. Emotional vent / stress / companionship
+  // 5. Creative / Writing / Design / Content Creator
+  if (/\b(write|story|script|design|art|drawing|sketch|video|blog|content|creative|poem|song|lyrics|kahani|likhna|kavita)\b/i.test(lowerMsg)) {
+    return isHindi
+      ? ['Ideas brainstorm karein', 'Review karke feedback do', 'Next draft likhein']
+      : ['Brainstorm ideas', 'Review and give feedback', 'Write the next draft'];
+  }
+
+  // 6. Food / Cooking / Nutrition / Recipes
+  if (/\b(recipe|cook|cooking|khana|dinner|lunch|breakfast|bana raha|bana rahi|meal|diet|snack|bhukh|bhookh)\b/i.test(lowerMsg)) {
+    return isHindi
+      ? ['Quick healthy recipe batao', 'Ingredients suggest karo', 'Prep steps batao']
+      : ['Suggest a quick healthy recipe', 'Give ingredient substitutions', 'Show prep steps'];
+  }
+
+  // 7. Emotional vent / stress / companionship
   if (/\b(feel|tired|exhausted|sad|tension|stress|lonely|bored|dukhi|pareshan|thak gaya|thak gayi)\b/i.test(lowerMsg)) {
     return isHindi
       ? ['Thoda baat karein?', 'Distract me please', 'I need a break']
       : ["Let's chat a bit", 'Distract me please', 'I need a break'];
   }
 
-  // 6. Factual / Explanatory followup
+  // 8. Factual / Explanatory followup
   if (/\b(explain|detail|difference|compare|why|kaise|samjhao|batao)\b/i.test(lowerMsg)) {
     return isHindi
       ? ['Example ke saath batao', 'Table format me dikhao', 'Short summary do']
       : ['Give an example', 'Show in a table', 'Give a short summary'];
   }
 
-  // 7. General friendly conversational progression
+  // 9. General friendly conversational progression
   if (lowerReply.includes('?') || lowerMsg.includes('?')) {
     return isHindi
       ? ['Haan bilkul', 'Thoda aur batao', 'Nahi, baad me']

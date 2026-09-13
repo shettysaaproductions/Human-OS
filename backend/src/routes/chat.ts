@@ -17,7 +17,7 @@ import { degradedMode } from '../services/DegradedModeService';
 import { situationalAwareness } from '../services/SituationalAwareness';
 import { sendNovaReplyNotification, sendVisionSnapNotification } from '../lib/pushNotifications';
 import { reminderService } from '../services/reminderService';
-// ReminderEngine imported dynamically where needed
+import { resolveUserTzOffsetHours } from '../services/ReminderEngine';
 import { presencePatternService } from '../services/PresencePatternService';
 import { visionService } from '../services/VisionService';
 import { sanitizeReply, NOVA_EMPTY_REPLY, isPromptLeak, validateAndRepairGrounding } from '../services/NovaBrainService';
@@ -1273,8 +1273,7 @@ chatRouter.post(
       }
 
       const userCountry = profile?.country || 'IN';
-      const TIMEZONE_OFFSETS: Record<string, number> = { IN: 5.5, US: -5, UK: 0, AU: 10, AE: 4, SA: 3, PK: 5, BD: 6, SG: 8, JP: 9, DE: 1, FR: 1, CA: -5, NZ: 12, ZA: 2, NG: 1, KE: 3, BR: -3 };
-      const tzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
+      const tzOffset = resolveUserTzOffsetHours(profile || undefined);
       const tzMs = tzOffset * 3600 * 1000;
       const nowLocal = new Date(Date.now() + tzMs);
       const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
