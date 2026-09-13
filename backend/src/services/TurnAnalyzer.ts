@@ -1272,6 +1272,30 @@ export class TurnAnalyzer {
       facts.push({ key: 'artist_genre', value: 'Hip-Hop / Rap', text, isProtected: isExplicitRemember, factClass });
     }
 
+    // 4.5. YouTube Channel & Audience Reach (e.g. "youtube channel pe 1 lakh subscribers", "1 lakh subscribers")
+    const ytMatch = lower.match(/\b(?:youtube(?:\s*channel)?|yt(?:\s*channel)?)\b/i);
+    const subMatch = lower.match(/\b(?:(\d+(?:\.\d+)?\s*(?:lakh|lac|k|m|million))\s*(?:subscribers?|subs)?|subscribers?\s*(?:pe\s+)?(\d+(?:\.\d+)?\s*(?:lakh|lac|k|m|million)?))\b/i);
+    if (ytMatch || (subMatch && /\b(?:subscribers?|subs|channel)\b/i.test(lower))) {
+      const subCountMatch = lower.match(/\b(\d+(?:\.\d+)?\s*(?:lakh|lac|k|m|million))\s*(?:subscribers?|subs)?\b/i);
+      const subs = subCountMatch ? this.cleanValue(subCountMatch[1]) : (subMatch ? this.cleanValue(subMatch[0]) : '');
+      if (subs) {
+        facts.push({
+          key: 'youtube_subscribers',
+          value: `${subs} Subscribers`,
+          text,
+          isProtected: isExplicitRemember,
+          factClass
+        });
+      }
+      facts.push({
+        key: 'content_creator_platform',
+        value: 'YouTube',
+        text,
+        isProtected: isExplicitRemember,
+        factClass
+      });
+    }
+
     // 5. Friends Sub-Branches & Attributes (e.g. Childhood Friend, Smoking Partner)
     const childhoodFriendMatch = lower.match(/\b([a-zA-Z]+)\s*(?:is\s+(?:my\s+)?|mera\s+)?childhood\s*friend\b/i) ||
       lower.match(/\bchildhood\s*friend\s+(?:hai\s+|is\s+|)([a-zA-Z]+)\b/i);

@@ -2712,7 +2712,17 @@ export function buildDynamicKnowledgeGraph(
     if (meta.domain === 'work') {
       const isCompanyBranch = ['company_name', 'current_company', 'office_name'].includes(k);
       const isVentureBranch = ['venture_name', 'business_venture', 'cloud_kitchen_business', 'dhaba_venture'].includes(k);
-      const isArtistItem = k.startsWith('career_milestone_') || k.startsWith('career_achievement_') || k === 'artist_genre' || (k === 'profession' && /artist|rapper|singer|musician|producer/i.test(item.value));
+      const isArtistItem = k.startsWith('career_milestone_') ||
+        k.startsWith('career_achievement_') ||
+        k === 'artist_genre' ||
+        k.includes('hustle') ||
+        k.includes('gully_boy') ||
+        k.includes('gullyboy') ||
+        k.startsWith('youtube_') ||
+        k === 'content_creator_platform' ||
+        k.includes('youtube') ||
+        (k.includes('subscriber') && !k.includes('plan')) ||
+        (k === 'profession' && /artist|rapper|singer|musician|producer|creator/i.test(item.value));
 
       if (isArtistItem) {
         const artistNodeId = 'mem-artist-career';
@@ -2752,6 +2762,8 @@ export function buildDynamicKnowledgeGraph(
           edgeType = 'ATTRIBUTE_STEM';
           relation = k.includes('hustle') ? 'REALITY_SHOW_MILESTONE' :
                      k.includes('gully') ? 'FILM_FEATURE_MILESTONE' :
+                     k.includes('youtube') || k.includes('subscriber') ? 'AUDIENCE_REACH' :
+                     k.includes('creator') || k === 'content_creator_platform' ? 'CREATOR_PLATFORM' :
                      k.includes('genre') ? 'ARTIST_GENRE' :
                      k.includes('rank') ? 'COMPETITION_RANK' :
                      k === 'profession' ? 'ARTIST_TITLE' : 'CAREER_MILESTONE';

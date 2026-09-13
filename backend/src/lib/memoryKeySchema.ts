@@ -355,8 +355,8 @@ export function isKnownCanonicalKey(canonicalKey: string): boolean {
   if (CANONICAL_KEYS.has(canonicalKey)) return true;
   // Entity-scoped canonical keys: entity:<subject_id>:<predicate>
   if (/^entity:[a-z0-9_]+:[a-z0-9_]+$/i.test(canonicalKey)) return true;
-  // Dynamic entity relationship and category keys across all life domains (e.g. colleague_ijaz, profession_guitar, dog_coco, project_helios, career_milestone_mtv_hustle)
-  if (/^(?:colleague|office_friend|coworker|friend|mentor|doctor|pet|dog|cat|bird|profession|career|job|project|venture|stack|tool|skill|instrument|guitar|piano|car|bike|vehicle|sport|game|hobby|routine|habit|diet|medical|goal|career_milestone|milestone|achievement|award|artist)_[a-z0-9_]+$/i.test(canonicalKey)) return true;
+  // Dynamic entity relationship and category keys across all life domains (e.g. colleague_ijaz, profession_guitar, dog_coco, project_helios, career_milestone_mtv_hustle, youtube_subscribers)
+  if (/^(?:colleague|office_friend|coworker|friend|mentor|doctor|pet|dog|cat|bird|profession|career|job|project|venture|stack|tool|skill|instrument|guitar|piano|car|bike|vehicle|sport|game|hobby|routine|habit|diet|medical|goal|career_milestone|career_achievement|milestone|achievement|award|artist|youtube|social|creator|content|channel)_[a-z0-9_]+$/i.test(canonicalKey)) return true;
   return false;
 }
 

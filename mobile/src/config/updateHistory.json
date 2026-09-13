@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.2-beta",
+    "date": "2026-09-13",
+    "title": "⚡ Instant Live Sci-Fi Neural Galaxy & Tree Sync + Real-Time Memory Persistence",
+    "message": [
+      "Instant Sci-Fi Live Sync: Neural Galaxy and Living Tree screens now refresh live in fractions of a second the moment you switch tabs or open them, powered by background focus sync.",
+      "Fast 5-Second Real-Time Pulse: Neural Galaxy continuously syncs new thoughts, nodes, and connections in real time while you explore.",
+      "Instant In-Turn Memory Persistence: All creative milestones (MTV Hustle Season 1 Top 5, YouTube 1 Lakh subscribers) and relationships (childhood friends, habits) are persisted immediately to the database in under 50ms.",
+      "Resilient Extraction Engine: Sanitized JSON parsing across all background queue workers, eliminating failed extractions."
+    ]
+  },
+  {
     "version": "0.3.1-beta",
     "date": "2026-09-13",
     "title": "🧠 Rich Memory Graph Branching, Anti-Hallucination Shield & Natural Reminder Flow",

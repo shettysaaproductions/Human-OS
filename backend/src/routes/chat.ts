@@ -2404,6 +2404,70 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
       degradedMode.appendMessage(userId, 'user', primaryMessage);
       degradedMode.appendMessage(userId, 'assistant', reply);
 
+      // 8.5. INSTANT DETERMINISTIC MEMORY PERSISTENCE (Fraction-of-a-second live sync)
+      // Any deterministic facts extracted by TurnAnalyzer (milestones, family, friends, habits, channels, etc.)
+      // are persisted IMMEDIATELY to Supabase before background LLM queue runs.
+      if (process.env.DISABLE_MEMORY !== 'true' && memoryEnabledForChat) {
+        try {
+          const candidateUnits = (turnAnalysis?.units || []).filter(u =>
+            (u.type === 'fact' || u.type === 'correction') &&
+            u.factKey &&
+            u.factValue &&
+            u.factKey !== 'UNKNOWN_RELATION' &&
+            !u.factKey.startsWith('__sys_')
+          );
+
+          const messageForMemory = (effectiveMessage && effectiveMessage.trim().length > primaryMessage.length) ? effectiveMessage : primaryMessage;
+          const directFacts = TurnAnalyzer.extractFacts(messageForMemory);
+          const combinedFacts = new Map<string, { key: string; value: string; domain?: string }>();
+
+          for (const u of candidateUnits) {
+            if (u.factKey && u.factValue) {
+              combinedFacts.set(u.factKey, { key: u.factKey, value: u.factValue, domain: u.memoryDomain });
+            }
+          }
+          for (const df of directFacts) {
+            if (df.key && df.value && !combinedFacts.has(df.key)) {
+              combinedFacts.set(df.key, { key: df.key, value: df.value });
+            }
+          }
+
+          if (combinedFacts.size > 0) {
+            for (const [factKey, fact] of combinedFacts.entries()) {
+              const memoryType = fact.domain || (
+                factKey.startsWith('friend_') || factKey.startsWith('family_') || factKey.includes('wife') || factKey.includes('son') || factKey.includes('mother') || factKey.includes('father')
+                  ? 'family'
+                  : factKey.startsWith('career_') || factKey.startsWith('youtube_') || factKey === 'profession' || factKey === 'artist_genre' || factKey.startsWith('work_') || factKey.startsWith('colleague_')
+                  ? 'work'
+                  : factKey.startsWith('goal_')
+                  ? 'goals'
+                  : 'lifestyle'
+              );
+
+              await memoryRepository.upsertMemory(
+                userId,
+                {
+                  shouldPersist: true,
+                  type: memoryType as any,
+                  key: fact.key,
+                  value: fact.value,
+                  importance: 9,
+                  confidence: 1.0,
+                  source_authority: 'deterministic',
+                },
+                messageForMemory
+              );
+              logger.info('[Chat] Instant deterministic memory persisted', { userId, key: fact.key, value: fact.value });
+            }
+
+            const { invalidateAnalyticsCache } = await import('./analytics');
+            invalidateAnalyticsCache(userId);
+          }
+        } catch (memErr: any) {
+          logger.warn('[Chat] Instant deterministic memory persistence error (non-fatal)', { error: memErr?.message });
+        }
+      }
+
       // 9. Background extraction — skipped when DISABLE_MEMORY=true or MEMORY_ENABLED=false
       // OPTIMIZED: All 7 memory types are extracted in ONE LLM call via ConsolidatedMemoryAgent.
       // This reduces per-message LLM load from ~7 calls to ~2 (1 main + 1 consolidated extraction).

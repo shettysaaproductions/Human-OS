@@ -326,7 +326,24 @@ ENTITY ATTRIBUTION & ACTIVITY OWNERSHIP (CRITICAL — ZERO CONFUSION):
       temperature: 0.1
     });
 
-    const parsed = JSON.parse(response) as ConsolidatedExtraction;
+    let jsonStr = (response || '').trim();
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    }
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0];
+    }
+    let parsed: ConsolidatedExtraction;
+    try {
+      parsed = JSON.parse(jsonStr) as ConsolidatedExtraction;
+    } catch (parseErr) {
+      logger.error('[ConsolidatedMemoryAgent] Failed to parse JSON response', {
+        error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        rawResponse: response?.slice(0, 200)
+      });
+      return 0;
+    }
     const contextText = typeof recentContext === 'string' ? recentContext : '';
 
     if (hasCanonicalEvents) {

@@ -5,7 +5,7 @@ import {
   KeyboardAvoidingView, Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Svg, { G, Line, Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -1175,13 +1175,20 @@ function KgExplorerContent() {
     }
   }, []);
 
+  // Instant Live Sync on Screen Focus (fraction-of-a-second refresh when user taps Galaxy tab)
+  useFocusEffect(
+    useCallback(() => {
+      fetchGraph(true);
+    }, [fetchGraph])
+  );
+
   useEffect(() => {
     fetchGraph(false);
 
-    // Auto-sync polling every 20 seconds while on screen
+    // Fast auto-sync polling every 5 seconds while on screen for live real-time updates
     const interval = setInterval(() => {
       fetchGraph(true);
-    }, 20000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [fetchGraph]);

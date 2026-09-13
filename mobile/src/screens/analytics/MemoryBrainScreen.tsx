@@ -5,7 +5,7 @@ import {
   RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { api } from '../../services/api';
 import { BrainHeader } from '../../components/BrainHeader';
 
@@ -183,11 +183,9 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => { fetchMemories(); }, []);
-
-  const fetchMemories = async () => {
+  const fetchMemories = useCallback(async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const res = await api.get('/analytics/memories');
       setData(res.data.data);
     } catch (err) {
@@ -196,12 +194,27 @@ export const MemoryBrainScreen = React.memo(function MemoryBrainScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
+
+  // Instant Live Sync on Screen Focus (fraction-of-a-second refresh when user taps Tree tab)
+  useFocusEffect(
+    useCallback(() => {
+      fetchMemories(false);
+    }, [fetchMemories])
+  );
+
+  useEffect(() => {
+    fetchMemories(true);
+    const interval = setInterval(() => {
+      fetchMemories(false);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchMemories]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchMemories();
-  }, []);
+    await fetchMemories(false);
+  }, [fetchMemories]);
 
   const toggleWardrobe = useCallback((id: string) => {
     setExpandedWardrobes(prev => ({ ...prev, [id]: !prev[id] }));
