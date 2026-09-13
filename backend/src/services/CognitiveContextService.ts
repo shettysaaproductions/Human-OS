@@ -26,6 +26,7 @@ import { extractKeywords, stopWords } from '../utils/nlp';
 import { TurnAnalyzer, TurnAnalysisResult } from './TurnAnalyzer';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { memoryPolicyService } from './MemoryPolicyService';
+import { resolveUserTzOffsetHours } from './ReminderEngine';
 
 export interface ContextItemProvenance {
   source: 'current_turn' | 'chat_history' | 'working_memory' | 'short_term_memory' | 'episodic_memory' | 'long_term_memory' | 'life_thread' | 'nova_action' | 'reminder' | 'user_profile' | 'presence';
@@ -319,7 +320,7 @@ export class CognitiveContextService {
     });
 
     const remindersPromise = qt.track('get_upcoming_reminders', 'reminders', () =>
-      supabaseAdmin.from('reminders').select('id, title, trigger_at, event_trigger').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(5)
+      supabaseAdmin.from('reminders').select('id, text, trigger_at, event_trigger').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(5)
     ).catch(err => {
       logger.warn('[CognitiveContext] Reminders fetch failed', { error: err.message });
       degradedSources.push('reminders');
@@ -339,10 +340,7 @@ export class CognitiveContextService {
     // ── 1. User & Temporal Context ──────────────────────────────────────────
     const profile = (profileRes.data as any) || {};
     const userCountry = profile.country || 'IN';
-    const TIMEZONE_OFFSETS: Record<string, number> = {
-      IN: 5.5, US: -5, UK: 0, AU: 10, AE: 4, SA: 3, PK: 5, BD: 6, SG: 8, JP: 9, DE: 1, FR: 1, CA: -5, NZ: 12, ZA: 2, NG: 1, KE: 3, BR: -3
-    };
-    const tzOffset = profile.timezone_offset ? profile.timezone_offset / 60 : (TIMEZONE_OFFSETS[userCountry] ?? 5.5);
+    const tzOffset = resolveUserTzOffsetHours(profile);
     const tzMs = tzOffset * 3600 * 1000;
     const nowLocal = new Date(Date.now() + tzMs);
     const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -569,7 +567,7 @@ export class CognitiveContextService {
     // ── 8. Reminders ────────────────────────────────────────────────────────
     const upcomingReminders = ((remindersRes.data as any[]) || []).map(r => ({
       id: r.id,
-      title: r.title,
+      title: r.text || r.title || 'Reminder',
       trigger_at: r.trigger_at,
       event_trigger: r.event_trigger
     }));

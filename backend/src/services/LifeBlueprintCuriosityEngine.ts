@@ -117,7 +117,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'HIGH',
     timingAffinity: 'ANYTIME_CASUAL',
     matchingKeys: ['city', 'current_city', 'hometown', 'location', 'user_location', 'living_in'],
-    valueEvidencePatterns: [/mumbai|delhi|bangalore|bengaluru|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|lucknow|thane|navi mumbai/i],
+    valueEvidencePatterns: [/[a-zA-Z\s.,'-]{2,50}/],
     promptTemplates: [
       "Waise tum usually kaunse city me based ho? Taaki local context, weather aur timing ka exact dhyan rakh sakoon."
     ],
@@ -134,7 +134,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'MEDIUM',
     timingAffinity: 'ANYTIME_CASUAL',
     matchingKeys: ['mother_tongue', 'native_language', 'cultural_background', 'home_language'],
-    valueEvidencePatterns: [/hindi|tulu|kannada|marathi|gujarati|bengali|tamil|telugu|malayalam|punjabi/i],
+    valueEvidencePatterns: [/[a-zA-Z\s-]{2,40}/i],
     promptTemplates: [
       "Waise ghar pe mostly kaunsi language bolte ho — Hindi ke alawa mother tongue kya hai?"
     ],
@@ -248,7 +248,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'MEDIUM',
     timingAffinity: 'MEAL_TIME',
     matchingKeys: ['comfort_food', 'favorite_dish', 'favorite_food', 'go_to_meal'],
-    valueEvidencePatterns: [/\b(?:biryani|dal chawal|roti|paneer|chicken|dosa|idli|khichdi|pasta|pizza|fish curry)\b/i],
+    valueEvidencePatterns: [/\b(?:biryani|dal chawal|roti|paneer|chicken|dosa|idli|khichdi|pasta|pizza|fish curry|sushi|ramen|tacos|salad|burger|steak|soup|rice)\b/i, /[a-zA-Z\s-]{3,40}/i],
     promptTemplates: [
       "Jab lamba din ho aur stress ho, to tumhara go-to comfort food kya hota hai?",
       "Sabse pasandida khana kya hai tumhara jise khakar maza aa jaye?"
@@ -269,7 +269,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'HIGH',
     timingAffinity: 'MORNING_FRESH',
     matchingKeys: ['fitness_routine', 'workout_routine', 'exercise_habit', 'gym_routine', 'daily_walk'],
-    valueEvidencePatterns: [/\b(?:gym|walk|walking|running|workout|yoga|cardio|weights|cycling|badminton)\b/i],
+    valueEvidencePatterns: [/\b(?:gym|walk|walking|running|workout|yoga|cardio|weights|cycling|badminton|swimming|pilates|calisthenics|crossfit|martial arts|boxing|active|exercise|none)\b/i, /[a-zA-Z\s-]{3,40}/i],
     promptTemplates: [
       "Tumhara daily fitness ya physical activity ka kya scene hai — gym, walk, ya abhi busy schedule me paused hai?",
       "Physical routine me kuch follow karte ho jaise morning walk ya workout, ya pure office focus rehta hai?"
@@ -288,7 +288,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'HIGH',
     timingAffinity: 'EVENING_WIND_DOWN',
     matchingKeys: ['stress_relief', 'stress_relief_habit', 'decompression_habit', 'recharge_method', 'how_to_relax'],
-    valueEvidencePatterns: [/\b(?:music|drive|bike ride|sleeping|talking|gaming|netflix|reading|silence|chai)\b/i],
+    valueEvidencePatterns: [/\b(?:music|drive|bike ride|sleeping|talking|gaming|netflix|reading|silence|chai|coffee|meditation|walk)\b/i, /[a-zA-Z\s-]{3,40}/i],
     promptTemplates: [
       "Jab din bohot hectic aur dimag full ho jaye, to tumhein sabse zyada relax kya karta hai — music, lambi drive, ya bas shanti me baithna?",
       "Tension ya stress me tumhara instant mood-lifter kya hota hai?"
@@ -309,7 +309,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'HIGH',
     timingAffinity: 'WEEKEND_RELAX',
     matchingKeys: ['weekend_routine', 'sunday_routine', 'weekend_habit', 'off_day_habit'],
-    valueEvidencePatterns: [/\b(?:family time|sleeping in|outing|cooking|movies|relaxing|chilling|exploring)\b/i],
+    valueEvidencePatterns: [/\b(?:family time|sleeping in|outing|cooking|movies|relaxing|chilling|exploring|reading|hiking|sports)\b/i, /[a-zA-Z\s-]{3,40}/i],
     promptTemplates: [
       "Weekend ya weekoff pe tumhara usual routine kya hota hai — pura din rest aur family time, ya kuch exploration?",
       "Weekend pe tumhein sabse zyada kya karna pasand hai?"
@@ -328,7 +328,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'MEDIUM',
     timingAffinity: 'ANYTIME_CASUAL',
     matchingKeys: ['favorite_music', 'music_taste', 'music_genre', 'favorite_songs'],
-    valueEvidencePatterns: [/\b(?:lofi|retro|bollywood|ghazal|rock|punjabi|instrumental|hip hop|classical|pop)\b/i],
+    valueEvidencePatterns: [/\b(?:lofi|retro|bollywood|ghazal|rock|punjabi|instrumental|hip hop|classical|pop|jazz|metal|electronic|edm|indie|r&b)\b/i, /[a-zA-Z\s-]{2,40}/i],
     promptTemplates: [
       "Gaane sunne ka shauk hai? Kaunsa genre ya artist sabse zyada loop pe rehta hai tumhare headphone me?"
     ],
@@ -345,7 +345,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'MEDIUM',
     timingAffinity: 'ANYTIME_CASUAL',
     matchingKeys: ['commute_mode', 'daily_commute', 'travel_mode', 'bike_or_car'],
-    valueEvidencePatterns: [/\b(?:bike|motorcycle|scooter|activa|car|metro|train|auto|cab|walk)\b/i],
+    valueEvidencePatterns: [/\b(?:bike|motorcycle|scooter|activa|car|metro|train|auto|cab|walk|bus|bicycle|transit|subway|wfh|remote)\b/i, /[a-zA-Z\s-]{2,40}/i],
     promptTemplates: [
       "Daily commute kaise karte ho office ke lie — bike, car, metro ya cab?"
     ],
@@ -364,7 +364,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'HIGH',
     timingAffinity: 'EVENING_WIND_DOWN',
     matchingKeys: ['core_value', 'life_philosophy', 'what_drives_me', 'biggest_motivation'],
-    valueEvidencePatterns: [/\b(?:family|freedom|independence|success|wealth|stability|impact|growth)\b/i],
+    valueEvidencePatterns: [/\b(?:family|freedom|independence|success|wealth|stability|impact|growth|learning|peace|health|creativity)\b/i, /[a-zA-Z\s-]{3,40}/i],
     promptTemplates: [
       "Itni mehnat aur multi-venture hustle ke peeche tumhara sabse bada drive kya hai — family ki stability, personal freedom, ya kuch bada build karna?"
     ],
@@ -440,6 +440,12 @@ export class LifeBlueprintCuriosityEngine {
     const currentHour = timeContext?.localHour ?? new Date().getUTCHours();
     const isWeekend = timeContext?.isWeekend ?? false;
 
+    const RELATIVE_EXCLUSIONS = [
+      'wife', 'husband', 'spouse', 'son', 'daughter', 'child', 'kid',
+      'father', 'mother', 'mom', 'dad', 'sister', 'brother', 'partner',
+      'fiance', 'fiancee', 'sakshi', 'shreshth'
+    ];
+
     for (const def of FOUNDATIONAL_BLUEPRINT_REGISTRY) {
       let isKnown = false;
       let knownValue: string | undefined;
@@ -449,7 +455,7 @@ export class LifeBlueprintCuriosityEngine {
         if (memMap.has(mKey)) {
           // If checking user birthday/age, ensure it's not a relative's key
           if ((def.key === 'birth_date' || def.key === 'user_age') && 
-              (mKey.includes('wife') || mKey.includes('sakshi') || mKey.includes('son') || mKey.includes('shreshth') || mKey.includes('father') || mKey.includes('mother'))) {
+              RELATIVE_EXCLUSIONS.some(rel => mKey.includes(rel))) {
             continue;
           }
           const val = memMap.get(mKey);
@@ -479,8 +485,9 @@ export class LifeBlueprintCuriosityEngine {
             const traitVal = String(trait.value || '').trim();
             if (!traitVal || /unknown|not specified|n\/a|none/i.test(traitVal)) continue;
 
-            // Ensure we don't pick up other people's birthdays
-            if (def.key === 'birth_date' && (traitKeyLower.includes('sakshi') || traitKeyLower.includes('wife') || traitKeyLower.includes('son') || traitVal.toLowerCase().includes("sakshi's birthday"))) {
+            // Ensure we don't pick up other people's birthdays or ages
+            if ((def.key === 'birth_date' || def.key === 'user_age') && 
+                (RELATIVE_EXCLUSIONS.some(rel => traitKeyLower.includes(rel) || traitVal.toLowerCase().includes(`${rel}'s`)))) {
               continue;
             }
 

@@ -370,8 +370,10 @@ export class TurnAnalyzer {
           }
         }
         // 3. Check for questions (excluding exclamatory phrases like "kya baat hai", "kya mast", "kya gazab" or pure exclamation marks)
-        const isExclamation = /\b(kya\s+(?:baat|mast|gazab|kamaal|sundar|khoob|sahi|ajab|shandar))\b/i.test(lower) || (!/\?/.test(clause) && /!$/.test(clause.trim()));
-        if (!isExclamation && (/\?/.test(clause) || /\b(kya|kahan|kab|kaise|kyun|kaun|who|why|what|where|when|how|can you|will you|tell me)\b/i.test(lower))) {
+        else if (
+          !(/\b(kya\s+(?:baat|mast|gazab|kamaal|sundar|khoob|sahi|ajab|shandar))\b/i.test(lower) || (!/\?/.test(clause) && /!$/.test(clause.trim()))) &&
+          (/\?/.test(clause) || /\b(kya|kahan|kab|kaise|kyun|kaun|who|why|what|where|when|how|can you|will you|tell me)\b/i.test(lower))
+        ) {
           units.push({
             unitId: crypto.randomUUID(),
             sourceMessageId,
@@ -984,21 +986,52 @@ export class TurnAnalyzer {
     }
 
     // ── Birth Dates & Anniversaries ──────────────────────────────────────────
-    // 1. Son / Shreshth / Tuku / Tiku birth date
+    // 1. Son / Child birth date
     const sonBdayMatch = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)?\s*(?:shreshth|shresth|tuku|tiku)?(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|kab\s+hai\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+|-)[0-9]{2,4}))(?:\s+hai|\s+is|[.,;!]|$)/i) ||
         lower.match(/\b(?:beta|bete|son|child|shreshth|shresth|tuku|tiku)\s+(?:was\s+)?born\s+(?:on\s+)?([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+|-)[0-9]{2,4}))(?:\s+ko|[.,;!]|$)/i);
     if (sonBdayMatch && /\b(beta|bete|son|child|shreshth|shresth|tuku|tiku)\b/i.test(lower)) {
       facts.push({ key: 'son_birth_date', value: this.cleanValue(sonBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
-    // 2. Wife / Sakshi birth date
+    // 2. Daughter birth date
+    const daughterBdayMatch = lower.match(/\b(?:meri|mere|my)?\s*(?:beti|daughter)(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+        lower.match(/\b(?:beti|daughter)\s+(?:was\s+)?born\s+(?:on\s+)?([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+|-)[0-9]{2,4}))(?:\s+ko|[.,;!]|$)/i);
+    if (daughterBdayMatch && /\b(beti|daughter)\b/i.test(lower)) {
+      facts.push({ key: 'daughter_birth_date', value: this.cleanValue(daughterBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 3. Wife birth date
     const wifeBdayMatch = lower.match(/\b(?:meri|mere|my)?\s*(?:biwi|wife|patni)?\s*(?:sakshi)?(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i);
     if (wifeBdayMatch && /\b(biwi|wife|patni|sakshi)\b/i.test(lower)) {
       facts.push({ key: 'wife_birth_date', value: this.cleanValue(wifeBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
     }
 
-    // 3. User birth date
-    if (facts.every(f => f.key !== 'son_birth_date' && f.key !== 'wife_birth_date')) {
+    // 4. Husband birth date
+    const husbandBdayMatch = lower.match(/\b(?:mera|mere|my)?\s*(?:pati|husband|shauhar)(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (husbandBdayMatch && /\b(pati|husband|shauhar)\b/i.test(lower)) {
+      facts.push({ key: 'husband_birth_date', value: this.cleanValue(husbandBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 5. Mother / Father birth dates
+    const motherBdayMatch = lower.match(/\b(?:meri|mere|my)?\s*(?:mummy|mom|mother|maa|mata)(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (motherBdayMatch && /\b(mummy|mom|mother|maa|mata)\b/i.test(lower)) {
+      facts.push({ key: 'mother_birth_date', value: this.cleanValue(motherBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    const fatherBdayMatch = lower.match(/\b(?:mera|mere|my)?\s*(?:papa|dad|father|pita|daddy)(?:'s)?\s*(?:ka\s+)?(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i);
+    if (fatherBdayMatch && /\b(papa|dad|father|pita|daddy)\b/i.test(lower)) {
+      facts.push({ key: 'father_birth_date', value: this.cleanValue(fatherBdayMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 6. Wedding / Marriage Anniversary
+    const anniMatch = lower.match(/\b(?:humari|meri|our|my)?\s*(?:wedding\s+anniversary|marriage\s+anniversary|anniversary|shaadi\s+ki\s+anniversary|saalgirah)\s+(?:is\s+|hai\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i) ||
+        lower.match(/\bgot\s+married\s+on\s+([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))/i);
+    if (anniMatch) {
+      facts.push({ key: 'anniversary_date', value: this.cleanValue(anniMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // 7. User birth date
+    if (facts.every(f => !f.key.endsWith('_birth_date') && f.key !== 'anniversary_date')) {
       const userBdayMatch = lower.match(/\b(?:mera|my)\s+(?:date\s+of\s+birth|birth\s*date|dob|birthday|bday|janam\s+din)\s+(?:hai\s+|is\s+|to\s+|on\s+|)([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))(?:\s+hai|\s+is|[.,;!]|$)/i) ||
           lower.match(/\b(?:i\s+was|mai)\s+born\s+(?:on\s+)?([0-9]{1,2}(?:[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|(?:\s+|-)(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+[0-9]{2,4})?))/i);
       if (userBdayMatch) {
@@ -1048,6 +1081,45 @@ export class TurnAnalyzer {
         m = lower.match(/\b(?:kaam karta|karti hoon|work at|working at|worked at|joined|employed at|job at|now work at|now working at)\s+([a-zA-Z0-9\s]+?)(?:[.,;]|$|\band\b|\bin\s+\d{4}|\bin\s+[a-z]+|\bsince\b)/i);
         if (m) facts.push({ key: 'company_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       }
+    }
+
+    // Profession / Occupation (e.g. "I am a software engineer", "Main doctor hoon", "I work as a UI designer")
+    if (facts.every(f => f.key !== 'profession')) {
+      const profMatch = lower.match(/\b(?:i\s+am\s+(?:a|an)|i'm\s+(?:a|an)|work\s+as\s+(?:a|an))\s+([a-zA-Z\s]{3,35}?)(?:\s+(?:by\s+profession|at|in|for)\b|[.,;!]|$)/i) ||
+          lower.match(/\b(?:mai|main)\s+(?:ek\s+)?([a-zA-Z\s]{3,35}?)\s+(?:hoon|hun)\b/i);
+      if (profMatch) {
+        const pVal = this.cleanValue(profMatch[1]);
+        const isCommonRole = /\b(engineer|developer|designer|doctor|lawyer|teacher|professor|student|nurse|architect|consultant|manager|writer|founder|artist|photographer|scientist|analyst|accountant|chef|pilot)\b/i.test(pVal);
+        if (isCommonRole && !this.isStopPronoun(pVal)) {
+          facts.push({ key: 'profession', value: pVal, text, isProtected: isExplicitRemember, factClass });
+        }
+      }
+    }
+
+    // College / University / Education
+    const collegeMatch = lower.match(/\b(?:study\s+at|studying\s+at|student\s+(?:at|of)|college\s+is|university\s+is)\s+([a-zA-Z0-9\s]{3,50}?)(?:[.,;!]|$|\band\b)/i) ||
+        lower.match(/\b(?:mai|main)\s+([a-zA-Z0-9\s]{3,50}?)\s+(?:me\s+padhta|me\s+padhti|college\s+me)\b/i);
+    if (collegeMatch && !collegeMatch[1].toLowerCase().includes('home')) {
+      facts.push({ key: 'college_name', value: this.cleanValue(collegeMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Competitive Exam / Study Goal
+    const examMatch = lower.match(/\b(?:preparing\s+for|ki\s+taiyari\s+kar\s+raha|ki\s+prep\s+kar\s+raha|target\s+exam\s+is)\s+([a-zA-Z0-9\s]{2,30}?)(?:[.,;!]|$|\bexam\b)/i);
+    if (examMatch) {
+      facts.push({ key: 'target_exam', value: this.cleanValue(examMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Dietary preference (e.g. "I am vegetarian", "Main pure veg hoon", "I am vegan")
+    const dietMatch = lower.match(/\b(?:i\s+am|i'm|mai|main)\s+(?:pure\s+)?(vegetarian|non-vegetarian|vegan|eggetarian|jain|veg|non-veg)\b/i) ||
+        lower.match(/\b(?:my\s+diet\s+is|eating\s+habit\s+is)\s+(vegetarian|non-vegetarian|vegan|eggetarian|jain|veg|non-veg)\b/i);
+    if (dietMatch) {
+      facts.push({ key: 'dietary_preference', value: this.cleanValue(dietMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Fitness Routine (e.g. "I go to gym at 7am", "Main daily workout karta hoon", "I do yoga every morning")
+    const fitnessMatch = lower.match(/\b(?:go\s+to\s+(?:the\s+)?gym|workout|gym\s+jata|gym\s+jati|exercise|do\s+yoga|morning\s+walk)\s*(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning))?\b/i);
+    if (fitnessMatch) {
+      facts.push({ key: 'fitness_routine', value: this.cleanValue(fitnessMatch[0]), text, isProtected: isExplicitRemember, factClass });
     }
 
     // Passports / Identifiers

@@ -116,4 +116,56 @@ describe('LifeBlueprintCuriosityEngine — Personal Life Blueprint & Adaptive Di
     const identityGaps = summary.missingGapsByCategory.IDENTITY_AND_BIO.map(g => g.key);
     expect(identityGaps).not.toContain('birth_date');
   });
+
+  it('recognizes global cities and international languages as known without cultural bias', () => {
+    const mockWardrobe: any = {
+      id: 'wardrobe-user',
+      domain: 'identity',
+      name: 'Elena',
+      roleTitle: 'Architect',
+      traits: [
+        { label: 'Current City', value: 'Seattle' },
+        { label: 'Native Language', value: 'Spanish' },
+        { label: 'Comfort Food', value: 'Sushi' },
+        { label: 'Fitness Routine', value: 'Pilates and Swimming' },
+        { label: 'Weekend Habit', value: 'Hiking in the mountains' }
+      ]
+    };
+
+    const summary = lifeBlueprintCuriosityEngine.evaluateMissingBlueprintGaps(
+      [],
+      {},
+      { localHour: 14, isWeekend: true },
+      [mockWardrobe]
+    );
+
+    const identityGaps = summary.missingGapsByCategory.IDENTITY_AND_BIO.map(g => g.key);
+    expect(identityGaps).not.toContain('hometown_or_city');
+    expect(identityGaps).not.toContain('native_language');
+
+    const dietGaps = summary.missingGapsByCategory.DIET_AND_HEALTH.map(g => g.key);
+    expect(dietGaps).not.toContain('comfort_food');
+    expect(dietGaps).not.toContain('fitness_routine');
+
+    const personalGaps = summary.missingGapsByCategory.PERSONAL_CHOICES_AND_RECHARGE.map(g => g.key);
+    expect(personalGaps).not.toContain('weekend_routine');
+  });
+
+  it('never misattributes a relative birthday or age to the user birthday', () => {
+    const memories = [
+      { key: 'daughter_birth_date', value: '14 May 2020' },
+      { key: 'husband_birth_date', value: '22 October 1990' },
+      { key: 'sister_birth_date', value: '05 July 1995' }
+    ];
+
+    const summary = lifeBlueprintCuriosityEngine.evaluateMissingBlueprintGaps(
+      memories,
+      {},
+      { localHour: 10, isWeekend: false }
+    );
+
+    const identityGaps = summary.missingGapsByCategory.IDENTITY_AND_BIO.map(g => g.key);
+    // User's own birthday must still be reported as missing, not resolved by daughter/husband/sister
+    expect(identityGaps).toContain('birth_date');
+  });
 });
