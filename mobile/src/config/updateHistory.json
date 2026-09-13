@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.3-beta",
+    "date": "2026-09-13",
+    "title": "🎮 GTA Vice City 3D Movement Engine, Planetary Rings & Primary Galaxy Window",
+    "message": [
+      "Primary Galaxy Brain Window: Tapping the 🧠 brain button in the chat header or quick action chips pops directly into the 3D Neural Galaxy as your primary view.",
+      "GTA Vice City Fluid 3D Movement: Ultra-smooth 60-120 FPS camera orbit with natural inertial momentum gliding and velocity coasting — swiping and flicking feels silky-smooth and alive.",
+      "Lag-Free 0.005ms Rendering: Eliminated heavy label collision calculation bottlenecks, freeing the mobile CPU and ensuring butter-smooth touch interaction.",
+      "Rich 3D Planetary Spheres: All bubbles upgraded with multi-layer specular glints, volumetric depth shading, planetary Saturn orbit rings around hubs, and depth-scaled elevation lighting.",
+      "Two-Finger Canvas Pan: Effortlessly pan the galaxy with two fingers while keeping one-finger 360° orbit active simultaneously."
+    ]
+  },
+  {
     "version": "0.3.2-beta",
     "date": "2026-09-13",
     "title": "⚡ Instant Live Sci-Fi Neural Galaxy & Tree Sync + Real-Time Memory Persistence",

@@ -25,6 +25,7 @@ function TabIcon({ emoji, focused, color }: { emoji: string; focused: boolean; c
 export function BrainNavigator() {
   return (
     <Tab.Navigator
+      initialRouteName="Graph"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -42,21 +43,21 @@ export function BrainNavigator() {
         },
       }}
     >
-      {/* ── Core 5 User-Facing Brain Pillars ───────────────────────────────── */}
-      <Tab.Screen
-        name="Memory"
-        component={MemoryBrainScreen}
-        options={{
-          tabBarLabel: 'Tree',
-          tabBarIcon: ({ focused, color }) => <TabIcon emoji="🌳" focused={focused} color={color} />
-        }}
-      />
+      {/* ── Core 5 User-Facing Brain Pillars (Galaxy is Primary 3D Canvas) ──── */}
       <Tab.Screen
         name="Graph"
         component={KgExplorerScreen}
         options={{
           tabBarLabel: 'Galaxy',
           tabBarIcon: ({ focused, color }) => <TabIcon emoji="🌌" focused={focused} color={color} />
+        }}
+      />
+      <Tab.Screen
+        name="Memory"
+        component={MemoryBrainScreen}
+        options={{
+          tabBarLabel: 'Tree',
+          tabBarIcon: ({ focused, color }) => <TabIcon emoji="🌳" focused={focused} color={color} />
         }}
       />
       <Tab.Screen

@@ -1487,7 +1487,7 @@ export function ChatScreen() {
               }} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>✨</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => navigation.navigate('Brain')} style={s.headerBtn}>
+              <TouchableOpacity onPress={() => (navigation as any).navigate('Brain', { screen: 'Graph' })} style={s.headerBtn}>
                 <Text style={s.headerBtnText}>🧠</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={s.headerBtn}>
@@ -1745,7 +1745,7 @@ export function ChatScreen() {
                   if ((chip as any).isModal) {
                     setIsLifestyleModalVisible(true);
                   } else if (chip.isNavigation) {
-                    navigation.navigate('Brain');
+                    (navigation as any).navigate('Brain', { screen: 'Graph' });
                   } else if (chip.prefix) {
                     setInputText(prev => {
                       const trimmed = prev.trim();
