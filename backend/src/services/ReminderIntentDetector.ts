@@ -252,6 +252,30 @@ export class ReminderIntentDetector {
       if (excludedDays.length > 0) {
         activeDays = DAY_NAMES.filter(d => !excludedDays.includes(d));
       }
+    } else {
+      // Explicit recurring days: e.g. "every Monday", "har Somwar", "every Mon and Wed"
+      const recurringDayMatch = lower.match(/\b(?:every|har)\s+([a-zA-Z\s,]+?)(?:\s+(?:ko|at|\d{1,2}|morning|evening|night|baje|am|pm|$))/i);
+      if (recurringDayMatch) {
+        const dayStr = recurringDayMatch[1].toLowerCase();
+        const matchedDays: string[] = [];
+        for (const d of DAY_NAMES) {
+          const shortD = d.slice(0, 3);
+          if (dayStr.includes(d) || new RegExp(`\\b${shortD}\\b`, 'i').test(dayStr)) {
+            matchedDays.push(d);
+          }
+        }
+        if (/\b(?:somwar|somvaar)\b/i.test(dayStr)) matchedDays.push('monday');
+        if (/\b(?:mangalwar|mangalvaar)\b/i.test(dayStr)) matchedDays.push('tuesday');
+        if (/\b(?:budhwar|budhvaar)\b/i.test(dayStr)) matchedDays.push('wednesday');
+        if (/\b(?:guruwar|veerwar|guruvaar)\b/i.test(dayStr)) matchedDays.push('thursday');
+        if (/\b(?:shukrawar|shukravar)\b/i.test(dayStr)) matchedDays.push('friday');
+        if (/\b(?:shaniwar|shanivaar)\b/i.test(dayStr)) matchedDays.push('saturday');
+        if (/\b(?:raviwar|ravivaar|itwar)\b/i.test(dayStr)) matchedDays.push('sunday');
+
+        if (matchedDays.length > 0) {
+          activeDays = Array.from(new Set(matchedDays));
+        }
+      }
     }
 
     // ── 3. Monthly Recurrence with Month Exclusions & Missing Time ──
@@ -426,13 +450,39 @@ export class ReminderIntentDetector {
       targetDay += 2;
       dateIdentified = true;
       dateLabel = 'Day after tomorrow';
-    } else if (/\b(?:kal|tomorrow)\b/i.test(lower)) {
+    } else if (/\b(?:kal|tomorrow|tmrw)\b/i.test(lower)) {
       targetDay += 1;
       dateIdentified = true;
       dateLabel = 'Tomorrow';
     } else if (/\b(?:aaj|today|tonight)\b/i.test(lower)) {
       dateIdentified = true;
       dateLabel = 'Today';
+    } else if (!activeDays || activeDays.length === 0) {
+      // Check for single explicit day of the week (e.g. "on Friday", "this Saturday", "next Monday", "Somwar ko")
+      const HINGLISH_DAYS: Record<string, number> = {
+        somwar: 1, somvaar: 1, mangalwar: 2, mangalvaar: 2, budhwar: 3, budhvaar: 3,
+        guruwar: 4, veerwar: 4, shukrawar: 5, shukravar: 5, shaniwar: 6, shanivaar: 6,
+        raviwar: 0, ravivaar: 0, itwar: 0,
+        sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, wednesday: 3, wed: 3,
+        thursday: 4, thu: 4, friday: 5, fri: 5, saturday: 6, sat: 6
+      };
+      const dayMatch = lower.match(/\b(?:on\s+|this\s+|next\s+)?(sunday|sun|monday|mon|tuesday|tue|wednesday|wed|thursday|thu|friday|fri|saturday|sat|somwar|somvaar|mangalwar|budhwar|guruwar|veerwar|shukrawar|shaniwar|raviwar|itwar)\b(?:\s+ko)?/i);
+      if (dayMatch) {
+        const matchedKey = dayMatch[1].toLowerCase();
+        const targetDayIdx = HINGLISH_DAYS[matchedKey];
+        if (targetDayIdx !== undefined) {
+          const currentDayIdx = nowLocal.getUTCDay();
+          let daysAhead = (targetDayIdx - currentDayIdx + 7) % 7;
+          if (daysAhead === 0 && /\bnext\b/i.test(dayMatch[0])) {
+            daysAhead = 7;
+          }
+          if (daysAhead > 0) {
+            targetDay += daysAhead;
+            dateIdentified = true;
+            dateLabel = DAY_NAMES[targetDayIdx].charAt(0).toUpperCase() + DAY_NAMES[targetDayIdx].slice(1);
+          }
+        }
+      }
     }
 
     const isMorning = /\b(?:subah|sube|sawere|savere|morning|am)\b/i.test(lower);
@@ -534,7 +584,7 @@ export class ReminderIntentDetector {
 
     const triggerAt = new Date(targetLocal.getTime() - tzOffsetHours * 3600 * 1000);
     const title = this.cleanTaskTitle(text);
-    const isRecurringDaily = hasEveryDayOrMorning || /\b(?:roz|daily|har\s*din|every\s*day)\b/i.test(lower);
+    const isRecurring = Boolean(hasEveryDayOrMorning || (activeDays && activeDays.length > 0) || /\b(?:roz|daily|har\s*din|every\s*day)\b/i.test(lower));
     const hh12 = hour % 12 || 12;
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const timeFormatted = `${hh12}:${minute.toString().padStart(2, '0')} ${ampm}`;
@@ -543,7 +593,7 @@ export class ReminderIntentDetector {
     if (activeDays && activeDays.length > 0) {
       const dayNamesFormatted = activeDays.map(d => d.slice(0, 3).toUpperCase()).join(', ');
       formattedTime = `Every day (${dayNamesFormatted}) at ${timeFormatted}`;
-    } else if (isRecurringDaily) {
+    } else if (isRecurring) {
       formattedTime = `Every day at ${timeFormatted}`;
     } else {
       formattedTime = `${dateLabel} at ${timeFormatted}`;
@@ -554,9 +604,9 @@ export class ReminderIntentDetector {
       triggerAt,
       isAmbiguous: false,
       formattedTime,
-      isRecurring: isRecurringDaily,
-      recurrenceType: isRecurringDaily ? 'daily' : undefined,
-      recurrenceInterval: isRecurringDaily ? 1 : undefined,
+      isRecurring,
+      recurrenceType: isRecurring ? (activeDays && activeDays.length > 0 ? 'weekly' : 'daily') : undefined,
+      recurrenceInterval: isRecurring ? 1 : undefined,
       activeDays
     };
   }
@@ -574,8 +624,9 @@ export class ReminderIntentDetector {
   cleanTaskTitle(text: string): string {
     let clean = text
       .replace(/\b(?:kal|aaj|parso|tomorrow|today|tonight)\b/gi, '')
+      .replace(/\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat|somwar|somvaar|mangalwar|budhwar|guruwar|veerwar|shukrawar|shaniwar|raviwar|itwar)\b/gi, '')
       .replace(/\b(?:subah|sube|sawere|savere|morning|afternoon|dopahar|dupeher|shaam|sham|evening|raat|night)\b/gi, '')
-      .replace(/\b(?:in\s+\d+\s*(?:mins?|minutes?|hours?)|aadhe\s*ghante\s*me)\b/gi, '')
+      .replace(/\b(?:in\s+\d+\s*(?:mins?|minutes?|hours?)|after\s+\d+\s*(?:mins?|minutes?|hours?)|aadhe\s*ghante\s*me)\b/gi, '')
       .replace(/\b\d{1,2}(?::\d{2})?\s*(?:bje|baje|bJe|am|pm)?\b/gi, '')
       .replace(/\b(?:set|put|add|create|schedule|make)\s*(?:an?|the)?\s*(?:reminder|alarm)\b/gi, '')
       .replace(/\b(?:wake\s+(?:me|us|him|her)\s+up|utha\s*(?:dena|diyo|denaa)|jaga\s*(?:dena|diyo|denaa))\b/gi, '')
@@ -591,7 +642,7 @@ export class ReminderIntentDetector {
       .replace(/\s{2,}/g, ' ')
       .trim();
 
-    clean = clean.replace(/^(?:to|for|about|at|ke\s*liye|regarding|on)\s*/i, '').trim();
+    clean = clean.replace(/^(?:to|for|about|at|ke\s*liye|regarding|on|this|next)\s*/i, '').trim();
 
     if (!clean || clean.length < 2) {
       if (/\b(?:wake|uth|jaga)\b/i.test(text)) {

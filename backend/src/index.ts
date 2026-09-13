@@ -68,16 +68,26 @@ async function main(): Promise<void> {
 
   // DISABLE_REFLECTIONS=true → skip all scheduled reflection/reminder/moment workers
   if (process.env.DISABLE_REFLECTIONS !== 'true') {
-    // Start Moment Engine Scheduler (runs once every 24 hours)
+    // Moment Engine Scheduler (runs every 2 hours; internal guards prevent duplicate daily moments & respect quiet hours)
     const momentInterval = setInterval(async () => {
       try {
-        logger.info('Scheduler: Triggering daily Moment Engine checks...');
+        logger.info('Scheduler: Triggering periodic Moment Engine checks...');
         await momentEngineService.runEngineForAllUsers();
       } catch (err) {
         logger.error('Error in Moment Engine scheduled run', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 24 * 60 * 60 * 1000); // 24 hours
+    }, 2 * 60 * 60 * 1000); // 2 hours
     if (momentInterval.unref) momentInterval.unref();
+
+    // Initial warm-up for Moment Engine 2.5 mins after boot
+    setTimeout(async () => {
+      try {
+        logger.info('[BOOT] Triggering initial Moment Engine check...');
+        await momentEngineService.runEngineForAllUsers();
+      } catch (e) {
+        logger.warn('[BOOT] Initial Moment Engine check failed (non-critical)', { error: e });
+      }
+    }, 150 * 1000);
 
     // Reminders + Nova Follow-up Polling Engine (throttled to 30s to prevent token starvation)
     const remindersInterval = setInterval(async () => {
@@ -196,20 +206,40 @@ async function main(): Promise<void> {
       }
     }, 60 * 1000);
 
-    // Daily Reflection + Memory Pruning Scheduler (runs once per day)
+    // Daily Reflection + Memory Pruning Scheduler (runs once per day, checked hourly to survive restarts)
+    let lastDailyReflectionDate: string | null = null;
     const dailyReflectionInterval = setInterval(async () => {
       try {
-        logger.info('Scheduler: Triggering daily reflections...');
-        await reflectionScheduler.runDailyForAllUsers();
-        await shortTermMemoryCleanupService.run();
-        
-        const { thoughtPruningService } = await import('./services/ThoughtPruningService');
-        await thoughtPruningService.pruneOldThoughts();
+        const today = new Date().toISOString().split('T')[0];
+        if (lastDailyReflectionDate !== today) {
+          lastDailyReflectionDate = today;
+          logger.info('Scheduler: Triggering daily reflections...');
+          await reflectionScheduler.runDailyForAllUsers();
+          await shortTermMemoryCleanupService.run();
+          
+          const { thoughtPruningService } = await import('./services/ThoughtPruningService');
+          await thoughtPruningService.pruneOldThoughts();
+        }
       } catch (err) {
         logger.error('Error in daily scheduled run', { error: err instanceof Error ? err.message : String(err) });
       }
-    }, 24 * 60 * 60 * 1000); // 24 hours
+    }, 60 * 60 * 1000); // 1 hour check
     if (dailyReflectionInterval.unref) dailyReflectionInterval.unref();
+
+    // Initial warm-up for daily reflections 2 mins after boot
+    setTimeout(async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        if (lastDailyReflectionDate !== today) {
+          lastDailyReflectionDate = today;
+          logger.info('[BOOT] Triggering initial daily reflections check...');
+          await reflectionScheduler.runDailyForAllUsers();
+          await shortTermMemoryCleanupService.run();
+        }
+      } catch (e) {
+        logger.warn('[BOOT] Initial daily reflections run failed (non-critical)', { error: e });
+      }
+    }, 120 * 1000);
 
     // Nightly chat history pruning + self-improvement — guaranteed to run ONCE per
     // day when the clock is in the 2–4am window. A separate hourly check (instead of
@@ -257,10 +287,14 @@ async function main(): Promise<void> {
     }, 60 * 60 * 1000); // check every hour
     if (nightlyMaintenanceInterval.unref) nightlyMaintenanceInterval.unref();
 
-    // Weekly Reflection Scheduler (runs on Sundays)
+    // Weekly Reflection Scheduler (runs on Sundays, checked hourly)
+    let lastWeeklyReflectionDate: string | null = null;
     const weeklyReflectionInterval = setInterval(async () => {
-      const day = new Date().getDay();
-      if (day === 0) { // Sunday
+      const now = new Date();
+      const day = now.getDay();
+      const today = now.toISOString().split('T')[0];
+      if (day === 0 && lastWeeklyReflectionDate !== today) { // Sunday
+        lastWeeklyReflectionDate = today;
         try {
           logger.info('Scheduler: Triggering weekly reflections...');
           await reflectionScheduler.runWeeklyForAllUsers();
@@ -268,7 +302,7 @@ async function main(): Promise<void> {
           logger.error('Error in weekly reflection scheduled run', { error: err instanceof Error ? err.message : String(err) });
         }
       }
-    }, 24 * 60 * 60 * 1000); // Check daily, run on Sunday
+    }, 60 * 60 * 1000); // Check hourly on Sunday
     if (weeklyReflectionInterval.unref) weeklyReflectionInterval.unref();
   } else {
     logger.warn('[DEBUG] DISABLE_REFLECTIONS=true — all reflection/reminder/moment schedulers NOT started');

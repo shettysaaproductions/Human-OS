@@ -479,14 +479,14 @@ export class SituationalAwareness {
     return 'Neutral mood. Respond naturally.';
   }
 
-  detectConversationPhase(last5Messages: { role: string; content: string; created_at: string }[], gapMinutes: number): string {
+  detectConversationPhase(last5Messages: { role: string; content: string; created_at?: string }[], gapMinutes: number = 1): string {
     if (gapMinutes > 60 && last5Messages[0]?.role === 'user') {
       return 'OPENING — user just returned after a gap. Acknowledge return naturally, greet if appropriate.';
     }
     
     if (gapMinutes < 5) {
       const recentUserMsg = last5Messages[0]?.content?.toLowerCase() || '';
-      if (['gn', 'bye', 'goodnight', 'ttyl', 'cya', 'ok bye'].some(w => recentUserMsg.includes(w))) {
+      if (/\b(?:gn|bye|goodnight|good\s*night|ttyl|cya|ok\s*bye|alvida|soja|so\s*jao?)\b/i.test(recentUserMsg)) {
         return 'WINDING_DOWN — user is trying to end the chat. Say goodbye gracefully, do NOT start new topics or ask questions.';
       }
       return 'FLOWING — active back-and-forth. Keep it natural, match their pace, do NOT greet again.';

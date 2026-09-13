@@ -13,6 +13,11 @@ import { watchtowerInspector } from './WatchtowerInspector';
  * exposes jargon the user shouldn't see. Mirrors FALLBACK_REPLY in routes/chat.ts.
  */
 export const NOVA_EMPTY_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
+export const NOVA_EMPTY_REPLY_EN = "Hmm... let me think about that for a second, I'll get right back to you.";
+
+export function getNovaEmptyReply(isEnglish?: boolean): string {
+  return isEnglish ? NOVA_EMPTY_REPLY_EN : NOVA_EMPTY_REPLY;
+}
 
 export interface NormalizedMessage {
   message: string;
@@ -413,16 +418,30 @@ export function validateAndRepairGrounding(
   // Between 10 PM and 6 AM, or when user mentions late night ("raat ke 12:19", "itni raat"),
   // Nova must NEVER tell user to start cooking, workout, or physical chores right now.
   const isLateNightUserSignal =
-    /\b(?:raat\s+ke\s+12|itni\s+raat|raat\s+ho\s+gayi|sone\s+ka\s+time|midnight)\b/i.test(userMessage);
-  const nowHour = new Date().getUTCHours() + 5.5; // default IST
+    /\b(?:raat\s+ke\s+12|itni\s+raat|raat\s+ho\s+gayi|sone\s+ka\s+time|midnight|late\s+night)\b/i.test(userMessage);
+
+  // Resolve user local hour from context (fallback to IST only if unspecified)
+  let tzOffset = 5.5;
+  if (typeof context?.tzOffsetHours === 'number') {
+    tzOffset = context.tzOffsetHours;
+  } else if (context?.userProfile) {
+    const { resolveUserTzOffsetHours } = require('./ReminderEngine');
+    tzOffset = resolveUserTzOffsetHours(context.userProfile);
+  } else if (typeof context?.timezoneOffset === 'number') {
+    tzOffset = context.timezoneOffset / 60;
+  }
+  const nowUtc = new Date();
+  const nowHour = (nowUtc.getUTCHours() + nowUtc.getUTCMinutes() / 60 + tzOffset + 24) % 24;
   const isLateNightTime = nowHour >= 22.5 || nowHour < 6.0;
 
   const hasMidnightChoreSuggestion =
-    /\b(?:abhi\s+(?:free\s+hai\s+toh\s+)?start\s+kar\s+de|abhi\s+(?:se\s+)?(?:khana|cooking|workout|exercise)\s+(?:shuru|start)\s+kar)\b/i.test(text);
+    /\b(?:abhi\s+(?:free\s+hai\s+toh\s+)?start\s+kar\s+de|abhi\s+(?:se\s+)?(?:khana|cooking|workout|exercise)\s+(?:shuru|start)\s+kar|start\s+(?:cooking|working\s*out|exercising)\s+right\s+now|do\s+(?:it|the\s+workout)\s+now)\b/i.test(text);
 
   if ((isLateNightUserSignal || isLateNightTime) && hasMidnightChoreSuggestion) {
     logger.warn('[GroundingValidator] Intercepted midnight chore suggestion, repairing to restful wind-down');
-    text = "Arre nahi, Abhi raat ko aaram kar aur so ja! Kal subah uthke fresh mind se karte hain 😊";
+    text = isEnglish
+      ? "No way, get some rest and sleep right now! Let's do this fresh tomorrow morning 😊"
+      : "Arre nahi, Abhi raat ko aaram kar aur so ja! Kal subah uthke fresh mind se karte hain 😊";
   }
 
   // 9. Entity Attribution & Common-Sense Plausibility Guard (Adult Wife Sakshi vs Infant Son Shreshth)
@@ -709,7 +728,8 @@ export class NovaBrainService {
 
     const convoMessages = buildMessages(conversationFullPrompt, context.recentMessages, combinedUserMessage);
 
-    let reply = NOVA_EMPTY_REPLY;
+    const emptyReply = getNovaEmptyReply(isEnglishContext);
+    let reply = emptyReply;
 
     try {
       const profile = determineUserProfile(combinedUserMessage);
@@ -739,13 +759,13 @@ export class NovaBrainService {
           temperature: 0.85,
           maxTokens: maxTok,
         });
-        reply = (secondaryReply && !isPromptLeak(secondaryReply)) ? secondaryReply : NOVA_EMPTY_REPLY;
+        reply = (secondaryReply && !isPromptLeak(secondaryReply)) ? secondaryReply : emptyReply;
       }
 
-      if (!reply || isPromptLeak(reply)) reply = NOVA_EMPTY_REPLY;
+      if (!reply || isPromptLeak(reply)) reply = emptyReply;
       reply = sanitizeReply(reply);
       reply = validateAndRepairGrounding(reply, combinedUserMessage, context);
-      if (!reply || isPromptLeak(reply)) reply = NOVA_EMPTY_REPLY;
+      if (!reply || isPromptLeak(reply)) reply = emptyReply;
       logger.info(`[NOVA BRAIN] Call 1 reply: "${reply.substring(0, 80)}..."`);
 
     } catch (error) {

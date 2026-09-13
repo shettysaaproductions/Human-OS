@@ -13,7 +13,7 @@ export class ReminderSchedulerService {
   /**
    * Schedule a reminder by creating a database record
    */
-  async scheduleReminder(userId: string, text: string, triggerAt: Date, recurrenceType?: string, recurrenceInterval?: number, recurrenceLimit?: number): Promise<any> {
+  async scheduleReminder(userId: string, text: string, triggerAt: Date, recurrenceType?: string, recurrenceInterval?: number, recurrenceLimit?: number, isAuto: boolean = false): Promise<any> {
     const { data: reminder, error } = await supabaseAdmin
       .from('reminders')
       .insert({
@@ -23,7 +23,8 @@ export class ReminderSchedulerService {
         recurrence_type: recurrenceType || null,
         recurrence_interval: recurrenceInterval || null,
         recurrence_limit: recurrenceLimit || null,
-        status: 'active'
+        status: 'active',
+        is_auto: isAuto
       })
       .select('*')
       .single();
@@ -214,7 +215,7 @@ export class ReminderSchedulerService {
     //     regardless of urgency — a system-classified "high" does not equal user intent.
     //   - This prevents a future system-generated reminder from accidentally breaking quiet hours
     //     simply because it was classified as high urgency.
-    const isUserRequested = reminder.is_auto === false;
+    const isUserRequested = reminder.is_auto !== true;
     const isHighUrgency = reminder.urgency === 'high';
     const bypassQuietHours = isUserRequested && isHighUrgency;
 
@@ -242,6 +243,24 @@ export class ReminderSchedulerService {
 
     if (finalStatus === 'SUPPRESSED') {
       logger.info('[Reminder] Delivery suppressed by gate (quiet hours or cooldown)', { reminderId, bypassQuietHours, reason: dispatchResult.reason });
+      // CRITICAL BUG FIX: If a one-time reminder is suppressed by quiet hours or gate limits,
+      // DO NOT mark it completed! Marking it completed kills the reminder permanently without delivery.
+      // Instead, defer it: retry after quiet hours (60 min) or cooldown (15 min).
+      if (!reminder.recurrence_type) {
+        const deferMinutes = dispatchResult.reason === 'QUIET_HOURS' ? 60 : 15;
+        const nextTrigger = new Date(Date.now() + deferMinutes * 60 * 1000);
+        await supabaseAdmin
+          .from('reminders')
+          .update({ trigger_at: nextTrigger.toISOString(), updated_at: now.toISOString() })
+          .eq('id', reminderId);
+        logger.info('[Reminder] One-time reminder delivery suppressed; deferred trigger_at instead of killing', {
+          reminderId,
+          deferMinutes,
+          nextTrigger: nextTrigger.toISOString(),
+          reason: dispatchResult.reason,
+        });
+        return;
+      }
       // Still handle recurrence below — the reminder logic continues even if this firing is suppressed.
     } else if (finalStatus === 'FAILED_TRANSIENT') {
       logger.warn('[Reminder] Delivery failed transiently — will retry on next poll', { reminderId });

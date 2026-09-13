@@ -340,14 +340,6 @@ export class UserLifeStageEngine {
       const localMinute = localDate.getUTCMinutes();
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const dayOfWeek = dayNames[localDate.getUTCDay()];
-      const customWeekoffDay = (
-        (workingContext && Array.isArray(workingContext) ? workingContext.find((w: any) => w.key === 'weekoff_day')?.value : null) ||
-        (workingContext && typeof workingContext === 'object' && !Array.isArray(workingContext) ? (workingContext as any).weekoff_day : null)
-      )?.toLowerCase();
-      const isWeekendDay = customWeekoffDay 
-        ? dayOfWeek.toLowerCase() === customWeekoffDay 
-        : (dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday');
-
       // Inspect custom sleep/wake memories if known
       const memMap = new Map<string, string>();
       for (const m of memories || []) {
@@ -364,6 +356,17 @@ export class UserLifeStageEngine {
           }
         }
       }
+
+      const customWeekoffDay = (
+        memMap.get('weekoff_day') ||
+        memMap.get('day_off') ||
+        memMap.get('weekly_off') ||
+        (workingContext && Array.isArray(workingContext) ? workingContext.find((w: any) => w.key === 'weekoff_day')?.value : null) ||
+        (workingContext && typeof workingContext === 'object' && !Array.isArray(workingContext) ? (workingContext as any).weekoff_day : null)
+      )?.toLowerCase();
+      const isWeekendDay = customWeekoffDay 
+        ? dayOfWeek.toLowerCase() === customWeekoffDay 
+        : (dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday');
 
       const customSleepVal = memMap.get('sleep_time') || memMap.get('bedtime') || memMap.get('sleep_schedule');
       const customWakeVal = memMap.get('wake_time') || memMap.get('wake_up_time') || memMap.get('wakeup_time');
@@ -402,6 +405,20 @@ export class UserLifeStageEngine {
       let isWindDownHours = false;
       let isSleepQuietHours = false;
 
+      // Evaluate active work shift (support day shifts + overnight shifts for shift workers)
+      const hasDefinedShift = Boolean(primaryLivelihood && primaryLivelihood.shiftStartHour !== undefined && primaryLivelihood.shiftEndHour !== undefined);
+      let isDuringWorkShift = false;
+      if (hasDefinedShift) {
+        const sStart = primaryLivelihood!.shiftStartHour!;
+        const sEnd = primaryLivelihood!.shiftEndHour!;
+        if (sStart <= sEnd) {
+          isDuringWorkShift = localHour >= sStart && localHour < sEnd;
+        } else {
+          // Overnight shift for shift workers (e.g. 21:00 to 05:00)
+          isDuringWorkShift = localHour >= sStart || localHour < sEnd;
+        }
+      }
+
       // Time classifications
       if (isSleepingNow) {
         currentPhase = 'SLEEP_REST';
@@ -412,10 +429,10 @@ export class UserLifeStageEngine {
         currentPhase = 'WEEKEND_FLEX';
         phaseDescription = `${dayOfWeek} Rest & Flexible Mode. Relaxed, open for personal moments, hobbies, and ideas.`;
         proactiveAllowance = 'FAMILY_STRATEGIC';
-      } else if (localHour >= (primaryLivelihood?.shiftStartHour ?? 11) && localHour < (primaryLivelihood?.shiftEndHour ?? 20)) {
+      } else if (isDuringWorkShift) {
         currentPhase = 'WORK_FOCUS';
         const focusLabel = primaryLivelihood?.name ? `Active Work Shift at ${primaryLivelihood.name}` : (isStudent ? 'Active Study & Learning Session' : 'Daytime Productive Focus');
-        phaseDescription = `${focusLabel} (${primaryLivelihood?.shiftStartHour ?? 11}:00 AM – ${primaryLivelihood?.shiftEndHour ?? 8}:00 PM). Focus hours.`;
+        phaseDescription = `${focusLabel} (${primaryLivelihood?.shiftStartHour ?? 10}:00 – ${primaryLivelihood?.shiftEndHour ?? 19}:00). Focus hours.`;
         proactiveAllowance = 'WORK_OPERATIONAL_ONLY';
         isWorkFocusHours = true;
       } else if (localHour >= 20 && (localHour < 22 || (localHour === 22 && localMinute <= 30))) {
@@ -432,9 +449,11 @@ export class UserLifeStageEngine {
         proactiveAllowance = 'MINIMAL_CALM';
         isWindDownHours = true;
       } else {
+        // Daytime flow (e.g. 7:30 AM to 8 PM for users without an active work shift lock)
         currentPhase = 'WORK_FOCUS';
-        phaseDescription = 'Early Morning Prep / Daytime Active Focus.';
+        phaseDescription = 'Daytime Productive Flow / Open for check-ins, ideas, and companion chat.';
         proactiveAllowance = 'FULL';
+        isWorkFocusHours = false;
       }
 
       // 8. Classify Holistic Life Stage

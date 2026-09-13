@@ -112,9 +112,9 @@ export interface TurnContext {
   memories?: Array<{ key?: string; value?: string; memory_type?: string }>;
 }
 
-const FEMININE_RELATIONS = ['mother_name', 'mother_nickname', 'sister_name', 'sister_nickname', 'wife_name', 'wife_nickname', 'daughter_name', 'daughter_nickname', 'grandmother_name'];
-const MASCULINE_RELATIONS = ['father_name', 'father_nickname', 'brother_name', 'brother_nickname', 'husband_name', 'husband_nickname', 'son_name', 'son_nickname', 'grandfather_name'];
-const ALL_PERSON_RELATIONS = [...FEMININE_RELATIONS, ...MASCULINE_RELATIONS];
+const FEMININE_RELATIONS = ['mother_name', 'mother_nickname', 'sister_name', 'sister_nickname', 'wife_name', 'wife_nickname', 'daughter_name', 'daughter_nickname', 'grandmother_name', 'girlfriend_name', 'girlfriend_nickname'];
+const MASCULINE_RELATIONS = ['father_name', 'father_nickname', 'brother_name', 'brother_nickname', 'husband_name', 'husband_nickname', 'son_name', 'son_nickname', 'grandfather_name', 'boyfriend_name', 'boyfriend_nickname'];
+const ALL_PERSON_RELATIONS = [...FEMININE_RELATIONS, ...MASCULINE_RELATIONS, 'partner_name', 'partner_nickname'];
 
 export class TurnAnalyzer {
   public static analyze(messages: ChatMessageInput[] | string, context?: TurnContext): TurnAnalysisResult {
@@ -510,15 +510,19 @@ export class TurnAnalyzer {
     //   m[3] = numeric hour (ALWAYS the rawTime)
     // Do NOT use m[1] ?? m[2] ?? m[0] — that returns the period word instead of the number.
     const TIME_PATTERNS: Array<{ re: RegExp; extractRaw: (m: RegExpMatchArray) => string; extractPeriod?: (m: RegExpMatchArray) => string }> = [
-      // "in 20 minutes" / "in 2 hours"
-      { re: /in\s+(\d+)\s*min(?:utes?)?/i,  extractRaw: m => m[1] + 'min' },
-      { re: /in\s+(\d+)\s*hour(?:s)?/i,     extractRaw: m => m[1] + 'hour' },
-      // "kal shaam 4 baje" / "kal 9 baje" / "kal 9:30"
-      { re: /(kal|aaj)\s+(?:(subah|shaam|raat|dopahar)\s+)?(\d{1,2}(?::\d{2})?)\s*(?:baje)?/i,
+      // "in 20 minutes" / "after 20 minutes" / "in 2 hours" / "after 2 hours"
+      { re: /(?:in|after)\s+(\d+)\s*min(?:utes?)?/i,  extractRaw: m => m[1] + 'min' },
+      { re: /(?:in|after)\s+(\d+)\s*hour(?:s)?/i,     extractRaw: m => m[1] + 'hour' },
+      // "20 minute baad" / "1 ghante baad" / "aadhe ghante baad"
+      { re: /(\d+)\s*min(?:utes?|ut)?\s*(?:baad|me|mein|after)/i, extractRaw: m => m[1] + 'min' },
+      { re: /(\d+)\s*(?:hours?|hrs?|ghante?)\s*(?:baad|me|mein|after)/i, extractRaw: m => m[1] + 'hour' },
+      { re: /\b(?:aadhe|aadha|half)\s*(?:ghante?|hour)\b/i, extractRaw: () => '30min' },
+      // "kal shaam 4 baje" / "tomorrow morning 9am" / "tomorrow at 9:30" / "kal 9 baje"
+      { re: /(kal|aaj|tomorrow|today|tonight|parso)\s+(?:(subah|shaam|raat|dopahar|morning|evening|afternoon|night)\s+)?(?:at\s+)?(\d{1,2}(?::\d{2})?)\s*(?:am|pm|baje)?/i,
         extractRaw: m => m[3],
         extractPeriod: m => m[2] || '' },
-      // "shaam 4 baje" (no kal/aaj prefix)
-      { re: /(subah|shaam|raat|dopahar)\s+(\d{1,2}(?::\d{2})?)\s*(?:baje)?/i,
+      // "shaam 4 baje" / "morning 8am" / "evening at 7pm" (no kal/aaj prefix)
+      { re: /(subah|shaam|raat|dopahar|morning|evening|afternoon|night)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?)\s*(?:am|pm|baje)?/i,
         extractRaw: m => m[2],
         extractPeriod: m => m[1] },
       // "3 pm" / "9:30 am" / "5 baje" with suffix
@@ -923,6 +927,34 @@ export class TurnAnalyzer {
       }
     }
 
+    // Girlfriend nickname & name
+    if (!thirdPartyRelations.has('girlfriend')) {
+      let m = lower.match(/\b(?:meri|mere|my)?\s*(?:girlfriend|gf|bandi)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'girlfriend_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+
+      if (facts.every(f => f.key !== 'girlfriend_nickname')) {
+        m = lower.match(/\b(?:meri|mere|my)?\s*(?:girlfriend|gf|bandi)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) facts.push({ key: 'girlfriend_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // Boyfriend nickname & name
+    if (!thirdPartyRelations.has('boyfriend')) {
+      let m = lower.match(/\b(?:mera|mere|my)?\s*(?:boyfriend|bf|banda)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'boyfriend_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+
+      if (facts.every(f => f.key !== 'boyfriend_nickname')) {
+        m = lower.match(/\b(?:mera|mere|my)?\s*(?:boyfriend|bf|banda)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+        if (m) facts.push({ key: 'boyfriend_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // Partner name
+    if (!thirdPartyRelations.has('partner')) {
+      let m = lower.match(/\b(?:mera|meri|mere|my)?\s*(?:partner|life\s+partner)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
+      if (m) facts.push({ key: 'partner_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
     // Sister nickname
     if (!thirdPartyRelations.has('sister')) {
       let m = lower.match(/\b(?:meri|mere|my)?\s*(?:behen|sister|didi)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
@@ -1117,9 +1149,48 @@ export class TurnAnalyzer {
     }
 
     // Fitness Routine (e.g. "I go to gym at 7am", "Main daily workout karta hoon", "I do yoga every morning")
-    const fitnessMatch = lower.match(/\b(?:(?:go\s+to\s+(?:the\s+)?gym|gym\s+jata|gym\s+jati|do\s+yoga|morning\s+walk)\s*(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning))?|(?:daily|regularly|roz|har\s+din|every\s+day)\s+(?:workout|exercise|gym)|(?:workout|exercise)\s+(?:daily|regularly|roz|karta\s+hoon|karti\s+hoon|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning)))\b/i);
+    const isFitnessFutureIntention = /\b(?:start\s*karna|shuru\s*karna|karna\s*hai|planning|soch\s*raha)\b/i.test(lower);
+    const fitnessMatch = !isFitnessFutureIntention && lower.match(/\b(?:(?:go\s+to\s+(?:the\s+)?gym|gym\s+jata|gym\s+jati|do\s+yoga|morning\s+walk)\s*(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning))?|(?:daily|regularly|roz|har\s+din|every\s+day)\s+(?:workout|exercise|gym)|(?:workout|exercise)\s+(?:daily|regularly|roz|karta\s+hoon|karti\s+hoon|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|every\s+(?:day|morning)))\b/i);
     if (fitnessMatch) {
       facts.push({ key: 'fitness_routine', value: this.cleanValue(fitnessMatch[0]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Pet name & Pet type (e.g. "my dog's name is Bruno", "mera kutta Bruno", "my pet cat Luna", "I have a dog named Max")
+    const petMatch = lower.match(/\b(?:mera|meri|mere|my)?\s*(?:pet\s+)?(dog|cat|puppy|kitten|kutta|billi)(?:'s)?\s+(?:ka\s+naam|is|name\s+is|named|name|ka\s+name)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9]+)\b/i) ||
+      lower.match(/\b(?:have|got)\s+a\s+(dog|cat|puppy|kitten)\s+named\s+([a-zA-Z0-9]+)\b/i);
+    if (petMatch) {
+      const pType = petMatch[1].toLowerCase().replace('kutta', 'dog').replace('billi', 'cat');
+      const pName = this.cleanValue(petMatch[2]);
+      if (!this.isStopPronoun(pName)) {
+        facts.push({ key: 'pet_name', value: pName, text, isProtected: isExplicitRemember, factClass });
+        facts.push({ key: 'pet_type', value: pType, text, isProtected: isExplicitRemember, factClass });
+      }
+    }
+
+    // Sleep time (e.g. "I sleep at 11pm", "mera bedtime 12am hai", "main 11:30 baje sota hu")
+    const sleepTimeMatch = lower.match(/\b(?:i\s+usually\s+sleep|sleep\s+at|bedtime\s+is|sone\s+ka\s+time|sota\s+hoon|soti\s+hoon)\s+(?:at\s+|around\s+|hai\s+|is\s+|to\s+|)([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|baje)?)\b/i) ||
+      lower.match(/\b([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|baje))\s+(?:ko\s+)?sota\s+hoon\b/i);
+    if (sleepTimeMatch && facts.every(f => f.key !== 'sleep_time')) {
+      facts.push({ key: 'sleep_time', value: this.cleanValue(sleepTimeMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Wake time (e.g. "I wake up at 6am", "main subah 7 baje uthta hu", "wake up time is 6:30am")
+    const wakeTimeMatch = lower.match(/\b(?:i\s+wake\s+up|wake\s+up\s+at|wakeup\s+time|uthne\s+ka\s+time|subah\s+uthta\s+hoon|subah\s+uthti\s+hoon)\s+(?:at\s+|around\s+|hai\s+|is\s+|to\s+|)([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|baje)?)\b/i) ||
+      lower.match(/\b([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|baje))\s+(?:ko\s+)?uthta\s+hoon\b/i);
+    if (wakeTimeMatch && facts.every(f => f.key !== 'wake_time')) {
+      facts.push({ key: 'wake_time', value: this.cleanValue(wakeTimeMatch[1]), text, isProtected: isExplicitRemember, factClass });
+    }
+
+    // Work mode (e.g. "I work from home", "I work remotely", "work remotely from home", "main WFH karta hu", "hybrid work")
+    const workModeMatch = lower.match(/\b(?:work(?:ing)?\s+(?:remotely(?:\s+from\s+home)?|from\s+home|from\s+office|hybrid)|remote\s+work|wfh|hybrid\s+work|work\s+mode)\b/i);
+    if (workModeMatch && facts.every(f => f.key !== 'work_mode')) {
+      const rawWm = workModeMatch[0].toLowerCase();
+      const val = rawWm.includes('home') || rawWm.includes('wfh') || rawWm.includes('remotely') || rawWm.includes('remote')
+        ? 'Remote / Work From Home'
+        : rawWm.includes('hybrid')
+        ? 'Hybrid'
+        : 'Office';
+      facts.push({ key: 'work_mode', value: val, text, isProtected: isExplicitRemember, factClass });
     }
 
     // Passports / Identifiers

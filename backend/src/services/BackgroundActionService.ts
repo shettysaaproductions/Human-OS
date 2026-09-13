@@ -1,13 +1,8 @@
 import { logger } from '../lib/logger';
 import { supabaseAdmin } from '../lib/supabase';
+import { resolveUserTzOffsetHours } from './ReminderEngine';
 // memoryRepository import removed in Phase 11 — MemoryRepository.save handler is dead code
 // (blocked by PHASE10_BLOCKED guard; canonical memories come from FactAssertionConsumer)
-
-const TIMEZONE_OFFSETS: Record<string, number> = {
-  IN: 5.5,
-  US: -5,
-  UK: 0,
-};
 
 
 const processedCache = new Map<string, number>();
@@ -53,7 +48,17 @@ export class BackgroundActionService {
 
       // 2. Execute Action Synchronously
       if (action.tool === 'ReminderEngine' && action.action === 'schedule') {
-        const userTzOffset = TIMEZONE_OFFSETS[userCountry] ?? 5.5;
+        let userTzOffset = 5.5;
+        try {
+          const { data: profile } = await supabaseAdmin
+            .from('profiles')
+            .select('timezone_offset, timezone, country')
+            .eq('id', userId)
+            .maybeSingle();
+          userTzOffset = resolveUserTzOffsetHours(profile || { country: userCountry });
+        } catch {
+          userTzOffset = resolveUserTzOffsetHours({ country: userCountry });
+        }
         const { ReminderEngine } = await import('./ReminderEngine');
         const engine = new ReminderEngine(userTzOffset);
         

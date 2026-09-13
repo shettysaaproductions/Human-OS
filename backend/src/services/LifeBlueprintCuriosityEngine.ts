@@ -153,7 +153,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'CRITICAL',
     timingAffinity: 'EVENING_WIND_DOWN',
     matchingKeys: ['sleep_time', 'bed_time', 'sleep_schedule', 'sleep_cycle', 'sleep_hours', 'usual_sleep_time', 'bedtime'],
-    valueEvidencePatterns: [/\b(?:10|11|12|1|2)\s*(?::\d{2})?\s*(?:pm|am|baje|o'clock)?\b/i, /sleep.*(?:at|around)\s*\d+/i],
+    valueEvidencePatterns: [/\b(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:pm|am|baje|o'clock)?\b/i, /sleep.*(?:at|around)?\s*\d+/i, /\b(?:bed|night owl|late night|shift|so\s*jata)\b/i],
     promptTemplates: [
       "Waise ek zaroori baat puchhni thi — tumhara usual sone ka time kya rehta hai? Taaki main kabhi raat ko untimely ping na karun aur wind-down sahi se plan kar sakein.",
       "Raat ko usually kitne baje sote ho? Taaki tumhare rest hours me strict quiet mode on rakh sakoon aur late night disturbing msgs bilkul na jaayein."
@@ -172,7 +172,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'HIGH',
     timingAffinity: 'MORNING_FRESH',
     matchingKeys: ['wake_time', 'wake_up_time', 'morning_time', 'wakeup_time', 'usual_wake_time'],
-    valueEvidencePatterns: [/\b(?:5|6|7|8|9|10)\s*(?::\d{2})?\s*(?:am|subah|baje)?\b/i, /wake.*(?:at|around)\s*\d+/i],
+    valueEvidencePatterns: [/\b(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:am|pm|subah|baje|o'clock)?\b/i, /wake.*(?:at|around)?\s*\d+/i, /\buth(?:ta|ti|te)?\b/i],
     promptTemplates: [
       "Subah usually kis time uthte ho? Taaki morning sync aur daily priorities ka timing ekdum perfect rahe.",
       "Tumhara morning wake-up time kya rehta hai usually?"
@@ -191,7 +191,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'MEDIUM',
     timingAffinity: 'MORNING_FRESH',
     matchingKeys: ['morning_starter', 'morning_drink', 'beverage_preference', 'tea_or_coffee', 'favorite_beverage'],
-    valueEvidencePatterns: [/\b(?:chai|tea|coffee|black coffee|espresso|green tea|warm water|nimbu pani)\b/i],
+    valueEvidencePatterns: [/\b(?:chai|tea|coffee|black coffee|espresso|green tea|matcha|warm water|water|nimbu pani|lemon water|smoothie|protein shake|shake|milk|juice|energy drink)\b/i],
     promptTemplates: [
       "Subah ka starter kya hota hai tumhara — garam chai, strong coffee, ya simple warm water?",
       "Chai person ho ya coffee person? Subah kickstart karne ke lie kya pasand hai?"
@@ -210,7 +210,7 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
     importance: 'MEDIUM',
     timingAffinity: 'EVENING_WIND_DOWN',
     matchingKeys: ['dinner_time', 'dinner_routine', 'dinner_hour'],
-    valueEvidencePatterns: [/\b(?:8|9|10|11)\s*(?::\d{2})?\s*(?:pm|baje|raat)?\b/i],
+    valueEvidencePatterns: [/\b(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:pm|am|baje|raat|evening)?\b/i, /dinner.*(?:at|around)?\s*\d+/i],
     promptTemplates: [
       "Tumhara family ke sath dinner ka time usually kab rehta hai? Taaki us window me work ya alerts pause rakh sakoon."
     ],
@@ -372,6 +372,25 @@ export const FOUNDATIONAL_BLUEPRINT_REGISTRY: BlueprintItemDefinition[] = [
       "Behind all your hard work and hustle, what's your biggest driving force — family security, personal freedom, or building something meaningful?"
     ],
     companionValue: "Aligns Nova's long-term motivational nudges directly with the user's deepest inner fire."
+  },
+  {
+    key: 'pets_or_animals',
+    category: 'PERSONAL_CHOICES_AND_RECHARGE',
+    title: 'Pets & Animal Companions',
+    description: 'Whether user has any pets (dog, cat, birds, fish) and their names',
+    importance: 'MEDIUM',
+    timingAffinity: 'ANYTIME_CASUAL',
+    matchingKeys: ['pet_name', 'pet_type', 'pets', 'dog_name', 'cat_name', 'has_pet', 'pets_or_animals'],
+    valueEvidencePatterns: [/\b(?:dog|cat|puppy|kitten|bird|parrot|fish|hamster|rabbit|husky|golden retriever|labrador|indie|no pets|none)\b/i, /[a-zA-Z\s-]{2,40}/i],
+    promptTemplates: [
+      "Waise ghar pe koi pet hai kya tumhare — dog, cat ya koi aur companion?",
+      "Do you have any pets at home?"
+    ],
+    promptTemplatesEn: [
+      "By the way, do you have any pets at home — a dog, cat, or any furry companion?",
+      "Do you have any pets?"
+    ],
+    companionValue: "Allows Nova to acknowledge user's beloved animals, ask about vet visits, and remember pet routines."
   }
 ];
 

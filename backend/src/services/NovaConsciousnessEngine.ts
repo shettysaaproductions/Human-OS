@@ -597,7 +597,7 @@ export class NovaConsciousnessEngine {
     // 1. High urgency agenda item exists
     // 2. User is actively chatting (sent a message in last 5 minutes — clearly not sleeping)
     const userIsActivelyChatting = gapMinutes < 5;
-    if (tContext.isSleepWindow && !userIsActivelyChatting) {
+    if (tContext.isSleepWindow && !userIsActivelyChatting && !isSleepWindowOverridden) {
       if (!agendaItem || agendaItem.urgency !== 'high') {
         logger.info('[NACE] Skipping — sleep window and user is not active', { userId });
         return;

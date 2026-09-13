@@ -107,7 +107,8 @@ export class ActionIntelligenceService {
     
     await supabaseAdmin.from('nova_actions')
       .update({ state: 'completed', updated_at: new Date().toISOString() })
-      .eq('id', actionId);
+      .eq('id', actionId)
+      .eq('user_id', userId);
       
     return true;
   }

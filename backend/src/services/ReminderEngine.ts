@@ -232,14 +232,19 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
   if (!title) title = 'Reminder';
   title = title.substring(0, 80);
 
-  // 1. Relative time: "in N min", "in N hours"
-  const inMinMatch = textLower.match(/in\s+(\d+)\s*min(?:utes?)?/);
+  // 1. Relative time: "in N min", "after N min", "N minute baad"
+  const inMinMatch = textLower.match(/(?:in|after)\s+(\d+)\s*min(?:utes?)?/i) ||
+    textLower.match(/(\d+)\s*min(?:utes?|ut)?\s*(?:baad|me|mein|after)/i);
   if (inMinMatch) {
     return { title, relative_value: parseInt(inMinMatch[1], 10), relative_unit: 'minutes', is_auto: false };
   }
-  const inHrMatch = textLower.match(/in\s+(\d+)\s*hour(?:s)?/);
+  const inHrMatch = textLower.match(/(?:in|after)\s+(\d+)\s*hour(?:s)?/i) ||
+    textLower.match(/(\d+)\s*(?:hours?|hrs?|ghante?)\s*(?:baad|me|mein|after)/i);
   if (inHrMatch) {
     return { title, relative_value: parseInt(inHrMatch[1], 10), relative_unit: 'hours', is_auto: false };
+  }
+  if (/\b(?:aadhe|aadha|half)\s*(?:ghante?|hour)\b/i.test(textLower)) {
+    return { title, relative_value: 30, relative_unit: 'minutes', is_auto: false };
   }
   // rawTime may also carry the 'min'/'hour' suffix from extractRaw
   if (intent.rawTime.endsWith('min')) {
@@ -251,12 +256,21 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
     if (!isNaN(v)) return { title, relative_value: v, relative_unit: 'hours', is_auto: false };
   }
 
-  // 2. Tomorrow prefix: "kal"
-  const hasKal = /\bkal\b/i.test(textLower);
+  // 2. Date prefix: tomorrow, parso, today
+  const hasTomorrow = /\b(kal|tomorrow|tmrw)\b/i.test(textLower);
+  const hasDayAfter = /\b(parso|tarso|day\s+after\s+tomorrow)\b/i.test(textLower);
+  const hasToday = /\b(aaj|today|tonight)\b/i.test(textLower);
   let dateStr: string | undefined = undefined;
-  if (hasKal) {
+  if (hasDayAfter) {
+    const nowLocal = new Date(Date.now() + userTzOffsetHours * 3600000);
+    nowLocal.setUTCDate(nowLocal.getUTCDate() + 2);
+    dateStr = nowLocal.toISOString().slice(0, 10);
+  } else if (hasTomorrow) {
     const nowLocal = new Date(Date.now() + userTzOffsetHours * 3600000);
     nowLocal.setUTCDate(nowLocal.getUTCDate() + 1);
+    dateStr = nowLocal.toISOString().slice(0, 10);
+  } else if (hasToday) {
+    const nowLocal = new Date(Date.now() + userTzOffsetHours * 3600000);
     dateStr = nowLocal.toISOString().slice(0, 10);
   }
 
