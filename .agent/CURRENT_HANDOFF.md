@@ -1,35 +1,46 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-13 — Gemini 3.8 Flash Migration, False-Positive Rate-Limit Regex Fix, 12s Budgeting & Codebase Architect Skill (MAM)
+2026-09-13 — v0.3.8-beta: Google Maps Neural Navigation, Progressive LOD Labels, Zoom Gestures & Lifestyle Intelligence
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: COMPLETE — Resolved Nova 'sochne de' fallback hang and built high-level codebase architect skill:
-1. **Root Cause Resolved**:
-   - Google deprecated `gemini-2.0-flash` (returned HTTP 404).
-   - In `backend/src/lib/gemini.ts`, `msg.includes('rate')` matched inside `"generateContent"`, causing 404 Model Not Found errors to be falsely classified as 429 Rate Limits, locking all 8 keys in a 60s cooldown.
-   - `conversationTimeoutMs` was only 5000ms, starving Gemini with an effective ~1000ms deadline.
-2. **Gemini 3.8 Flash Upgrade & Robust Error Handling**:
-   - Upgraded default model in `config/index.ts` and `.env` to `gemini-3.8-flash`.
-   - Updated intra-provider fallback cascade to: `['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest']`.
-   - Fixed regex error classification using word boundaries `/\b(rate[ -]?limit|quota[ -]?exceeded|resource[ -]?exhausted|too many requests)\b/i`.
-   - Added 404 fast-fail so model not found errors do NOT retry keys or put them on cooldown.
-   - Prioritized `process.env.GEMINI_API_KEY` at index 0 of key pool. Reduced overload cooldown to 8s.
-   - Increased `conversationTimeoutMs` to 12000ms (12s) and increased Gemini conversational budget in `cognitiveRouter.ts` up to 8500ms.
-   - Guarded `MessageFormatter.addEmoji` in `chat.ts` to never append festive emojis (`🎉`) to fallback messages.
-3. **Codebase Architect Skill & Automated Tree Generator (MAM)**:
-   - Created `.agents/skills/codebase-architect/SKILL.md` (Antigravity customization standard).
-   - Implemented `.agents/skills/codebase-architect/scripts/generate_architecture_map.js` to scan files and generate `.agents/skills/codebase-architect/references/ARCHITECTURE_TREE.md`.
-   - Indexes all architectural boundaries (Mobile, Backend, Supabase DB, Cognitive Router, Services, Stores) to allow Gemini 3.8 Flash and fresh sessions to navigate files in 0 tokens wasted.
+Task: COMPLETE — Hardened mobile 2D/3D neural galaxy, fixed zoom lock, implemented map-style LOD labels, Google Maps department navigation, and upgraded companion lifestyle intelligence:
 
-## Verification & Status
-- `backend/npm run build`: Exited code 0 (clean).
-- `mobile/npx tsc --noEmit`: Exited code 0 (clean).
-- Direct Gemini 3.8 Flash text completion verified: SUCCESS.
-- Failover cascade test with Gemini 3.7 Flash: SUCCESS.
-- Node architecture tree generator verified: SUCCESS.
+1. **2D & 3D Neural Galaxy Zoom Lock Root Cause & Fix**:
+   - **Root Cause**: `hasUserInteractedRef.current` was never set to `true` during gestures or zoom button taps. The 5-second background sync poll (`fetchGraph(true)`) checked `if (!hasUserInteractedRef.current)` and continuously forced `scale.value = fitScale` (0.17), killing user zoom.
+   - **Gesture Conflicts**: `panGesture` lacked `.maxPointers(1)`, causing simultaneous conflict with `pinchGesture` on 2-finger touches.
+   - **Fix**: Added `markInteracted` callback invoked on `pinchGesture.onBegin`, `panGesture.onBegin`, `twoFingerPanGesture.onBegin`, `rotationGesture.onBegin`, and zoom buttons. Constrained `panGesture` to `maxPointers(1)`. Guarded `fetchGraph` auto-fit so it only runs on initial mount (`!isBackground && nodes.length === 0`).
+
+2. **Progressive Semantic Level of Detail (LOD) Labels**:
+   - Implemented dynamic label visibility based on camera zoom scale:
+     - `scale < 0.28`: Only main department trunks (`hierarchyLevel === 1`) and `user-core` display labels.
+     - `0.28 <= scale < 0.48`: Entity branches (`hierarchyLevel === 2`) emerge.
+     - `scale >= 0.48`: All micro-branches and leaf attribute stems become visible.
+     - Selected nodes and 1-hop connected neighbors always display labels at any zoom level.
+   - Leader lines and nameplates cleanly toggle with `showLabel`.
+
+3. **Google Maps Fly-To Department Navigation**:
+   - Fixed camera jump where `handleFocusDept` previously used screen deltas from old zoom to animate to new zoom, throwing nodes 600px offscreen.
+   - Implemented `navigateToNode(node, targetScale)` using exact inverse projection math for both 2D and 3D perspectives.
+   - Department chips now smoothly fly the camera right onto the hub at 0.62 zoom with cubic easing.
+   - Tapping "✨ All Galaxy" resets filters and smoothly glides back to full panoramic view.
+
+4. **Companion Lifestyle Intelligence & Action Routing**:
+   - Added `FESTIVAL_SIGNALS` (Ganpati, Diwali, Eid, Navratri, Pooja, fasting, rituals).
+   - Added `SOLITARY_SIGNALS` (home alone, akela hu, quiet me-time companioning).
+   - Added `FAMILY_CARE_SIGNALS` (parents, child caregiving, family dinner).
+   - Routed `extractCriticalAction` in `NovaBrainService.ts` through `cognitiveRouter.complete('ACTION_INTELLIGENCE', ...)` with Gemini 3.8 Flash failover.
+
+## OTA Deployment & Notification Protocol
+- **Version**: `v0.3.8-beta`
+- **Changelog**: Updated index 0 of `mobile/src/config/updateHistory.json`.
+- **Pre-flight**: `mobile/npx tsc --noEmit` (exit 0), `backend/npm run build` (exit 0).
+- **EAS Update Group ID**: `bdf355a0-a2c8-46ac-8711-346e37b53ab7`
+- **Android Update ID**: `01a09bef-e4a5-7744-89dd-425e2266bbfd`
+- **iOS Update ID**: `01a09bef-e4a5-710c-87b4-96193dc6d678`
+- **Broadcast Push Notification**: Successfully dispatched to all registered user devices via `broadcast_update_push.ts`.
 
 ## NEXT ACTION
-Ready to commit and push changes to `origin main` (triggers Render backend deploy).
+Commit and push changes to `origin main` (triggers automatic Render backend build & deploy).

@@ -1304,6 +1304,9 @@ function KgExplorerContent() {
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
   const hasUserInteractedRef = useRef(false);
+  const markInteracted = useCallback(() => {
+    hasUserInteractedRef.current = true;
+  }, []);
 
   // Conversational Memory Surgery & On-the-Spot Correction State
   const [talkModalVisible, setTalkModalVisible] = useState(false);
@@ -1394,7 +1397,8 @@ function KgExplorerContent() {
       setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
       // Auto-fit zoomed out framing so all nodes and the outermost bubble are visible
-      if (!hasUserInteractedRef.current && galaxy.nodes.length > 0) {
+      // ONLY on initial load if user hasn't interacted yet. Never override user zoom during background 5s polling!
+      if (!isBackground && !hasUserInteractedRef.current && nodes.length === 0 && galaxy.nodes.length > 0) {
         const fitScale = calculateFitScale(galaxy.nodes, viewMode === '3d');
         scale.value = fitScale;
         savedScale.value = fitScale;
@@ -1461,6 +1465,7 @@ function KgExplorerContent() {
         'worklet';
         cancelAnimation(scale);
         savedScale.value = scale.value;
+        runOnJS(markInteracted)();
       })
       .onUpdate((e) => {
         'worklet';
@@ -1471,17 +1476,19 @@ function KgExplorerContent() {
         'worklet';
         savedScale.value = scale.value;
       });
-  }, [scale, savedScale]);
+  }, [scale, savedScale, markInteracted]);
 
   const panGesture = useMemo(() => {
     return Gesture.Pan()
       .minDistance(2)
+      .maxPointers(1)
       .onBegin(() => {
         'worklet';
         cancelAnimation(yaw);
         cancelAnimation(pitch);
         cancelAnimation(panX);
         cancelAnimation(panY);
+        runOnJS(markInteracted)();
 
         if (viewMode === '3d' && gestureMode === 'orbit') {
           savedYaw.value = yaw.value;
@@ -1515,7 +1522,7 @@ function KgExplorerContent() {
           panY.value = withDecay({ velocity: e.velocityY * 0.7, deceleration: 0.986 });
         }
       });
-  }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, panX, panY, savedPanX, savedPanY]);
+  }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, panX, panY, savedPanX, savedPanY, markInteracted]);
 
   // Two-finger Pan Gesture: pan canvas in 3D without switching HUD modes
   const twoFingerPanGesture = useMemo(() => {
@@ -1528,6 +1535,7 @@ function KgExplorerContent() {
         cancelAnimation(panY);
         savedPanX.value = panX.value;
         savedPanY.value = panY.value;
+        runOnJS(markInteracted)();
       })
       .onUpdate((e) => {
         'worklet';
@@ -1541,12 +1549,13 @@ function KgExplorerContent() {
         panX.value = withDecay({ velocity: e.velocityX * 0.65, deceleration: 0.985 });
         panY.value = withDecay({ velocity: e.velocityY * 0.65, deceleration: 0.985 });
       });
-  }, [panX, panY, savedPanX, savedPanY]);
+  }, [panX, panY, savedPanX, savedPanY, markInteracted]);
 
   const rotationGesture = useMemo(() => {
     return Gesture.Rotation()
       .onBegin(() => {
         'worklet';
+        runOnJS(markInteracted)();
         if (viewMode === '3d') {
           cancelAnimation(roll);
           savedRoll.value = roll.value;
@@ -1564,7 +1573,7 @@ function KgExplorerContent() {
           savedRoll.value = roll.value;
         }
       });
-  }, [viewMode, roll, savedRoll]);
+  }, [viewMode, roll, savedRoll, markInteracted]);
 
   const composedGesture = useMemo(() => {
     return Gesture.Simultaneous(pinchGesture, panGesture, twoFingerPanGesture, rotationGesture);
@@ -1572,18 +1581,21 @@ function KgExplorerContent() {
 
   const handleResetView = useCallback(() => {
     hasUserInteractedRef.current = false;
+    setSelectedDept(null);
+    setSelectedNode(null);
+    setSelectedEdge(null);
     const is3d = viewMode === '3d';
     const fitScale = calculateFitScale(nodes, is3d);
     const targetPitch = is3d ? 0.24 : 0.0;
     const targetYaw = is3d ? 0.35 : 0.0;
     const targetRoll = 0.0;
 
-    pitch.value = withSpring(targetPitch, { damping: 18 });
-    yaw.value = withSpring(targetYaw, { damping: 18 });
-    roll.value = withSpring(targetRoll, { damping: 18 });
-    panX.value = withSpring(0, { damping: 18 });
-    panY.value = withSpring(0, { damping: 18 });
-    scale.value = withSpring(fitScale, { damping: 18 });
+    pitch.value = withTiming(targetPitch, { duration: 600, easing: Easing.out(Easing.cubic) });
+    yaw.value = withTiming(targetYaw, { duration: 600, easing: Easing.out(Easing.cubic) });
+    roll.value = withTiming(targetRoll, { duration: 600, easing: Easing.out(Easing.cubic) });
+    panX.value = withTiming(0, { duration: 600, easing: Easing.out(Easing.cubic) });
+    panY.value = withTiming(0, { duration: 600, easing: Easing.out(Easing.cubic) });
+    scale.value = withTiming(fitScale, { duration: 600, easing: Easing.out(Easing.cubic) });
 
     savedPitch.value = targetPitch;
     savedYaw.value = targetYaw;
@@ -1636,18 +1648,20 @@ function KgExplorerContent() {
   }, [yaw, savedYaw, pitch, roll, panX, panY, scale, syncCamera]);
 
   const handleZoomIn = useCallback(() => {
-    const next = Math.min(scale.value * 1.3, 5.0);
+    markInteracted();
+    const next = Math.min(scale.value * 1.45, 5.0);
     scale.value = withSpring(next);
     savedScale.value = next;
     syncCamera(yaw.value, pitch.value, roll.value, panX.value, panY.value, next);
-  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera]);
+  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera, markInteracted]);
 
   const handleZoomOut = useCallback(() => {
-    const next = Math.max(scale.value / 1.3, 0.10);
+    markInteracted();
+    const next = Math.max(scale.value / 1.45, 0.10);
     scale.value = withSpring(next);
     savedScale.value = next;
     syncCamera(yaw.value, pitch.value, roll.value, panX.value, panY.value, next);
-  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera]);
+  }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera, markInteracted]);
 
   const toggleAutoOrbit = useCallback(() => {
     setIsAutoOrbit(prev => !prev);
@@ -1829,6 +1843,7 @@ function KgExplorerContent() {
       leaderStartY: number;
       leaderEndX: number;
       leaderEndY: number;
+      showLabel: boolean;
     }
 
     const placementMap = new Map<string, PlacementResult>();
@@ -1838,6 +1853,25 @@ function KgExplorerContent() {
       const isConnected = connectedNodeIds.has(pn.node.id);
       const isFocus = isSelected || isConnected;
       const r = pn.circleSize / 2;
+
+      // Semantic Level of Detail (LOD) / Map-Style Progressive Filtering
+      // Zoomed out (curScale < 0.28): Show only main department trunks & user-core (clean high-level galaxy)
+      // Mid zoom (0.28 <= curScale < 0.48): Show main trunks + secondary entity branches
+      // Close zoom (curScale >= 0.48): Show all micro-branches, attribute leaves, and fine neural stems
+      // Active focus/selection: Always show label regardless of zoom level
+      const isMainBranch = pn.node.id === 'user-core' || pn.node.isDepartment || pn.node.isHub || pn.node.hierarchyLevel === 1;
+      const isSubBranch = pn.node.hierarchyLevel === 2;
+
+      let showLabel = false;
+      if (isFocus) {
+        showLabel = true;
+      } else if (isMainBranch) {
+        showLabel = true;
+      } else if (isSubBranch) {
+        showLabel = curScale >= 0.28;
+      } else {
+        showLabel = curScale >= 0.48;
+      }
 
       // Dynamic sizing based on hierarchy, name length, and zoom level
       let labelW = Math.round(Math.min(105, Math.max(36, pn.node.name.length * 6.0 + 12)) * zoomRatio);
@@ -1887,7 +1921,8 @@ function KgExplorerContent() {
         leaderStartX: 0,
         leaderStartY: 0,
         leaderEndX: 0,
-        leaderEndY: 0
+        leaderEndY: 0,
+        showLabel
       });
     }
 
@@ -1995,33 +2030,85 @@ function KgExplorerContent() {
     };
   }, [nodes, edges, camera, viewMode, selectedNode, selectedEdge, connectedNodeIds]);
 
+  const navigateToNode = useCallback((node: GraphNode, customTargetScale?: number) => {
+    markInteracted();
+    const is3d = viewMode === '3d';
+    const targetScale = customTargetScale ?? (node.isDepartment || node.isHub ? 0.62 : Math.max(scale.value, 0.90));
+
+    const safeX = (typeof node.x === 'number' && isFinite(node.x)) ? node.x : CENTER;
+    const safeY = (typeof node.y === 'number' && isFinite(node.y)) ? node.y : CENTER;
+
+    let targetPanX = 0;
+    let targetPanY = 0;
+
+    if (is3d) {
+      const x = node.x3d ?? (safeX - CENTER);
+      const y = node.y3d ?? (safeY - CENTER);
+      const z = node.z3d ?? 0;
+
+      const curYaw = yaw.value;
+      const curPitch = pitch.value;
+      const curRoll = roll.value;
+
+      const cy = Math.cos(curYaw);
+      const sy = Math.sin(curYaw);
+      const x1 = x * cy + z * sy;
+      const y1 = y;
+      const z1 = -x * sy + z * cy;
+
+      const cp = Math.cos(curPitch);
+      const sp = Math.sin(curPitch);
+      const x2 = x1;
+      const y2 = y1 * cp - z1 * sp;
+      const z2 = y1 * sp + z1 * cp;
+
+      const cr = Math.cos(curRoll);
+      const sr = Math.sin(curRoll);
+      const x3 = x2 * cr - y2 * sr;
+      const y3 = x2 * sr + y2 * cr;
+      const z3 = z2;
+
+      const cameraDistance = 1100;
+      const dist = Math.max(200, cameraDistance - z3);
+      const perspective = cameraDistance / dist;
+
+      targetPanX = - (x3 * perspective * targetScale);
+      targetPanY = - (y3 * perspective * targetScale);
+    } else {
+      const offsetX = safeX - CENTER;
+      const offsetY = safeY - CENTER;
+      targetPanX = - (offsetX * targetScale);
+      targetPanY = - (offsetY * targetScale);
+    }
+
+    cancelAnimation(panX);
+    cancelAnimation(panY);
+    cancelAnimation(scale);
+
+    panX.value = withTiming(targetPanX, { duration: 600, easing: Easing.out(Easing.cubic) });
+    panY.value = withTiming(targetPanY, { duration: 600, easing: Easing.out(Easing.cubic) });
+    scale.value = withTiming(targetScale, { duration: 600, easing: Easing.out(Easing.cubic) });
+
+    savedPanX.value = targetPanX;
+    savedPanY.value = targetPanY;
+    savedScale.value = targetScale;
+
+    syncCamera(yaw.value, pitch.value, roll.value, targetPanX, targetPanY, targetScale);
+  }, [viewMode, scale, yaw, pitch, roll, panX, panY, savedPanX, savedPanY, savedScale, syncCamera, markInteracted]);
+
   const handleNodePress = useCallback((node: GraphNode) => {
     setSelectedEdge(null);
     if (selectedNode?.id === node.id) {
       setSelectedNode(null);
     } else {
       setSelectedNode(node);
-      const pn = projectedGraph.nodeMap.get(node.id);
-      if (pn) {
-        const dx = pn.screenX - SCREEN_WIDTH / 2;
-        const dy = pn.screenY - GRAPH_HEIGHT / 2;
-        const nextPanX = panX.value - dx;
-        const nextPanY = panY.value - dy;
-        const nextScale = Math.max(scale.value, 1.25);
-
-        panX.value = withSpring(nextPanX, { damping: 18 });
-        panY.value = withSpring(nextPanY, { damping: 18 });
-        savedPanX.value = nextPanX;
-        savedPanY.value = nextPanY;
-        scale.value = withSpring(nextScale, { damping: 18 });
-        savedScale.value = nextScale;
-
-        syncCamera(yaw.value, pitch.value, roll.value, nextPanX, nextPanY, nextScale);
-      }
+      const nextScale = (node.isDepartment || node.isHub) ? 0.62 : Math.max(scale.value, 0.90);
+      navigateToNode(node, nextScale);
     }
-  }, [selectedNode, projectedGraph, panX, panY, savedPanX, savedPanY, scale, savedScale, yaw, pitch, roll, syncCamera]);
+  }, [selectedNode, scale, navigateToNode]);
 
   const handleEdgePress = useCallback((edge: GraphEdge) => {
+    markInteracted();
     setSelectedNode(null);
     if (selectedEdge?.id === edge.id) {
       setSelectedEdge(null);
@@ -2045,7 +2132,7 @@ function KgExplorerContent() {
         syncCamera(yaw.value, pitch.value, roll.value, nextPanX, nextPanY, nextScale);
       }
     }
-  }, [selectedEdge, projectedGraph, panX, panY, savedPanX, savedPanY, scale, savedScale, yaw, pitch, roll, syncCamera]);
+  }, [selectedEdge, projectedGraph, panX, panY, savedPanX, savedPanY, scale, savedScale, yaw, pitch, roll, syncCamera, markInteracted]);
 
   // Conversational Memory Editing & Surgical Handlers
   const handleOpenTalkModal = useCallback((node: GraphNode) => {
@@ -2221,13 +2308,13 @@ function KgExplorerContent() {
 
   const handleFocusDept = useCallback((deptId: string) => {
     setSelectedDept(deptId);
-    setSelectedNode(null);
     setSelectedEdge(null);
     const hubNode = nodes.find(n => n.id === `dept-${deptId}`);
     if (hubNode) {
-      handleNodePress(hubNode);
+      setSelectedNode(hubNode);
+      navigateToNode(hubNode, 0.62);
     }
-  }, [nodes, handleNodePress]);
+  }, [nodes, navigateToNode]);
 
   if (loading) {
     return (
@@ -2524,7 +2611,7 @@ function KgExplorerContent() {
                 {/* Dynamic Leader Lines connecting node orbs to offset nameplates */}
                 <G id="leader-lines">
                   {projectedGraph.nodes.map((pn) => {
-                    if (!pn.hasLeaderLine) return null;
+                    if (!pn.hasLeaderLine || !pn.showLabel) return null;
                     return (
                       <Line
                         key={`leader-${pn.node.id}`}
@@ -2730,48 +2817,50 @@ function KgExplorerContent() {
                       </View>
                     </TouchableOpacity>
 
-                    {/* Dynamic Non-Overlapping Nameplate (PUBG / GTA 360 Dynamic HUD) */}
-                    <TouchableOpacity
-                      style={[
-                        styles.labelPill,
-                        {
-                          position: 'absolute',
-                          left: pn.labelOffsetX - pn.labelW / 2,
-                          top: pn.labelOffsetY - pn.labelH / 2,
-                          width: pn.labelW,
-                          height: pn.labelH,
-                          borderColor: isSelected
-                            ? '#38BDF8'
-                            : isConnected
-                            ? '#38BDF8'
-                            : n.isDepartment
-                            ? n.color
-                            : 'rgba(255,255,255,0.22)'
-                        },
-                        isSelected && styles.labelPillSelected,
-                        isConnected && styles.labelPillConnected
-                      ]}
-                      onPress={() => handleNodePress(n)}
-                      activeOpacity={0.8}
-                    >
-                      <Text
+                    {/* Dynamic Non-Overlapping Nameplate (Map-Style LOD: only visible when pn.showLabel is true) */}
+                    {pn.showLabel && (
+                      <TouchableOpacity
                         style={[
-                          styles.labelText,
-                          { fontSize: Math.round(Math.max(8.0, 11 * Math.min(1.0, Math.max(0.60, 0.40 + 0.88 * (camera.scale / 0.45))))) },
-                          isSelected && styles.labelTextSelected,
-                          n.isDepartment && { color: n.color }
+                          styles.labelPill,
+                          {
+                            position: 'absolute',
+                            left: pn.labelOffsetX - pn.labelW / 2,
+                            top: pn.labelOffsetY - pn.labelH / 2,
+                            width: pn.labelW,
+                            height: pn.labelH,
+                            borderColor: isSelected
+                              ? '#38BDF8'
+                              : isConnected
+                              ? '#38BDF8'
+                              : n.isDepartment
+                              ? n.color
+                              : 'rgba(255,255,255,0.22)'
+                          },
+                          isSelected && styles.labelPillSelected,
+                          isConnected && styles.labelPillConnected
                         ]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
+                        onPress={() => handleNodePress(n)}
+                        activeOpacity={0.8}
                       >
-                        {n.name}
-                      </Text>
-                      {pn.labelH > 20 && n.subLabel ? (
-                        <Text style={styles.subLabelText} numberOfLines={1}>
-                          {n.subLabel}
+                        <Text
+                          style={[
+                            styles.labelText,
+                            { fontSize: Math.round(Math.max(8.0, 11 * Math.min(1.0, Math.max(0.60, 0.40 + 0.88 * (camera.scale / 0.45))))) },
+                            isSelected && styles.labelTextSelected,
+                            n.isDepartment && { color: n.color }
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {n.name}
                         </Text>
-                      ) : null}
-                    </TouchableOpacity>
+                        {pn.labelH > 20 && n.subLabel ? (
+                          <Text style={styles.subLabelText} numberOfLines={1}>
+                            {n.subLabel}
+                          </Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    )}
                   </View>
                 );
               })}

@@ -113,6 +113,22 @@ const HABIT_SIGNALS = [
   'steps', '10k steps', 'walked', 'drank water', 'liters of water', 'sleep', 'slept'
 ];
 
+const FESTIVAL_SIGNALS = [
+  'ganpati', 'ganesh', 'bappa', 'diwali', 'eid', 'navratri', 'durga puja', 'pooja', 'puja',
+  'aarti', 'vrat', 'fasting', 'upwas', 'holi', 'rakhi', 'raksha bandhan', 'christmas',
+  'new year', 'celebration', 'modak', 'visarjan', 'pandits', 'mandir', 'temple', 'masjid', 'church'
+];
+
+const SOLITARY_SIGNALS = [
+  'akela hu', 'akeli hu', 'ghar pe akela', 'ghar pe akeli', 'home alone', 'koi nahi hai ghar pe',
+  'sab bahar gaye', 'room pe akela', 'feeling lonely', 'alone at home', 'by myself today', 'alone today'
+];
+
+const FAMILY_CARE_SIGNALS = [
+  'mummy', 'papa', 'family dinner', 'relatives', 'bachhe ko', 'baby ko', 'sula raha',
+  'khana khila raha', 'parents ke sath', 'in-laws', 'family time', 'cousins', 'joint family'
+];
+
 /**
  * Robust signal matcher: enforces whole-word boundaries for short words (<=4 chars)
  * to avoid false substring triggers (e.g. "art" inside "karte", "cat" inside "certificate").
@@ -276,6 +292,12 @@ export class SituationalAwareness {
         lines.push(`- 🎨 LIFESTYLE FOCUS (Creativity & Ideas): User is creating content, writing, or brainstorming. Be an inspiring creative sounding board! Suggest unique angles and bounce ideas.`);
       } else if (availability === 'habit') {
         lines.push(`- 🌿 LIFESTYLE FOCUS (Habits & Mindfulness): User is tracking daily routines, meditation, or hydration. Celebrate consistency and help them maintain their streak!`);
+      } else if (availability === 'festival') {
+        lines.push(`- 🎉 LIFESTYLE FOCUS (Festival & Celebration): User is participating in a festival, pooja, cultural ceremony, or religious event. Be celebratory, respectful, and culturally in-tune! Acknowledge the festive atmosphere, family gatherings, or rituals warmly.`);
+      } else if (availability === 'solitary') {
+        lines.push(`- 🛋️ LIFESTYLE FOCUS (Solitary / Home Alone State): User is home alone or by themselves. Be a warm, reassuring, companionable presence! You are their trusted companion sitting right there — ask if they are enjoying some quiet me-time, planning to watch something, or cooking something simple.`);
+      } else if (availability === 'family_care') {
+        lines.push(`- 👨‍👩‍👧 LIFESTYLE FOCUS (Family Routine & Caregiving): User is spending time with family, parents, child, or relatives. Be respectful of their family environment! Encourage their family bonding and keep messages warm and easy to read without requiring intense focus.`);
       }
     }
 
@@ -375,10 +397,13 @@ export class SituationalAwareness {
     return lines.join('\n');
   }
 
-  detectAvailability(message: string): 'busy' | 'excited' | 'relationship' | 'fitness' | 'study' | 'work' | 'pet' | 'creative' | 'habit' | 'neutral' {
+  detectAvailability(message: string): 'busy' | 'excited' | 'relationship' | 'fitness' | 'study' | 'work' | 'pet' | 'creative' | 'habit' | 'festival' | 'solitary' | 'family_care' | 'neutral' {
     const lower = message.toLowerCase();
 
     // 1. Check lifestyle signals FIRST so user sharing their routine, metrics, habits, or milestones is never muted
+    if (matchesSignalList(lower, FESTIVAL_SIGNALS)) return 'festival';
+    if (matchesSignalList(lower, SOLITARY_SIGNALS)) return 'solitary';
+    if (matchesSignalList(lower, FAMILY_CARE_SIGNALS)) return 'family_care';
     if (matchesSignalList(lower, FITNESS_SIGNALS)) return 'fitness';
     if (matchesSignalList(lower, STUDY_SIGNALS)) return 'study';
     if (matchesSignalList(lower, PET_SIGNALS)) return 'pet';

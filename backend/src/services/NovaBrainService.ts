@@ -1,4 +1,4 @@
-import { complete, determineUserProfile } from '../lib/nvidia';
+import { determineUserProfile } from '../lib/nvidia';
 import { cognitiveRouter } from '../lib/cognitiveRouter';
 import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
@@ -619,7 +619,7 @@ Example:
 ]`;
 
   try {
-    const rawExtraction = await complete('CRITICAL_ACTION',
+    const rawExtraction = await cognitiveRouter.complete('ACTION_INTELLIGENCE',
       [
         { role: 'system', content: prompt },
         { role: 'user', content: message }

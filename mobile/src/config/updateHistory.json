@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.3.8-beta",
+    "date": "2026-09-13",
+    "title": "🗺️ Google Maps Neural Navigation, Progressive LOD Labels & Lifestyle Intelligence",
+    "message": [
+      "Full Zoom Freedom (2D & 3D): Fixed the auto-fit reset bug that snapped camera scale back every 5 seconds. Pinch-to-zoom and zoom buttons now glide smoothly from wide 0.10x galaxy view up to 5.0x micro view.",
+      "Map-Style Level of Detail (LOD) Labels: In zoomed-out view, only major department trunks and core hubs display labels. As you zoom in, sub-branches and micro-branch attribute leaves progressively reveal themselves just like Google Maps.",
+      "Google Maps Fly-To Department Navigation: Tapping department filter chips (Family, Career, Ambitions, etc.) smoothly flies and centers the camera right onto that department hub at optimal reading zoom, instead of jumping offscreen.",
+      "Reset All Galaxy View: Tapping '✨ All Galaxy' smoothly glides the camera back to full panoramic galaxy view, resetting filters and centering the entire neural network.",
+      "Lifestyle & Cultural Companion Intelligence: Nova now understands Indian & global festivals (Ganpati, Diwali, Eid, Navratri, Pooja), solitary / home-alone moments, and family caregiving routines with deep empathy.",
+      "Action Intelligence Reliability: Routed critical action extraction through the multi-provider cognitive router with Gemini 3.8 Flash failover."
+    ]
+  },
+  {
     "version": "0.3.7-beta",
     "date": "2026-09-13",
     "title": "🎮 Default 2D Tactical View, Auto-Fit Zoom & GTA Vice City Live Synaptic Pulses",
