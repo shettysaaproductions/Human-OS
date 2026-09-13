@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.7-beta",
+    "date": "2026-09-13",
+    "title": "🎮 Default 2D Tactical View, Auto-Fit Zoom & GTA Vice City Live Synaptic Pulses",
+    "message": [
+      "Default 2D Tactical Mode: Tapping the 🧠 Brain button now opens directly into a crisp, flat top-down 2D tactical view by default, with an instant one-tap toggle to 3D continuous orbit.",
+      "Auto-Fit Full Universe Zoom: The galaxy automatically frames to a comfortable zoomed-out perspective where all department clusters, thinking lines, and the outermost 'last bubble' fit 100% on screen.",
+      "GTA Vice City Live Synaptic Pulses: 36 continuous glowing photon dots stream simultaneously across department trunks, entity branches, and cross-domain bridges in both 2D and 3D modes.",
+      "Adaptive Non-Overlapping Scaling: Bubbles and nameplates scale proportionally with zoom level, preventing visual clutter when zoomed out while expanding smoothly when inspected.",
+      "Tactical 2D Pan Momentum: Smooth inertial flick-and-glide physics let you pan across your entire neural universe with silky GTA Vice City responsiveness."
+    ]
+  },
+  {
     "version": "0.3.6-beta",
     "date": "2026-09-13",
     "title": "⚡ 24/7 Conversational Resilience, 20-Key LLM Fuel & Human-Paced Messaging",

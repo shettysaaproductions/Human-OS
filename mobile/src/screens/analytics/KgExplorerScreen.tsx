@@ -1170,15 +1170,6 @@ const SynapticActionPotentialLayer = React.memo(function SynapticActionPotential
     midY: number;
   }>;
 }) {
-  const [pulseBatchSeed, setPulseBatchSeed] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setPulseBatchSeed(s => (s + 1) % 100);
-    }, 4500);
-    return () => clearInterval(timer);
-  }, []);
-
   const activePathways = useMemo(() => {
     if (!edges || edges.length === 0) return [];
 
@@ -1194,21 +1185,23 @@ const SynapticActionPotentialLayer = React.memo(function SynapticActionPotential
     const crossEdges = validEdges.filter(e => e.isCross);
     const standardEdges = validEdges.filter(e => !e.isCross);
 
-    const picked: typeof validEdges = [];
-    if (crossEdges.length > 0) {
-      for (let i = 0; i < Math.min(3, crossEdges.length); i++) {
-        const idx = (pulseBatchSeed + i * 2) % crossEdges.length;
-        picked.push(crossEdges[idx]);
-      }
-    }
+    // 1. Pick all cross-domain bridges (up to 8)
+    const picked: typeof validEdges = [...crossEdges.slice(0, 8)];
 
-    const remainingCount = Math.max(3, 8 - picked.length);
-    for (let i = 0; i < remainingCount && standardEdges.length > 0; i++) {
-      const idx = (pulseBatchSeed * 3 + i * 5) % standardEdges.length;
-      picked.push(standardEdges[idx]);
-    }
+    // 2. Add central trunks and entity branches
+    const trunkAndBranch = standardEdges.filter(pe => {
+      const sId = pe.edge.source;
+      const tId = pe.edge.target;
+      return sId === 'user-core' || tId === 'user-core' || sId.startsWith('dept-') || pe.edge.edgeType === 'DEPARTMENT_BRANCH' || pe.edge.edgeType === 'ENTITY_BRANCH';
+    });
+    const otherStems = standardEdges.filter(pe => !trunkAndBranch.includes(pe));
 
-    const PALETTE = ['#38BDF8', '#C084FC', '#34D399', '#F472B6', '#FBBF24', '#60A5FA'];
+    // Fill up to 36 total permanent pulsating pathways across all 5 sectors
+    picked.push(...trunkAndBranch.slice(0, 20));
+    const remainingCount = Math.max(6, 36 - picked.length);
+    picked.push(...otherStems.slice(0, remainingCount));
+
+    const PALETTE = ['#38BDF8', '#C084FC', '#34D399', '#F472B6', '#FBBF24', '#60A5FA', '#A78BFA', '#2DD4BF'];
 
     return picked.map((pe, idx) => {
       const e = pe.edge;
@@ -1228,11 +1221,13 @@ const SynapticActionPotentialLayer = React.memo(function SynapticActionPotential
       }
 
       const color = pe.isCross ? '#C084FC' : (e.color || PALETTE[idx % PALETTE.length]);
-      const duration = 1900 + (idx % 4) * 420;
-      const delay = (idx * 260) % 1100;
+      // Rhythmic GTA Vice City continuous pulse duration: 1300ms to 2200ms
+      const duration = 1350 + (idx % 6) * 170;
+      // Staggered delays so dots flow continuously without gaps
+      const delay = (idx * 90) % 1400;
 
       return {
-        id: `pulse-${e.id}-${pulseBatchSeed}-${idx}`,
+        id: `pulse-${e.id}-${idx}`,
         x1: pe.sourceNode.screenX,
         y1: pe.sourceNode.screenY,
         x2: pe.targetNode.screenX,
@@ -1244,7 +1239,7 @@ const SynapticActionPotentialLayer = React.memo(function SynapticActionPotential
         delay
       };
     });
-  }, [edges, pulseBatchSeed]);
+  }, [edges]);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -1255,12 +1250,51 @@ const SynapticActionPotentialLayer = React.memo(function SynapticActionPotential
   );
 });
 
+// Dynamic Auto-Fit Zoom Scale: Ensures the whole universe, all branches, and the outermost "last bubble" fit 100% on screen
+function calculateFitScale(nodes: GraphNode[], is3d: boolean): number {
+  if (!nodes || nodes.length === 0) return is3d ? 0.28 : 0.17;
+  let maxExtentX = 0;
+  let maxExtentY = 0;
+
+  for (const n of nodes) {
+    if (is3d) {
+      const x = Math.abs(n.x3d ?? 0);
+      const y = Math.abs(n.y3d ?? 0);
+      const z = Math.abs(n.z3d ?? 0);
+      const r = Math.sqrt(x * x + y * y + z * z);
+      if (r > maxExtentX) maxExtentX = r;
+      if (r > maxExtentY) maxExtentY = r;
+    } else {
+      const x = (typeof n.x === 'number' && isFinite(n.x)) ? Math.abs(n.x - CENTER) : 0;
+      const y = (typeof n.y === 'number' && isFinite(n.y)) ? Math.abs(n.y - CENTER) : 0;
+      if (x > maxExtentX) maxExtentX = x;
+      if (y > maxExtentY) maxExtentY = y;
+    }
+  }
+
+  if (maxExtentX < 40 || maxExtentY < 40) return is3d ? 0.28 : 0.17;
+
+  if (is3d) {
+    const availW = (SCREEN_WIDTH - 60) / 2;
+    const availH = (GRAPH_HEIGHT - 80) / 2;
+    const maxR = Math.max(maxExtentX, maxExtentY) * 1.35;
+    return Math.max(0.18, Math.min(0.42, Math.min(availW / maxR, availH / maxR)));
+  } else {
+    // In 2D: ensure outermost bubbles and their labels have safe margin from screen borders
+    const availW = (SCREEN_WIDTH - 70) / 2;
+    const availH = (GRAPH_HEIGHT - 90) / 2;
+    const scaleX = availW / (maxExtentX + 60);
+    const scaleY = availH / (maxExtentY + 60);
+    return Math.max(0.13, Math.min(0.32, Math.min(scaleX, scaleY)));
+  }
+}
+
 function KgExplorerContent() {
   const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
-  const [gestureMode, setGestureMode] = useState<'pan' | 'orbit'>('orbit');
+  const [viewMode, setViewMode] = useState<'3d' | '2d'>('2d'); // By default: 2D view!
+  const [gestureMode, setGestureMode] = useState<'pan' | 'orbit'>('pan'); // By default: pan in 2D!
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [departments, setDepartments] = useState<DepartmentMeta[]>([]);
@@ -1269,6 +1303,7 @@ function KgExplorerContent() {
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [lineFilter, setLineFilter] = useState<'all' | 'cross'>('all');
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
+  const hasUserInteractedRef = useRef(false);
 
   // Conversational Memory Surgery & On-the-Spot Correction State
   const [talkModalVisible, setTalkModalVisible] = useState(false);
@@ -1278,33 +1313,33 @@ function KgExplorerContent() {
   const [surgicalLoading, setSurgicalLoading] = useState(false);
   const [novaFeedback, setNovaFeedback] = useState<string | null>(null);
 
-  // Default 3D perspective camera state
+  // Default 2D perspective camera state (flat top-down, zoomed-out)
   const defaultCamera = {
-    pitch: 0.24, // ~14 deg tilt (X-axis)
-    yaw: 0.35,   // ~20 deg orbit (Y-axis)
-    roll: 0.0,   // 0 deg roll (Z-axis)
+    pitch: 0.0,
+    yaw: 0.0,
+    roll: 0.0,
     panX: 0,
     panY: 0,
-    scale: 0.70
+    scale: 0.17
   };
 
   const pendingCameraRef = useRef(defaultCamera);
   const [camera, setCamera] = useState(defaultCamera);
   const rafRef = useRef<number | null>(null);
 
-  const pitch = useSharedValue(0.24);
-  const yaw = useSharedValue(0.35);
+  const pitch = useSharedValue(0.0);
+  const yaw = useSharedValue(0.0);
   const roll = useSharedValue(0.0);
   const panX = useSharedValue(0);
   const panY = useSharedValue(0);
-  const scale = useSharedValue(0.70);
+  const scale = useSharedValue(0.17);
 
-  const savedPitch = useSharedValue(0.24);
-  const savedYaw = useSharedValue(0.35);
+  const savedPitch = useSharedValue(0.0);
+  const savedYaw = useSharedValue(0.0);
   const savedRoll = useSharedValue(0.0);
   const savedPanX = useSharedValue(0);
   const savedPanY = useSharedValue(0);
-  const savedScale = useSharedValue(0.70);
+  const savedScale = useSharedValue(0.17);
 
   const [isAutoOrbit, setIsAutoOrbit] = useState(false);
 
@@ -1357,13 +1392,21 @@ function KgExplorerContent() {
       setEdges(galaxy.edges);
       setDepartments(galaxy.departments);
       setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+      // Auto-fit zoomed out framing so all nodes and the outermost bubble are visible
+      if (!hasUserInteractedRef.current && galaxy.nodes.length > 0) {
+        const fitScale = calculateFitScale(galaxy.nodes, viewMode === '3d');
+        scale.value = fitScale;
+        savedScale.value = fitScale;
+        syncCamera(yaw.value, pitch.value, roll.value, panX.value, panY.value, fitScale);
+      }
     } catch (err) {
       console.error('Failed to load knowledge galaxy', err);
     } finally {
       setLoading(false);
       setSyncing(false);
     }
-  }, []);
+  }, [viewMode, syncCamera, pitch, yaw, roll, panX, panY, scale, savedScale]);
 
   // Instant Live Sync on Screen Focus (fraction-of-a-second refresh when user taps Galaxy tab)
   useFocusEffect(
@@ -1421,7 +1464,7 @@ function KgExplorerContent() {
       })
       .onUpdate((e) => {
         'worklet';
-        const next = Math.max(0.25, Math.min(5.0, savedScale.value * e.scale));
+        const next = Math.max(0.10, Math.min(5.0, savedScale.value * e.scale));
         scale.value = next;
       })
       .onEnd(() => {
@@ -1439,17 +1482,20 @@ function KgExplorerContent() {
         cancelAnimation(pitch);
         cancelAnimation(panX);
         cancelAnimation(panY);
-        savedYaw.value = yaw.value;
-        savedPitch.value = pitch.value;
-        savedPanX.value = panX.value;
-        savedPanY.value = panY.value;
+
+        if (viewMode === '3d' && gestureMode === 'orbit') {
+          savedYaw.value = yaw.value;
+          savedPitch.value = pitch.value;
+        } else {
+          savedPanX.value = panX.value;
+          savedPanY.value = panY.value;
+        }
       })
       .onUpdate((e) => {
         'worklet';
         if (viewMode === '3d' && gestureMode === 'orbit') {
-          // GTA Vice City continuous 360-degree orbit with fluid responsiveness
-          yaw.value = savedYaw.value + (e.translationX * 0.0065);
-          pitch.value = savedPitch.value - (e.translationY * 0.0065);
+          yaw.value = savedYaw.value + e.translationX * 0.0075;
+          pitch.value = savedPitch.value + e.translationY * 0.0075;
         } else {
           panX.value = savedPanX.value + e.translationX;
           panY.value = savedPanY.value + e.translationY;
@@ -1458,27 +1504,15 @@ function KgExplorerContent() {
       .onEnd((e) => {
         'worklet';
         if (viewMode === '3d' && gestureMode === 'orbit') {
-          // GTA Vice City Inertial Momentum: flick glides smoothly and coasts to a natural stop
-          const vx = e.velocityX * 0.0007;
-          const vy = -e.velocityY * 0.0007;
-          yaw.value = withDecay({
-            velocity: vx,
-            deceleration: 0.993,
-          });
-          pitch.value = withDecay({
-            velocity: vy,
-            deceleration: 0.993,
-          });
+          savedYaw.value = yaw.value;
+          savedPitch.value = pitch.value;
+          yaw.value = withDecay({ velocity: e.velocityX * 0.0022, deceleration: 0.988 });
+          pitch.value = withDecay({ velocity: e.velocityY * 0.0022, deceleration: 0.988 });
         } else {
-          // GTA Pan Momentum
-          panX.value = withDecay({
-            velocity: e.velocityX,
-            deceleration: 0.993,
-          });
-          panY.value = withDecay({
-            velocity: e.velocityY,
-            deceleration: 0.993,
-          });
+          savedPanX.value = panX.value;
+          savedPanY.value = panY.value;
+          panX.value = withDecay({ velocity: e.velocityX * 0.7, deceleration: 0.986 });
+          panY.value = withDecay({ velocity: e.velocityY * 0.7, deceleration: 0.986 });
         }
       });
   }, [viewMode, gestureMode, yaw, pitch, savedYaw, savedPitch, panX, panY, savedPanX, savedPanY]);
@@ -1502,17 +1536,25 @@ function KgExplorerContent() {
       })
       .onEnd((e) => {
         'worklet';
-        panX.value = withDecay({ velocity: e.velocityX, deceleration: 0.993 });
-        panY.value = withDecay({ velocity: e.velocityY, deceleration: 0.993 });
+        savedPanX.value = panX.value;
+        savedPanY.value = panY.value;
+        panX.value = withDecay({ velocity: e.velocityX * 0.65, deceleration: 0.985 });
+        panY.value = withDecay({ velocity: e.velocityY * 0.65, deceleration: 0.985 });
       });
   }, [panX, panY, savedPanX, savedPanY]);
 
   const rotationGesture = useMemo(() => {
     return Gesture.Rotation()
+      .onBegin(() => {
+        'worklet';
+        if (viewMode === '3d') {
+          cancelAnimation(roll);
+          savedRoll.value = roll.value;
+        }
+      })
       .onUpdate((e) => {
         'worklet';
         if (viewMode === '3d') {
-          // Free 360-degree continuous roll around Z-axis
           roll.value = savedRoll.value + e.rotation;
         }
       })
@@ -1529,61 +1571,62 @@ function KgExplorerContent() {
   }, [pinchGesture, panGesture, twoFingerPanGesture, rotationGesture]);
 
   const handleResetView = useCallback(() => {
-    pitch.value = withSpring(0.24, { damping: 18 });
-    yaw.value = withSpring(0.35, { damping: 18 });
-    roll.value = withSpring(0.0, { damping: 18 });
+    hasUserInteractedRef.current = false;
+    const is3d = viewMode === '3d';
+    const fitScale = calculateFitScale(nodes, is3d);
+    const targetPitch = is3d ? 0.24 : 0.0;
+    const targetYaw = is3d ? 0.35 : 0.0;
+    const targetRoll = 0.0;
+
+    pitch.value = withSpring(targetPitch, { damping: 18 });
+    yaw.value = withSpring(targetYaw, { damping: 18 });
+    roll.value = withSpring(targetRoll, { damping: 18 });
     panX.value = withSpring(0, { damping: 18 });
     panY.value = withSpring(0, { damping: 18 });
-    scale.value = withSpring(0.70, { damping: 18 });
+    scale.value = withSpring(fitScale, { damping: 18 });
 
-    savedPitch.value = 0.24;
-    savedYaw.value = 0.35;
-    savedRoll.value = 0.0;
+    savedPitch.value = targetPitch;
+    savedYaw.value = targetYaw;
+    savedRoll.value = targetRoll;
     savedPanX.value = 0;
     savedPanY.value = 0;
-    savedScale.value = 0.70;
+    savedScale.value = fitScale;
 
-    syncCamera(0.35, 0.24, 0.0, 0, 0, 0.70);
-  }, [pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
+    syncCamera(targetYaw, targetPitch, targetRoll, 0, 0, fitScale);
+  }, [viewMode, nodes, pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
 
   const handleToggleViewMode = useCallback((mode: '3d' | '2d') => {
     setViewMode(mode);
     setSelectedNode(null);
     setSelectedEdge(null);
+    const is3d = mode === '3d';
+    const fitScale = calculateFitScale(nodes, is3d);
+    const targetPitch = is3d ? 0.24 : 0.0;
+    const targetYaw = is3d ? 0.35 : 0.0;
+    const targetRoll = 0.0;
+
     if (mode === '2d') {
-      pitch.value = withSpring(0, { damping: 18 });
-      yaw.value = withSpring(0, { damping: 18 });
-      roll.value = withSpring(0, { damping: 18 });
-      panX.value = withSpring(0, { damping: 18 });
-      panY.value = withSpring(0, { damping: 18 });
-      scale.value = withSpring(0.70, { damping: 18 });
-
-      savedPitch.value = 0;
-      savedYaw.value = 0;
-      savedRoll.value = 0;
-      savedPanX.value = 0;
-      savedPanY.value = 0;
-      savedScale.value = 0.70;
-
-      syncCamera(0, 0, 0, 0, 0, 0.70);
+      setGestureMode('pan');
     } else {
-      pitch.value = withSpring(0.24, { damping: 18 });
-      yaw.value = withSpring(0.35, { damping: 18 });
-      roll.value = withSpring(0.0, { damping: 18 });
-      panX.value = withSpring(0, { damping: 18 });
-      panY.value = withSpring(0, { damping: 18 });
-      scale.value = withSpring(0.70, { damping: 18 });
-
-      savedPitch.value = 0.24;
-      savedYaw.value = 0.35;
-      savedRoll.value = 0.0;
-      savedPanX.value = 0;
-      savedPanY.value = 0;
-      savedScale.value = 0.70;
-
-      syncCamera(0.35, 0.24, 0.0, 0, 0, 0.70);
+      setGestureMode('orbit');
     }
-  }, [pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
+
+    pitch.value = withSpring(targetPitch, { damping: 18 });
+    yaw.value = withSpring(targetYaw, { damping: 18 });
+    roll.value = withSpring(targetRoll, { damping: 18 });
+    panX.value = withSpring(0, { damping: 18 });
+    panY.value = withSpring(0, { damping: 18 });
+    scale.value = withSpring(fitScale, { damping: 18 });
+
+    savedPitch.value = targetPitch;
+    savedYaw.value = targetYaw;
+    savedRoll.value = targetRoll;
+    savedPanX.value = 0;
+    savedPanY.value = 0;
+    savedScale.value = fitScale;
+
+    syncCamera(targetYaw, targetPitch, targetRoll, 0, 0, fitScale);
+  }, [nodes, pitch, yaw, roll, panX, panY, scale, savedPitch, savedYaw, savedRoll, savedPanX, savedPanY, savedScale, syncCamera]);
 
   const handleSpinY = useCallback(() => {
     const next = yaw.value + Math.PI / 2;
@@ -1600,7 +1643,7 @@ function KgExplorerContent() {
   }, [scale, savedScale, yaw, pitch, roll, panX, panY, syncCamera]);
 
   const handleZoomOut = useCallback(() => {
-    const next = Math.max(scale.value / 1.3, 0.25);
+    const next = Math.max(scale.value / 1.3, 0.10);
     scale.value = withSpring(next);
     savedScale.value = next;
     syncCamera(yaw.value, pitch.value, roll.value, panX.value, panY.value, next);
@@ -1725,6 +1768,9 @@ function KgExplorerContent() {
     const curPanX = camera.panX;
     const curPanY = camera.panY;
 
+    // Dynamic adaptive scale factor: keeps bubbles and labels proportional and non-overlapping when zoomed out
+    const zoomRatio = Math.min(1.0, Math.max(0.60, 0.40 + 0.88 * (curScale / 0.45)));
+
     // 1. Project all nodes
     const projectedNodesRaw = nodes.map(n => {
       const safeX = (typeof n.x === 'number' && isFinite(n.x)) ? n.x : CENTER;
@@ -1740,8 +1786,8 @@ function KgExplorerContent() {
         SCREEN_WIDTH, GRAPH_HEIGHT
       );
 
-      const baseSize = n.isHub ? 42 : n.isDepartment ? 36 : (n.hierarchyLevel === 2 ? 28 : 20);
-      const circleSize = Math.round(baseSize * Math.min(1.4, Math.max(0.65, proj.perspective)));
+      const baseSize = n.isHub ? 44 : n.isDepartment ? 36 : (n.hierarchyLevel === 2 ? 26 : 18);
+      const circleSize = Math.round(baseSize * zoomRatio * Math.min(1.35, Math.max(0.68, proj.perspective)));
 
       const isSelected = selectedNode?.id === n.id;
       const isConnected = connectedNodeIds.has(n.id);
@@ -1793,16 +1839,16 @@ function KgExplorerContent() {
       const isFocus = isSelected || isConnected;
       const r = pn.circleSize / 2;
 
-      // Dynamic sizing based on hierarchy and name length
-      let labelW = Math.min(105, Math.max(38, pn.node.name.length * 6.2 + 14));
-      let labelH = 16;
+      // Dynamic sizing based on hierarchy, name length, and zoom level
+      let labelW = Math.round(Math.min(105, Math.max(36, pn.node.name.length * 6.0 + 12)) * zoomRatio);
+      let labelH = Math.round(16 * zoomRatio);
 
       if (pn.node.isHub || pn.node.isDepartment) {
-        labelW = Math.min(135, Math.max(50, pn.node.name.length * 7.2 + 16));
-        labelH = pn.node.subLabel ? 26 : 18;
+        labelW = Math.round(Math.min(135, Math.max(48, pn.node.name.length * 7.0 + 14)) * zoomRatio);
+        labelH = Math.round((pn.node.subLabel ? 24 : 18) * zoomRatio);
       } else if (pn.node.hierarchyLevel === 2) {
-        labelW = Math.min(115, Math.max(42, pn.node.name.length * 6.6 + 14));
-        labelH = (pn.node.subLabel && isFocus) ? 24 : 17;
+        labelW = Math.round(Math.min(115, Math.max(40, pn.node.name.length * 6.4 + 12)) * zoomRatio);
+        labelH = Math.round(((pn.node.subLabel && isFocus) ? 22 : 16) * zoomRatio);
       }
 
       // Base outward arborization angle (away from parent or central sun)
@@ -1826,7 +1872,7 @@ function KgExplorerContent() {
       }
 
       // Smooth radial clearance offset
-      const dist = r + 8 + labelH / 2;
+      const dist = r + Math.round(6 * zoomRatio) + labelH / 2;
       const cosA = isFinite(Math.cos(baseAngle)) ? Math.cos(baseAngle) : 0;
       const sinA = isFinite(Math.sin(baseAngle)) ? Math.sin(baseAngle) : 1;
       const safeOffsetX = isFinite(dist * cosA) ? Math.round(dist * cosA) : 0;
@@ -2361,8 +2407,8 @@ function KgExplorerContent() {
                     const isHighlight = isDirectlySelected || isNodeConnected;
 
                     let strokeColor = e.color || 'rgba(255,255,255,0.2)';
-                    let strokeWidth = isCross ? 2.5 : 1.5;
-                    let strokeOpacity = 0.55;
+                    let strokeWidth = isCross ? 2.6 : (e.source === 'user-core' || e.target === 'user-core' ? 2.4 : 1.6);
+                    let strokeOpacity = isCross ? 0.85 : 0.62;
 
                     if (selectedEdge) {
                       if (isDirectlySelected) {
@@ -2370,7 +2416,7 @@ function KgExplorerContent() {
                         strokeWidth = 4.5;
                         strokeOpacity = 1.0;
                       } else {
-                        strokeOpacity = 0.06;
+                        strokeOpacity = 0.08;
                         strokeWidth = 0.8;
                       }
                     } else if (selectedNode) {
@@ -2379,18 +2425,18 @@ function KgExplorerContent() {
                         strokeWidth = 4;
                         strokeOpacity = 1.0;
                       } else {
-                        strokeOpacity = 0.06;
+                        strokeOpacity = 0.08;
                         strokeWidth = 0.8;
                       }
                     } else if (isCross) {
                       strokeColor = e.color || '#C084FC';
                       strokeWidth = 2.8;
-                      strokeOpacity = 0.85;
+                      strokeOpacity = 0.88;
                     } else if (viewMode === '3d') {
                       // 3D Depth weighting
-                      const depthNorm = Math.max(0.3, Math.min(1.0, (pe.avgDepth + 400) / 800));
-                      strokeOpacity = 0.25 + 0.45 * depthNorm;
-                      strokeWidth = Math.max(0.8, strokeWidth * depthNorm);
+                      const depthNorm = Math.max(0.35, Math.min(1.0, (pe.avgDepth + 400) / 800));
+                      strokeOpacity = 0.32 + 0.48 * depthNorm;
+                      strokeWidth = Math.max(0.9, strokeWidth * depthNorm);
                     }
 
                     if (isCross && pe.pathD) {
@@ -2711,6 +2757,7 @@ function KgExplorerContent() {
                       <Text
                         style={[
                           styles.labelText,
+                          { fontSize: Math.round(Math.max(8.0, 11 * Math.min(1.0, Math.max(0.60, 0.40 + 0.88 * (camera.scale / 0.45))))) },
                           isSelected && styles.labelTextSelected,
                           n.isDepartment && { color: n.color }
                         ]}

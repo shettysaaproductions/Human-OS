@@ -1,39 +1,37 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-13 — 24/7 Conversational Resilience, 20-Key Gemini Fuel Pool, Single-Turn Coalescing & Human-Paced Messaging (v0.3.6-beta)
+2026-09-13 — Default 2D Tactical View, Auto-Fit Zoom & GTA Vice City Live Synaptic Pulses (v0.3.7-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: COMPLETE — Resolved Nova fallback hang ("Hmm... give me a moment to think"), persona violation ("Beta", "kar diya hoon"), multi-bubble spam, and added multi-key LLM pool:
-1. **Zero-Stuck Deterministic Task/Reminder Handler**: Added `isTaskOrReminderQuery` and `executeTaskOrReminderQuery` in `chat.ts` to query Supabase directly for active reminders & life threads in < 200ms, formatted as natural companion dialogue with quick-action chips.
-2. **20-Slot Gemini LLM Fuel Reservoir**: Expanded `gemini.ts` to support 20 slots (`KEY_1` to `KEY_20`) with dynamic env key loading (`GEMINI_API_KEY`, `GEMINI_API_KEYS`, `GEMINI_API_KEY_1..20`). Added bi-directional failover in `cognitiveRouter.ts` (NVIDIA <-> Gemini pool) and in `chat.ts` catch blocks.
-3. **Strict Anti-Beta & Companion Peer Enforcement**: Added parental/maternal vocative filter in `WatchtowerInspector.ts` stripping `Beta,`, `Bache,`, etc., and transitive feminine verb repair (`kar diya hoon` -> `kar diya hai`). Enforced strict feminine peer friendship in `promptBuilder.ts`.
-4. **Single-Turn Coalescing**: Eliminated separate row inserts per bubble in `chat.ts`. Multi-bubble replies are stored as ONE cohesive turn joined with `<NOVA_MESSAGE_BREAK>`, fixing simultaneous timestamp clutter and duplicate `✨ Aligned (v2)` badges.
-5. **Human-Paced 5–10s Texting Intervals**: Updated mobile `useChatStore.ts` to deliver the first bubble immediately and stagger subsequent chunks in the turn with 5–10s delays while maintaining active typing indicator. Also exported and wired `isFallbackMessage` detecting both English and Hindi fallback strings.
+Task: COMPLETE — Hardcoded Neural Galaxy tab default behavior to 2D tactical view with auto-fit zoom and GTA Vice City live synaptic dot movement:
+1. **Default 2D Tactical View**: Hardcoded default `viewMode` to `'2d'` and default `gestureMode` to `'pan'`, providing a clean, flat, top-down radar view upon opening the Galaxy tab from the 🧠 brain button.
+2. **Dynamic Auto-Fit Zoom Calculation**: Implemented `calculateFitScale(nodes, is3d)` which dynamically inspects the extreme coordinate extents of all nodes (including the outermost bubbles / "the last bubble") and calculates an ideal zoom ratio (typically ~0.16–0.18 for 2000x2000 virtual space) with screen padding (35–45px). Auto-fits on initial load, view mode toggles, and reset view.
+3. **Deep Zoom Clamping**: Reduced minimum zoom out threshold in both buttons and pinch gestures from `0.25` down to `0.10`, allowing full bird's-eye galaxy visibility.
+4. **Adaptive Zoom Scaling**: Introduced dynamic `zoomRatio` scaling for node circle sizes, badge dimensions, leader line offsets, and font sizes so bubbles and labels do not overlap or collide when zoomed out.
+5. **GTA Vice City-Style Live Synaptic Action Potential Pulses**: Expanded `SynapticActionPotentialLayer` to 36 permanent, continuous pathways across all 5 departments (Core hubs, entity branches, attribute stems, and cross-domain bridges). Assigned stable keys to eliminate the 4.5s re-render flicker, running smooth Reanimated native UI thread loops with vibrant cyan/amber/fuchsia pulses and glow shadows in both 2D and 3D modes.
 
 ## Deployment & OTA Status
 - **Pre-flight verification**:
   - `mobile/npx tsc --noEmit`: Exited with code 0 (clean).
   - `backend/npm run build`: Exited with code 0 (clean).
-  - `WatchtowerInspector.test.ts`: 10/10 tests passed (clean).
-  - Watchtower repair verification on screenshot snippet: successfully replaced "Beta" with "Arre" and repaired "kar diya hoon" to "kar diya hai".
 - **Mobile EAS Production OTA Update**:
   - **Branch**: `production`
   - **Environment**: `production`
   - **Runtime Version**: `1.1.0`
   - **Platforms**: `android`, `ios`
-  - **Update Group ID**: `952870ad-1344-4cee-91b3-56e7e658f853`
-  - **Android Update ID**: `01a09bb2-668a-7395-8a5f-faa1685e83b5`
-  - **iOS Update ID**: `01a09bb2-668a-785a-b18a-d1d061da4551`
-  - **Version**: `v0.3.6-beta`
-  - **EAS Dashboard**: `https://expo.dev/accounts/shettysaa/projects/mobile/updates/952870ad-1344-4cee-91b3-56e7e658f853`
+  - **Update Group ID**: `7e18aabe-8e60-46f5-b865-c3937ae3afbb`
+  - **Android Update ID**: `01a09bc2-a31d-7389-8d7a-0ba954f22a6e`
+  - **iOS Update ID**: `01a09bc2-a31d-7143-8ae1-fc1b8394500c`
+  - **Version**: `v0.3.7-beta`
+  - **EAS Dashboard**: `https://expo.dev/accounts/shettysaa/projects/mobile/updates/7e18aabe-8e60-46f5-b865-c3937ae3afbb`
   - **Status**: Live on production channel ✅
 - **In-App Update Notification Modal**:
-  - Inserted `v0.3.6-beta` at index `0` of `mobile/src/config/updateHistory.json`. Triggers automatically on launch.
+  - Inserted `v0.3.7-beta` at index `0` of `mobile/src/config/updateHistory.json`. Triggers automatically on launch.
 - **Broadcast Push Notification**:
   - Dispatched update push notification via `broadcast_update_push.ts` to all registered user push tokens.
 
 ## NEXT ACTION
-All issues resolved, tested, built cleanly, committed, and deployed via EAS production OTA update `952870ad-1344-4cee-91b3-56e7e658f853`. Users will receive the update automatically on their next app launch.
+All issues resolved, tested, built cleanly, and deployed via EAS production OTA update `7e18aabe-8e60-46f5-b865-c3937ae3afbb`. Ready for git commit and push to origin main.
