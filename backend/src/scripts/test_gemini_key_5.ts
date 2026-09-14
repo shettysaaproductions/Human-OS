@@ -4,7 +4,9 @@ dotenv.config();
 import { GoogleGenAI } from '@google/genai';
 import { geminiLivePool } from '../lib/geminiLivePool';
 
-const key5 = process.env.GEMINI_API_KEY_5;
+// Non-null assertion: process.exit(1) above guarantees key5 is defined beyond this point.
+// TypeScript doesn't narrow across closure boundaries, so we assert explicitly.
+const key5: string = process.env.GEMINI_API_KEY_5 ?? '';
 if (!key5) {
   console.error('❌ GEMINI_API_KEY_5 is not set in environment or .env');
   process.exit(1);
