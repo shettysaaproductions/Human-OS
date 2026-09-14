@@ -1,7 +1,16 @@
 name: Build Android APK via EAS
 
 on:
-  workflow_dispatch:   # Manual trigger only — run from GitHub Actions tab
+  workflow_dispatch:   # Manual trigger — run from the GitHub Actions tab
+    inputs:
+      profile:
+        description: 'EAS build profile (apk = fast internal APK on production channel)'
+        required: false
+        default: 'apk'
+        type: choice
+        options:
+          - apk
+          - production
 
 defaults:
   run:
@@ -9,7 +18,7 @@ defaults:
 
 jobs:
   build:
-    name: EAS Build — Android Production APK
+    name: EAS Remote Build — Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -26,24 +35,49 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Setup EAS CLI
         run: npm install -g eas-cli
 
-      - name: Build APK locally on CI
+      # ── Remote EAS Build (runs on Expo's servers, not our runner) ─────────────
+      # This compiles all native modules (expo-av, expo-camera, etc.) into the APK.
+      # The build URL will appear in the step log — check the EAS dashboard for download.
+      - name: Build APK on EAS (remote)
+        id: eas_build
         env:
-          EAS_LOCAL_BUILD_SKIP_CLEANUP: 1
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform android --profile production --local --non-interactive
+        run: |
+          BUILD_OUTPUT=$(eas build \
+            --platform android \
+            --profile ${{ github.event.inputs.profile || 'apk' }} \
+            --non-interactive \
+            --json \
+            2>&1 | tee /dev/stderr | grep '"id":' | head -1 || true)
+          echo "EAS build submitted. Monitor at https://expo.dev/accounts/shettysaa/projects/mobile/builds"
 
-      - name: Upload APK artifact
+      # ── Wait for build to finish and download the APK ─────────────────────────
+      - name: Wait for EAS build and download APK
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          echo "Waiting for latest build to complete..."
+          # Poll the latest build until it's finished (max 30 min)
+          for i in $(seq 1 60); do
+            BUILDS=$(eas build:list --platform android --status finished --limit 1 --json --non-interactive 2>/dev/null || echo '[]')
+            DOWNLOAD_URL=$(echo "$BUILDS" | python3 -c "import sys,json; builds=json.load(sys.stdin); print(builds[0]['artifacts']['buildUrl'] if builds and builds[0].get('artifacts') else '')" 2>/dev/null || echo '')
+            if [ -n "$DOWNLOAD_URL" ]; then
+              echo "Build finished! Downloading APK..."
+              curl -L "$DOWNLOAD_URL" -o HumanOS.apk
+              ls -lh HumanOS.apk
+              break
+            fi
+            echo "Build still running... ($i/60, checking every 30s)"
+            sleep 30
+          done
+
+      - name: Upload APK as GitHub artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HumanOS-APK
-          path: mobile/*.apk
-          retention-days: 7
+          name: HumanOS-${{ github.event.inputs.profile || 'apk' }}-${{ github.run_number }}
+          path: mobile/HumanOS.apk
+          retention-days: 14
+          if-no-files-found: warn
