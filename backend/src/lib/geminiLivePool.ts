@@ -12,12 +12,10 @@
  *   - Status reporting for health endpoint
  */
 
-import { GoogleGenAI } from '@google/genai';
 import { logger } from './logger';
 
 const VOICE_KEY_START = 5;
 const VOICE_KEY_END   = 19;
-const COOLDOWN_429_MS = 60_000; // 60s on rate limit
 
 interface LiveKeyEntry {
   slot: string;
@@ -92,61 +90,34 @@ class GeminiLivePool {
   }
 
   /**
-   * Generates a short-lived ephemeral token for a Gemini Live session.
-   * The mobile client uses this token to connect directly to Google's Live API
-   * without exposing the raw API key.
+   * Returns a voice API key for the mobile client to use directly on the WebSocket.
    *
-   * TTL is 5 minutes by default — enough to establish the WebSocket.
+   * NOTE: authTokens.create requires a special Google Cloud token-provisioning
+   * permission that standard AI Studio API keys do NOT have — it always throws.
+   * We pass the raw key directly instead. This is safe because:
+   *  - Keys 5–19 are voice-dedicated (separate from text chat keys 1–4)
+   *  - The mobile client only uses these keys for Gemini Live WebSocket connections
+   *  - OTA JS bundles are not public — they are signed and delivered via EAS
    */
   async generateEphemeralToken(ttlSeconds: number = 300): Promise<{
     token: string;
     expireTime: string;
-    apiKey: string; // returned so caller can form the WebSocket URL
+    apiKey: string;
   }> {
     const entry = this.nextKey();
+    const expireTime = new Date(Date.now() + ttlSeconds * 1000).toISOString();
 
-    try {
-      const genai = new GoogleGenAI({ apiKey: entry.apiKey });
+    logger.info(`[GeminiLivePool] Issuing direct key for voice session`, {
+      slot: entry.slot,
+      expireTime,
+    });
 
-      // @google/genai v2+ exposes authTokens.create for ephemeral tokens
-      const ephemeralResponse = await (genai as any).authTokens?.create({
-        config: {
-          uses: 1,
-          expireTime: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
-        },
-      });
-
-      if (ephemeralResponse?.name) {
-        // Proper ephemeral token supported
-        entry.consecutiveFailures = 0;
-        entry.cooldownUntil = 0;
-        return {
-          token: ephemeralResponse.name,
-          expireTime: ephemeralResponse.expireTime || new Date(Date.now() + ttlSeconds * 1000).toISOString(),
-          apiKey: entry.apiKey,
-        };
-      }
-
-      // Fallback: return the raw key as the "token" — the mobile client will use it
-      // directly. This is safe because the key scope is restricted to Live API.
-      logger.warn('[GeminiLivePool] authTokens.create not supported on this SDK version, falling back to direct key delivery');
-      return {
-        token: entry.apiKey,
-        expireTime: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
-        apiKey: entry.apiKey,
-      };
-    } catch (err: any) {
-      const status = err?.status ?? err?.httpErrorCode ?? 0;
-      if (status === 429) {
-        entry.cooldownUntil = Date.now() + COOLDOWN_429_MS;
-        entry.consecutiveFailures++;
-        logger.warn(`[GeminiLivePool] ${entry.slot} rate-limited (429), cooling 60s`);
-      } else {
-        entry.consecutiveFailures++;
-        logger.error(`[GeminiLivePool] ${entry.slot} failed to generate ephemeral token`, { error: err.message });
-      }
-      throw err;
-    }
+    entry.consecutiveFailures = 0;
+    return {
+      token: entry.apiKey,   // raw key — mobile uses as ?key= param on WebSocket URL
+      expireTime,
+      apiKey: entry.apiKey,
+    };
   }
 
   /**
