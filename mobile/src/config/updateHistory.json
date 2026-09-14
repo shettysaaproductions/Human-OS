@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.12-beta",
+    "date": "2026-09-14",
+    "title": "⚡ Real-Time Voice Engine & Low-Latency Gemini 2.5 Live Activation",
+    "message": [
+      "Gemini 2.5 Live Native Model: Switched live voice engine to models/gemini-2.5-flash-native-audio-latest for high-fidelity, real-time bidirectional audio conversation.",
+      "Instant Setup Handshake: Refined live WebSocket negotiation with setupComplete gating, ensuring clean audio stream initialization with zero dropped packets.",
+      "Streamlined Audio Pipeline: Audio chunks stream incrementally without file-lock duplication, delivering natural low-latency voice responses.",
+      "Hardware-Decoded PCM Playback: Nova's 24kHz voice output is now dynamically wrapped in container headers, enabling smooth native playback on phone speakers without audio clipping."
+    ]
+  },
+  {
     "version": "0.3.11-beta",
     "date": "2026-09-14",
     "title": "🎙️ Nova Voice Mode — Talk to Nova Live!",

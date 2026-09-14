@@ -262,7 +262,7 @@ class NovaVoiceService {
     // Determine voice name based on language
     const voiceName = preferredLanguage === 'en' ? 'Aoede' : 'Kore'; // Kore works well for Hindi/Hinglish
 
-    const liveModel = (config as any).voice?.liveModel || 'gemini-2.0-flash-live-001';
+    const liveModel = process.env.GEMINI_LIVE_MODEL || (config as any).voice?.liveModel || 'models/gemini-2.5-flash-native-audio-latest';
 
     return {
       ephemeralToken: tokenResult.token,
