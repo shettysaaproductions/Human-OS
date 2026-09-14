@@ -1,35 +1,39 @@
 /**
  * useVoiceSession.ts — Nova Voice Mode WebSocket + Audio Hook
  *
- * v0.3.14 — Bulletproof rewrite. Root causes fixed:
+ * v0.3.15 — Root-cause fix: File-based WAV playback + correct AudioModule access
  *
- *   BUG 1 (v0.3.13 regression — Stuck at "Connecting"):
- *     setAudioModeAsync() can hang indefinitely on Android in expo-audio@56
- *     when called in the blocking permission path. Fixed by making it
- *     fire-and-forget (non-blocking).
+ *   FIX 1 (v0.3.14 regression — No audio from speaker):
+ *     createAudioPlayer({ uri: 'data:audio/wav;base64,...' }) fails silently on
+ *     Android. ExoPlayer cannot infer the MIME type from a 'data:' URI scheme
+ *     and the ProgressiveMediaSource creation throws internally without logging.
+ *     FIXED: Write each WAV chunk to a temp file via expo-file-system, then
+ *     play from the file:// URI which ExoPlayer handles reliably.
  *
- *   BUG 2 (v0.3.12 — No audio heard):
- *     expo-audio@56 does NOT export AudioModule from its index. Using
- *     `require('expo-audio/build/AudioModule').default` to access AudioStream
- *     for raw 16kHz mono PCM mic streaming.
+ *   FIX 2 (AudioStream access — OTA reliability):
+ *     AudioModule IS re-exported from expo-audio (ExpoAudio.js line 565:
+ *     `export { AudioModule }`). Using ExpoAudio.AudioModule.AudioStream
+ *     is more reliable in OTA bundle resolution than the internal build path.
  *
- *   BUG 3 (v0.3.12 — No audio heard):
- *     createRecording() does not exist in expo-audio@56. The old code
- *     fell back to null and never recorded anything.
+ *   FIX 3 (Audio routing — Android speaker vs earpiece):
+ *     setAudioModeAsync({ allowsRecording: true }) without interruptionMode
+ *     can route audio through the earpiece on Android. Adding
+ *     interruptionMode: 'doNotMix' grants speaker focus alongside recording.
  *
- *   BUG 4 (v0.3.13 regression — Parsing):
- *     Added Blob/async parsing that broke simple text-frame parsing.
- *     Reverted to simple JSON.parse(event.data) which worked in v0.3.12.
+ *   FIX 4 (Polling fallback race condition):
+ *     Old condition: !player.playing && currentTime > 0 — but for short audio
+ *     chunks, currentTime resets to 0 when playback ends, so the poll
+ *     never fires. New: poll checks isLoaded && !playing after warmup ticks.
  *
- *   BUG 5 (all versions — Hung connections):
- *     No connection timeout. A 12-second timeout now auto-errors.
- *
- *   BUG 6 (v0.3.12 — Playback queue deadlocks):
- *     Polling player.playing in setInterval could deadlock the queue.
- *     Fixed with event-driven addListener('playbackStatusUpdate') + hard fallback.
+ *   Previous fixes (v0.3.12–14) preserved:
+ *   - setAudioModeAsync fire-and-forget (no await on Android)
+ *   - 12-second connection timeout
+ *   - Simple synchronous JSON.parse for WS messages
+ *   - Event-driven didJustFinish queue drain
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { File as FSFile, Paths } from 'expo-file-system';
 import {
   voiceService,
   VoiceSessionConfig,
@@ -46,14 +50,24 @@ try {
   console.warn('[VoiceSession] expo-audio not available — voice mode disabled');
 }
 
-// AudioModule is NOT re-exported from expo-audio index.
-// Access the native module directly so we can use AudioStream.
+// FIX 2: AudioModule IS re-exported from expo-audio (ExpoAudio.js:565).
+// ExpoAudio.AudioModule is the native module; .AudioStream is the constructor.
 let NativeAudioModule: any = null;
 try {
-  NativeAudioModule = require('expo-audio/build/AudioModule').default;
-} catch {
-  console.warn('[VoiceSession] expo-audio/build/AudioModule not accessible — mic streaming disabled');
+  NativeAudioModule = ExpoAudio?.AudioModule ?? null;
+  if (NativeAudioModule?.AudioStream) {
+    console.log('[VoiceSession] AudioModule.AudioStream available ✓');
+  } else {
+    // Fallback to internal build path if AudioModule is not on the index
+    NativeAudioModule = require('expo-audio/build/AudioModule').default;
+    console.log('[VoiceSession] AudioModule loaded via build path fallback');
+  }
+} catch (e: any) {
+  console.warn('[VoiceSession] AudioModule not accessible — mic streaming disabled:', e?.message);
 }
+
+// Global chunk counter for unique temp file names (survives re-renders)
+let _chunkCounter = 0;
 
 // ── Base64 & WAV helpers ──────────────────────────────────────────────────────
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -108,10 +122,10 @@ function float32ToInt16Base64(buffer: ArrayBuffer): string {
 }
 
 /**
- * Gemini sends 24kHz int16 PCM. Prepend a WAV header so createAudioPlayer
- * can decode it via ExoPlayer (Android) or AVAudioPlayer (iOS).
+ * Gemini sends 24kHz int16 PCM. Prepend a WAV header so ExoPlayer/AVPlayer
+ * can decode it. Returns a Uint8Array (WAV bytes — no base64 needed).
  */
-function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
+function pcmToWavBytes(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): Uint8Array {
   const pcmBytes = base64ToUint8(pcmBase64);
   const dataLen = pcmBytes.length;
   const wav = new Uint8Array(44 + dataLen);
@@ -130,7 +144,7 @@ function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, 
   v.setUint32(36, 0x64617461, false); // "data"
   v.setUint32(40, dataLen, true);
   wav.set(pcmBytes, 44);
-  return uint8ToBase64(wav);
+  return wav;  // Return raw bytes — write directly to file (no base64 needed)
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -196,22 +210,21 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       return false;
     }
     try {
-      // FIX BUG 1: requestRecordingPermissionsAsync is a top-level export in expo-audio@56
+      console.log('[VoiceSession] Requesting mic permission...');
       const { granted } = await ExpoAudio.requestRecordingPermissionsAsync();
       if (!granted) {
         setErrorMessage('Microphone permission is required for voice mode');
         return false;
       }
+      console.log('[VoiceSession] Mic permission granted ✓');
 
-      // FIX BUG 1: setAudioModeAsync is FIRE-AND-FORGET — never await it.
-      // On some Android devices in expo-audio@56, awaiting this hangs indefinitely
-      // when the audio focus changes conflict with an active media session.
-      // We don't need to await it — the permission grant is sufficient to record.
+      // FIX 1: setAudioModeAsync is FIRE-AND-FORGET — never await on Android.
+      // FIX 3: Add interruptionMode 'doNotMix' so Android routes to speaker during recording.
       ExpoAudio.setAudioModeAsync({
         playsInSilentMode: true,
         allowsRecording: true,
+        interruptionMode: 'doNotMix',
       }).catch((err: any) => {
-        // Non-fatal — log and continue
         console.warn('[VoiceSession] setAudioModeAsync failed (non-fatal):', err?.message);
       });
 
@@ -225,16 +238,13 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // ── Mic Streaming (AudioStream API) ──────────────────────────────────────
 
   const startMicStream = useCallback(() => {
-    // FIX BUG 2: AudioModule is NOT exported from expo-audio index.
-    // Must require 'expo-audio/build/AudioModule' directly.
     if (!NativeAudioModule?.AudioStream) {
-      console.warn('[VoiceSession] AudioStream not available — mic streaming disabled');
+      console.warn('[VoiceSession] AudioModule.AudioStream not available — mic disabled. Nova can still speak but cannot hear you.');
       return;
     }
 
     try {
-      // Raw PCM stream at 16kHz mono float32
-      // (We convert to int16 before sending to Gemini Live)
+      console.log('[VoiceSession] Creating AudioStream (16kHz mono float32)...');
       const stream = new NativeAudioModule.AudioStream({
         sampleRate: 16000,
         channels: 1,
@@ -258,8 +268,12 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         }
       });
 
+      stream.addListener('audioStreamStatus', (status: any) => {
+        console.log('[VoiceSession] AudioStream status:', JSON.stringify(status));
+      });
+
       stream.start().then(() => {
-        console.log('[VoiceSession] AudioStream started successfully (16kHz mono float32→int16)');
+        console.log('[VoiceSession] AudioStream started ✓ (16kHz mono float32→int16)');
       }).catch((err: any) => {
         console.warn('[VoiceSession] AudioStream.start() failed:', err?.message);
       });
@@ -279,47 +293,79 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
   // ── Audio Playback Queue ──────────────────────────────────────────────────
 
+  /**
+   * FIX 1: Write WAV to a temp file, play from file:// URI.
+   *
+   * data: URIs fail silently on Android — ExoPlayer's ProgressiveMediaSource
+   * cannot detect MIME type from a data: scheme and throws internally.
+   * File-based playback is reliable across all Android versions.
+   */
   const playNextChunk = useCallback(async () => {
     if (!ExpoAudio?.createAudioPlayer) return;
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
     isPlayingRef.current = true;
 
-    const base64Audio = audioQueueRef.current.shift()!;
+    const base64Pcm = audioQueueRef.current.shift()!;
     try {
-      // Wrap Gemini's 24kHz int16 PCM in a WAV container
-      const wavBase64 = pcmToWavBase64(base64Audio, 24000, 1, 16);
-      const player = ExpoAudio.createAudioPlayer({ uri: `data:audio/wav;base64,${wavBase64}` });
+      // Build WAV bytes (44-byte header + 24kHz int16 PCM data)
+      const wavBytes = pcmToWavBytes(base64Pcm, 24000, 1, 16);
 
-      // FIX BUG 6: Use event-driven completion detection instead of polling
+      // Write to a temp file in the cache dir — ExoPlayer plays file:// URIs reliably
+      const tmpFile = new FSFile(Paths.cache, `nova_chunk_${++_chunkCounter}.wav`);
+      if (tmpFile.exists) tmpFile.delete();
+      tmpFile.write(wavBytes);   // sync write of Uint8Array — fastest path
+      const tmpUri = tmpFile.uri;
+      console.log(`[VoiceSession] Playing chunk #${_chunkCounter} from file`);
+
+      const player = ExpoAudio.createAudioPlayer({ uri: tmpUri });
+
       let done = false;
+      const cleanAndAdvance = () => {
+        try { tmpFile.exists && tmpFile.delete(); } catch (_) {}
+        playNextChunk();
+      };
       const markDone = () => {
         if (done) return;
         done = true;
         isPlayingRef.current = false;
         try { sub?.remove(); } catch (_) {}
+        clearInterval(poll);
         try { player.remove?.(); } catch (_) {}
-        playNextChunk();
+        cleanAndAdvance();
       };
 
+      // Event-driven (primary path)
       const sub = player.addListener('playbackStatusUpdate', (status: any) => {
-        if (status?.didJustFinish) markDone();
+        if (status?.didJustFinish) {
+          console.log(`[VoiceSession] Chunk #${_chunkCounter} done (event)`);
+          markDone();
+        }
+        if (status?.error) {
+          console.warn(`[VoiceSession] Chunk playback error: ${status.error}`);
+          markDone();
+        }
       });
 
       player.play();
 
-      // Hard fallback: if events never fire, poll for completion
+      // FIX 4: Poll checks isLoaded && !playing (currentTime can reset to 0 at end)
+      let pollTick = 0;
       const poll = setInterval(() => {
-        if (!player.playing && (player.currentTime ?? 0) > 0) {
-          clearInterval(poll);
+        pollTick++;
+        // Wait a few ticks before checking to let the player start
+        if (pollTick > 3 && player.isLoaded && !player.playing) {
+          console.log(`[VoiceSession] Chunk #${_chunkCounter} done (poll)`);
           markDone();
         }
-      }, 150);
+      }, 200);
 
-      // Safety ceiling: 30s max per chunk (very generous for any audio)
+      // Hard ceiling: 20s max per chunk
       setTimeout(() => {
-        clearInterval(poll);
-        markDone();
-      }, 30000);
+        if (!done) {
+          console.warn(`[VoiceSession] Chunk #${_chunkCounter} timeout`);
+          markDone();
+        }
+      }, 20000);
 
     } catch (err: any) {
       console.warn('[VoiceSession] Playback error:', err?.message);
@@ -515,6 +561,17 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       wsRef.current = null;
     }
 
+    // Clean up any leftover temp WAV files in cache dir
+    try {
+      const cacheDir = Paths.cache;
+      const items = cacheDir.list();
+      for (const item of items) {
+        if (item instanceof FSFile && item.name.startsWith('nova_chunk_')) {
+          try { item.delete(); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
     if (transcript.length > 0) {
       voiceService.endSession({
         transcript,
@@ -566,3 +623,4 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     isNativeAvailable,
   };
 }
+

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.15-beta",
+    "date": "2026-09-14",
+    "title": "🔊 Nova Voice — Audio Playback Fixed",
+    "message": [
+      "Audio Playback Fixed: Nova's voice was being silently dropped because ExoPlayer can't detect the audio format from base64 data URIs. Audio chunks are now written to temp files and played reliably.",
+      "Speaker Routing Fixed: Added interruptionMode 'doNotMix' so Android properly routes Nova's voice to the speaker while the mic is active — no more audio going to the earpiece.",
+      "AudioModule Access Improved: AudioStream is now loaded via the primary expo-audio export path with a build-path fallback, improving reliability across OTA updates.",
+      "Playback Queue Fixed: Improved completion detection — the polling logic now correctly handles short audio chunks whose currentTime resets to 0 at end of playback.",
+      "Temp File Cleanup: WAV temp files are cleaned up automatically after each chunk plays and when the session ends."
+    ]
+  },
+  {
     "version": "0.3.14-beta",
     "date": "2026-09-14",
     "title": "🔧 Voice Engine — Deep Fix (Connecting Hang & No Audio)",
