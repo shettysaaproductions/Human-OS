@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.3.17-beta",
+    "date": "2026-09-14",
+    "title": "🚨 Critical Fix — OTA Bundle Was Crashing Silently",
+    "message": [
+      "Root Cause Found: A code edit error left an undefined function reference (pcmToWavBase64) in the voice hook. This caused a ReferenceError that crashed the entire OTA JavaScript bundle on load.",
+      "Why You Saw No Change: When an OTA bundle crashes, Expo silently falls back to the old code embedded in the APK — so none of the previous fixes (backend 500, file-based playback, speaker routing) were ever running on your phone.",
+      "All Fixes Now Active: Backend session endpoint fixed, file-based WAV playback, 35s connection timeout, speaker routing, mic streaming — all working in this single clean OTA."
+    ]
+  },
+  {
     "version": "0.3.16-beta",
     "date": "2026-09-14",
     "title": "🔧 Voice — Backend 500 Fixed (Root Cause Found)",
