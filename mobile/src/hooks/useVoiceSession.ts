@@ -471,7 +471,9 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     sessionIdRef.current  = `voice_${Date.now()}`;
     sessionStartRef.current = Date.now();
 
-    // FIX BUG 5: 12-second hard timeout — prevents infinite "Connecting to Nova..."
+    // 35-second hard timeout — accounts for Render free-tier cold start (~20-30s)
+    // After backend wakes and session config is fetched, the WS + setupComplete
+    // should arrive in <5s, well within this window.
     clearConnectTimer();
     connectTimerRef.current = setTimeout(() => {
       if (wsRef.current) {
@@ -479,9 +481,9 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         wsRef.current = null;
       }
       stopMicStream();
-      setErrorMessage('Connection timed out — please check your internet and try again');
+      setErrorMessage('Connecting to Nova is taking longer than expected — server may be waking up. Please try again in a moment.');
       setState('error');
-    }, 12000);
+    }, 35000);
 
     const hasPermission = await requestAudioPermissions();
     if (!hasPermission) {
