@@ -18,6 +18,7 @@ The app was crashing immediately on startup (before any JS rendered). Diagnosing
 4. **`AutonomousEyes` Camera Crash**: The `CameraView` component was rendered unconditionally in `App.tsx` and wasn't wrapped in an ErrorBoundary. If `useCameraPermissions` or the native camera module had a blip, it killed the chat tree.
 
 ### Fixes Applied
+- **`index.ts`**: Added the absolutely critical `import 'react-native-gesture-handler';` to the very top. This is strictly required by the library, and without it, Android release builds crash immediately upon launch.
 - **`notificationService.ts`**: Removed top-level `_ensureAndroidChannels()` call (it is safely called via `initialize()` after mount). Wrapped `setNotificationHandler()` in `try/catch`.
 - **`App.tsx`**: Wrapped `AutonomousEyes` in an `<ErrorBoundary fallback={null}>`.
 - **`index.ts`**: Created a `RootApp` component that wraps `App` in `<ErrorBoundary>`. Rewrote using `React.createElement` instead of JSX so we could keep the `.ts` extension (Metro expects exactly `index.ts` due to `package.json`).
@@ -25,11 +26,11 @@ The app was crashing immediately on startup (before any JS rendered). Diagnosing
 
 ### EAS Build Success
 - Triggered `eas build --platform android --profile apk --non-interactive`.
-- Build successfully completed with ID **c0d52803-2c00-475b-9e0b-ba55aca5c777**.
+- Build successfully completed with ID **6b8f8362-eed8-496d-843b-76cd7b3fcc86**.
 - This fresh APK natively bundles `expo-av` so the Voice Mode fallback screen will no longer show.
 
 ## NEXT ACTION
-- User to install the new APK (build `c0d52803`) and verify:
+- User to install the new APK (build `6b8f8362`) and verify:
   1. The app starts cleanly without crashing.
   2. Voice Mode opens successfully and requests microphone permissions.
   3. The microphone captures audio and transcribes correctly (via the new `expo-file-system` code).
