@@ -1,44 +1,47 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-14 — v0.3.10-beta: Universal Branch & Stem Relocation Engine, Confirmation Protocol & Attribution Invariants
+2026-09-14 — v0.3.11-beta crash fix: FileReader + expo-av native module guard
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Task: COMPLETE — Implemented the Universal Memory Branch & Stem Relocation Engine with mandatory Confirmation Protocol ("Are you sure?"), resolved bizarre attribution / perspective confusion bug, eradicated phantom duplicate entities, and published production EAS OTA update:
 
-1. **Universal Memory Branch & Stem Relocation Engine (`UniversalBranchRelocationService.ts`)**:
-   - **Dynamic Cross-Domain Branch Relocation**: Users can move ANY memory bubble from ANY department (e.g. `Family & Relationships`) to ANY other department (e.g. `Work & Career`, `Pets`, `Lifestyle`, `Goals`).
-   - **Full Hierarchy & Reminder Reparenting**: When an entity is moved, all its connected sub-branches, microbranches, attribute leaves (`stems`), and active `reminders` are atomically reparented and reconnected to the target department trunk.
-   - **Antecedent Entity Resolution**: Supports pronoun and conversational references (e.g., *"the one I was talking about was not my friend, he was my character of a project on which I am working on to create a short film"* or *"jiski baat kar raha tha wo dost nahi tha, meri film ka character tha"*). Resolves the target entity name from recent conversation history while filtering Hindi and English copula stop words.
-   - **Specialized Revelation Patterns**: Dedicated support for Fictional Project Characters (`work`), Pet Revelations (`family/pets`), and explicit cross-department commands (*"move X from family to work and career"*).
+## Current Task: COMPLETE — Crash Fix (v0.3.11-beta)
 
-2. **Doubt Explanation & Mandatory Confirmation Protocol ("Are you sure?")**:
-   - Because reclassifying a branch alters Nova's worldview, Nova never moves a branch silently.
-   - Nova calculates all connected stems and reminders, explains its doubt clearly:
-     *"Wait, earlier I thought Ramesh was under Family & Relationships as a Friend, thinking it was a real-life relationship. But are you saying Ramesh is actually a fictional character for your project (Short Film Character) under Career & Professional? If you confirm, I will move Ramesh, all connected stems (2 details), and 1 reminder to Career & Professional. Are you sure?"*
-   - Staged in `working_memory` under `__pending_branch_relocation:{userId}`.
-   - **Affirmative Response ("haan", "yes", "sure", "pakka", "kardo")**: Atomically executes the relocation in Supabase, invalidates analytics cache, updates `kg_nodes` / `kg_edges`, and confirms warmly.
-   - **Negative Response ("nahi", "no", "rehne do", "cancel")**: Cancels the pending proposal, leaving the entity intact.
+### Root Cause of Crash
+The app was crashing on startup due to **two bugs introduced in the Voice Mode implementation**:
 
-3. **Phantom Duplicate Entity Eradication & Attribution Truth**:
-   - When user clarifies *"mera koi suresh naam ka dost nahi hai.. mere papa ka name suresh hai"*, Nova immediately purges the phantom `friend_suresh` memory from the database and working memory so it never claims both exist simultaneously.
-   - **Attribution Truth Invariant (`promptBuilder.ts`)**: Strictly forbids Nova from adopting user/relative schedules (e.g., *"wo kaam se 11 baje aate hai"*) as its own routine (*"Main 11 baje kam se aa jaati hoon"*). Nova is strictly grounded as an AI companion living in the app.
-   - **Neutral Companion Address Invariant (`promptBuilder.ts`)**: Prohibits unprompted female grammatical inflections (*"kahaan thi tu?", "kya kar rahi thi?"*) unless the profile explicitly specifies `gender: female`.
+1. **`FileReader` is not available in React Native** — `useVoiceSession.ts` used `new FileReader()` to convert audio blobs to base64. `FileReader` is a Web API and does not exist in the RN runtime. This caused an immediate crash whenever `sendAudioChunk()` was called.
 
-4. **Verification & Tests**:
-   - Added unit test suite `UniversalBranchRelocation.test.ts` (11 tests passed, 100% success).
-   - Pre-flight verification: `backend/npm run build` (exit 0) and `mobile/npx tsc --noEmit` (exit 0).
+2. **`expo-av` is a native module** — it must be compiled into the APK. When the user downloaded a fresh APK from Expo Dev Servers, if that build didn't include `expo-av` native code, importing it at module level would crash the entire JS bundle at startup.
 
-## OTA Deployment & Notification Protocol
-- **Version**: `v0.3.10-beta`
-- **Changelog**: Inserted at index 0 of `mobile/src/config/updateHistory.json`.
-- **Pre-flight**: `mobile/npx tsc --noEmit` (exit 0), `backend/npm run build` (exit 0).
-- **EAS Update Group ID**: `50c52a0b-16bc-41e1-aabe-5cace6ac0605`
-- **Android Update ID**: `01a09c26-1f4d-75b7-875a-48f9ddcac60e`
-- **iOS Update ID**: `01a09c26-1f4d-7085-87ab-332c07f68844`
-- **Broadcast Push Notification**: Dispatched to registered devices via `broadcast_update_push.ts`.
+### Fixes Applied
+- **`mobile/src/hooks/useVoiceSession.ts`**: Replaced `FileReader` with `expo-file-system`'s `readAsStringAsync` (which works in RN). Also wrapped `require('expo-av')` and `require('expo-file-system')` in try/catch so missing native modules degrade gracefully instead of crashing.
+- **`mobile/src/components/VoiceMode.tsx`**: Added `isNativeAvailable` check — if `expo-av` is not compiled into the current build, shows a friendly "Voice Mode requires a native build" screen instead of crashing.
+
+### Additional Changes (same session)
+- **`broadcast_update_push.ts`**: Now reads `updateHistory.json` to get real update title + bullet points for the push notification plate, so users always see full feature details.
+- **`notificationService.ts`**: Added `nova_updates` channel (MAX importance) to ensure update notifications always show even when on chat screen.
+- **`App.tsx`**: Update notification plate now shows full feature changelog on `nova_update` push tap, and has a fallback that always shows changelog if `lastSeenVersion` read fails.
+- **`ChatScreen.tsx`**: Added `🎙️ Live` pill button in the header and styled circular mic button in the input bar.
+
+## OTA Deployment Protocol
+| # | Version | Update Group ID | Description |
+|---|---------|----------------|-------------|
+| 1 | v0.3.11-beta | `15dfd2cd-ae70-4337-b20d-7116f774b67d` | Voice Mode initial |
+| 2 | v0.3.11-beta | `ac1f3f0` (commit) | Header Live button + notification plate |
+| 3 | v0.3.11-beta | `20fc4b1a-6ec4-484d-b74c-05d81932a4b5` | **CRASH FIX** — FileReader removed, expo-av guard |
+
+- **Git**: `main` at `461ed79`
+- **Runtime version**: `1.1.0`
+- **Broadcast**: Dispatched to registered devices
+
+## Why the Old "2.0.0" APK
+The user saw version `2.0.0` in the Expo Dev Client APK. This is a **different build profile** — the Expo Dev Client bundles all installed native modules. The production OTA (`runtimeVersion: 1.1.0`) should now apply correctly to the APK they have installed if it was built from the same `appVersion: 1.1.0`.
+
+**If crash persists**: The APK may have a different `runtimeVersion` than `1.1.0`, which means the OTA won't apply. In that case, a new production APK build (`eas build --platform android --profile production`) is required.
 
 ## NEXT ACTION
-Commit and push changes to `origin main` (triggers automatic Render backend build & deploy).
+- Wait for user to confirm the crash is fixed after app reload.
+- If user still sees crash → trigger a new `eas build` for a fresh production APK.
