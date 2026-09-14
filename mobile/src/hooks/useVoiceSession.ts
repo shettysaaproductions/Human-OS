@@ -170,6 +170,8 @@ export interface UseVoiceSessionReturn {
   selectedVoice: string;
   errorMessage: string | null;
   startSession: (voiceName?: string) => Promise<void>;
+  prefetchSession: () => void; // call this when voice screen opens
+  prefetchState: 'idle' | 'loading' | 'ready' | 'error';
   endSession: () => Promise<void>;
   mute: () => void;
   unmute: () => void;
@@ -199,6 +201,14 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const mutedRef        = useRef(false);
   const connectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Session Prefetch ───────────────────────────────────────────────────────
+  // Call prefetchSession() when the voice screen opens so the backend
+  // is already warm and session config is cached when user taps mic.
+  const cachedSessionRef    = useRef<any>(null);
+  const cachedVoicesRef     = useRef<AvailableVoice[]>([]);
+  const [prefetchState, setPrefetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const prefetchInProgressRef = useRef(false);
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   const clearConnectTimer = useCallback(() => {
@@ -206,6 +216,27 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       clearTimeout(connectTimerRef.current);
       connectTimerRef.current = null;
     }
+  }, []);
+
+  const prefetchSession = useCallback(() => {
+    // Already have a fresh cached session or fetch in progress — skip
+    if (cachedSessionRef.current || prefetchInProgressRef.current) return;
+    prefetchInProgressRef.current = true;
+    setPrefetchState('loading');
+    console.log('[VoiceSession] Prefetching session config...');
+    voiceService.startSession({ voiceName: 'Kore' })
+      .then(({ session, availableVoices: voices }) => {
+        cachedSessionRef.current = session;
+        cachedVoicesRef.current = voices;
+        setPrefetchState('ready');
+        prefetchInProgressRef.current = false;
+        console.log('[VoiceSession] Session prefetch complete ✓ Model:', session.model);
+      })
+      .catch((err: any) => {
+        setPrefetchState('error');
+        prefetchInProgressRef.current = false;
+        console.warn('[VoiceSession] Session prefetch failed:', err?.message);
+      });
   }, []);
 
   // ── Audio Permissions ──────────────────────────────────────────────────────
@@ -498,11 +529,32 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
 
     try {
-      console.log('[VoiceSession] Fetching session config from backend...');
-      const { session, availableVoices: voices } = await voiceService.startSession({ voiceName });
-      sessionIdRef.current = session.ephemeralToken ? `voice_${Date.now()}` : sessionIdRef.current;
+      let session: any;
+      let voices: AvailableVoice[];
+
+      if (cachedSessionRef.current) {
+        // Use prefetched session — no backend call needed, connect immediately
+        console.log('[VoiceSession] Using prefetched session config ✓');
+        session = cachedSessionRef.current;
+        // Override voice if user selected a different one
+        if (voiceName && voiceName !== session.voiceConfig?.voiceName) {
+          session = { ...session, voiceConfig: { ...session.voiceConfig, voiceName } };
+        }
+        voices = cachedVoicesRef.current;
+        cachedSessionRef.current = null; // consume the cache
+        setPrefetchState('idle');
+      } else {
+        // No prefetch available — fetch now (may be slow on cold start)
+        console.log('[VoiceSession] Fetching session config from backend (no cache)...');
+        const result = await voiceService.startSession({ voiceName });
+        session = result.session;
+        voices = result.availableVoices;
+      }
+
+      sessionIdRef.current = `voice_${Date.now()}`;
       setAvailableVoices(voices);
-      console.log('[VoiceSession] Session config received. Model:', session.model, 'Voice:', session.voiceConfig.voiceName);
+
+      console.log('[VoiceSession] Session ready. Model:', session.model, 'Voice:', session.voiceConfig.voiceName);
 
       const wsUrl = `${GEMINI_LIVE_WS_URL}?key=${session.apiKey}`;
       console.log('[VoiceSession] Opening WebSocket to Gemini Live...');
@@ -615,6 +667,8 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     selectedVoice,
     errorMessage,
     startSession,
+    prefetchSession,
+    prefetchState,
     endSession,
     mute,
     unmute,

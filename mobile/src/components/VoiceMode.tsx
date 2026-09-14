@@ -64,6 +64,8 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     selectedVoice,
     errorMessage,
     startSession,
+    prefetchSession,
+    prefetchState,
     endSession,
     mute,
     unmute,
@@ -83,7 +85,7 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
   const transcriptRef = useRef<ScrollView>(null);
   const [showVoicePicker, setShowVoicePicker] = useState(false);
 
-  // Slide in on open
+  // Slide in on open + prefetch session as soon as screen opens
   useEffect(() => {
     if (visible) {
       Animated.spring(slideUp, {
@@ -92,6 +94,8 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
         damping: 20,
         stiffness: 120,
       }).start();
+      // Kick off backend prefetch immediately — warms up Render + caches session
+      prefetchSession();
     } else {
       Animated.timing(slideUp, {
         toValue: SCREEN_H,
@@ -164,12 +168,8 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     }
   }, [transcript]);
 
-  // Auto-start session when overlay opens (only if native audio is available)
-  useEffect(() => {
-    if (visible && state === 'idle' && isNativeAvailable) {
-      startSession(selectedVoice);
-    }
-  }, [visible]);
+  // Do NOT auto-start — user taps the orb to connect.
+  // Prefetch is already running from the visible useEffect above.
 
   const handleClose = async () => {
     await endSession();
@@ -177,7 +177,12 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
   };
 
   const colors = STATE_COLORS[state];
-  const label  = STATE_LABELS[state];
+  const label = state === 'idle'
+    ? prefetchState === 'loading' ? 'Getting Nova ready...'
+    : prefetchState === 'ready'   ? 'Tap to talk with Nova ✓'
+    : prefetchState === 'error'   ? 'Tap to connect (may take a moment)'
+    : 'Tap to start talking'
+    : STATE_LABELS[state];
 
   // If native audio isn't available in this build, show an informative screen
   if (!isNativeAvailable) {
@@ -236,28 +241,40 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
               />
             ))}
 
-            {/* Main orb */}
-            <Animated.View
-              style={[
-                styles.orb,
-                {
-                  backgroundColor: colors[0],
-                  shadowColor: colors[0],
-                  transform: [{ scale: orbScale }],
-                  opacity: orbOpacity,
-                },
-              ]}
+            {/* Main orb — tap to start/end session */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                if (state === 'idle' || state === 'error') {
+                  startSession(selectedVoice);
+                } else if (state === 'listening' || state === 'speaking' || state === 'processing') {
+                  handleClose();
+                }
+              }}
             >
-              {state === 'connecting' ? (
-                <ActivityIndicator size="large" color="#fff" />
-              ) : (
-                <Text style={styles.orbIcon}>
-                  {state === 'error' ? '⚠️' :
-                   isMuted ? '🔇' :
-                   state === 'speaking' ? '🔊' : '🎙️'}
-                </Text>
-              )}
-            </Animated.View>
+              <Animated.View
+                style={[
+                  styles.orb,
+                  {
+                    backgroundColor: colors[0],
+                    shadowColor: colors[0],
+                    transform: [{ scale: orbScale }],
+                    opacity: orbOpacity,
+                  },
+                ]}
+              >
+                {state === 'connecting' ? (
+                  <ActivityIndicator size="large" color="#fff" />
+                ) : (
+                  <Text style={styles.orbIcon}>
+                    {state === 'error' ? '⚠️' :
+                     state === 'idle' ? '🎙️' :
+                     isMuted ? '🔇' :
+                     state === 'speaking' ? '🔊' : '🎙️'}
+                  </Text>
+                )}
+              </Animated.View>
+            </TouchableOpacity>
           </View>
 
           {/* State Label */}
