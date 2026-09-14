@@ -1,6 +1,17 @@
 [
   {
+    "version": "0.3.18-beta",
+    "date": "2026-09-15",
+    "title": "⚡ Voice — Instant Connect (Prefetch Architecture)",
+    "message": [
+      "How It Works Now: When you open the Voice screen, Nova silently warms up the server and caches your session in the background. By the time you tap the mic, everything is ready — no more 30-second waits.",
+      "Tap to Connect: The orb now shows 'Getting Nova ready...' while warming up, then 'Tap to talk with Nova ✓' when ready. Just tap it to start the call instantly.",
+      "Root Cause Fixed: The previous auto-start was racing against the prefetch fetch, causing them to conflict and both fail. Now the flow is clean: prefetch → cache → tap → instant connect."
+    ]
+  },
+  {
     "version": "0.3.17-beta",
+
     "date": "2026-09-14",
     "title": "🚨 Critical Fix — OTA Bundle Was Crashing Silently",
     "message": [
