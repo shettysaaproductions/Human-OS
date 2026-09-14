@@ -4,7 +4,7 @@
  * Manages the full lifecycle of a Gemini Live voice session:
  *   1. Fetches session config (ephemeral token) from backend
  *   2. Opens WebSocket directly to Google Gemini Live
- *   3. Records mic audio via expo-av and sends as base64 PCM chunks
+ *   3. Records mic audio via expo-audio and sends as base64 PCM chunks
  *   4. Receives audio response chunks and plays them back
  *   5. Handles tool calls → dispatches to backend → sends result back
  *   6. Builds transcript and sends it to backend on session end
@@ -12,12 +12,11 @@
  * Architecture: Mobile connects DIRECTLY to Google's Live API.
  * The backend only handles session setup and tool execution — no audio relay.
  *
- * IMPORTANT: FileReader is NOT available in React Native — we use
- * expo-file-system's readAsStringAsync for base64 file reading.
+ * Uses expo-audio (SDK 56 successor to expo-av) with the new hook-based API.
+ * This avoids the expo-av native crash that occurred with the old library.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Platform } from 'react-native';
 import {
   voiceService,
   VoiceSessionConfig,
@@ -27,13 +26,13 @@ import {
 } from '../services/voiceService';
 
 // ── Dynamic imports — guard against missing native modules ───────────────────
-// expo-av requires native compilation. If it's missing from the build, we
+// expo-audio requires native compilation. If it's missing from the build, we
 // degrade gracefully instead of crashing the entire app.
-let Audio: any = null;
+let ExpoAudio: any = null;
 try {
-  Audio = require('expo-av').Audio;
+  ExpoAudio = require('expo-audio');
 } catch {
-  console.warn('[VoiceSession] expo-av not available — voice mode disabled');
+  console.warn('[VoiceSession] expo-audio not available — voice mode disabled');
 }
 
 let FileSystem: any = null;
@@ -79,36 +78,38 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Whether native audio modules are available in this build
-  const isNativeAvailable = Audio !== null;
+  const isNativeAvailable = ExpoAudio !== null;
 
   const wsRef = useRef<WebSocket | null>(null);
   const sessionConfigRef = useRef<VoiceSessionConfig | null>(null);
   const sessionIdRef = useRef<string>(`voice_${Date.now()}`);
   const sessionStartRef = useRef<number>(0);
-  const recordingRef = useRef<any>(null);
-  const soundRef = useRef<any>(null);
+  const recorderRef = useRef<any>(null);   // expo-audio AudioRecorder instance
   const audioQueueRef = useRef<string[]>([]); // base64 PCM chunks to play
   const isPlayingRef = useRef(false);
   const mutedRef = useRef(false);
+  const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Audio Permissions & Mode ─────────────────────────────────────────────────
+  // ── Audio Permissions ─────────────────────────────────────────────────────
 
   const requestAudioPermissions = useCallback(async (): Promise<boolean> => {
-    if (!Audio) {
+    if (!ExpoAudio) {
       setErrorMessage('Voice mode requires a native build of the app. Please update via the Play Store or download the latest APK.');
       return false;
     }
     try {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
+      // expo-audio uses requestRecordingPermissionsAsync
+      const { granted } = await ExpoAudio.requestRecordingPermissionsAsync();
+      if (!granted) {
         setErrorMessage('Microphone permission required for voice mode');
         return false;
       }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
+      // Set audio mode — expo-audio uses setAudioModeAsync at the module level
+      await ExpoAudio.setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: true,
         shouldDuckAndroid: true,
+        staysActiveInBackground: false,
       });
       return true;
     } catch (err: any) {
@@ -120,44 +121,51 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // ── Mic Recording ──────────────────────────────────────────────────────────
 
   const startRecording = useCallback(async () => {
-    if (!Audio) return;
+    if (!ExpoAudio) return;
     if (mutedRef.current) return;
     try {
-      if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadAsync().catch(() => {});
-        recordingRef.current = null;
+      // Stop any existing recorder
+      if (recorderRef.current) {
+        try { recorderRef.current.stop(); } catch (_) {}
+        recorderRef.current = null;
+      }
+      if (chunkIntervalRef.current) {
+        clearInterval(chunkIntervalRef.current);
+        chunkIntervalRef.current = null;
       }
 
-      const { recording } = await Audio.Recording.createAsync(
-        {
-          android: {
-            extension: '.wav',
-            outputFormat: Audio.AndroidOutputFormat.DEFAULT,
-            audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 128000,
-          },
-          ios: {
-            extension: '.wav',
-            audioQuality: Audio.IOSAudioQuality?.HIGH ?? 2,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 128000,
-            linearPCMBitDepth: 16,
-            linearPCMIsBigEndian: false,
-            linearPCMIsFloat: false,
-          },
-          web: {},
+      // expo-audio hook-based API: create recorder with custom config
+      const recorder = ExpoAudio.createRecording ? ExpoAudio.createRecording() : null;
+      if (!recorder) {
+        console.warn('[VoiceSession] expo-audio createRecording not available');
+        return;
+      }
+
+      // Use LOW_QUALITY preset for lower latency PCM-compatible audio
+      const preset = ExpoAudio.RecordingPresets?.LOW_QUALITY ?? {
+        android: {
+          extension: '.wav',
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 128000,
         },
-        (status: any) => {
-          if (status.isRecording && status.metering !== undefined) {
-            sendAudioChunk();
-          }
+        ios: {
+          extension: '.wav',
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 128000,
         },
-        100 // update interval ms
-      );
-      recordingRef.current = recording;
+      };
+
+      await recorder.prepareToRecordAsync(preset);
+      recorder.record();
+      recorderRef.current = recorder;
+
+      // Send audio chunks every 250ms (instead of relying on expo-av status callback)
+      chunkIntervalRef.current = setInterval(() => {
+        sendAudioChunk();
+      }, 250);
+
     } catch (err: any) {
       console.warn('[VoiceSession] Recording start failed:', err?.message);
     }
@@ -165,18 +173,15 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
   const sendAudioChunk = useCallback(async () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!recordingRef.current) return;
+    if (!recorderRef.current) return;
     if (mutedRef.current) return;
-    if (!FileSystem) return; // fallback — skip if expo-file-system not available
+    if (!FileSystem) return;
 
     try {
-      const status = await recordingRef.current.getStatusAsync();
-      if (!status.isRecording) return;
-
-      const uri = recordingRef.current.getURI();
+      const uri = recorderRef.current.getURI?.() ?? null;
       if (!uri) return;
 
-      // Use expo-file-system instead of FileReader (FileReader doesn't exist in RN)
+      // Use expo-file-system for base64 encoding (FileReader doesn't exist in RN)
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType?.Base64 ?? 'base64',
       });
@@ -196,27 +201,45 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
   }, []);
 
+  const stopRecording = useCallback(async () => {
+    if (chunkIntervalRef.current) {
+      clearInterval(chunkIntervalRef.current);
+      chunkIntervalRef.current = null;
+    }
+    if (recorderRef.current) {
+      try { recorderRef.current.stop(); } catch (_) {}
+      recorderRef.current = null;
+    }
+  }, []);
+
   // ── Audio Playback Queue ───────────────────────────────────────────────────
 
   const playNextChunk = useCallback(async () => {
-    if (!Audio) return;
+    if (!ExpoAudio) return;
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
     isPlayingRef.current = true;
 
     const base64Audio = audioQueueRef.current.shift()!;
     try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: `data:audio/pcm;base64,${base64Audio}` },
-        { shouldPlay: true, rate: 1.0 }
-      );
-      soundRef.current = sound;
-      sound.setOnPlaybackStatusUpdate((status: any) => {
-        if (status.isLoaded && status.didJustFinish) {
-          isPlayingRef.current = false;
-          sound.unloadAsync().catch(() => {});
-          playNextChunk();
-        }
-      });
+      // expo-audio uses useAudioPlayer hook, but for imperative playback
+      // we use the createAudioPlayer function
+      if (ExpoAudio.createAudioPlayer) {
+        const player = ExpoAudio.createAudioPlayer(
+          { uri: `data:audio/pcm;base64,${base64Audio}` }
+        );
+        player.play();
+        // Poll for completion
+        const checkDone = setInterval(() => {
+          if (!player.playing) {
+            clearInterval(checkDone);
+            isPlayingRef.current = false;
+            player.remove?.();
+            playNextChunk();
+          }
+        }, 100);
+      } else {
+        isPlayingRef.current = false;
+      }
     } catch (err: any) {
       console.warn('[VoiceSession] Playback failed:', err?.message);
       isPlayingRef.current = false;
@@ -301,7 +324,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     sessionIdRef.current = `voice_${Date.now()}`;
     sessionStartRef.current = Date.now();
 
-    // Request mic permissions (also validates that expo-av is available)
+    // Request mic permissions
     const hasPermission = await requestAudioPermissions();
     if (!hasPermission) {
       setState('error');
@@ -372,21 +395,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     const duration = Math.round((Date.now() - sessionStartRef.current) / 1000);
 
     // Stop recording
-    try {
-      if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadAsync();
-        recordingRef.current = null;
-      }
-    } catch (_) {}
-
-    // Stop playback
-    try {
-      if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
-    } catch (_) {}
+    await stopRecording();
 
     // Close WebSocket
     if (wsRef.current) {
@@ -403,11 +412,15 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         durationSeconds: duration,
       }).catch(err => console.warn('[VoiceSession] End session failed:', err?.message));
     }
-  }, [transcript]);
+  }, [transcript, stopRecording]);
 
   const mute = useCallback(() => {
     mutedRef.current = true;
     setIsMuted(true);
+    if (chunkIntervalRef.current) {
+      clearInterval(chunkIntervalRef.current);
+      chunkIntervalRef.current = null;
+    }
   }, []);
 
   const unmute = useCallback(() => {
@@ -424,8 +437,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   useEffect(() => {
     return () => {
       try { wsRef.current?.close(); } catch (_) {}
-      try { recordingRef.current?.stopAndUnloadAsync(); } catch (_) {}
-      try { soundRef.current?.unloadAsync(); } catch (_) {}
+      try { stopRecording(); } catch (_) {}
     };
   }, []);
 

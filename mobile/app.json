@@ -52,6 +52,12 @@
       "expo-task-manager",
       "expo-background-fetch",
       [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Human OS to access your microphone for Nova Voice Mode."
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Allow Human OS to access your camera for visual context awareness."
@@ -89,7 +95,8 @@
         }
       ],
       "./plugins/withDisableLint.js",
-      "expo-localization"
+      "expo-localization",
+      "expo-audio"
     ],
     "extra": {
       "eas": {
