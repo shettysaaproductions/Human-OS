@@ -36,22 +36,25 @@ export function setChatScreenActive(active: boolean) {
   _isChatScreenActive = active;
 }
 
-// ── Show notifications when app is open BUT suppress when on ChatScreen ────────
-// Update notifications (nova_update) are critical and always shown.
-Notifications.setNotificationHandler({
-  handleNotification: async (notification) => {
-    const type = notification?.request?.content?.data?.type;
-    const isUpdate = type === 'nova_update';
-    const isActuallyActive = _isChatScreenActive && AppState.currentState === 'active';
-    return {
-      shouldShowAlert: isUpdate || !isActuallyActive,
-      shouldPlaySound: isUpdate || !isActuallyActive,
-      shouldSetBadge: true,
-      shouldShowBanner: isUpdate || !isActuallyActive,
-      shouldShowList: true,
-    };
-  },
-});
+// Guard against expo-notifications not being ready at module load time
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async (notification) => {
+      const type = notification?.request?.content?.data?.type;
+      const isUpdate = type === 'nova_update';
+      const isActuallyActive = _isChatScreenActive && AppState.currentState === 'active';
+      return {
+        shouldShowAlert: isUpdate || !isActuallyActive,
+        shouldPlaySound: isUpdate || !isActuallyActive,
+        shouldSetBadge: true,
+        shouldShowBanner: isUpdate || !isActuallyActive,
+        shouldShowList: true,
+      };
+    },
+  });
+} catch (err) {
+  console.warn('[Notifications] setNotificationHandler failed at module load (non-critical):', err);
+}
 
 // ── Ensure Android notification channels always have HIGH importance ──────────
 // Android caches channel settings immutably. Delete + recreate on every start
@@ -113,7 +116,8 @@ async function _ensureAndroidChannels() {
     console.warn('[Notifications] Channel setup error (non-critical):', err);
   }
 }
-_ensureAndroidChannels();
+// NOTE: _ensureAndroidChannels() is called inside initialize() after app mounts,
+// NOT at module load time — calling async native code at import time can crash.
 
 class NotificationService {
 

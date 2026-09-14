@@ -14,6 +14,7 @@ import { NavigationContainerRef, useNavigationContainerRef } from '@react-naviga
 import updateHistory from './src/config/updateHistory.json';
 import { presenceService } from './src/services/presenceService';
 import { AutonomousEyes } from './src/components/AutonomousEyes';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 const latestUpdate = updateHistory[0];
 
@@ -157,7 +158,9 @@ function AppContent({ navigationRef }: { navigationRef: any }) {
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <AppNavigator navigationRef={navigationRef} />
-      <AutonomousEyes />
+      <ErrorBoundary fallback={null}>
+        <AutonomousEyes />
+      </ErrorBoundary>
       
       {modalVisible && (
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.75)' }]}>
