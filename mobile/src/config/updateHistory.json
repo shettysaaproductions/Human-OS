@@ -1,6 +1,17 @@
 [
   {
+    "version": "0.3.16-beta",
+    "date": "2026-09-14",
+    "title": "🔧 Voice — Backend 500 Fixed (Root Cause Found)",
+    "message": [
+      "Root Cause Found: The backend was throwing a 500 error on every voice session request because authTokens.create requires a special Google Cloud IAM permission that standard AI Studio API keys do not have. Every voice tap caused a silent crash before even reaching Gemini.",
+      "Backend Fixed: The session endpoint now returns the API key directly instead of trying to generate an ephemeral token. This is safe because voice keys (5-19) are dedicated and separate from text chat keys.",
+      "Timeout Increased: Connection timeout raised from 12s to 35s to account for Render free-tier cold starts (can take 20-30s on first request after idle)."
+    ]
+  },
+  {
     "version": "0.3.15-beta",
+
     "date": "2026-09-14",
     "title": "🔊 Nova Voice — Audio Playback Fixed",
     "message": [
