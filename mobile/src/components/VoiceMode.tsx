@@ -69,6 +69,7 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     unmute,
     isMuted,
     selectVoice,
+    isNativeAvailable,
   } = useVoiceSession();
 
   // Animation refs
@@ -163,9 +164,9 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     }
   }, [transcript]);
 
-  // Auto-start session when overlay opens
+  // Auto-start session when overlay opens (only if native audio is available)
   useEffect(() => {
-    if (visible && state === 'idle') {
+    if (visible && state === 'idle' && isNativeAvailable) {
       startSession(selectedVoice);
     }
   }, [visible]);
@@ -177,6 +178,27 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
 
   const colors = STATE_COLORS[state];
   const label  = STATE_LABELS[state];
+
+  // If native audio isn't available in this build, show an informative screen
+  if (!isNativeAvailable) {
+    return (
+      <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(10, 8, 20, 0.97)', justifyContent: 'center', alignItems: 'center', padding: 32, zIndex: 1000 }]}>
+          <Text style={{ fontSize: 56, marginBottom: 24 }}>🎙️</Text>
+          <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 12 }}>Voice Mode Coming Soon</Text>
+          <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 15, textAlign: 'center', lineHeight: 22, marginBottom: 32 }}>
+            {'Nova Voice requires the latest native app build. Please download the latest APK from the Play Store or Expo, then restart the app.'}
+          </Text>
+          <TouchableOpacity
+            onPress={onClose}
+            style={{ backgroundColor: '#8B5CF6', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14 }}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Got It</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent>

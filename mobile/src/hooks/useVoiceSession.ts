@@ -11,10 +11,12 @@
  *
  * Architecture: Mobile connects DIRECTLY to Google's Live API.
  * The backend only handles session setup and tool execution — no audio relay.
+ *
+ * IMPORTANT: FileReader is NOT available in React Native — we use
+ * expo-file-system's readAsStringAsync for base64 file reading.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Audio } from 'expo-av';
 import { Platform } from 'react-native';
 import {
   voiceService,
@@ -23,6 +25,23 @@ import {
   TranscriptEntry,
   GEMINI_LIVE_WS_URL,
 } from '../services/voiceService';
+
+// ── Dynamic imports — guard against missing native modules ───────────────────
+// expo-av requires native compilation. If it's missing from the build, we
+// degrade gracefully instead of crashing the entire app.
+let Audio: any = null;
+try {
+  Audio = require('expo-av').Audio;
+} catch {
+  console.warn('[VoiceSession] expo-av not available — voice mode disabled');
+}
+
+let FileSystem: any = null;
+try {
+  FileSystem = require('expo-file-system');
+} catch {
+  // Non-fatal — audio sending will be skipped
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +65,7 @@ export interface UseVoiceSessionReturn {
   unmute: () => void;
   isMuted: boolean;
   selectVoice: (voiceId: string) => void;
+  isNativeAvailable: boolean;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -58,19 +78,26 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const [isMuted, setIsMuted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Whether native audio modules are available in this build
+  const isNativeAvailable = Audio !== null;
+
   const wsRef = useRef<WebSocket | null>(null);
   const sessionConfigRef = useRef<VoiceSessionConfig | null>(null);
   const sessionIdRef = useRef<string>(`voice_${Date.now()}`);
   const sessionStartRef = useRef<number>(0);
-  const recordingRef = useRef<Audio.Recording | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const recordingRef = useRef<any>(null);
+  const soundRef = useRef<any>(null);
   const audioQueueRef = useRef<string[]>([]); // base64 PCM chunks to play
   const isPlayingRef = useRef(false);
   const mutedRef = useRef(false);
 
-  // ── Audio Permissions & Mode ────────────────────────────────────────────────
+  // ── Audio Permissions & Mode ─────────────────────────────────────────────────
 
   const requestAudioPermissions = useCallback(async (): Promise<boolean> => {
+    if (!Audio) {
+      setErrorMessage('Voice mode requires a native build of the app. Please update via the Play Store or download the latest APK.');
+      return false;
+    }
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
@@ -85,7 +112,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       });
       return true;
     } catch (err: any) {
-      setErrorMessage(`Audio setup failed: ${err.message}`);
+      setErrorMessage(`Audio setup failed: ${err?.message || 'unknown error'}`);
       return false;
     }
   }, []);
@@ -93,10 +120,11 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // ── Mic Recording ──────────────────────────────────────────────────────────
 
   const startRecording = useCallback(async () => {
+    if (!Audio) return;
     if (mutedRef.current) return;
     try {
       if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadAsync();
+        await recordingRef.current.stopAndUnloadAsync().catch(() => {});
         recordingRef.current = null;
       }
 
@@ -112,7 +140,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
           },
           ios: {
             extension: '.wav',
-            audioQuality: Audio.IOSAudioQuality.HIGH,
+            audioQuality: Audio.IOSAudioQuality?.HIGH ?? 2,
             sampleRate: 16000,
             numberOfChannels: 1,
             bitRate: 128000,
@@ -123,7 +151,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
           web: {},
         },
         (status: any) => {
-          // Send audio chunks to Gemini Live as they become available
           if (status.isRecording && status.metering !== undefined) {
             sendAudioChunk();
           }
@@ -132,7 +159,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       );
       recordingRef.current = recording;
     } catch (err: any) {
-      console.warn('[VoiceSession] Recording start failed', err.message);
+      console.warn('[VoiceSession] Recording start failed:', err?.message);
     }
   }, []);
 
@@ -140,33 +167,30 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     if (!recordingRef.current) return;
     if (mutedRef.current) return;
+    if (!FileSystem) return; // fallback — skip if expo-file-system not available
 
     try {
       const status = await recordingRef.current.getStatusAsync();
       if (!status.isRecording) return;
 
-      // Get current URI and read as base64
       const uri = recordingRef.current.getURI();
       if (!uri) return;
 
-      // Read the audio file as base64 and send to Gemini Live
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = (reader.result as string).split(',')[1];
-        if (base64 && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            realtimeInput: {
-              audio: {
-                data: base64,
-                mimeType: 'audio/wav;rate=16000',
-              },
+      // Use expo-file-system instead of FileReader (FileReader doesn't exist in RN)
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType?.Base64 ?? 'base64',
+      });
+
+      if (base64 && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          realtimeInput: {
+            audio: {
+              data: base64,
+              mimeType: 'audio/wav;rate=16000',
             },
-          }));
-        }
-      };
-      reader.readAsDataURL(blob);
+          },
+        }));
+      }
     } catch (_) {
       // Non-fatal — audio chunks are best-effort
     }
@@ -175,6 +199,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // ── Audio Playback Queue ───────────────────────────────────────────────────
 
   const playNextChunk = useCallback(async () => {
+    if (!Audio) return;
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
     isPlayingRef.current = true;
 
@@ -188,14 +213,14 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       sound.setOnPlaybackStatusUpdate((status: any) => {
         if (status.isLoaded && status.didJustFinish) {
           isPlayingRef.current = false;
-          sound.unloadAsync();
-          playNextChunk(); // play next in queue
+          sound.unloadAsync().catch(() => {});
+          playNextChunk();
         }
       });
     } catch (err: any) {
-      console.warn('[VoiceSession] Playback failed', err.message);
+      console.warn('[VoiceSession] Playback failed:', err?.message);
       isPlayingRef.current = false;
-      playNextChunk(); // try next chunk anyway
+      playNextChunk();
     }
   }, []);
 
@@ -217,7 +242,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
           audioQueueRef.current.push(part.inlineData.data);
           playNextChunk();
         }
-        // Text transcript of Nova's audio response
         if (part.text) {
           setTranscript(prev => [...prev, { role: 'nova', text: part.text, timestamp: new Date().toISOString() }]);
         }
@@ -248,7 +272,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
             sessionId: sessionIdRef.current,
           });
 
-          // Send result back to Gemini Live
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               toolResponse: {
@@ -261,7 +284,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
             }));
           }
         } catch (err: any) {
-          console.warn('[VoiceSession] Tool execution failed', fnCall.name, err.message);
+          console.warn('[VoiceSession] Tool execution failed:', fnCall.name, err?.message);
         }
       }
     }
@@ -278,7 +301,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     sessionIdRef.current = `voice_${Date.now()}`;
     sessionStartRef.current = Date.now();
 
-    // Request mic permissions
+    // Request mic permissions (also validates that expo-av is available)
     const hasPermission = await requestAudioPermissions();
     if (!hasPermission) {
       setState('error');
@@ -335,12 +358,11 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
       ws.onclose = (event) => {
         console.log('[VoiceSession] WebSocket closed', event.code, event.reason);
-        if (state !== 'idle') setState('idle');
       };
 
     } catch (err: any) {
-      console.error('[VoiceSession] Failed to start', err.message);
-      setErrorMessage(err.message || 'Failed to start voice session');
+      console.error('[VoiceSession] Failed to start:', err?.message);
+      setErrorMessage(err?.message || 'Failed to start voice session');
       setState('error');
     }
   }, [selectedVoice, requestAudioPermissions, startRecording, handleWsMessage]);
@@ -379,7 +401,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         transcript: currentTranscript,
         sessionId: sessionIdRef.current,
         durationSeconds: duration,
-      }).catch(err => console.warn('[VoiceSession] End session failed', err.message));
+      }).catch(err => console.warn('[VoiceSession] End session failed:', err?.message));
     }
   }, [transcript]);
 
@@ -391,7 +413,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const unmute = useCallback(() => {
     mutedRef.current = false;
     setIsMuted(false);
-    startRecording(); // resume recording
+    startRecording();
   }, [startRecording]);
 
   const selectVoice = useCallback((voiceId: string) => {
@@ -401,9 +423,9 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      wsRef.current?.close();
-      recordingRef.current?.stopAndUnloadAsync();
-      soundRef.current?.unloadAsync();
+      try { wsRef.current?.close(); } catch (_) {}
+      try { recordingRef.current?.stopAndUnloadAsync(); } catch (_) {}
+      try { soundRef.current?.unloadAsync(); } catch (_) {}
     };
   }, []);
 
@@ -419,5 +441,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     unmute,
     isMuted,
     selectVoice,
+    isNativeAvailable,
   };
 }
