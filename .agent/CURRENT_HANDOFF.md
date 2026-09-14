@@ -1,47 +1,35 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-14 — v0.3.11-beta crash fix: FileReader + expo-av native module guard
+2026-09-14 — Native Crash Fixes & Successful APK Build c0d52803
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Current Task: COMPLETE — Crash Fix (v0.3.11-beta)
+## Current Task: COMPLETE — Startup Crash Fixes & Fresh APK
 
-### Root Cause of Crash
-The app was crashing on startup due to **two bugs introduced in the Voice Mode implementation**:
+### Root Cause of Startup Crashes
+The app was crashing immediately on startup (before any JS rendered). Diagnosing revealed three critical JS initialization bugs that were killing the native process during module load:
 
-1. **`FileReader` is not available in React Native** — `useVoiceSession.ts` used `new FileReader()` to convert audio blobs to base64. `FileReader` is a Web API and does not exist in the RN runtime. This caused an immediate crash whenever `sendAudioChunk()` was called.
-
-2. **`expo-av` is a native module** — it must be compiled into the APK. When the user downloaded a fresh APK from Expo Dev Servers, if that build didn't include `expo-av` native code, importing it at module level would crash the entire JS bundle at startup.
+1. **`_ensureAndroidChannels()` at Module Load**: This async function was called directly at the top level of `notificationService.ts`. If the `expo-notifications` native module wasn't fully initialized, this crashed the process.
+2. **`Notifications.setNotificationHandler()` at Module Load**: Also called at the top level, without a `try/catch`. 
+3. **No Root ErrorBoundary**: `index.ts` was not wrapped in an ErrorBoundary, meaning any startup JS error silently killed the app.
+4. **`AutonomousEyes` Camera Crash**: The `CameraView` component was rendered unconditionally in `App.tsx` and wasn't wrapped in an ErrorBoundary. If `useCameraPermissions` or the native camera module had a blip, it killed the chat tree.
 
 ### Fixes Applied
-- **`mobile/src/hooks/useVoiceSession.ts`**: Replaced `FileReader` with `expo-file-system`'s `readAsStringAsync` (which works in RN). Also wrapped `require('expo-av')` and `require('expo-file-system')` in try/catch so missing native modules degrade gracefully instead of crashing.
-- **`mobile/src/components/VoiceMode.tsx`**: Added `isNativeAvailable` check — if `expo-av` is not compiled into the current build, shows a friendly "Voice Mode requires a native build" screen instead of crashing.
+- **`notificationService.ts`**: Removed top-level `_ensureAndroidChannels()` call (it is safely called via `initialize()` after mount). Wrapped `setNotificationHandler()` in `try/catch`.
+- **`App.tsx`**: Wrapped `AutonomousEyes` in an `<ErrorBoundary fallback={null}>`.
+- **`index.ts`**: Created a `RootApp` component that wraps `App` in `<ErrorBoundary>`. Rewrote using `React.createElement` instead of JSX so we could keep the `.ts` extension (Metro expects exactly `index.ts` due to `package.json`).
+- **`app.json`**: Added `RECORD_AUDIO` to Android permissions, which is required for Voice Mode to actually work once `expo-av` initializes.
 
-### Additional Changes (same session)
-- **`broadcast_update_push.ts`**: Now reads `updateHistory.json` to get real update title + bullet points for the push notification plate, so users always see full feature details.
-- **`notificationService.ts`**: Added `nova_updates` channel (MAX importance) to ensure update notifications always show even when on chat screen.
-- **`App.tsx`**: Update notification plate now shows full feature changelog on `nova_update` push tap, and has a fallback that always shows changelog if `lastSeenVersion` read fails.
-- **`ChatScreen.tsx`**: Added `🎙️ Live` pill button in the header and styled circular mic button in the input bar.
-
-## OTA Deployment Protocol
-| # | Version | Update Group ID | Description |
-|---|---------|----------------|-------------|
-| 1 | v0.3.11-beta | `15dfd2cd-ae70-4337-b20d-7116f774b67d` | Voice Mode initial |
-| 2 | v0.3.11-beta | `ac1f3f0` (commit) | Header Live button + notification plate |
-| 3 | v0.3.11-beta | `20fc4b1a-6ec4-484d-b74c-05d81932a4b5` | **CRASH FIX** — FileReader removed, expo-av guard |
-
-- **Git**: `main` at `461ed79`
-- **Runtime version**: `1.1.0`
-- **Broadcast**: Dispatched to registered devices
-
-## Why the Old "2.0.0" APK
-The user saw version `2.0.0` in the Expo Dev Client APK. This is a **different build profile** — the Expo Dev Client bundles all installed native modules. The production OTA (`runtimeVersion: 1.1.0`) should now apply correctly to the APK they have installed if it was built from the same `appVersion: 1.1.0`.
-
-**If crash persists**: The APK may have a different `runtimeVersion` than `1.1.0`, which means the OTA won't apply. In that case, a new production APK build (`eas build --platform android --profile production`) is required.
+### EAS Build Success
+- Triggered `eas build --platform android --profile apk --non-interactive`.
+- Build successfully completed with ID **c0d52803-2c00-475b-9e0b-ba55aca5c777**.
+- This fresh APK natively bundles `expo-av` so the Voice Mode fallback screen will no longer show.
 
 ## NEXT ACTION
-- Wait for user to confirm the crash is fixed after app reload.
-- If user still sees crash → trigger a new `eas build` for a fresh production APK.
+- User to install the new APK (build `c0d52803`) and verify:
+  1. The app starts cleanly without crashing.
+  2. Voice Mode opens successfully and requests microphone permissions.
+  3. The microphone captures audio and transcribes correctly (via the new `expo-file-system` code).
