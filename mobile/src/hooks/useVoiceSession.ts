@@ -1,25 +1,32 @@
 /**
  * useVoiceSession.ts — Nova Voice Mode WebSocket + Audio Hook
  *
- * Manages the full lifecycle of a Gemini Live voice session using the correct
- * expo-audio@56 APIs:
+ * v0.3.14 — Bulletproof rewrite. Root causes fixed:
  *
- *   INPUT (Mic → Gemini Live):
- *     - Uses AudioStream for real-time raw PCM capture (int16, 16kHz, mono)
- *     - Each buffer callback fires ~20ms of audio → sent directly to WS as base64
- *     - No file I/O, no polling, no compressed format issues
+ *   BUG 1 (v0.3.13 regression — Stuck at "Connecting"):
+ *     setAudioModeAsync() can hang indefinitely on Android in expo-audio@56
+ *     when called in the blocking permission path. Fixed by making it
+ *     fire-and-forget (non-blocking).
  *
- *   OUTPUT (Gemini Live → Speaker):
- *     - Gemini sends 24kHz int16 PCM chunks in base64
- *     - We prepend a 44-byte WAV RIFF header and pass as data-URI to createAudioPlayer
- *     - Players are queued and played sequentially via addListener(PLAYBACK_STATUS_UPDATE)
+ *   BUG 2 (v0.3.12 — No audio heard):
+ *     expo-audio@56 does NOT export AudioModule from its index. Using
+ *     `require('expo-audio/build/AudioModule').default` to access AudioStream
+ *     for raw 16kHz mono PCM mic streaming.
  *
- *   API Fixes from expo-audio@56:
- *     - requestRecordingPermissionsAsync() — top-level export (not ExpoAudio.*)
- *     - setAudioModeAsync() — top-level export, takes { allowsRecording, playsInSilentMode }
- *     - AudioStream — new native streaming API for raw PCM mic capture
- *     - createAudioPlayer(source) — creates an unmanaged AudioPlayer (usable outside hooks)
- *     - player.addListener('playbackStatusUpdate', cb) — event-driven completion detection
+ *   BUG 3 (v0.3.12 — No audio heard):
+ *     createRecording() does not exist in expo-audio@56. The old code
+ *     fell back to null and never recorded anything.
+ *
+ *   BUG 4 (v0.3.13 regression — Parsing):
+ *     Added Blob/async parsing that broke simple text-frame parsing.
+ *     Reverted to simple JSON.parse(event.data) which worked in v0.3.12.
+ *
+ *   BUG 5 (all versions — Hung connections):
+ *     No connection timeout. A 12-second timeout now auto-errors.
+ *
+ *   BUG 6 (v0.3.12 — Playback queue deadlocks):
+ *     Polling player.playing in setInterval could deadlock the queue.
+ *     Fixed with event-driven addListener('playbackStatusUpdate') + hard fallback.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -39,10 +46,34 @@ try {
   console.warn('[VoiceSession] expo-audio not available — voice mode disabled');
 }
 
-// ── Base64 & WAV Container Helpers ────────────────────────────────────────────
+// AudioModule is NOT re-exported from expo-audio index.
+// Access the native module directly so we can use AudioStream.
+let NativeAudioModule: any = null;
+try {
+  NativeAudioModule = require('expo-audio/build/AudioModule').default;
+} catch {
+  console.warn('[VoiceSession] expo-audio/build/AudioModule not accessible — mic streaming disabled');
+}
+
+// ── Base64 & WAV helpers ──────────────────────────────────────────────────────
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const B64_LOOKUP = new Uint8Array(256);
 for (let i = 0; i < B64_CHARS.length; i++) B64_LOOKUP[B64_CHARS.charCodeAt(i)] = i;
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let b64 = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    b64 += B64_CHARS[b0 >> 2];
+    b64 += B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+    b64 += i + 1 < len ? B64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+    b64 += i + 2 < len ? B64_CHARS[b2 & 63] : '=';
+  }
+  return b64;
+}
 
 function base64ToUint8(b64: string): Uint8Array {
   const clean = b64.replace(/[^A-Za-z0-9+/]/g, '');
@@ -62,26 +93,11 @@ function base64ToUint8(b64: string): Uint8Array {
   return bytes;
 }
 
-function uint8ToBase64(bytes: Uint8Array): string {
-  let b64 = '';
-  const len = bytes.length;
-  for (let i = 0; i < len; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < len ? bytes[i + 1] : 0;
-    const b2 = i + 2 < len ? bytes[i + 2] : 0;
-    b64 += B64_CHARS[b0 >> 2];
-    b64 += B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
-    b64 += i + 1 < len ? B64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
-    b64 += i + 2 < len ? B64_CHARS[b2 & 63] : '=';
-  }
-  return b64;
-}
-
 /**
- * Convert a float32 ArrayBuffer (from AudioStream) to int16 PCM base64.
- * Gemini Live expects audio/pcm;rate=16000 (int16 little-endian).
+ * float32 ArrayBuffer (from AudioStream) → int16 base64.
+ * Gemini Live requires audio/pcm;rate=16000 (int16 little-endian).
  */
-function float32BufferToInt16Base64(buffer: ArrayBuffer): string {
+function float32ToInt16Base64(buffer: ArrayBuffer): string {
   const float32 = new Float32Array(buffer);
   const int16 = new Int16Array(float32.length);
   for (let i = 0; i < float32.length; i++) {
@@ -92,31 +108,29 @@ function float32BufferToInt16Base64(buffer: ArrayBuffer): string {
 }
 
 /**
- * If Gemini sends int16 PCM base64, convert it to float32 for AudioStream playback.
- * For createAudioPlayer we need a WAV container.
+ * Gemini sends 24kHz int16 PCM. Prepend a WAV header so createAudioPlayer
+ * can decode it via ExoPlayer (Android) or AVAudioPlayer (iOS).
  */
 function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
   const pcmBytes = base64ToUint8(pcmBase64);
   const dataLen = pcmBytes.length;
-  const wavBytes = new Uint8Array(44 + dataLen);
-  const view = new DataView(wavBytes.buffer);
-
-  view.setUint32(0, 0x52494646, false); // "RIFF"
-  view.setUint32(4, 36 + dataLen, true);
-  view.setUint32(8, 0x57415645, false); // "WAVE"
-  view.setUint32(12, 0x666d7420, false); // "fmt "
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);           // PCM
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, (sampleRate * numChannels * bitsPerSample) / 8, true);
-  view.setUint16(32, (numChannels * bitsPerSample) / 8, true);
-  view.setUint16(34, bitsPerSample, true);
-  view.setUint32(36, 0x64617461, false); // "data"
-  view.setUint32(40, dataLen, true);
-  wavBytes.set(pcmBytes, 44);
-
-  return uint8ToBase64(wavBytes);
+  const wav = new Uint8Array(44 + dataLen);
+  const v = new DataView(wav.buffer);
+  v.setUint32(0,  0x52494646, false); // "RIFF"
+  v.setUint32(4,  36 + dataLen, true);
+  v.setUint32(8,  0x57415645, false); // "WAVE"
+  v.setUint32(12, 0x666d7420, false); // "fmt "
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);           // PCM
+  v.setUint16(22, numChannels, true);
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, (sampleRate * numChannels * bitsPerSample) / 8, true);
+  v.setUint16(32, (numChannels * bitsPerSample) / 8, true);
+  v.setUint16(34, bitsPerSample, true);
+  v.setUint32(36, 0x64617461, false); // "data"
+  v.setUint32(40, dataLen, true);
+  wav.set(pcmBytes, 44);
+  return uint8ToBase64(wav);
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -156,44 +170,54 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
   const isNativeAvailable = ExpoAudio !== null;
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const sessionConfigRef = useRef<VoiceSessionConfig | null>(null);
-  const sessionIdRef = useRef<string>(`voice_${Date.now()}`);
+  const wsRef           = useRef<WebSocket | null>(null);
+  const sessionIdRef    = useRef<string>(`voice_${Date.now()}`);
   const sessionStartRef = useRef<number>(0);
+  const audioStreamRef  = useRef<any>(null);
+  const audioQueueRef   = useRef<string[]>([]);
+  const isPlayingRef    = useRef(false);
+  const mutedRef        = useRef(false);
+  const connectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Audio stream (mic → Gemini)
-  const audioStreamRef = useRef<any>(null);
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-  // Playback queue
-  const audioQueueRef = useRef<string[]>([]);
-  const isPlayingRef = useRef(false);
-  const mutedRef = useRef(false);
+  const clearConnectTimer = useCallback(() => {
+    if (connectTimerRef.current) {
+      clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = null;
+    }
+  }, []);
 
-  // ── Audio Permissions & Mode Setup ───────────────────────────────────────
+  // ── Audio Permissions ──────────────────────────────────────────────────────
 
   const requestAudioPermissions = useCallback(async (): Promise<boolean> => {
     if (!ExpoAudio) {
-      setErrorMessage('Voice mode requires a native build. Please install the APK from the Play Store.');
+      setErrorMessage('Voice mode requires a native build. Please install the APK.');
       return false;
     }
     try {
-      // Use the correct expo-audio@56 top-level export
+      // FIX BUG 1: requestRecordingPermissionsAsync is a top-level export in expo-audio@56
       const { granted } = await ExpoAudio.requestRecordingPermissionsAsync();
       if (!granted) {
-        setErrorMessage('Microphone permission required for voice mode');
+        setErrorMessage('Microphone permission is required for voice mode');
         return false;
       }
 
-      // Set audio mode using expo-audio@56 API
-      await ExpoAudio.setAudioModeAsync({
+      // FIX BUG 1: setAudioModeAsync is FIRE-AND-FORGET — never await it.
+      // On some Android devices in expo-audio@56, awaiting this hangs indefinitely
+      // when the audio focus changes conflict with an active media session.
+      // We don't need to await it — the permission grant is sufficient to record.
+      ExpoAudio.setAudioModeAsync({
         playsInSilentMode: true,
         allowsRecording: true,
-        shouldPlayInBackground: false,
+      }).catch((err: any) => {
+        // Non-fatal — log and continue
+        console.warn('[VoiceSession] setAudioModeAsync failed (non-fatal):', err?.message);
       });
 
       return true;
     } catch (err: any) {
-      setErrorMessage(`Audio setup failed: ${err?.message || 'unknown error'}`);
+      setErrorMessage(`Microphone permission error: ${err?.message || 'unknown'}`);
       return false;
     }
   }, []);
@@ -201,16 +225,20 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // ── Mic Streaming (AudioStream API) ──────────────────────────────────────
 
   const startMicStream = useCallback(() => {
-    if (!ExpoAudio?.AudioModule) {
-      console.warn('[VoiceSession] AudioModule not available for streaming');
+    // FIX BUG 2: AudioModule is NOT exported from expo-audio index.
+    // Must require 'expo-audio/build/AudioModule' directly.
+    if (!NativeAudioModule?.AudioStream) {
+      console.warn('[VoiceSession] AudioStream not available — mic streaming disabled');
       return;
     }
+
     try {
-      // Create a raw PCM audio stream at 16kHz mono int16 (Gemini Live requirement)
-      const stream = new ExpoAudio.AudioModule.AudioStream({
+      // Raw PCM stream at 16kHz mono float32
+      // (We convert to int16 before sending to Gemini Live)
+      const stream = new NativeAudioModule.AudioStream({
         sampleRate: 16000,
         channels: 1,
-        encoding: 'float32', // capture float32, we'll convert to int16 for Gemini
+        encoding: 'float32',
       });
 
       stream.addListener('audioStreamBuffer', (buffer: any) => {
@@ -219,27 +247,24 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         if (!buffer?.data) return;
 
         try {
-          // Convert float32 PCM → int16 base64 for Gemini Live
-          const base64Chunk = float32BufferToInt16Base64(buffer.data);
+          const int16b64 = float32ToInt16Base64(buffer.data as ArrayBuffer);
           wsRef.current.send(JSON.stringify({
             realtimeInput: {
-              mediaChunks: [{
-                mimeType: 'audio/pcm;rate=16000',
-                data: base64Chunk,
-              }],
+              mediaChunks: [{ mimeType: 'audio/pcm;rate=16000', data: int16b64 }],
             },
           }));
         } catch (e: any) {
-          console.warn('[VoiceSession] Stream buffer encode error:', e?.message);
+          console.warn('[VoiceSession] PCM encode error:', e?.message);
         }
       });
 
-      stream.start().catch((err: any) => {
-        console.warn('[VoiceSession] AudioStream start failed:', err?.message);
+      stream.start().then(() => {
+        console.log('[VoiceSession] AudioStream started successfully (16kHz mono float32→int16)');
+      }).catch((err: any) => {
+        console.warn('[VoiceSession] AudioStream.start() failed:', err?.message);
       });
 
       audioStreamRef.current = stream;
-      console.log('[VoiceSession] AudioStream started (16kHz, mono, float32→int16)');
     } catch (err: any) {
       console.warn('[VoiceSession] AudioStream creation failed:', err?.message);
     }
@@ -255,66 +280,49 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // ── Audio Playback Queue ──────────────────────────────────────────────────
 
   const playNextChunk = useCallback(async () => {
-    if (!ExpoAudio) return;
+    if (!ExpoAudio?.createAudioPlayer) return;
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
     isPlayingRef.current = true;
 
     const base64Audio = audioQueueRef.current.shift()!;
     try {
-      if (ExpoAudio.createAudioPlayer) {
-        // Wrap Gemini's 24kHz int16 PCM in a WAV container so ExoPlayer can decode it
-        const wavBase64 = pcmToWavBase64(base64Audio, 24000, 1, 16);
-        const wavDataUri = `data:audio/wav;base64,${wavBase64}`;
-        const player = ExpoAudio.createAudioPlayer({ uri: wavDataUri });
+      // Wrap Gemini's 24kHz int16 PCM in a WAV container
+      const wavBase64 = pcmToWavBase64(base64Audio, 24000, 1, 16);
+      const player = ExpoAudio.createAudioPlayer({ uri: `data:audio/wav;base64,${wavBase64}` });
 
-        // Use event listener to detect completion — more reliable than polling .playing
-        const subscription = player.addListener('playbackStatusUpdate', (status: any) => {
-          // didJustFinish fires once when playback completes
-          if (status.didJustFinish || (!status.isLoaded && !status.isBuffering)) {
-            subscription?.remove();
-            isPlayingRef.current = false;
-            try { player.remove?.(); } catch (_) {}
-            // Play next chunk in queue
-            playNextChunk();
-          }
-        });
-
-        player.play();
-
-        // Fallback: if status events never fire (some Android configs), poll duration
-        const fallbackCheck = setTimeout(async () => {
-          if (isPlayingRef.current) {
-            try {
-              if (!player.playing) {
-                subscription?.remove();
-                isPlayingRef.current = false;
-                try { player.remove?.(); } catch (_) {}
-                playNextChunk();
-              }
-            } catch (_) {}
-          }
-        }, 10000); // 10s hard fallback
-
-        // Also detect playback start so we can clear fallback when we know it's playing
-        const startCheck = setInterval(() => {
-          if (player.playing || player.currentTime > 0) {
-            clearInterval(startCheck);
-            // Clear the hard fallback — rely on events from now on
-            clearTimeout(fallbackCheck);
-          }
-        }, 100);
-
-        // Safety: if player never started at all (load error), clear after 3s
-        setTimeout(() => {
-          clearInterval(startCheck);
-        }, 3000);
-
-      } else {
-        // expo-audio not available for playback
+      // FIX BUG 6: Use event-driven completion detection instead of polling
+      let done = false;
+      const markDone = () => {
+        if (done) return;
+        done = true;
         isPlayingRef.current = false;
-      }
+        try { sub?.remove(); } catch (_) {}
+        try { player.remove?.(); } catch (_) {}
+        playNextChunk();
+      };
+
+      const sub = player.addListener('playbackStatusUpdate', (status: any) => {
+        if (status?.didJustFinish) markDone();
+      });
+
+      player.play();
+
+      // Hard fallback: if events never fire, poll for completion
+      const poll = setInterval(() => {
+        if (!player.playing && (player.currentTime ?? 0) > 0) {
+          clearInterval(poll);
+          markDone();
+        }
+      }, 150);
+
+      // Safety ceiling: 30s max per chunk (very generous for any audio)
+      setTimeout(() => {
+        clearInterval(poll);
+        markDone();
+      }, 30000);
+
     } catch (err: any) {
-      console.warn('[VoiceSession] Playback failed:', err?.message);
+      console.warn('[VoiceSession] Playback error:', err?.message);
       isPlayingRef.current = false;
       playNextChunk();
     }
@@ -322,28 +330,29 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
   // ── WebSocket Message Handler ──────────────────────────────────────────────
 
-  const handleWsMessage = useCallback(async (event: MessageEvent) => {
+  const handleWsMessage = useCallback((event: MessageEvent) => {
+    // FIX BUG 4: Use simple synchronous JSON.parse — same as v0.3.12 which worked.
+    // React Native WebSocket sends text frames as plain strings.
+    // No async Blob handling needed here.
     let data: any;
     try {
-      // Handle both string and Blob payloads (React Native WS sends Blob)
-      let rawStr = event.data;
-      if (rawStr && typeof rawStr.text === 'function') {
-        rawStr = await rawStr.text();
-      }
-      data = JSON.parse(rawStr);
+      data = JSON.parse(event.data);
     } catch {
+      console.warn('[VoiceSession] WS message not valid JSON, skipping');
       return;
     }
+    if (!data) return;
 
-    // 1. Google Live setup complete confirmation
-    if (data.setupComplete) {
-      console.log('[VoiceSession] Gemini Live setupComplete received — starting mic stream');
+    // 1. setupComplete — Gemini Live is ready for audio
+    if (data.setupComplete !== undefined) {
+      console.log('[VoiceSession] ✅ setupComplete received — transitioning to listening');
+      clearConnectTimer();
       setState('listening');
       startMicStream();
       return;
     }
 
-    // 2. Audio response chunk from Gemini Live
+    // 2. Audio response chunks from Gemini
     if (data.serverContent?.modelTurn?.parts) {
       setState('speaking');
       for (const part of data.serverContent.modelTurn.parts) {
@@ -352,35 +361,39 @@ export function useVoiceSession(): UseVoiceSessionReturn {
           playNextChunk();
         }
         if (part.text) {
-          setTranscript(prev => [...prev, { role: 'nova', text: part.text, timestamp: new Date().toISOString() }]);
+          setTranscript(prev => [
+            ...prev,
+            { role: 'nova', text: part.text, timestamp: new Date().toISOString() },
+          ]);
         }
       }
     }
 
-    // 3. Transcription of user speech (inputTranscription)
+    // 3. User speech transcription
     if (data.serverContent?.inputTranscription?.text) {
       const userText = data.serverContent.inputTranscription.text;
       if (userText.trim()) {
         setState('processing');
-        setTranscript(prev => [...prev, { role: 'user', text: userText, timestamp: new Date().toISOString() }]);
+        setTranscript(prev => [
+          ...prev,
+          { role: 'user', text: userText, timestamp: new Date().toISOString() },
+        ]);
       }
     }
 
-    // 4. Turn complete — return to listening
+    // 4. Turn complete
     if (data.serverContent?.turnComplete) {
       setState('listening');
     }
 
-    // 5. Tool / function calls from Gemini Live
+    // 5. Tool calls from Gemini Live
     if (data.toolCall?.functionCalls) {
       for (const fnCall of data.toolCall.functionCalls) {
-        try {
-          const result = await voiceService.executeTool({
-            toolName: fnCall.name,
-            toolArgs: fnCall.args || {},
-            sessionId: sessionIdRef.current,
-          });
-
+        voiceService.executeTool({
+          toolName: fnCall.name,
+          toolArgs: fnCall.args || {},
+          sessionId: sessionIdRef.current,
+        }).then(result => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               toolResponse: {
@@ -392,12 +405,12 @@ export function useVoiceSession(): UseVoiceSessionReturn {
               },
             }));
           }
-        } catch (err: any) {
-          console.warn('[VoiceSession] Tool execution failed:', fnCall.name, err?.message);
-        }
+        }).catch((err: any) => {
+          console.warn('[VoiceSession] Tool failed:', fnCall.name, err?.message);
+        });
       }
     }
-  }, [playNextChunk, startMicStream]);
+  }, [clearConnectTimer, playNextChunk, startMicStream]);
 
   // ── Session Lifecycle ──────────────────────────────────────────────────────
 
@@ -407,41 +420,54 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     setState('connecting');
     setTranscript([]);
     audioQueueRef.current = [];
-    isPlayingRef.current = false;
-    sessionIdRef.current = `voice_${Date.now()}`;
+    isPlayingRef.current  = false;
+    mutedRef.current      = false;
+    sessionIdRef.current  = `voice_${Date.now()}`;
     sessionStartRef.current = Date.now();
+
+    // FIX BUG 5: 12-second hard timeout — prevents infinite "Connecting to Nova..."
+    clearConnectTimer();
+    connectTimerRef.current = setTimeout(() => {
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch (_) {}
+        wsRef.current = null;
+      }
+      stopMicStream();
+      setErrorMessage('Connection timed out — please check your internet and try again');
+      setState('error');
+    }, 12000);
 
     const hasPermission = await requestAudioPermissions();
     if (!hasPermission) {
+      clearConnectTimer();
       setState('error');
       return;
     }
 
     try {
+      console.log('[VoiceSession] Fetching session config from backend...');
       const { session, availableVoices: voices } = await voiceService.startSession({ voiceName });
-      sessionConfigRef.current = session;
+      sessionIdRef.current = session.ephemeralToken ? `voice_${Date.now()}` : sessionIdRef.current;
       setAvailableVoices(voices);
+      console.log('[VoiceSession] Session config received. Model:', session.model, 'Voice:', session.voiceConfig.voiceName);
 
       const wsUrl = `${GEMINI_LIVE_WS_URL}?key=${session.apiKey}`;
+      console.log('[VoiceSession] Opening WebSocket to Gemini Live...');
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[VoiceSession] WebSocket opened, sending setup...');
+        console.log('[VoiceSession] WebSocket opened — sending setup frame');
         ws.send(JSON.stringify({
           setup: {
             model: session.model,
-            systemInstruction: {
-              parts: [{ text: session.systemInstruction }],
-            },
+            systemInstruction: { parts: [{ text: session.systemInstruction }] },
             tools: session.tools,
             generationConfig: {
               responseModalities: session.sessionConfig.responseModalities,
               speechConfig: {
                 voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: session.voiceConfig.voiceName,
-                  },
+                  prebuiltVoiceConfig: { voiceName: session.voiceConfig.voiceName },
                 },
               },
             },
@@ -454,31 +480,34 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       ws.onmessage = handleWsMessage;
 
       ws.onerror = (err) => {
-        console.error('[VoiceSession] WebSocket error', err);
+        console.error('[VoiceSession] WebSocket error:', err);
+        clearConnectTimer();
         setErrorMessage('Connection error — please try again');
         setState('error');
       };
 
       ws.onclose = (event) => {
-        console.log('[VoiceSession] WebSocket closed', event.code, event.reason);
+        console.log('[VoiceSession] WebSocket closed:', event.code, event.reason || '(no reason)');
+        clearConnectTimer();
         stopMicStream();
         if (event.code !== 1000 && event.code !== 1005) {
-          setErrorMessage(`Live connection closed (${event.code}${event.reason ? ': ' + event.reason : ''})`);
+          setErrorMessage(`Connection closed (${event.code})`);
           setState('error');
         }
       };
 
     } catch (err: any) {
-      console.error('[VoiceSession] Failed to start:', err?.message);
+      clearConnectTimer();
+      console.error('[VoiceSession] startSession failed:', err?.message);
       setErrorMessage(err?.message || 'Failed to start voice session');
       setState('error');
     }
-  }, [selectedVoice, requestAudioPermissions, handleWsMessage, stopMicStream]);
+  }, [selectedVoice, requestAudioPermissions, handleWsMessage, clearConnectTimer, stopMicStream]);
 
   const endSession = useCallback(async () => {
+    clearConnectTimer();
     setState('idle');
     const duration = Math.round((Date.now() - sessionStartRef.current) / 1000);
-
     stopMicStream();
 
     if (wsRef.current) {
@@ -486,26 +515,24 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       wsRef.current = null;
     }
 
-    const currentTranscript = transcript;
-    if (currentTranscript.length > 0) {
+    if (transcript.length > 0) {
       voiceService.endSession({
-        transcript: currentTranscript,
+        transcript,
         sessionId: sessionIdRef.current,
         durationSeconds: duration,
-      }).catch(err => console.warn('[VoiceSession] End session failed:', err?.message));
+      }).catch(err => console.warn('[VoiceSession] endSession failed:', err?.message));
     }
-  }, [transcript, stopMicStream]);
+  }, [transcript, stopMicStream, clearConnectTimer]);
 
   const mute = useCallback(() => {
     mutedRef.current = true;
     setIsMuted(true);
-    // Don't stop the stream — just gate the sends via mutedRef
   }, []);
 
   const unmute = useCallback(() => {
     mutedRef.current = false;
     setIsMuted(false);
-    // If stream isn't running (e.g. was stopped), restart it
+    // Restart mic stream if it died while muted
     if (!audioStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
       startMicStream();
     }
@@ -518,10 +545,11 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      clearConnectTimer();
       try { wsRef.current?.close(); } catch (_) {}
       stopMicStream();
     };
-  }, [stopMicStream]);
+  }, [stopMicStream, clearConnectTimer]);
 
   return {
     state,

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.14-beta",
+    "date": "2026-09-14",
+    "title": "🔧 Voice Engine — Deep Fix (Connecting Hang & No Audio)",
+    "message": [
+      "Connecting Hang Fixed: setAudioModeAsync was blocking indefinitely on some Android devices, preventing the session from ever starting. It now runs fire-and-forget — Nova connects instantly.",
+      "Mic Stream Fixed: The AudioStream API is now accessed via the correct internal module path. Raw 16kHz PCM audio now flows cleanly to Gemini Live.",
+      "Audio Parsing Fixed: Reverted to simple synchronous JSON parsing that correctly handles Gemini Live's text-frame messages.",
+      "Connection Timeout: Added a 12-second hard timeout — if something goes wrong, the UI shows an error instead of spinning forever.",
+      "Playback Queue Fixed: Audio chunk completion now uses event-driven detection with a safety fallback, preventing queue deadlocks."
+    ]
+  },
+  {
     "version": "0.3.13-beta",
     "date": "2026-09-14",
     "title": "🎙️ Voice Fix — Nova Can Now Speak & Hear You",
