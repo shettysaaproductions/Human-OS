@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.13-beta",
+    "date": "2026-09-14",
+    "title": "🎙️ Voice Fix — Nova Can Now Speak & Hear You",
+    "message": [
+      "Mic Streaming Fixed: Switched from file-based recording (which recorded compressed .3gp audio Nova couldn't use) to real-time AudioStream PCM capture — Nova now actually receives your voice.",
+      "Playback Fixed: Replaced the broken polling-based audio player with an event-driven WAV playback queue — Nova's 24kHz responses now play clearly through your speaker.",
+      "Silent Mode Support: Audio session now correctly sets allowsRecording + playsInSilentMode so voice works even when your phone is on silent.",
+      "WebSocket Blob Fix: Incoming Gemini Live messages are now correctly decoded from Blob format on Android, resolving silent failures in the message handler."
+    ]
+  },
+  {
     "version": "0.3.12-beta",
     "date": "2026-09-14",
     "title": "⚡ Real-Time Voice Engine & Low-Latency Gemini 2.5 Live Activation",

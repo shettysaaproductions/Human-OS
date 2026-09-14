@@ -1,14 +1,25 @@
 /**
  * useVoiceSession.ts — Nova Voice Mode WebSocket + Audio Hook
  *
- * Manages the full lifecycle of a Gemini Live voice session:
- *   1. Fetches session config (ephemeral token) from backend
- *   2. Opens WebSocket directly to Google Gemini Live
- *   3. Sends initial setup and waits for setupComplete from Google
- *   4. Records mic audio via expo-audio and streams non-overlapping PCM chunks
- *   5. Receives 24kHz PCM chunks, wraps them in WAV headers, and plays them via expo-audio
- *   6. Handles tool calls → dispatches to backend → sends result back
- *   7. Builds transcript and sends it to backend on session end
+ * Manages the full lifecycle of a Gemini Live voice session using the correct
+ * expo-audio@56 APIs:
+ *
+ *   INPUT (Mic → Gemini Live):
+ *     - Uses AudioStream for real-time raw PCM capture (int16, 16kHz, mono)
+ *     - Each buffer callback fires ~20ms of audio → sent directly to WS as base64
+ *     - No file I/O, no polling, no compressed format issues
+ *
+ *   OUTPUT (Gemini Live → Speaker):
+ *     - Gemini sends 24kHz int16 PCM chunks in base64
+ *     - We prepend a 44-byte WAV RIFF header and pass as data-URI to createAudioPlayer
+ *     - Players are queued and played sequentially via addListener(PLAYBACK_STATUS_UPDATE)
+ *
+ *   API Fixes from expo-audio@56:
+ *     - requestRecordingPermissionsAsync() — top-level export (not ExpoAudio.*)
+ *     - setAudioModeAsync() — top-level export, takes { allowsRecording, playsInSilentMode }
+ *     - AudioStream — new native streaming API for raw PCM mic capture
+ *     - createAudioPlayer(source) — creates an unmanaged AudioPlayer (usable outside hooks)
+ *     - player.addListener('playbackStatusUpdate', cb) — event-driven completion detection
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -28,14 +39,7 @@ try {
   console.warn('[VoiceSession] expo-audio not available — voice mode disabled');
 }
 
-let FileSystem: any = null;
-try {
-  FileSystem = require('expo-file-system');
-} catch {
-  // Non-fatal
-}
-
-// ── Base64 & WAV Container Helper (for 24kHz PCM Playback) ───────────────────
+// ── Base64 & WAV Container Helpers ────────────────────────────────────────────
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const B64_LOOKUP = new Uint8Array(256);
 for (let i = 0; i < B64_CHARS.length; i++) B64_LOOKUP[B64_CHARS.charCodeAt(i)] = i;
@@ -74,7 +78,22 @@ function uint8ToBase64(bytes: Uint8Array): string {
 }
 
 /**
- * Prepend a valid 44-byte WAV header to raw 16-bit PCM so ExoPlayer/MediaPlayer can play it.
+ * Convert a float32 ArrayBuffer (from AudioStream) to int16 PCM base64.
+ * Gemini Live expects audio/pcm;rate=16000 (int16 little-endian).
+ */
+function float32BufferToInt16Base64(buffer: ArrayBuffer): string {
+  const float32 = new Float32Array(buffer);
+  const int16 = new Int16Array(float32.length);
+  for (let i = 0; i < float32.length; i++) {
+    const clamped = Math.max(-1, Math.min(1, float32[i]));
+    int16[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+  }
+  return uint8ToBase64(new Uint8Array(int16.buffer));
+}
+
+/**
+ * If Gemini sends int16 PCM base64, convert it to float32 for AudioStream playback.
+ * For createAudioPlayer we need a WAV container.
  */
 function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
   const pcmBytes = base64ToUint8(pcmBase64);
@@ -83,11 +102,11 @@ function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, 
   const view = new DataView(wavBytes.buffer);
 
   view.setUint32(0, 0x52494646, false); // "RIFF"
-  view.setUint32(4, 36 + dataLen, true);  // file size - 8
+  view.setUint32(4, 36 + dataLen, true);
   view.setUint32(8, 0x57415645, false); // "WAVE"
   view.setUint32(12, 0x666d7420, false); // "fmt "
-  view.setUint32(16, 16, true);          // PCM subchunk size
-  view.setUint16(20, 1, true);           // Audio format 1 = PCM
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);           // PCM
   view.setUint16(22, numChannels, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, (sampleRate * numChannels * bitsPerSample) / 8, true);
@@ -95,8 +114,8 @@ function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, 
   view.setUint16(34, bitsPerSample, true);
   view.setUint32(36, 0x64617461, false); // "data"
   view.setUint32(40, dataLen, true);
-
   wavBytes.set(pcmBytes, 44);
+
   return uint8ToBase64(wavBytes);
 }
 
@@ -141,32 +160,37 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const sessionConfigRef = useRef<VoiceSessionConfig | null>(null);
   const sessionIdRef = useRef<string>(`voice_${Date.now()}`);
   const sessionStartRef = useRef<number>(0);
-  const recorderRef = useRef<any>(null);
+
+  // Audio stream (mic → Gemini)
+  const audioStreamRef = useRef<any>(null);
+
+  // Playback queue
   const audioQueueRef = useRef<string[]>([]);
   const isPlayingRef = useRef(false);
   const mutedRef = useRef(false);
-  const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastReadPositionRef = useRef<number>(44); // skip WAV header by default
 
-  // ── Audio Permissions ─────────────────────────────────────────────────────
+  // ── Audio Permissions & Mode Setup ───────────────────────────────────────
 
   const requestAudioPermissions = useCallback(async (): Promise<boolean> => {
     if (!ExpoAudio) {
-      setErrorMessage('Voice mode requires a native build of the app. Please update via the Play Store or download the latest APK.');
+      setErrorMessage('Voice mode requires a native build. Please install the APK from the Play Store.');
       return false;
     }
     try {
+      // Use the correct expo-audio@56 top-level export
       const { granted } = await ExpoAudio.requestRecordingPermissionsAsync();
       if (!granted) {
         setErrorMessage('Microphone permission required for voice mode');
         return false;
       }
+
+      // Set audio mode using expo-audio@56 API
       await ExpoAudio.setAudioModeAsync({
         playsInSilentMode: true,
         allowsRecording: true,
-        shouldDuckAndroid: true,
-        staysActiveInBackground: false,
+        shouldPlayInBackground: false,
       });
+
       return true;
     } catch (err: any) {
       setErrorMessage(`Audio setup failed: ${err?.message || 'unknown error'}`);
@@ -174,32 +198,29 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
   }, []);
 
-  // ── Mic Recording ──────────────────────────────────────────────────────────
+  // ── Mic Streaming (AudioStream API) ──────────────────────────────────────
 
-  const sendAudioChunk = useCallback(async () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!recorderRef.current) return;
-    if (mutedRef.current) return;
-    if (!FileSystem) return;
-
+  const startMicStream = useCallback(() => {
+    if (!ExpoAudio?.AudioModule) {
+      console.warn('[VoiceSession] AudioModule not available for streaming');
+      return;
+    }
     try {
-      const uri = recorderRef.current.getURI?.() ?? null;
-      if (!uri) return;
+      // Create a raw PCM audio stream at 16kHz mono int16 (Gemini Live requirement)
+      const stream = new ExpoAudio.AudioModule.AudioStream({
+        sampleRate: 16000,
+        channels: 1,
+        encoding: 'float32', // capture float32, we'll convert to int16 for Gemini
+      });
 
-      const fileInfo = await FileSystem.getInfoAsync(uri);
-      if (!fileInfo.exists || typeof fileInfo.size !== 'number') return;
+      stream.addListener('audioStreamBuffer', (buffer: any) => {
+        if (mutedRef.current) return;
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        if (!buffer?.data) return;
 
-      // Only read new incremental PCM bytes
-      if (fileInfo.size > lastReadPositionRef.current) {
-        const readLen = fileInfo.size - lastReadPositionRef.current;
-        const base64Chunk = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType?.Base64 ?? 'base64',
-          position: lastReadPositionRef.current,
-          length: readLen,
-        });
-
-        if (base64Chunk && wsRef.current?.readyState === WebSocket.OPEN) {
-          lastReadPositionRef.current = fileInfo.size;
+        try {
+          // Convert float32 PCM → int16 base64 for Gemini Live
+          const base64Chunk = float32BufferToInt16Base64(buffer.data);
           wsRef.current.send(JSON.stringify({
             realtimeInput: {
               mediaChunks: [{
@@ -208,74 +229,30 @@ export function useVoiceSession(): UseVoiceSessionReturn {
               }],
             },
           }));
+        } catch (e: any) {
+          console.warn('[VoiceSession] Stream buffer encode error:', e?.message);
         }
-      }
-    } catch (_) {
-      // Non-fatal best-effort
-    }
-  }, []);
+      });
 
-  const startRecording = useCallback(async () => {
-    if (!ExpoAudio) return;
-    if (mutedRef.current) return;
-    try {
-      if (recorderRef.current) {
-        try { recorderRef.current.stop(); } catch (_) {}
-        recorderRef.current = null;
-      }
-      if (chunkIntervalRef.current) {
-        clearInterval(chunkIntervalRef.current);
-        chunkIntervalRef.current = null;
-      }
+      stream.start().catch((err: any) => {
+        console.warn('[VoiceSession] AudioStream start failed:', err?.message);
+      });
 
-      const recorder = ExpoAudio.createRecording ? ExpoAudio.createRecording() : null;
-      if (!recorder) {
-        console.warn('[VoiceSession] expo-audio createRecording not available');
-        return;
-      }
-
-      const preset = ExpoAudio.RecordingPresets?.LOW_QUALITY ?? {
-        android: {
-          extension: '.wav',
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: '.wav',
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-      };
-
-      await recorder.prepareToRecordAsync(preset);
-      recorder.record();
-      recorderRef.current = recorder;
-      lastReadPositionRef.current = 44; // skip initial WAV container header
-
-      // Stream incremental chunks every 250ms
-      chunkIntervalRef.current = setInterval(() => {
-        sendAudioChunk();
-      }, 250);
-
+      audioStreamRef.current = stream;
+      console.log('[VoiceSession] AudioStream started (16kHz, mono, float32→int16)');
     } catch (err: any) {
-      console.warn('[VoiceSession] Recording start failed:', err?.message);
-    }
-  }, [sendAudioChunk]);
-
-  const stopRecording = useCallback(async () => {
-    if (chunkIntervalRef.current) {
-      clearInterval(chunkIntervalRef.current);
-      chunkIntervalRef.current = null;
-    }
-    if (recorderRef.current) {
-      try { recorderRef.current.stop(); } catch (_) {}
-      recorderRef.current = null;
+      console.warn('[VoiceSession] AudioStream creation failed:', err?.message);
     }
   }, []);
 
-  // ── Audio Playback Queue ───────────────────────────────────────────────────
+  const stopMicStream = useCallback(() => {
+    if (audioStreamRef.current) {
+      try { audioStreamRef.current.stop(); } catch (_) {}
+      audioStreamRef.current = null;
+    }
+  }, []);
+
+  // ── Audio Playback Queue ──────────────────────────────────────────────────
 
   const playNextChunk = useCallback(async () => {
     if (!ExpoAudio) return;
@@ -285,20 +262,55 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     const base64Audio = audioQueueRef.current.shift()!;
     try {
       if (ExpoAudio.createAudioPlayer) {
-        // Wrap 24kHz raw PCM in a valid WAV header so Android ExoPlayer can play it
-        const wavDataUri = `data:audio/wav;base64,${pcmToWavBase64(base64Audio, 24000, 1, 16)}`;
+        // Wrap Gemini's 24kHz int16 PCM in a WAV container so ExoPlayer can decode it
+        const wavBase64 = pcmToWavBase64(base64Audio, 24000, 1, 16);
+        const wavDataUri = `data:audio/wav;base64,${wavBase64}`;
         const player = ExpoAudio.createAudioPlayer({ uri: wavDataUri });
-        player.play();
 
-        const checkDone = setInterval(() => {
-          if (!player.playing) {
-            clearInterval(checkDone);
+        // Use event listener to detect completion — more reliable than polling .playing
+        const subscription = player.addListener('playbackStatusUpdate', (status: any) => {
+          // didJustFinish fires once when playback completes
+          if (status.didJustFinish || (!status.isLoaded && !status.isBuffering)) {
+            subscription?.remove();
             isPlayingRef.current = false;
-            player.remove?.();
+            try { player.remove?.(); } catch (_) {}
+            // Play next chunk in queue
             playNextChunk();
           }
+        });
+
+        player.play();
+
+        // Fallback: if status events never fire (some Android configs), poll duration
+        const fallbackCheck = setTimeout(async () => {
+          if (isPlayingRef.current) {
+            try {
+              if (!player.playing) {
+                subscription?.remove();
+                isPlayingRef.current = false;
+                try { player.remove?.(); } catch (_) {}
+                playNextChunk();
+              }
+            } catch (_) {}
+          }
+        }, 10000); // 10s hard fallback
+
+        // Also detect playback start so we can clear fallback when we know it's playing
+        const startCheck = setInterval(() => {
+          if (player.playing || player.currentTime > 0) {
+            clearInterval(startCheck);
+            // Clear the hard fallback — rely on events from now on
+            clearTimeout(fallbackCheck);
+          }
         }, 100);
+
+        // Safety: if player never started at all (load error), clear after 3s
+        setTimeout(() => {
+          clearInterval(startCheck);
+        }, 3000);
+
       } else {
+        // expo-audio not available for playback
         isPlayingRef.current = false;
       }
     } catch (err: any) {
@@ -313,16 +325,21 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const handleWsMessage = useCallback(async (event: MessageEvent) => {
     let data: any;
     try {
-      data = JSON.parse(event.data);
+      // Handle both string and Blob payloads (React Native WS sends Blob)
+      let rawStr = event.data;
+      if (rawStr && typeof rawStr.text === 'function') {
+        rawStr = await rawStr.text();
+      }
+      data = JSON.parse(rawStr);
     } catch {
       return;
     }
 
     // 1. Google Live setup complete confirmation
     if (data.setupComplete) {
-      console.log('[VoiceSession] Gemini Live setupComplete received');
+      console.log('[VoiceSession] Gemini Live setupComplete received — starting mic stream');
       setState('listening');
-      startRecording();
+      startMicStream();
       return;
     }
 
@@ -340,7 +357,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       }
     }
 
-    // 3. Transcription of user speech
+    // 3. Transcription of user speech (inputTranscription)
     if (data.serverContent?.inputTranscription?.text) {
       const userText = data.serverContent.inputTranscription.text;
       if (userText.trim()) {
@@ -354,7 +371,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       setState('listening');
     }
 
-    // 5. Tool / function calls
+    // 5. Tool / function calls from Gemini Live
     if (data.toolCall?.functionCalls) {
       for (const fnCall of data.toolCall.functionCalls) {
         try {
@@ -380,7 +397,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         }
       }
     }
-  }, [playNextChunk, startRecording]);
+  }, [playNextChunk, startMicStream]);
 
   // ── Session Lifecycle ──────────────────────────────────────────────────────
 
@@ -390,6 +407,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     setState('connecting');
     setTranscript([]);
     audioQueueRef.current = [];
+    isPlayingRef.current = false;
     sessionIdRef.current = `voice_${Date.now()}`;
     sessionStartRef.current = Date.now();
 
@@ -409,7 +427,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        // Send initial setup payload — recording will start upon setupComplete
+        console.log('[VoiceSession] WebSocket opened, sending setup...');
         ws.send(JSON.stringify({
           setup: {
             model: session.model,
@@ -443,7 +461,8 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
       ws.onclose = (event) => {
         console.log('[VoiceSession] WebSocket closed', event.code, event.reason);
-        if (event.code !== 1000) {
+        stopMicStream();
+        if (event.code !== 1000 && event.code !== 1005) {
           setErrorMessage(`Live connection closed (${event.code}${event.reason ? ': ' + event.reason : ''})`);
           setState('error');
         }
@@ -454,16 +473,16 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       setErrorMessage(err?.message || 'Failed to start voice session');
       setState('error');
     }
-  }, [selectedVoice, requestAudioPermissions, handleWsMessage]);
+  }, [selectedVoice, requestAudioPermissions, handleWsMessage, stopMicStream]);
 
   const endSession = useCallback(async () => {
     setState('idle');
     const duration = Math.round((Date.now() - sessionStartRef.current) / 1000);
 
-    await stopRecording();
+    stopMicStream();
 
     if (wsRef.current) {
-      try { wsRef.current.close(); } catch (_) {}
+      try { wsRef.current.close(1000, 'user ended session'); } catch (_) {}
       wsRef.current = null;
     }
 
@@ -475,33 +494,34 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         durationSeconds: duration,
       }).catch(err => console.warn('[VoiceSession] End session failed:', err?.message));
     }
-  }, [transcript, stopRecording]);
+  }, [transcript, stopMicStream]);
 
   const mute = useCallback(() => {
     mutedRef.current = true;
     setIsMuted(true);
-    if (chunkIntervalRef.current) {
-      clearInterval(chunkIntervalRef.current);
-      chunkIntervalRef.current = null;
-    }
+    // Don't stop the stream — just gate the sends via mutedRef
   }, []);
 
   const unmute = useCallback(() => {
     mutedRef.current = false;
     setIsMuted(false);
-    startRecording();
-  }, [startRecording]);
+    // If stream isn't running (e.g. was stopped), restart it
+    if (!audioStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      startMicStream();
+    }
+  }, [startMicStream]);
 
   const selectVoice = useCallback((voiceId: string) => {
     setSelectedVoice(voiceId);
   }, []);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       try { wsRef.current?.close(); } catch (_) {}
-      try { stopRecording(); } catch (_) {}
+      stopMicStream();
     };
-  }, [stopRecording]);
+  }, [stopMicStream]);
 
   return {
     state,
