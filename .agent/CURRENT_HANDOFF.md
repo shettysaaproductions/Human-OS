@@ -1,36 +1,29 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-14 — Native Crash Fixes & Successful APK Build c0d52803
+2026-09-14 — Real-Time Voice Mode OTA (v0.3.12-beta) & GEMINI_API_KEY_5 Verified
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Current Task: COMPLETE — Startup Crash Fixes & Fresh APK
+## Current Task: COMPLETE — Gemini Live Voice Engine & Key 5 Verification
 
-### Root Cause of Startup Crashes
-The app was crashing immediately on startup (before any JS rendered). Diagnosing revealed three critical JS initialization bugs that were killing the native process during module load:
+### 1. GEMINI_API_KEY_5 Validation
+- **Key Status**: 100% verified and active.
+- **Dedicated Slot**: Configured as first voice key (`LIVE_KEY_1`) in `GeminiLivePool` (range 5–19).
+- **Ephemeral Token**: Successfully generates short-lived auth tokens (`authTokens.create`) via `@google/genai`.
+- **Live WebSocket Handshake**: Connected to `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent` with `models/gemini-2.5-flash-native-audio-latest` and received valid `{"setupComplete":{}}` response.
 
-1. **`_ensureAndroidChannels()` at Module Load**: This async function was called directly at the top level of `notificationService.ts`. If the `expo-notifications` native module wasn't fully initialized, this crashed the process.
-2. **`Notifications.setNotificationHandler()` at Module Load**: Also called at the top level, without a `try/catch`. 
-3. **No Root ErrorBoundary**: `index.ts` was not wrapped in an ErrorBoundary, meaning any startup JS error silently killed the app.
-4. **`AutonomousEyes` Camera Crash**: The `CameraView` component was rendered unconditionally in `App.tsx` and wasn't wrapped in an ErrorBoundary. If `useCameraPermissions` or the native camera module had a blip, it killed the chat tree.
-
-### Fixes Applied
-- **`index.ts`**: Added the absolutely critical `import 'react-native-gesture-handler';` to the very top. This is strictly required by the library, and without it, Android release builds crash immediately upon launch.
-- **`notificationService.ts`**: Removed top-level `_ensureAndroidChannels()` call (it is safely called via `initialize()` after mount). Wrapped `setNotificationHandler()` in `try/catch`.
-- **`App.tsx`**: Wrapped `AutonomousEyes` in an `<ErrorBoundary fallback={null}>`.
-- **`index.ts`**: Created a `RootApp` component that wraps `App` in `<ErrorBoundary>`. Rewrote using `React.createElement` instead of JSX so we could keep the `.ts` extension (Metro expects exactly `index.ts` due to `package.json`).
-- **`package.json`**: Removed `expo-av`. This native module was fundamentally causing an uncatchable OS-level crash upon launch on Android (likely due to SDK 36/Android 15 preview incompatibility). VoiceMode falls back gracefully without it.
-
-### EAS Build Success
-- Triggered `eas build --platform android --profile apk --non-interactive`.
-- Build successfully completed with ID **0e24d5aa-c63b-4e6d-88de-fd768410f534**.
-- This fresh APK is stable and does not crash, restoring access to the app while Voice Mode gracefully waits for a stable native implementation.
+### 2. EAS Production OTA Publish (v0.3.12-beta)
+- **Branch**: `production`
+- **Runtime Version**: `1.1.0`
+- **Update Group ID**: `c754f123-14b3-4460-a891-f1636afad70d`
+- **Android Update ID**: `01a09fcb-c4c8-72a7-9f76-fd8f3ba71237`
+- **iOS Update ID**: `01a09fcb-c4c8-7f82-8273-ad0454e307d7`
+- **Changelog Modal**: Updated `mobile/src/config/updateHistory.json` with `v0.3.12-beta`.
+- **Broadcast Push Notification**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ## NEXT ACTION
-- User to install the new APK (build `0e24d5aa`) and verify:
-  1. The app starts cleanly without crashing.
-  2. Voice Mode opens successfully and requests microphone permissions.
-  3. The microphone captures audio and transcribes correctly (via the new `expo-file-system` code).
+- User to launch mobile app to receive OTA update `c754f123-14b3-4460-a891-f1636afad70d` and test live voice interactions using `GEMINI_API_KEY_5`.
+
