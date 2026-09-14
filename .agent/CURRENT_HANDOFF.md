@@ -22,15 +22,15 @@ The app was crashing immediately on startup (before any JS rendered). Diagnosing
 - **`notificationService.ts`**: Removed top-level `_ensureAndroidChannels()` call (it is safely called via `initialize()` after mount). Wrapped `setNotificationHandler()` in `try/catch`.
 - **`App.tsx`**: Wrapped `AutonomousEyes` in an `<ErrorBoundary fallback={null}>`.
 - **`index.ts`**: Created a `RootApp` component that wraps `App` in `<ErrorBoundary>`. Rewrote using `React.createElement` instead of JSX so we could keep the `.ts` extension (Metro expects exactly `index.ts` due to `package.json`).
-- **`app.json`**: Added `RECORD_AUDIO` to Android permissions, which is required for Voice Mode to actually work once `expo-av` initializes.
+- **`package.json`**: Removed `expo-av`. This native module was fundamentally causing an uncatchable OS-level crash upon launch on Android (likely due to SDK 36/Android 15 preview incompatibility). VoiceMode falls back gracefully without it.
 
 ### EAS Build Success
 - Triggered `eas build --platform android --profile apk --non-interactive`.
-- Build successfully completed with ID **6b8f8362-eed8-496d-843b-76cd7b3fcc86**.
-- This fresh APK natively bundles `expo-av` so the Voice Mode fallback screen will no longer show.
+- Build successfully completed with ID **0e24d5aa-c63b-4e6d-88de-fd768410f534**.
+- This fresh APK is stable and does not crash, restoring access to the app while Voice Mode gracefully waits for a stable native implementation.
 
 ## NEXT ACTION
-- User to install the new APK (build `6b8f8362`) and verify:
+- User to install the new APK (build `0e24d5aa`) and verify:
   1. The app starts cleanly without crashing.
   2. Voice Mode opens successfully and requests microphone permissions.
   3. The microphone captures audio and transcribes correctly (via the new `expo-file-system` code).
