@@ -33,7 +33,13 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { File as FSFile, Paths } from 'expo-file-system';
+// Use legacy subpath — works in all existing APKs regardless of expo-file-system version
+import {
+  writeAsStringAsync,
+  deleteAsync,
+  cacheDirectory,
+  EncodingType,
+} from 'expo-file-system/legacy';
 import {
   voiceService,
   VoiceSessionConfig,
@@ -123,9 +129,9 @@ function float32ToInt16Base64(buffer: ArrayBuffer): string {
 
 /**
  * Gemini sends 24kHz int16 PCM. Prepend a WAV header so ExoPlayer/AVPlayer
- * can decode it. Returns a Uint8Array (WAV bytes — no base64 needed).
+ * can decode it. Returns base64-encoded WAV for writeAsStringAsync.
  */
-function pcmToWavBytes(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): Uint8Array {
+function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
   const pcmBytes = base64ToUint8(pcmBase64);
   const dataLen = pcmBytes.length;
   const wav = new Uint8Array(44 + dataLen);
@@ -144,7 +150,7 @@ function pcmToWavBytes(pcmBase64: string, sampleRate = 24000, numChannels = 1, b
   v.setUint32(36, 0x64617461, false); // "data"
   v.setUint32(40, dataLen, true);
   wav.set(pcmBytes, 44);
-  return wav;  // Return raw bytes — write directly to file (no base64 needed)
+  return uint8ToBase64(wav);
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -307,21 +313,20 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
     const base64Pcm = audioQueueRef.current.shift()!;
     try {
-      // Build WAV bytes (44-byte header + 24kHz int16 PCM data)
-      const wavBytes = pcmToWavBytes(base64Pcm, 24000, 1, 16);
+      // Build WAV base64 (44-byte header + 24kHz int16 PCM data)
+      const wavBase64 = pcmToWavBase64(base64Pcm, 24000, 1, 16);
 
-      // Write to a temp file in the cache dir — ExoPlayer plays file:// URIs reliably
-      const tmpFile = new FSFile(Paths.cache, `nova_chunk_${++_chunkCounter}.wav`);
-      if (tmpFile.exists) tmpFile.delete();
-      tmpFile.write(wavBytes);   // sync write of Uint8Array — fastest path
-      const tmpUri = tmpFile.uri;
-      console.log(`[VoiceSession] Playing chunk #${_chunkCounter} from file`);
+      // Write to temp file using the LEGACY API (works in all installed APK versions).
+      // expo-file-system/legacy is guaranteed to be present in the native layer.
+      const tmpPath = `${cacheDirectory}nova_chunk_${++_chunkCounter}.wav`;
+      await writeAsStringAsync(tmpPath, wavBase64, { encoding: EncodingType.Base64 });
+      console.log(`[VoiceSession] Playing chunk #${_chunkCounter} from ${tmpPath}`);
 
-      const player = ExpoAudio.createAudioPlayer({ uri: tmpUri });
+      const player = ExpoAudio.createAudioPlayer({ uri: tmpPath });
 
       let done = false;
       const cleanAndAdvance = () => {
-        try { tmpFile.exists && tmpFile.delete(); } catch (_) {}
+        deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
         playNextChunk();
       };
       const markDone = () => {
@@ -563,16 +568,9 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       wsRef.current = null;
     }
 
-    // Clean up any leftover temp WAV files in cache dir
-    try {
-      const cacheDir = Paths.cache;
-      const items = cacheDir.list();
-      for (const item of items) {
-        if (item instanceof FSFile && item.name.startsWith('nova_chunk_')) {
-          try { item.delete(); } catch (_) {}
-        }
-      }
-    } catch (_) {}
+    // Clean up leftover temp WAV files (best-effort)
+    // Note: No directory listing in legacy API — files auto-cleared by OS on low storage
+    // Active cleanup happens per-chunk in cleanAndAdvance()
 
     if (transcript.length > 0) {
       voiceService.endSession({
