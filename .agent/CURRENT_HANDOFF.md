@@ -41,6 +41,7 @@ Latest commit: `350a0fa`
 
 | Version | Update Group ID | Android Update ID | Commit |
 |---|---|---|---|
+| v0.3.19-beta | d2f2b44a-96d9-4f93-b4cd-a4bfbf3a9817 | 01a0a3f7-b57a-74d3-8cbf-17936be9dbd7 | 65ceed6 |
 | v0.3.16-beta | e3dd1dd5-f437-46f3-a0dc-6d942a9f2a67 | 01a0a057-b66e-7354-92e6-a4aa7268a51a | 324e69e |
 | v0.3.15-beta | 48c6db6f-f465-4c7f-96a7-8b2632a50cd4 | 01a0a043-3693-7b91-9bca-8303b9471d8b | d34d8c1 |
 | v0.3.14-beta | (prev session) | — | a3c1e9e |
