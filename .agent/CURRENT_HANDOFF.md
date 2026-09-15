@@ -1,36 +1,39 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-14 — v0.3.16-beta OTA live + Backend redeployed (88129e7)
+2026-09-15 — v0.3.19-beta OTA & Backend WebSocket Proxy with Gemini 2.5 Live Audio
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Latest commit: `324e69e`
+Latest commit: `350a0fa`
 
-## Status: NEEDS USER TEST
+## Status: OTA DEPLOYING & TEST PENDING
 
 ---
 
-### The Full Root Cause Chain (finally complete)
+### The Real Breakthrough: Root Cause Uncovered & Fixed
 
-**ORIGINAL SYMPTOM**: "Connecting to Nova..." → timeout → error on every attempt.
+**PREVIOUS ISSUE**: Tap to talk to Nova → spinner runs for 30–35s → "Connection issue" / timeout.
 
-**v0.3.12–13**: Stuck connecting (setAudioModeAsync blocking) + no audio (wrong API for recording).
+1. **Google Gemini Live API Model Deprecation**:
+   - Google **deprecated** `gemini-2.0-flash-exp` for `bidiGenerateContent` in API version `v1beta`.
+   - Any WebSocket connection requesting `models/gemini-2.0-flash-exp` was immediately closed by Google with:
+     `WebSocket Code 1008: "models/gemini-2.0-flash-exp is not found for API version v1beta, or is not supported for bidiGenerateContent"`.
+   - Verified via Google's `ModelService.ListModels` that the current supported model for bidirectional live audio is:
+     **`models/gemini-2.5-flash-native-audio-latest`**.
+   - Verified via standalone Node script that WebSocket connections with `models/gemini-2.5-flash-native-audio-latest` open immediately, return `setupComplete`, and stream two-way audio (`audio/pcm;rate=24000`) without errors.
 
-**v0.3.14**: Connecting fixed. Reached "Listening..." but NO VOICE from Nova.
-- Data: URI playback fails silently in ExoPlayer (fixed in v0.3.15)
+2. **Keys (AQ. vs AIzaSy) Clarification**:
+   - The user's Google Cloud project credentials starting with `AQ.` (OAuth/service credentials) **DO WORK** for Gemini Live WebSocket connections when the supported model is specified.
+   - The failures previously attributed to key format were actually caused by Google rejecting the outdated model name `gemini-2.0-flash-exp`.
 
-**v0.3.15**: Better playback path. BUT still "Connection timed out" in 12s.
-- **REAL ROOT CAUSE**: Backend `/api/voice/session` returning **HTTP 500** on every request.
-- `authTokens.create` (Google SDK) requires a special Google Cloud IAM permission
-  that standard AI Studio API keys do NOT have. Every call throws `"fetch failed"`.
-- This means the backend crashed before ever returning session config to mobile.
-- Mobile got no session → connection timed out after 12 seconds.
+3. **Backend WebSocket Proxy Architecture**:
+   - Implemented `NovaVoiceProxy.ts` at `/voice/ws`.
+   - Mobile connects via `wss://[backend]/voice/ws?token=JWT&voice=Kore`.
+   - Backend authenticates JWT, enriches with memory context and voice tools, connects to Gemini Live, and relays frames bidirectionally.
+   - Mobile no longer connects directly to Google or exposes keys client-side.
 
-**v0.3.16**: 
-- **Backend fixed**: Skip `authTokens.create` entirely. Return raw API key directly.
-- **Timeout increased**: 12s → 35s (handles Render free-tier cold starts of 20-30s).
 
 ---
 
