@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.3.20-beta",
+    "date": "2026-09-15",
+    "title": "🔊 Crystal Clear Fluid Voice — Zero Stuttering",
+    "message": [
+      "Smooth Audio Jitter Buffering: Replaced per-chunk micro-playback with continuous PCM audio buffering. Nova now combines streaming audio into seamless speech segments, completely eliminating robotic stuttering and slow-motion pauses between syllables.",
+      "Dynamic Rate Matching: Added dynamic audio sample-rate detection directly from Gemini Live stream frames, ensuring speech plays at natural human cadence and tone.",
+      "Acoustic Feedback Protection: Microphone input is safely silenced while Nova is speaking, preventing speaker output from feeding back into the microphone."
+    ]
+  },
+  {
     "version": "0.3.19-beta",
     "date": "2026-09-15",
     "title": "🎙️ Nova Voice — Breakthrough Fix & Live Architecture",

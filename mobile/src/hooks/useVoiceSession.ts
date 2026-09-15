@@ -139,16 +139,18 @@ function float32ToInt16Base64(buffer: ArrayBuffer): string {
 }
 
 /**
- * Gemini sends 24kHz int16 PCM. Prepend a WAV header so ExoPlayer/AVPlayer
- * can decode it. Returns base64-encoded WAV for writeAsStringAsync.
+ * Concatenate multiple base64 PCM chunks into a single WAV file.
+ * Prepend a 44-byte WAV header so ExoPlayer/AVPlayer can decode it cleanly.
+ * Returns base64-encoded WAV for writeAsStringAsync.
  */
-function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
-  const pcmBytes = base64ToUint8(pcmBase64);
-  const dataLen = pcmBytes.length;
-  const wav = new Uint8Array(44 + dataLen);
+function pcmChunksToWavBase64(pcmChunks: string[], sampleRate = 24000, numChannels = 1, bitsPerSample = 16): string {
+  const byteArrays = pcmChunks.map(c => base64ToUint8(c));
+  const totalPcmLen = byteArrays.reduce((sum, arr) => sum + arr.length, 0);
+
+  const wav = new Uint8Array(44 + totalPcmLen);
   const v = new DataView(wav.buffer);
   v.setUint32(0,  0x52494646, false); // "RIFF"
-  v.setUint32(4,  36 + dataLen, true);
+  v.setUint32(4,  36 + totalPcmLen, true);
   v.setUint32(8,  0x57415645, false); // "WAVE"
   v.setUint32(12, 0x666d7420, false); // "fmt "
   v.setUint32(16, 16, true);
@@ -159,8 +161,13 @@ function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, numChannels = 1, 
   v.setUint16(32, (numChannels * bitsPerSample) / 8, true);
   v.setUint16(34, bitsPerSample, true);
   v.setUint32(36, 0x64617461, false); // "data"
-  v.setUint32(40, dataLen, true);
-  wav.set(pcmBytes, 44);
+  v.setUint32(40, totalPcmLen, true);
+
+  let offset = 44;
+  for (const arr of byteArrays) {
+    wav.set(arr, offset);
+    offset += arr.length;
+  }
   return uint8ToBase64(wav);
 }
 
@@ -209,6 +216,9 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const audioStreamRef  = useRef<any>(null);
   const audioQueueRef   = useRef<string[]>([]);
   const isPlayingRef    = useRef(false);
+  const sampleRateRef   = useRef<number>(24000);
+  const turnCompleteRef = useRef(false);
+  const activePlayerRef = useRef<any>(null);
   const mutedRef        = useRef(false);
   const connectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -308,6 +318,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
       stream.addListener('audioStreamBuffer', (buffer: any) => {
         if (mutedRef.current) return;
+        if (isPlayingRef.current) return; // Ignore mic while Nova is speaking (prevents echo / self-interruption)
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
         if (!buffer?.data) return;
 
@@ -350,38 +361,56 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
   /**
    * FIX 1: Write WAV to a temp file, play from file:// URI.
+  // ── Audio Playback Queue (Smooth Jitter Buffering) ───────────────────────
+
+  /**
+   * Concatenates all currently accumulated PCM chunks into a single WAV file
+   * and plays it continuously through ExoPlayer.
    *
-   * data: URIs fail silently on Android — ExoPlayer's ProgressiveMediaSource
-   * cannot detect MIME type from a data: scheme and throws internally.
-   * File-based playback is reliable across all Android versions.
+   * Why this eliminates stuttering ("atak-atak ke bolna" / slow-mo):
+   *   Streaming Gemini Live sends audio in tiny 50ms slices. Playing each slice
+   *   as an individual file caused a 50-100ms gap between every syllable while
+   *   the OS opened a new player. Combining all ready chunks into unified audio
+   *   segments produces fluid, continuous speech with zero gaps.
    */
-  const playNextChunk = useCallback(async () => {
+  const playAudioQueue = useCallback(async () => {
     if (!ExpoAudio?.createAudioPlayer) return;
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
+
+    // Grab all chunks currently accumulated in the queue
+    const chunks = audioQueueRef.current.splice(0, audioQueueRef.current.length);
+    if (chunks.length === 0) return;
+
     isPlayingRef.current = true;
+    setState('speaking');
 
-    const base64Pcm = audioQueueRef.current.shift()!;
+    const sampleRate = sampleRateRef.current || 24000;
+    const tmpPath = `${cacheDirectory}nova_audio_${++_chunkCounter}.wav`;
+
     try {
-      // Build WAV base64 (44-byte header + 24kHz int16 PCM data)
-      const wavBase64 = pcmToWavBase64(base64Pcm, 24000, 1, 16);
-
-      // Write to temp file using the LEGACY API (works in all installed APK versions).
-      // expo-file-system/legacy is guaranteed to be present in the native layer.
-      const tmpPath = `${cacheDirectory}nova_chunk_${++_chunkCounter}.wav`;
+      const wavBase64 = pcmChunksToWavBase64(chunks, sampleRate, 1, 16);
       await writeAsStringAsync(tmpPath, wavBase64, { encoding: EncodingType.Base64 });
-      console.log(`[VoiceSession] Playing chunk #${_chunkCounter} from ${tmpPath}`);
 
       const player = ExpoAudio.createAudioPlayer({ uri: tmpPath });
+      activePlayerRef.current = player;
 
       let done = false;
       const cleanAndAdvance = () => {
         deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-        playNextChunk();
+        activePlayerRef.current = null;
+        if (audioQueueRef.current.length > 0) {
+          playAudioQueue();
+        } else {
+          isPlayingRef.current = false;
+          if (turnCompleteRef.current) {
+            setState('listening');
+          }
+        }
       };
+
       const markDone = () => {
         if (done) return;
         done = true;
-        isPlayingRef.current = false;
         try { sub?.remove(); } catch (_) {}
         clearInterval(poll);
         try { player.remove?.(); } catch (_) {}
@@ -391,40 +420,40 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       // Event-driven (primary path)
       const sub = player.addListener('playbackStatusUpdate', (status: any) => {
         if (status?.didJustFinish) {
-          console.log(`[VoiceSession] Chunk #${_chunkCounter} done (event)`);
           markDone();
         }
         if (status?.error) {
-          console.warn(`[VoiceSession] Chunk playback error: ${status.error}`);
+          console.warn('[VoiceSession] Audio playback status error:', status.error);
           markDone();
         }
       });
 
       player.play();
 
-      // FIX 4: Poll checks isLoaded && !playing (currentTime can reset to 0 at end)
+      // Poll fallback
       let pollTick = 0;
       const poll = setInterval(() => {
         pollTick++;
-        // Wait a few ticks before checking to let the player start
-        if (pollTick > 3 && player.isLoaded && !player.playing) {
-          console.log(`[VoiceSession] Chunk #${_chunkCounter} done (poll)`);
+        if (pollTick > 2 && player.isLoaded && !player.playing) {
           markDone();
         }
       }, 200);
 
-      // Hard ceiling: 20s max per chunk
+      // Hard ceiling: 60s max per segment
       setTimeout(() => {
-        if (!done) {
-          console.warn(`[VoiceSession] Chunk #${_chunkCounter} timeout`);
-          markDone();
-        }
-      }, 20000);
+        if (!done) markDone();
+      }, 60000);
 
     } catch (err: any) {
       console.warn('[VoiceSession] Playback error:', err?.message);
+      deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
       isPlayingRef.current = false;
-      playNextChunk();
+      activePlayerRef.current = null;
+      if (audioQueueRef.current.length > 0) {
+        playAudioQueue();
+      } else if (turnCompleteRef.current) {
+        setState('listening');
+      }
     }
   }, []);
 
@@ -454,11 +483,20 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
     // 2. Audio response chunks from Gemini
     if (data.serverContent?.modelTurn?.parts) {
-      setState('speaking');
+      turnCompleteRef.current = false;
       for (const part of data.serverContent.modelTurn.parts) {
         if (part.inlineData?.data && part.inlineData.mimeType?.startsWith('audio/')) {
+          // Dynamic sample rate extraction from mimeType (e.g. rate=24000)
+          const rateMatch = part.inlineData.mimeType.match(/rate=(\d+)/);
+          if (rateMatch) {
+            sampleRateRef.current = parseInt(rateMatch[1], 10);
+          }
           audioQueueRef.current.push(part.inlineData.data);
-          playNextChunk();
+
+          // If not currently playing, start playing accumulated chunks
+          if (!isPlayingRef.current) {
+            playAudioQueue();
+          }
         }
         if (part.text) {
           setTranscript(prev => [
@@ -483,7 +521,12 @@ export function useVoiceSession(): UseVoiceSessionReturn {
 
     // 4. Turn complete
     if (data.serverContent?.turnComplete) {
-      setState('listening');
+      turnCompleteRef.current = true;
+      if (!isPlayingRef.current && audioQueueRef.current.length === 0) {
+        setState('listening');
+      } else if (!isPlayingRef.current && audioQueueRef.current.length > 0) {
+        playAudioQueue();
+      }
     }
 
     // 5. Tool calls from Gemini Live
@@ -510,7 +553,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         });
       }
     }
-  }, [clearConnectTimer, playNextChunk, startMicStream]);
+  }, [clearConnectTimer, playAudioQueue, startMicStream]);
 
   // ── Session Lifecycle ──────────────────────────────────────────────────────
 
@@ -624,6 +667,14 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     setState('idle');
     const duration = Math.round((Date.now() - sessionStartRef.current) / 1000);
     stopMicStream();
+
+    if (activePlayerRef.current) {
+      try { activePlayerRef.current.pause?.(); } catch (_) {}
+      try { activePlayerRef.current.remove?.(); } catch (_) {}
+      activePlayerRef.current = null;
+    }
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
 
     if (wsRef.current) {
       try { wsRef.current.close(1000, 'user ended session'); } catch (_) {}
