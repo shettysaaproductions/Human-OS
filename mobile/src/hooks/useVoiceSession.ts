@@ -398,13 +398,12 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       const cleanAndAdvance = () => {
         deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
         activePlayerRef.current = null;
+        isPlayingRef.current = false;
+
         if (audioQueueRef.current.length > 0) {
           playAudioQueue();
-        } else {
-          isPlayingRef.current = false;
-          if (turnCompleteRef.current) {
-            setState('listening');
-          }
+        } else if (turnCompleteRef.current) {
+          setState('listening');
         }
       };
 
@@ -484,6 +483,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     // 2. Audio response chunks from Gemini
     if (data.serverContent?.modelTurn?.parts) {
       turnCompleteRef.current = false;
+      let hasNewAudio = false;
       for (const part of data.serverContent.modelTurn.parts) {
         if (part.inlineData?.data && part.inlineData.mimeType?.startsWith('audio/')) {
           // Dynamic sample rate extraction from mimeType (e.g. rate=24000)
@@ -492,11 +492,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
             sampleRateRef.current = parseInt(rateMatch[1], 10);
           }
           audioQueueRef.current.push(part.inlineData.data);
-
-          // If not currently playing, start playing accumulated chunks
-          if (!isPlayingRef.current) {
-            playAudioQueue();
-          }
+          hasNewAudio = true;
         }
         if (part.text) {
           setTranscript(prev => [
@@ -504,6 +500,11 @@ export function useVoiceSession(): UseVoiceSessionReturn {
             { role: 'nova', text: part.text, timestamp: new Date().toISOString() },
           ]);
         }
+      }
+
+      // If not currently playing, play all accumulated chunks
+      if (hasNewAudio && !isPlayingRef.current) {
+        playAudioQueue();
       }
     }
 

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.3.21-beta",
+    "date": "2026-09-15",
+    "title": "🗣️ Complete Voice Sentences — Cutoff Bug Resolved",
+    "message": [
+      "Root Cause Found: The audio player queue was not releasing its playback lock (isPlayingRef) before queuing the second audio segment. This caused the first ~1.2s (first 2-3 words) to play, and silently discarded the rest of the sentence.",
+      "Full Fluid Speech: Fixed the lock release order and batched all streaming audio chunks before playback. Nova now speaks full, uninterrupted sentences smoothly from beginning to end."
+    ]
+  },
+  {
     "version": "0.3.20-beta",
     "date": "2026-09-15",
     "title": "🔊 Crystal Clear Fluid Voice — Zero Stuttering",

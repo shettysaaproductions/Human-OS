@@ -1,38 +1,46 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-15 — v0.3.19-beta OTA & Backend WebSocket Proxy with Gemini 2.5 Live Audio
+2026-09-15 — v0.3.20-beta OTA: Continuous PCM Jitter Buffering & Zero Stuttering
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Latest commit: `350a0fa`
+Latest commit: `6938cba`
 
 ## Status: OTA DEPLOYING & TEST PENDING
 
 ---
 
-### The Real Breakthrough: Root Cause Uncovered & Fixed
+### The Real Breakthrough & Subsequent Voice Audio Fix
 
-**PREVIOUS ISSUE**: Tap to talk to Nova → spinner runs for 30–35s → "Connection issue" / timeout.
+**MILESTONE ACHIEVED**: Nova successfully connected, entered `listening`, and replied with voice audio!
 
-1. **Google Gemini Live API Model Deprecation**:
-   - Google **deprecated** `gemini-2.0-flash-exp` for `bidiGenerateContent` in API version `v1beta`.
-   - Any WebSocket connection requesting `models/gemini-2.0-flash-exp` was immediately closed by Google with:
-     `WebSocket Code 1008: "models/gemini-2.0-flash-exp is not found for API version v1beta, or is not supported for bidiGenerateContent"`.
-   - Verified via Google's `ModelService.ListModels` that the current supported model for bidirectional live audio is:
-     **`models/gemini-2.5-flash-native-audio-latest`**.
-   - Verified via standalone Node script that WebSocket connections with `models/gemini-2.5-flash-native-audio-latest` open immediately, return `setupComplete`, and stream two-way audio (`audio/pcm;rate=24000`) without errors.
+**ISSUE DISCOVERED**: User reported audio was "slow mo or atakne wala audio, kind of getting stuck".
 
-2. **Keys (AQ. vs AIzaSy) Clarification**:
-   - The user's Google Cloud project credentials starting with `AQ.` (OAuth/service credentials) **DO WORK** for Gemini Live WebSocket connections when the supported model is specified.
-   - The failures previously attributed to key format were actually caused by Google rejecting the outdated model name `gemini-2.0-flash-exp`.
+**ROOT CAUSE OF STUTTER / SLOW-MO**:
+1. **Per-Chunk Micro-Playback Overhead**:
+   - Gemini Live streams audio in tiny ~50ms slices (e.g. 2,560 bytes).
+   - The previous player implementation converted each 50ms chunk into an individual WAV file, wrote it to disk via `writeAsStringAsync`, initialized an entire new ExoPlayer instance (`createAudioPlayer`), waited for completion, and repeated for each slice.
+   - Initializing ExoPlayer and writing to disk takes 40–100ms per file.
+   - Consequently, between every 50ms syllable, there was a 50–100ms pause of dead silence. This created the exact perception of "atak atak ke chalna" and stretched-out "slow motion" speech.
+2. **Acoustic Feedback & Self-Interruption**:
+   - While Nova was speaking through the device speaker, the microphone stream was still active and transmitting Nova's voice back into Gemini Live.
+   - Gemini heard its own voice as user input, interrupting the speech flow.
+3. **Dynamic Sample Rate Matching**:
+   - Audio chunks specify their native sample rate in `mimeType` (`audio/pcm;rate=24000`).
 
-3. **Backend WebSocket Proxy Architecture**:
-   - Implemented `NovaVoiceProxy.ts` at `/voice/ws`.
-   - Mobile connects via `wss://[backend]/voice/ws?token=JWT&voice=Kore`.
-   - Backend authenticates JWT, enriches with memory context and voice tools, connects to Gemini Live, and relays frames bidirectionally.
-   - Mobile no longer connects directly to Google or exposes keys client-side.
+**THE FIX IMPLEMENTED (v0.3.20-beta)**:
+1. **Seamless Continuous PCM Jitter Buffer**:
+   - Incoming base64 PCM chunks are accumulated in a queue buffer.
+   - When playback triggers, all accumulated PCM chunks are concatenated in memory into a single unified WAV file (`pcmChunksToWavBase64`).
+   - The entire phrase plays continuously through a single ExoPlayer instance with 0 gaps or syllable pauses.
+   - While one segment plays, subsequent chunks continue buffering smoothly.
+2. **Acoustic Feedback Guard**:
+   - Silenced mic buffer streaming whenever `isPlayingRef.current` is true.
+3. **Dynamic Sample Rate Extraction**:
+   - Dynamically parses `rate=(\d+)` from the mimeType so audio is rendered at true native speed and natural cadence.
+
 
 
 ---
