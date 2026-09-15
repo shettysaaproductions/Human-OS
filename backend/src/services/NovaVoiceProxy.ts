@@ -123,16 +123,66 @@ export async function handleVoiceWsProxy(
   const geminiUrl = `${GEMINI_LIVE_WS_URL}?key=${geminiKey}`;
   const geminiWs = new WebSocket(geminiUrl);
 
+  const sessionId = `voice_${Date.now()}`;
+  const sessionStartTime = Date.now();
   let setupSent = false;
   let setupComplete = false;
   let closed = false;
 
-  const cleanup = (reason: string) => {
+  // Server-side conversation transcript buffer
+  const transcriptBuffer: { role: 'user' | 'nova'; text: string; timestamp: string }[] = [];
+  let currentUserTurnText = '';
+  let currentNovaTurnText = '';
+
+  const cleanup = async (reason: string) => {
     if (closed) return;
     closed = true;
-    logger.info('[VoiceProxy] Cleaning up session', { userId, reason });
+
+    // Flush any pending turn text
+    if (currentUserTurnText.trim()) {
+      transcriptBuffer.push({
+        role: 'user',
+        text: currentUserTurnText.trim(),
+        timestamp: new Date().toISOString(),
+      });
+      currentUserTurnText = '';
+    }
+    if (currentNovaTurnText.trim()) {
+      transcriptBuffer.push({
+        role: 'nova',
+        text: currentNovaTurnText.trim(),
+        timestamp: new Date().toISOString(),
+      });
+      currentNovaTurnText = '';
+    }
+
+    const durationSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
+    logger.info('[VoiceProxy] Cleaning up session', {
+      userId,
+      reason,
+      durationSeconds,
+      transcriptCount: transcriptBuffer.length,
+    });
+
     try { geminiWs.close(1000); } catch {}
-    // Don't close mobileWs here — let the caller handle it based on context
+
+    // Auto-save transcript + trigger memory extraction & reflection
+    if (transcriptBuffer.length > 0) {
+      try {
+        await novaVoiceService.processSessionEnd(userId, transcriptBuffer, sessionId, durationSeconds);
+        logger.info('[VoiceProxy] Auto-persisted session transcript and triggered memory extraction', {
+          userId,
+          sessionId,
+          turns: transcriptBuffer.length,
+        });
+      } catch (err: any) {
+        logger.error('[VoiceProxy] Failed to auto-persist voice session on cleanup', {
+          userId,
+          sessionId,
+          error: err.message,
+        });
+      }
+    }
   };
 
   // 5. When Gemini connects, send setup frame immediately
@@ -167,9 +217,9 @@ export async function handleVoiceWsProxy(
     }
   });
 
-  // 6. Relay Gemini → Mobile
-  geminiWs.on('message', (data: Buffer) => {
-    if (mobileWs.readyState !== WebSocket.OPEN) return;
+  // 6. Relay Gemini → Mobile + Server-side Transcript & Tool Interception
+  geminiWs.on('message', async (data: Buffer) => {
+    if (mobileWs.readyState !== WebSocket.OPEN && closed) return;
 
     try {
       const msg = JSON.parse(data.toString());
@@ -179,11 +229,135 @@ export async function handleVoiceWsProxy(
         logger.info('[VoiceProxy] setupComplete received — session is live', { userId });
       }
 
-      // Relay everything verbatim to mobile
-      mobileWs.send(data.toString());
+      // Collect user input transcription from Gemini
+      if (msg.serverContent?.inputTranscription?.text) {
+        const text = msg.serverContent.inputTranscription.text;
+        currentUserTurnText += text;
+      }
+
+      // Collect Nova output transcription from Gemini
+      if (msg.serverContent?.outputTranscription?.text) {
+        const text = msg.serverContent.outputTranscription.text;
+        currentNovaTurnText += text;
+      }
+
+      // Also check modelTurn parts for text
+      if (msg.serverContent?.modelTurn?.parts) {
+        for (const part of msg.serverContent.modelTurn.parts) {
+          if (part.text) {
+            currentNovaTurnText += part.text;
+          }
+        }
+      }
+
+      // Turn complete — flush turn buffer
+      if (msg.serverContent?.turnComplete) {
+        if (currentUserTurnText.trim()) {
+          transcriptBuffer.push({
+            role: 'user',
+            text: currentUserTurnText.trim(),
+            timestamp: new Date().toISOString(),
+          });
+          currentUserTurnText = '';
+        }
+        if (currentNovaTurnText.trim()) {
+          transcriptBuffer.push({
+            role: 'nova',
+            text: currentNovaTurnText.trim(),
+            timestamp: new Date().toISOString(),
+          });
+          currentNovaTurnText = '';
+        }
+      }
+
+      // Server-side Tool Execution:
+      // When Gemini invokes a tool (e.g. save_memory, schedule_reminder, recall_memory),
+      // execute it directly and immediately on the backend server for 100% reliability.
+      if (msg.toolCall?.functionCalls && Array.isArray(msg.toolCall.functionCalls)) {
+        for (const fnCall of msg.toolCall.functionCalls) {
+          logger.info('[VoiceProxy] Server executing toolCall from Gemini', {
+            userId,
+            tool: fnCall.name,
+            args: fnCall.args,
+          });
+
+          novaVoiceService
+            .executeTool(userId, fnCall.name, fnCall.args || {})
+            .then((result) => {
+              logger.info('[VoiceProxy] Tool execution succeeded', {
+                userId,
+                tool: fnCall.name,
+                result,
+              });
+
+              if (geminiWs.readyState === WebSocket.OPEN) {
+                geminiWs.send(
+                  JSON.stringify({
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          id: fnCall.id,
+                          name: fnCall.name,
+                          response: { output: result },
+                        },
+                      ],
+                    },
+                  })
+                );
+              }
+
+              // Notify mobile so UI can display a memory saved / reminder toast
+              if (mobileWs.readyState === WebSocket.OPEN) {
+                try {
+                  mobileWs.send(
+                    JSON.stringify({
+                      toolExecutionResult: {
+                        name: fnCall.name,
+                        args: fnCall.args,
+                        result,
+                      },
+                    })
+                  );
+                } catch (_) {}
+              }
+            })
+            .catch((err) => {
+              logger.error('[VoiceProxy] Tool execution error', {
+                userId,
+                tool: fnCall.name,
+                error: err.message,
+              });
+
+              if (geminiWs.readyState === WebSocket.OPEN) {
+                geminiWs.send(
+                  JSON.stringify({
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          id: fnCall.id,
+                          name: fnCall.name,
+                          response: { output: { error: err.message } },
+                        },
+                      ],
+                    },
+                  })
+                );
+              }
+            });
+        }
+      }
+
+      // Relay everything to mobile for playback and UI updates
+      if (mobileWs.readyState === WebSocket.OPEN) {
+        mobileWs.send(data.toString());
+      }
     } catch {
-      // If we can't parse it, relay raw
-      try { mobileWs.send(data); } catch {}
+      // If parsing fails, relay raw
+      try {
+        if (mobileWs.readyState === WebSocket.OPEN) {
+          mobileWs.send(data);
+        }
+      } catch {}
     }
   });
 
@@ -221,9 +395,10 @@ export async function handleVoiceWsProxy(
     if (mobileWs.readyState === WebSocket.OPEN) {
       mobileWs.close(code === 1000 ? 1000 : 4500, reasonStr);
     }
+    cleanup('gemini_closed');
   });
 
-  // 7. Relay Mobile → Gemini (user audio, tool responses, etc.)
+  // 7. Relay Mobile → Gemini (user audio, etc.)
   mobileWs.on('message', (data: Buffer | string) => {
     if (geminiWs.readyState !== WebSocket.OPEN) return;
 
@@ -232,6 +407,11 @@ export async function handleVoiceWsProxy(
       const msg = JSON.parse(data.toString());
       if (msg.setup) {
         logger.warn('[VoiceProxy] Dropping setup frame from mobile — backend handles setup', { userId });
+        return;
+      }
+      // Drop toolResponse from mobile if already handled server-side
+      if (msg.toolResponse) {
+        logger.info('[VoiceProxy] Mobile sent toolResponse (server handles authoritatively)', { userId });
         return;
       }
     } catch {}

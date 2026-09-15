@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.22-beta",
+    "date": "2026-09-15",
+    "title": "📞 WhatsApp-Style Voice Calling & Living Brain Sync",
+    "message": [
+      "Server-Side Memory & Tool Execution: Any facts, preferences, or reminders shared during a call are now captured and stored directly on the server in real-time with zero packet drops.",
+      "Live Voice-to-Chat Sync: Spoken dialogues now stream with live subtitles and automatically sync to your chat timeline as soon as you finish talking with Nova.",
+      "WhatsApp-Style Calling Experience: Full-screen calling UI with live call timer, glowing voice activity rings, mute toggles, and a dedicated 📞 Call button in the chat header.",
+      "Gemini 2.5 Flash Chat Brain: Upgraded chat model to Google's ultra-fast Gemini 2.5 Flash, bringing identical natural Hinglish/English intelligence and speed across both Voice and Chat."
+    ]
+  },
+  {
     "version": "0.3.21-beta",
     "date": "2026-09-15",
     "title": "🗣️ Complete Voice Sentences — Cutoff Bug Resolved",

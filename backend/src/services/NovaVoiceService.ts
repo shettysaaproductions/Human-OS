@@ -297,15 +297,34 @@ class NovaVoiceService {
         const { key, value } = toolArgs;
         if (!key || !value) return { success: false, error: 'Missing key or value' };
         try {
-          await supabaseAdmin.from('memories').upsert({
-            user_id: userId,
-            key: key.toLowerCase().replace(/\s+/g, '_'),
-            value: String(value),
-            importance: 5,
-            source_authority: 'subconscious_inference',
-            memory_type: 'fact',
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'user_id,key' });
+          const cleanKey = key.toLowerCase().replace(/\s+/g, '_');
+          const cleanVal = String(value).trim();
+          const { data: existing } = await supabaseAdmin
+            .from('memories')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('key', cleanKey)
+            .maybeSingle();
+
+          if (existing) {
+            await supabaseAdmin.from('memories').update({
+              value: cleanVal,
+              importance: 5,
+              updated_at: new Date().toISOString(),
+              is_archived: false,
+            }).eq('id', existing.id);
+          } else {
+            await supabaseAdmin.from('memories').insert({
+              user_id: userId,
+              key: cleanKey,
+              value: cleanVal,
+              importance: 5,
+              source_authority: 'subconscious_inference',
+              memory_type: 'fact',
+              is_archived: false,
+            });
+          }
+          logger.info('[NovaVoiceService] Memory successfully saved via voice tool', { userId, key: cleanKey, value: cleanVal });
           return { success: true };
         } catch (err: any) {
           logger.error('[NovaVoiceService] save_memory failed', { error: err.message });
@@ -409,20 +428,45 @@ class NovaVoiceService {
 
     // 1. Save transcript to chat_history
     try {
+      // Find active conversation_id so voice calls show up in the user's chat!
+      let conversationId: string | null = null;
+      const { data: latestChat } = await supabaseAdmin
+        .from('chat_history')
+        .select('conversation_id')
+        .eq('user_id', userId)
+        .not('conversation_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestChat?.conversation_id) {
+        conversationId = latestChat.conversation_id;
+      } else {
+        const { data: conv } = await supabaseAdmin
+          .from('conversations')
+          .select('id')
+          .eq('user_id', userId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        conversationId = conv?.id || null;
+      }
+
       const now = new Date();
       const rows = transcript.map((entry, idx) => ({
         user_id: userId,
+        conversation_id: conversationId,
         role: entry.role === 'nova' ? 'assistant' : 'user',
         content: entry.text,
         created_at: new Date(now.getTime() + idx * 500).toISOString(), // 500ms spacing
-        meta: { source: 'voice_session', session_id: sessionId },
+        meta: { source: 'voice_session', session_id: sessionId, duration_seconds: durationSeconds },
       }));
 
       // Insert in batches of 20
       for (let i = 0; i < rows.length; i += 20) {
         await supabaseAdmin.from('chat_history').insert(rows.slice(i, i + 20));
       }
-      logger.info('[NovaVoiceService] Transcript saved to chat_history', { count: rows.length });
+      logger.info('[NovaVoiceService] Transcript saved to chat_history', { count: rows.length, conversationId });
     } catch (err: any) {
       logger.error('[NovaVoiceService] Failed to save transcript', { error: err.message });
     }
@@ -468,11 +512,13 @@ class NovaVoiceService {
       const { promptBuilder } = await import('./promptBuilder');
       const { backgroundActions } = await import('./BackgroundActionService');
 
-      // Process pairs of (user, nova) turns
+      // Process all user turns with their corresponding Nova context
       const pairs: { user: string; nova: string }[] = [];
-      for (let i = 0; i < transcript.length - 1; i++) {
-        if (transcript[i].role === 'user' && transcript[i + 1].role === 'nova') {
-          pairs.push({ user: transcript[i].text, nova: transcript[i + 1].text });
+      for (let i = 0; i < transcript.length; i++) {
+        if (transcript[i].role === 'user') {
+          const userText = transcript[i].text;
+          const nextNova = transcript.slice(i + 1).find((t) => t.role === 'nova')?.text || '';
+          pairs.push({ user: userText, nova: nextNova });
         }
       }
 

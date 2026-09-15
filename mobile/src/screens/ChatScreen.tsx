@@ -1455,15 +1455,15 @@ export function ChatScreen() {
               </View>
             </View>
             <View style={s.headerRight}>
-              {/* Voice Mode Live Pill Button */}
+              {/* WhatsApp-style Voice Call Button */}
               <TouchableOpacity
                 onPress={() => setIsVoiceModeVisible(true)}
                 style={[s.headerBtn, {
-                  backgroundColor: 'rgba(139, 92, 246, 0.2)',
-                  borderColor: '#8B5CF6',
+                  backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                  borderColor: '#22C55E',
                   borderWidth: 1,
                   borderRadius: 14,
-                  paddingHorizontal: 8,
+                  paddingHorizontal: 10,
                   paddingVertical: 5,
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -1472,8 +1472,8 @@ export function ChatScreen() {
                 }]}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={{ fontSize: 15 }}>🎙️</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#8B5CF6' }}>Live</Text>
+                <Text style={{ fontSize: 14 }}>📞</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#22C55E' }}>Call</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setIsLifestyleModalVisible(true)}
@@ -1911,7 +1911,12 @@ export function ChatScreen() {
       {/* Nova Voice Mode Overlay */}
       <VoiceMode
         visible={isVoiceModeVisible}
-        onClose={() => setIsVoiceModeVisible(false)}
+        onClose={() => {
+          setIsVoiceModeVisible(false);
+          setTimeout(() => {
+            hydrateMessages();
+          }, 600);
+        }}
       />
 
       {/* ── Message Version History & Branching Modal ── */}

@@ -92,8 +92,8 @@ export const config = {
     apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
     apiKey3: optionalEnv('GEMINI_API_KEY_3', ''),
     apiKey4: optionalEnv('GEMINI_API_KEY_4', ''),
-    // Primary Gemini model for conversational workloads (1500 RPD, fast)
-    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-3.8-flash'),
+    // Primary Gemini model for conversational workloads (ultra-fast, high emotional nuance)
+    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-2.5-flash'),
     // Hard interactive timeout for conversation workloads (default 12s for reliable chat reasoning)
     conversationTimeoutMs: parseInt(optionalEnv('GEMINI_CONVERSATION_TIMEOUT_MS', '12000'), 10),
   },

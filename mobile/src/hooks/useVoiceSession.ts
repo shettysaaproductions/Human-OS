@@ -495,10 +495,14 @@ export function useVoiceSession(): UseVoiceSessionReturn {
           hasNewAudio = true;
         }
         if (part.text) {
-          setTranscript(prev => [
-            ...prev,
-            { role: 'nova', text: part.text, timestamp: new Date().toISOString() },
-          ]);
+          const pText = part.text;
+          setTranscript(prev => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === 'nova' && !turnCompleteRef.current) {
+              return [...prev.slice(0, -1), { ...last, text: last.text + pText }];
+            }
+            return [...prev, { role: 'nova', text: pText, timestamp: new Date().toISOString() }];
+          });
         }
       }
 
@@ -508,16 +512,36 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       }
     }
 
+    // 2b. Output transcription (Nova's spoken dialogue in native audio mode)
+    if (data.serverContent?.outputTranscription?.text) {
+      const novaText = data.serverContent.outputTranscription.text;
+      setTranscript(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'nova' && !turnCompleteRef.current) {
+          return [...prev.slice(0, -1), { ...last, text: last.text + novaText }];
+        }
+        return [...prev, { role: 'nova', text: novaText, timestamp: new Date().toISOString() }];
+      });
+    }
+
     // 3. User speech transcription
     if (data.serverContent?.inputTranscription?.text) {
       const userText = data.serverContent.inputTranscription.text;
       if (userText.trim()) {
         setState('processing');
-        setTranscript(prev => [
-          ...prev,
-          { role: 'user', text: userText, timestamp: new Date().toISOString() },
-        ]);
+        setTranscript(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === 'user') {
+            return [...prev.slice(0, -1), { ...last, text: last.text + userText }];
+          }
+          return [...prev, { role: 'user', text: userText, timestamp: new Date().toISOString() }];
+        });
       }
+    }
+
+    // 3b. Server tool execution feedback
+    if (data.toolExecutionResult) {
+      console.log('[VoiceSession] Tool executed on server:', data.toolExecutionResult.name);
     }
 
     // 4. Turn complete

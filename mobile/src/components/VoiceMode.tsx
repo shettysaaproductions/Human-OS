@@ -168,8 +168,35 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     }
   }, [transcript]);
 
-  // Do NOT auto-start — user taps the orb to connect.
-  // Prefetch is already running from the visible useEffect above.
+  // Call duration timer (WhatsApp style)
+  const [callDuration, setCallDuration] = useState(0);
+  useEffect(() => {
+    let timer: any;
+    if (state === 'listening' || state === 'speaking' || state === 'processing') {
+      timer = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => clearInterval(timer);
+  }, [state]);
+
+  const formatDuration = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  // Auto-connect when modal opens
+  useEffect(() => {
+    if (visible && (state === 'idle' || state === 'error')) {
+      const timer = setTimeout(() => {
+        startSession(selectedVoice);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [visible]);
 
   const handleClose = async () => {
     await endSession();
@@ -177,12 +204,10 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
   };
 
   const colors = STATE_COLORS[state];
-  const label = state === 'idle'
-    ? prefetchState === 'loading' ? 'Getting Nova ready...'
-    : prefetchState === 'ready'   ? 'Tap to talk with Nova ✓'
-    : prefetchState === 'error'   ? 'Tap to connect (may take a moment)'
-    : 'Tap to start talking'
-    : STATE_LABELS[state];
+
+  // Latest conversation turns for live caption preview
+  const latestNova = [...transcript].reverse().find((t) => t.role === 'nova');
+  const latestUser = [...transcript].reverse().find((t) => t.role === 'user');
 
   // If native audio isn't available in this build, show an informative screen
   if (!isNativeAvailable) {
@@ -209,41 +234,61 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent>
       <Animated.View style={[styles.container, { transform: [{ translateY: slideUp }] }]}>
 
-        {/* Dark background overlay */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(10, 8, 20, 0.96)' }]} />
-        <View style={[styles.overlay, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]}>
+        {/* WhatsApp dark background overlay */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0B141B' }]} />
+        <View style={[styles.overlay, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 20 }]}>
 
-          {/* Header */}
+          {/* Top WhatsApp-style Call Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Nova Voice</Text>
-            <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
-              <Text style={styles.closeBtnText}>✕</Text>
+            <TouchableOpacity onPress={handleClose} style={styles.minimizeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.minimizeBtnText}>↓</Text>
+            </TouchableOpacity>
+            <View style={styles.headerCenter}>
+              <Text style={styles.callTypeTitle}>Nova Voice Call</Text>
+              <View style={styles.encryptionRow}>
+                <Text style={styles.encryptionIcon}>🔒</Text>
+                <Text style={styles.encryptionText}>End-to-end living brain</Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={() => setShowVoicePicker(true)} style={styles.voicePickerHeaderBtn}>
+              <Text style={{ fontSize: 18 }}>🗣️</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Orb + Wave Rings */}
+          {/* Contact Identity & Call Status */}
+          <View style={styles.identitySection}>
+            <Text style={styles.contactName}>Nova</Text>
+            <Text style={styles.callStatusText}>
+              {state === 'connecting' ? 'Calling...' :
+               state === 'listening' ? formatDuration(callDuration) :
+               state === 'speaking' ? `Nova speaking • ${formatDuration(callDuration)}` :
+               state === 'processing' ? 'Thinking...' :
+               state === 'error' ? (errorMessage || 'Connection issue') :
+               'Tap to start call'}
+            </Text>
+          </View>
+
+          {/* Glowing Orb & Concentric Pulse Rings */}
           <View style={styles.orbContainer}>
-            {/* Wave rings */}
             {[wave1, wave2, wave3].map((w, i) => (
               <Animated.View
                 key={i}
                 style={[
                   styles.waveRing,
                   {
-                    width: 200 + i * 30,
-                    height: 200 + i * 30,
-                    borderRadius: (200 + i * 30) / 2,
+                    width: 220 + i * 40,
+                    height: 220 + i * 40,
+                    borderRadius: (220 + i * 40) / 2,
                     borderColor: colors[0] + '40',
                     transform: [{ scale: w }],
-                    opacity: state === 'listening' || state === 'speaking' ? 0.5 - i * 0.1 : 0,
+                    opacity: state === 'listening' || state === 'speaking' ? 0.45 - i * 0.1 : 0,
                   },
                 ]}
               />
             ))}
 
-            {/* Main orb — tap to start/end session */}
             <TouchableOpacity
-              activeOpacity={0.85}
+              activeOpacity={0.88}
               onPress={() => {
                 if (state === 'idle' || state === 'error') {
                   startSession(selectedVoice);
@@ -266,70 +311,72 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
                 {state === 'connecting' ? (
                   <ActivityIndicator size="large" color="#fff" />
                 ) : (
-                  <Text style={styles.orbIcon}>
-                    {state === 'error' ? '⚠️' :
-                     state === 'idle' ? '🎙️' :
-                     isMuted ? '🔇' :
-                     state === 'speaking' ? '🔊' : '🎙️'}
-                  </Text>
+                  <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={styles.orbLetter}>N</Text>
+                    <Text style={styles.orbSubStatus}>
+                      {isMuted ? '🔇' : state === 'speaking' ? '🔊' : '🎙️'}
+                    </Text>
+                  </View>
                 )}
               </Animated.View>
             </TouchableOpacity>
           </View>
 
-          {/* State Label */}
-          <Text style={styles.stateLabel}>{isMuted ? 'Muted — tap to unmute' : label}</Text>
-          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-
-          {/* Transcript */}
-          <ScrollView
-            ref={transcriptRef}
-            style={styles.transcript}
-            contentContainerStyle={styles.transcriptContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {transcript.length === 0 && state === 'listening' ? (
-              <Text style={styles.transcriptPlaceholder}>Start speaking — Nova is listening...</Text>
-            ) : null}
-            {transcript.map((entry, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.transcriptBubble,
-                  entry.role === 'nova' ? styles.novaBubble : styles.userBubble,
-                ]}
-              >
-                <Text style={styles.transcriptRole}>{entry.role === 'nova' ? 'Nova' : 'You'}</Text>
-                <Text style={styles.transcriptText}>{entry.text}</Text>
-              </View>
-            ))}
-          </ScrollView>
-
-          {/* Controls */}
-          <View style={styles.controls}>
-
-            {/* Voice Picker Button */}
-            <TouchableOpacity
-              style={styles.controlBtn}
-              onPress={() => setShowVoicePicker(true)}
+          {/* Live Subtitle Transcript Area (WhatsApp Live Captions Style) */}
+          <View style={styles.liveCaptionsContainer}>
+            <ScrollView
+              ref={transcriptRef}
+              style={styles.transcriptScroll}
+              contentContainerStyle={styles.transcriptContent}
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.controlBtnIcon}>🎤</Text>
-              <Text style={styles.controlBtnLabel}>{selectedVoice}</Text>
-            </TouchableOpacity>
+              {transcript.length === 0 && state === 'listening' ? (
+                <Text style={styles.transcriptPlaceholder}>Go ahead, Nova is listening to you...</Text>
+              ) : null}
+              {transcript.slice(-4).map((entry, idx) => (
+                <View
+                  key={idx}
+                  style={[
+                    styles.transcriptBubble,
+                    entry.role === 'nova' ? styles.novaBubble : styles.userBubble,
+                  ]}
+                >
+                  <Text style={styles.transcriptRole}>{entry.role === 'nova' ? 'Nova' : 'You'}</Text>
+                  <Text style={styles.transcriptText}>{entry.text}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
 
-            {/* Mute Toggle */}
+          {/* WhatsApp-style Bottom Action Dock */}
+          <View style={styles.bottomDock}>
+            {/* Mute Mic */}
             <TouchableOpacity
-              style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
+              style={[styles.dockBtn, isMuted && styles.dockBtnActive]}
               onPress={isMuted ? unmute : mute}
+              activeOpacity={0.7}
             >
-              <Text style={styles.controlBtnIcon}>{isMuted ? '🔇' : '🎙️'}</Text>
-              <Text style={styles.controlBtnLabel}>{isMuted ? 'Unmute' : 'Mute'}</Text>
+              <Text style={styles.dockIcon}>{isMuted ? '🔇' : '🎙️'}</Text>
+              <Text style={styles.dockLabel}>{isMuted ? 'Unmute' : 'Mute'}</Text>
             </TouchableOpacity>
 
-            {/* End Session */}
-            <TouchableOpacity style={[styles.controlBtn, styles.endBtn]} onPress={handleClose}>
-              <Text style={styles.controlBtnIcon}>📴</Text>
-              <Text style={styles.controlBtnLabel}>End</Text>
+            {/* End Call (Big Red Circle) */}
+            <TouchableOpacity
+              style={styles.endCallCircleBtn}
+              onPress={handleClose}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.endCallIcon}>📞</Text>
+            </TouchableOpacity>
+
+            {/* Voice Pitch / Persona */}
+            <TouchableOpacity
+              style={styles.dockBtn}
+              onPress={() => setShowVoicePicker(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.dockIcon}>🗣️</Text>
+              <Text style={styles.dockLabel}>{selectedVoice}</Text>
             </TouchableOpacity>
           </View>
 
@@ -342,26 +389,29 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
               <Text style={styles.pickerTitle}>Choose Nova's Voice</Text>
               <FlatList
                 data={availableVoices.length > 0 ? availableVoices : [
-                  { id: 'Kore',   label: 'Kore',   description: 'Warm & expressive (great for Hindi)' },
+                  { id: 'Kore',   label: 'Kore',   description: 'Warm & expressive (great for Hindi/Hinglish)' },
                   { id: 'Aoede',  label: 'Aoede',  description: 'Smooth & natural (great for English)' },
                   { id: 'Charon', label: 'Charon', description: 'Deep & calm' },
                   { id: 'Fenrir', label: 'Fenrir', description: 'Clear & precise' },
                   { id: 'Puck',   label: 'Puck',   description: 'Bright & energetic' },
                 ]}
-                keyExtractor={item => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.voiceOption, selectedVoice === item.id && styles.voiceOptionSelected]}
-                    onPress={() => {
-                      selectVoice(item.id);
-                      setShowVoicePicker(false);
-                    }}
-                  >
-                    <Text style={styles.voiceOptionLabel}>{item.label}</Text>
-                    <Text style={styles.voiceOptionDesc}>{item.description}</Text>
-                    {selectedVoice === item.id && <Text style={styles.voiceOptionCheck}>✓</Text>}
-                  </TouchableOpacity>
-                )}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => {
+                  const isSelected = item.id === selectedVoice;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.voiceOption, isSelected && styles.voiceOptionSelected]}
+                      onPress={() => {
+                        selectVoice(item.id);
+                        setShowVoicePicker(false);
+                      }}
+                    >
+                      <Text style={styles.voiceOptionLabel}>{item.label}</Text>
+                      <Text style={styles.voiceOptionDesc}>{item.description}</Text>
+                      {isSelected ? <Text style={styles.voiceOptionCheck}>✓</Text> : null}
+                    </TouchableOpacity>
+                  );
+                }}
               />
               <TouchableOpacity style={styles.pickerClose} onPress={() => setShowVoicePicker(false)}>
                 <Text style={styles.pickerCloseText}>Cancel</Text>
@@ -385,72 +435,111 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     paddingHorizontal: 20,
+    justifyContent: 'space-between',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 8,
   },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+  minimizeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeBtnText: {
+  minimizeBtnText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  headerCenter: {
+    alignItems: 'center',
+  },
+  callTypeTitle: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  encryptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  encryptionIcon: {
+    fontSize: 10,
+  },
+  encryptionText: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
+    letterSpacing: 0.2,
+  },
+  voicePickerHeaderBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  identitySection: {
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  contactName: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  callStatusText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 15,
+    fontWeight: '500',
   },
   orbContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 280,
-    marginVertical: 8,
+    height: 240,
+    marginVertical: 10,
   },
   waveRing: {
     position: 'absolute',
     borderWidth: 1.5,
   },
   orb: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     alignItems: 'center',
     justifyContent: 'center',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 30,
+    shadowOpacity: 0.7,
+    shadowRadius: 32,
     elevation: 20,
   },
-  orbIcon: {
-    fontSize: 52,
+  orbLetter: {
+    color: '#fff',
+    fontSize: 48,
+    fontWeight: '800',
   },
-  stateLabel: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 16,
-    textAlign: 'center',
-    fontWeight: '500',
-    marginBottom: 4,
+  orbSubStatus: {
+    fontSize: 20,
+    marginTop: 2,
   },
-  errorText: {
-    color: '#FF6B6B',
-    fontSize: 13,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  transcript: {
+  liveCaptionsContainer: {
     flex: 1,
     marginVertical: 12,
+    maxHeight: 180,
+  },
+  transcriptScroll: {
+    flex: 1,
   },
   transcriptContent: {
     paddingVertical: 8,
@@ -461,76 +550,97 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontStyle: 'italic',
-    marginTop: 20,
+    marginTop: 16,
   },
   transcriptBubble: {
     borderRadius: 16,
-    padding: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     maxWidth: '85%',
   },
   novaBubble: {
-    backgroundColor: 'rgba(108,99,255,0.3)',
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.4)',
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 4,
   },
   userBubble: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     alignSelf: 'flex-end',
     borderBottomRightRadius: 4,
   },
   transcriptRole: {
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(255,255,255,0.55)',
     fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 3,
+    fontWeight: '700',
+    marginBottom: 2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   transcriptText: {
     color: '#fff',
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 20,
   },
-  controls: {
+  bottomDock: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 20,
-    paddingTop: 8,
-  },
-  controlBtn: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 16,
-    padding: 12,
-    minWidth: 80,
+    justifyContent: 'space-around',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 36,
+    marginHorizontal: 12,
+  },
+  dockBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 64,
     gap: 4,
   },
-  controlBtnActive: {
-    backgroundColor: 'rgba(255,107,107,0.25)',
+  dockBtnActive: {
+    opacity: 0.7,
   },
-  endBtn: {
-    backgroundColor: 'rgba(255,65,108,0.3)',
+  dockIcon: {
+    fontSize: 26,
   },
-  controlBtnIcon: {
-    fontSize: 24,
-  },
-  controlBtnLabel: {
-    color: 'rgba(255,255,255,0.8)',
+  dockLabel: {
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
-  // Voice picker
+  endCallCircleBtn: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  endCallIcon: {
+    fontSize: 30,
+    transform: [{ rotate: '135deg' }],
+  },
+  // Voice picker modal
   pickerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'flex-end',
   },
   pickerSheet: {
-    backgroundColor: '#1a1a2e',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: '#0F172A',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     padding: 24,
     paddingBottom: 40,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   pickerTitle: {
     color: '#fff',
@@ -544,14 +654,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     marginBottom: 8,
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   voiceOptionSelected: {
-    backgroundColor: 'rgba(108,99,255,0.3)',
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
     borderWidth: 1,
-    borderColor: '#6C63FF',
+    borderColor: '#8B5CF6',
   },
   voiceOptionLabel: {
     color: '#fff',
@@ -565,16 +675,16 @@ const styles = StyleSheet.create({
     flex: 2,
   },
   voiceOptionCheck: {
-    color: '#6C63FF',
+    color: '#8B5CF6',
     fontSize: 18,
     fontWeight: '700',
   },
   pickerClose: {
-    marginTop: 8,
+    marginTop: 10,
     padding: 16,
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12,
+    borderRadius: 14,
   },
   pickerCloseText: {
     color: 'rgba(255,255,255,0.7)',
