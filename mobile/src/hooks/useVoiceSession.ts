@@ -42,11 +42,10 @@ import {
 } from 'expo-file-system/legacy';
 import {
   voiceService,
-  VoiceSessionConfig,
   AvailableVoice,
   TranscriptEntry,
-  GEMINI_LIVE_WS_URL,
 } from '../services/voiceService';
+import { useAuthStore } from '../store/useAuthStore';
 
 // ── Dynamic imports — guard against missing native modules ───────────────────
 let ExpoAudio: any = null;
@@ -74,6 +73,18 @@ try {
 
 // Global chunk counter for unique temp file names (survives re-renders)
 let _chunkCounter = 0;
+
+// ── Backend proxy WebSocket URL ───────────────────────────────────────────────
+// Converts EXPO_PUBLIC_API_URL (https://...) → backend voice proxy WebSocket URL
+function getBackendVoiceWsUrl(accessToken: string, voiceName: string): string {
+  const apiUrl = (process.env.EXPO_PUBLIC_API_URL || 'https://human-os.onrender.com')
+    .replace(/\/$/, '')
+    .replace(/\/api$/, '');           // strip /api suffix if present
+  const wsUrl = apiUrl
+    .replace(/^https:\/\//, 'wss://') // https → wss
+    .replace(/^http:\/\//, 'ws://');  // http → ws (local dev)
+  return `${wsUrl}/voice/ws?token=${encodeURIComponent(accessToken)}&voice=${encodeURIComponent(voiceName)}`;
+}
 
 // ── Base64 & WAV helpers ──────────────────────────────────────────────────────
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -529,60 +540,52 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
 
     try {
-      let session: any;
-      let voices: AvailableVoice[];
-
-      if (cachedSessionRef.current) {
-        // Use prefetched session — no backend call needed, connect immediately
-        console.log('[VoiceSession] Using prefetched session config ✓');
-        session = cachedSessionRef.current;
-        // Override voice if user selected a different one
-        if (voiceName && voiceName !== session.voiceConfig?.voiceName) {
-          session = { ...session, voiceConfig: { ...session.voiceConfig, voiceName } };
-        }
-        voices = cachedVoicesRef.current;
-        cachedSessionRef.current = null; // consume the cache
-        setPrefetchState('idle');
-      } else {
-        // No prefetch available — fetch now (may be slow on cold start)
-        console.log('[VoiceSession] Fetching session config from backend (no cache)...');
-        const result = await voiceService.startSession({ voiceName });
-        session = result.session;
-        voices = result.availableVoices;
+      // Get the current JWT access token for backend auth
+      const accessToken = useAuthStore.getState().accessToken;
+      if (!accessToken) {
+        clearConnectTimer();
+        setErrorMessage('Please sign in to use voice mode');
+        setState('error');
+        return;
       }
 
-      sessionIdRef.current = `voice_${Date.now()}`;
-      setAvailableVoices(voices);
+      // Clear the prefetch cache (proxy builds its own session)
+      cachedSessionRef.current = null;
+      setPrefetchState('idle');
+      setAvailableVoices([
+        { id: 'Kore',   label: 'Kore',   description: 'Warm & expressive' },
+        { id: 'Aoede',  label: 'Aoede',  description: 'Smooth & natural' },
+        { id: 'Charon', label: 'Charon', description: 'Deep & calm' },
+        { id: 'Fenrir', label: 'Fenrir', description: 'Clear & precise' },
+        { id: 'Puck',   label: 'Puck',   description: 'Bright & energetic' },
+      ]);
 
-      console.log('[VoiceSession] Session ready. Model:', session.model, 'Voice:', session.voiceConfig.voiceName);
-
-      const wsUrl = `${GEMINI_LIVE_WS_URL}?key=${session.apiKey}`;
-      console.log('[VoiceSession] Opening WebSocket to Gemini Live...');
+      // Connect to our backend proxy — it handles the Gemini Live connection
+      // using a server-side API key (never exposed to mobile bundle)
+      const wsUrl = getBackendVoiceWsUrl(accessToken, voiceName);
+      console.log('[VoiceSession] Opening WebSocket to backend proxy...');
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[VoiceSession] WebSocket opened — sending setup frame');
-        ws.send(JSON.stringify({
-          setup: {
-            model: session.model,
-            systemInstruction: { parts: [{ text: session.systemInstruction }] },
-            tools: session.tools,
-            generationConfig: {
-              responseModalities: session.sessionConfig.responseModalities,
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: session.voiceConfig.voiceName },
-                },
-              },
-            },
-            inputAudioTranscription: session.sessionConfig.inputAudioTranscription,
-            outputAudioTranscription: session.sessionConfig.outputAudioTranscription,
-          },
-        }));
+        // Backend proxy handles setup frame — nothing to send on open
+        console.log('[VoiceSession] Backend proxy WS opened — waiting for setupComplete...');
       };
 
-      ws.onmessage = handleWsMessage;
+      // Wrap handleWsMessage to also detect proxyError frames
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.proxyError) {
+            console.error('[VoiceSession] Proxy error:', data.proxyError.code, data.proxyError.message);
+            clearConnectTimer();
+            setErrorMessage(data.proxyError.message || 'Voice connection error');
+            setState('error');
+            return;
+          }
+        } catch {}
+        handleWsMessage(event);
+      };
 
       ws.onerror = (err) => {
         console.error('[VoiceSession] WebSocket error:', err);

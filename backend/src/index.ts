@@ -21,6 +21,8 @@ import { novaFollowupService } from './services/NovaFollowupService';
 import { novaConsciousnessEngine } from './services/NovaConsciousnessEngine';
 import { selfImprovementService } from './services/NovaSelfImprovementService';
 import { promptBuilder } from './services/promptBuilder';
+import { WebSocketServer } from 'ws';
+import { handleVoiceWsProxy } from './services/NovaVoiceProxy';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -318,8 +320,22 @@ async function main(): Promise<void> {
     logger.info('Endpoints ready', {
       health: `GET  http://localhost:${config.server.port}/health`,
       chatTest: `POST http://localhost:${config.server.port}/chat/test`,
+      voiceWs: `WSS  http://localhost:${config.server.port}/voice/ws`,
     });
   });
+
+  // ── Voice WebSocket Proxy ─────────────────────────────────────────────────────────────
+  // Attaches a WebSocketServer to the same HTTP server.
+  // Mobile connects to wss://[backend]/voice/ws?token=JWT&voice=Kore
+  // This proxy relays bidirectionally to Gemini Live using a server-side AIzaSy key.
+  const wss = new WebSocketServer({ server, path: '/voice/ws' });
+  wss.on('connection', (ws, req) => {
+    handleVoiceWsProxy(ws, req).catch((err: Error) => {
+      logger.error('[VoiceProxy] Unhandled error in proxy handler', { error: err.message });
+      try { ws.close(4500, 'Internal proxy error'); } catch {}
+    });
+  });
+  logger.info('[VoiceProxy] WebSocket proxy registered at /voice/ws');
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────
   // Render sends SIGTERM before stopping a service — we want to finish
