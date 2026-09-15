@@ -24,6 +24,7 @@ import { IncomingMessage } from 'http';
 import { logger } from '../lib/logger';
 import { supabaseAdmin } from '../lib/supabase';
 import { novaVoiceService } from './NovaVoiceService';
+import { geminiLivePool } from '../lib/geminiLivePool';
 
 const GEMINI_LIVE_WS_URL =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -43,40 +44,25 @@ async function verifyJwt(token: string): Promise<string | null> {
 // ── Find a valid Gemini API key ───────────────────────────────────────────────
 
 function getGeminiLiveKey(): string {
-  // Priority 1: explicit GEMINI_LIVE_API_KEY (the proper AIzaSy key)
+  // Priority 1: explicit GEMINI_LIVE_API_KEY
   const explicitKey = process.env.GEMINI_LIVE_API_KEY;
-  if (explicitKey?.startsWith('AIzaSy')) {
-    return explicitKey;
+  if (explicitKey?.trim()) {
+    return explicitKey.trim();
   }
 
-  // Priority 2: scan GEMINI_API_KEY_1..19 for any valid AIzaSy key
-  for (let i = 1; i <= 19; i++) {
-    const k = process.env[`GEMINI_API_KEY_${i}`];
-    if (k?.startsWith('AIzaSy')) return k;
+  // Priority 2: dedicated GeminiLivePool key
+  try {
+    const poolKey = geminiLivePool.getDirectKey();
+    if (poolKey?.trim()) return poolKey.trim();
+  } catch (err: any) {
+    logger.warn('[VoiceProxy] Failed to acquire key from geminiLivePool', { error: err.message });
   }
 
-  // Priority 3: GEMINI_API_KEY (primary)
-  const primary = process.env.GEMINI_API_KEY;
-  if (primary?.startsWith('AIzaSy')) return primary;
+  // Priority 3: GEMINI_API_KEY (primary) or GEMINI_API_KEY_1
+  const primary = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_1;
+  if (primary?.trim()) return primary.trim();
 
-  // If we get here, NO valid key exists — log clearly and throw
-  const allKeys = [
-    process.env.GEMINI_LIVE_API_KEY,
-    process.env.GEMINI_API_KEY,
-    ...Array.from({length: 19}, (_, i) => process.env[`GEMINI_API_KEY_${i+1}`]),
-  ].filter(Boolean);
-
-  const prefixes = allKeys.map(k => k!.substring(0, 10));
-  logger.error('[VoiceProxy] CRITICAL: No valid Gemini Live API key found!', {
-    message: 'All keys start with AQ. (OAuth tokens), not AIzaSy. Voice will not work.',
-    foundPrefixes: prefixes,
-    fix: 'Add GEMINI_LIVE_API_KEY=AIzaSy... to Render environment variables. Get a key at https://aistudio.google.com/app/apikey',
-  });
-
-  throw new Error(
-    'No valid Gemini Live API key configured. All keys are OAuth tokens (AQ.), not API keys (AIzaSy). ' +
-    'Add GEMINI_LIVE_API_KEY=AIzaSy... to environment variables.'
-  );
+  throw new Error('No Gemini API key available for voice proxy');
 }
 
 // ── Voice proxy handler ───────────────────────────────────────────────────────
@@ -118,7 +104,7 @@ export async function handleVoiceWsProxy(
   // 3. Get a valid Gemini Live key
   let geminiKey: string;
   try {
-    geminiKey = getGeminiLiveKey();
+    geminiKey = (session.apiKey && session.apiKey.trim()) || getGeminiLiveKey();
   } catch (err: any) {
     // Send a friendly error to mobile before closing
     try {

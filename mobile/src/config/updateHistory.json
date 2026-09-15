@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.3.19-beta",
+    "date": "2026-09-15",
+    "title": "🎙️ Nova Voice — Breakthrough Fix & Live Architecture",
+    "message": [
+      "Root Cause Discovered: Google deprecated gemini-2.0-flash-exp for bidirectional live audio. Gemini Live WebSocket now runs exclusively on gemini-2.5-flash-native-audio-latest.",
+      "Backend Voice Proxy: Mobile now connects to Nova's secure backend WebSocket proxy. All authentication, live model negotiation, memory context, and audio relaying are managed reliably on the server.",
+      "Instant, Reliable Voice: With the correct live audio model and backend proxy, connections are instant and conversations flow smoothly without disconnects or 30-second timeouts."
+    ]
+  },
+  {
     "version": "0.3.18-beta",
     "date": "2026-09-15",
     "title": "⚡ Voice — Instant Connect (Prefetch Architecture)",

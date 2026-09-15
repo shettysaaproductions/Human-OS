@@ -230,23 +230,30 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   }, []);
 
   const prefetchSession = useCallback(() => {
-    // Already have a fresh cached session or fetch in progress — skip
-    if (cachedSessionRef.current || prefetchInProgressRef.current) return;
+    // Prefetch is now just a Render warm-up ping.
+    // The actual session is built by the backend proxy on WebSocket connect.
+    if (prefetchInProgressRef.current) return;
     prefetchInProgressRef.current = true;
     setPrefetchState('loading');
-    console.log('[VoiceSession] Prefetching session config...');
-    voiceService.startSession({ voiceName: 'Kore' })
-      .then(({ session, availableVoices: voices }) => {
-        cachedSessionRef.current = session;
-        cachedVoicesRef.current = voices;
+    console.log('[VoiceSession] Warming up backend server...');
+
+    const apiUrl = (process.env.EXPO_PUBLIC_API_URL || 'https://human-os.onrender.com')
+      .replace(/\/$/, '');
+    const healthUrl = apiUrl.endsWith('/api')
+      ? apiUrl.replace(/\/api$/, '/health')
+      : `${apiUrl}/health`;
+
+    fetch(healthUrl, { method: 'GET' })
+      .then(() => {
         setPrefetchState('ready');
         prefetchInProgressRef.current = false;
-        console.log('[VoiceSession] Session prefetch complete ✓ Model:', session.model);
+        console.log('[VoiceSession] Backend warm-up complete ✓');
       })
       .catch((err: any) => {
-        setPrefetchState('error');
+        // Non-fatal — might just be slow, still allow user to tap
+        setPrefetchState('ready'); // show as ready anyway; WS will reveal real error
         prefetchInProgressRef.current = false;
-        console.warn('[VoiceSession] Session prefetch failed:', err?.message);
+        console.warn('[VoiceSession] Backend warm-up ping failed (non-fatal):', err?.message);
       });
   }, []);
 
