@@ -1,74 +1,77 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — Indestructible Voice Cards & WhatsApp-Style Persistent Audio Caching (v0.3.29-beta)
+2026-09-16 — Deterministic Memory Deletion & Zero-Hallucination Action Gate (v0.3.30-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.29-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.30-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.29-beta)
-- **Update Group ID**: `bdbe6068-68ef-4f6c-99fb-2d84c7dc9bb6`
-- **Android Update ID**: `01a0aa91-3359-78bb-acfe-8cca1e46170a`
-- **iOS Update ID**: `01a0aa91-3359-7e84-90a8-b0494c7a6cb8`
+### EAS Production OTA Deployment (v0.3.30-beta)
+- **Update Group ID**: `6a78d36a-227e-4ff9-bda7-748f9fcf201c`
+- **Android Update ID**: `01a0ab6d-5908-7b6a-9e24-38f5571c1912`
+- **iOS Update ID**: `01a0ab6d-5908-7d00-ab92-45f7dd1eba39`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Critical Problems Solved & Core Invariants Enforced (v0.3.29-beta)
+### Critical Problems Solved & Core Invariants Enforced (v0.3.30-beta)
 
-1. **Indestructible WhatsApp-Style Voice Card UI**:
-   - **Diagnosis**: After navigating away to the Brain section (e.g. Brain Galaxy) and returning to Chat, voice note cards and play buttons completely disappeared, degrading to plain text bubbles.
-   - **Root Cause**: `ChatScreen.tsx` evaluated `hasVoiceMessage = !!(item.audio_uri || item.reply_audio_base64 || (item.is_voice_message && (item.audio_base64 || item.meta?.audio_base64)) || ...)`. When navigating away, `saveMessageCache` purposefully deleted large `audio_base64` strings before writing to SecureStore to respect device quotas. On unmount/remount, `loadMessageCache` restored messages with `audio_base64: undefined` and without a preserved `audio_uri`, evaluating `hasVoiceMessage` to `false` and destroying the voice card UI.
-   - **Fix**: Hardcoded voice note card rendering to depend strictly on message classification invariants: `item.is_voice_message || item.meta?.is_voice_message || item.meta?.is_voice_reply || item.audio_uri || item.audio_base64 || item.reply_audio_base64 || item.meta?.audio_base64`. Like WhatsApp, once a message is a voice note, its card and play button **never** disappear under any screen transition or cache reload.
+1. **Root Cause Analysis (Why Nova Hallucinated Deletion & Left Memories in Graph)**:
+   - **Regex Gaps in Intent Detection**: `EntityRelationshipCorrectionService.detectDeleteIntent` previously only handled exact bubble deletions (e.g. `delete Tomy bubble` or `Tomy bubble ko delete kar do`). When the user spoke:
+     `"Can you please delete everything you know about pet in my memory"`
+     the regex matched `"everything"` as the entity name, which failed the entity validator (`!/^(everything|all|...)$/`), returning `null`.
+   - **Execution Bypass**: Because `detectDeleteIntent` returned `null`, `cascadingDeleteEntityBubble` was never invoked on the database.
+   - **Conversational Hallucination**: The LLM prompt lacked an anti-hallucination gating rule for deletion actions. Seeing the user's intent to delete, the LLM naturally generated a pleasing conversational response ("Data deleted! Apki yaadon mein pet-related data saaf ho gaya hai..."), even though not a single database record was touched.
+   - **Watchtower Blindspot**: Watchtower revised the text to polite Hinglish ("Main pet-related data ko delete karne ke liye taiyar hoon...") without checking if an actual database transaction occurred.
 
-2. **Persistent Local Disk Audio Caching (`expo-file-system`)**:
-   - **Fix**: Implemented `getLocalVoiceUri(messageId)` and `writeVoiceFileIfPresent(messageId, b64)` in `useChatStore.ts`. Incoming base64 audio chunks are immediately saved to local persistent disk storage (`${FileSystem.cacheDirectory}voice_${messageId}.wav`) and assigned to `audio_uri`.
-   - **SecureStore Preservation**: `saveMessageCache` preserves `audio_uri` in SecureStore (a tiny ~50-byte string), ensuring instantaneous playback after app restarts or screen transitions without consuming RAM.
+2. **Deterministic Category & Scoped Memory Intent Detection**:
+   - Enhanced `detectDeleteIntent` in `backend/src/services/EntityRelationshipCorrectionService.ts` with 3 robust patterns:
+     - Category/Concept deletion: `delete everything you know about [category]`, `delete all details connected to my [category]`.
+     - Scoped memory deletion: `delete [entity] from/in my memory / tree / galaxy`.
+     - Hinglish category deletion: `[category] related data ko delete kar do`, `[category] ke baare me sab delete kar do`.
+   - Added regex stop-word guards preventing `connected`, `related`, `data`, `info`, `details` from being mistakenly captured as entity names.
 
-3. **Dedicated On-Demand Audio Retrieval Endpoint**:
-   - **Backend**: Added `GET /api/chat/:messageId/audio` in `backend/src/routes/chat.ts` to lazily fetch audio base64 and duration directly from `chat_history.meta` when needed.
-   - **Frontend**: Added `chatService.getMessageAudio(messageId)` and a 3-tier fallback in `handleTogglePlayAudio` in `ChatScreen.tsx`:
-     1. Play local disk URI (`file://...`) if present.
-     2. Play in-memory base64 and cache to disk.
-     3. Lazily fetch from backend audio endpoint, cache to disk, update store via `setAudioUri`, and play immediately with an inline activity indicator.
+3. **Smart Cascading Bubble Deletion with Word-Boundary Awareness**:
+   - Expanded search terms for generic categories (`pet`, `dog`, `cat`) to systematically cover connected attributes (`breed`, `ezra`, `rottweiler`, `pet_*`, `dog_*`).
+   - Replaced loose substring matching (`.includes('cat')` or `.ilike.%cat%`) with strict word and segment boundary matching (`keySegments.includes(term)` and guarded SQL operators), ensuring short terms like `'cat'` never touch unrelated words like `'location'`, `'application'`, or `'vacation'`.
+   - Cleanses active memories (`memories`), temporary items (`working_memory`), active reminders (`reminders`), and knowledge graph nodes/edges.
 
-4. **User Message Deduplication Metadata Fix**:
-   - **Diagnosis**: In `checkProactiveMessages` in `useChatStore.ts`, user message deduplication matched existing text content and ran `continue;`, dropping user voice metadata (`audio_base64`, `audio_duration`, `is_voice_message`).
-   - **Fix**: Updated deduplication logic to preserve and sync voice flags, durations, and audio URIs onto existing local user messages.
+4. **Zero-Tolerance Anti-Hallucination Deletion Invariant**:
+   - Added a hard behavioral invariant to `backend/src/services/promptBuilder.ts`:
+     Nova is strictly prohibited from claiming, promising, or implying that data or memories have been deleted or cleaned up UNLESS the turn prompt includes an explicit `'## 🗑️ CASCADING BUBBLE & STEM DELETION CONFIRMATION'` directive proving that the database transaction has already succeeded.
+
+5. **Live User Memory Cleansing & Verification**:
+   - Executed cascading deletion for user `62f9190b-1e1d-48d5-9667-12cd0bc3114b` for entity `Pet`.
+   - Successfully soft-tombstoned `pet_name: Ezra`, `pet_breed: Rottweiler`, `pet_age: Almost 4 years`, `pet_location`, `friend_breed`, and `working_pet_given_away_date`.
+   - Verified that active pet memories in Supabase are now exactly `0`, while all other family, career, and location memories remain intact and active.
 
 ---
 
 ### Verification Results
 
-1. **Pre-flight Compilation**:
+1. **Automated Unit Tests**:
+   - `npx jest src/services/__tests__/EntityRelationshipCorrection.test.ts`: **42 passed, 42 total**.
+   - Verified category deletion, scoped memory deletion, Hinglish deletion, and regression cases.
+
+2. **Pre-flight Compilation**:
    - `cd backend && npm run build`: **0 errors (Exit 0)**
    - `cd mobile && npx tsc --noEmit`: **0 errors (Exit 0)**
 
-2. **EAS Production OTA Publish**:
+3. **EAS Production OTA Publish**:
    - Successfully published to `production` branch.
-   - Update Group ID: `bdbe6068-68ef-4f6c-99fb-2d84c7dc9bb6`.
+   - Update Group ID: `6a78d36a-227e-4ff9-bda7-748f9fcf201c`.
+   - Android Update ID: `01a0ab6d-5908-7b6a-9e24-38f5571c1912`.
+   - iOS Update ID: `01a0ab6d-5908-7d00-ab92-45f7dd1eba39`.
 
-3. **Push Notification Broadcast**:
-   - Successfully broadcasted `v0.3.29-beta` release alert to registered devices.
-
----
-
-### Files Modified
-
-| File | Status | Description |
-|---|---|---|
-| `backend/src/routes/chat.ts` | **MODIFIED** | Added dedicated lazy audio retrieval endpoint `GET /api/chat/:messageId/audio` |
-| `mobile/src/services/chatService.ts` | **MODIFIED** | Added `chatService.getMessageAudio(messageId)` client method |
-| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Added local disk caching of voice files, preserved `audio_uri` in cache, fixed user deduplication |
-| `mobile/src/screens/ChatScreen.tsx` | **MODIFIED** | Permanent voice card rendering invariant, on-demand audio fallback, loading spinner |
-| `mobile/src/config/updateHistory.json` | **MODIFIED** | Registered `v0.3.29-beta` changelog for in-app update notification modal |
+4. **Push Notification Broadcast**:
+   - Successfully broadcasted `v0.3.30-beta` release alert to registered devices.
 
 ---
 
-### NEXT ACTION
-- Push verified changes to `origin main` to deploy backend updates to Render.
+## NEXT ACTION
+All tasks complete. Changes deployed to production OTA and ready for git commit & push to `main`.

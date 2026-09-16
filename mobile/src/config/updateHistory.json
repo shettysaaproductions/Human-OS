@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.30-beta",
+    "date": "2026-09-16",
+    "title": "🗑️ Deterministic Memory Deletion & Zero-Hallucination Action Gate",
+    "message": [
+      "Deterministic Category & Concept Deletion: Nova now natively understands category deletion commands ('delete everything you know about pet', 'delete all details connected to my pet', 'pet related data ko delete kar do') across English and Hinglish.",
+      "Zero-Tolerance Deletion Anti-Hallucination Gate: Nova is strictly prohibited from claiming, promising, or implying data has been deleted ('Data deleted!') unless backed by an executed backend transaction directive.",
+      "Smart Entity & Category Cascading Deletion: Deleting an entity category seamlessly dissolves all connected stems, attributes, working memory items, and reminders with word-boundary awareness, preserving all other life and family memories.",
+      "Live Memory Cleanliness: Purged orphaned pet memories and restored clean family tree representations without requiring manual database intervention."
+    ]
+  },
+  {
     "version": "0.3.29-beta",
     "date": "2026-09-16",
     "title": "🎙️ Indestructible Voice Cards & WhatsApp-Style Persistent Audio Caching",

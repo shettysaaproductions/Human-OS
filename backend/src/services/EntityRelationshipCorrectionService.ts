@@ -455,7 +455,52 @@ Output ONLY valid JSON.`;
 
     const lower = clean.toLowerCase();
 
-    // 1. English:
+    // 1. Category & Concept Deletion (e.g. "delete everything you know about pet in my memory", "delete all details connected to my pet", "delete everything about pet")
+    const pCategory = /\b(?:delete|remove|erase|forget|wipe|clear)\s+(?:all\s+(?:the\s+)?(?:details|info|data|memories|facts|stems)?\s*(?:(?:that\s+(?:is|are)\s+)?(?:connected\s+to|related\s+to)\s+|about\s+|of\s+)?|everything\s+(?:you\s+know\s+)?(?:about\s+|related\s+to\s+|connected\s+to\s+)?)(?:my\s+)?([a-zA-Z0-9_-]+)/i;
+    const mCat = lower.match(pCategory);
+    if (mCat) {
+      const rawEntity = mCat[1].trim();
+      const entityName = this.cleanEntity(rawEntity);
+      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|this|that|it|them|connected|related|data|info|all|everything)$/i.test(entityName)) {
+        return {
+          isDelete: true,
+          entityName: this.capitalizeWords(entityName),
+          cascade: true
+        };
+      }
+    }
+
+    // 2. Scope / Memory Target Deletion (e.g. "delete pet in my memory", "delete my pet from memory", "forget pet from memory")
+    const pScope = /\b(?:delete|remove|erase|forget|wipe|clear)\s+(?:my\s+)?([a-zA-Z0-9_-]+)(?:\s+(?:bubble|branch|detail|stem|info|data|details))?\s+(?:from|in)\s+(?:my\s+)?(?:memory|brain|mind|tree|galaxy|profile)\b/i;
+    const mScope = lower.match(pScope);
+    if (mScope) {
+      const rawEntity = mScope[1].trim();
+      const entityName = this.cleanEntity(rawEntity);
+      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|everything|all|this|that|connected|related|data|info)$/i.test(entityName)) {
+        return {
+          isDelete: true,
+          entityName: this.capitalizeWords(entityName),
+          cascade: true
+        };
+      }
+    }
+
+    // 3. Hinglish Category Deletion (e.g. "pet related data ko delete kar do", "pet ke baare me sab delete kar do")
+    const pHinglishCat = /\b(?:mera|mere|meri|my)?\s*([a-zA-Z0-9_-]+)\s*(?:(?:se\s+)?related|ke\s+baare\s+me|ka|ki|ke)?\s*(?:sab\s+kuch|saara\s+data|saari\s+details|saari\s+yaadein|everything|all\s+data|all\s+info|data)?\s*(?:ko\s+)?(?:delete|remove|hata|bhool|saaf|mita)\s+(?:kar\s+do|kardo|do|dena|jao)/i;
+    const mHinglishCat = lower.match(pHinglishCat);
+    if (mHinglishCat) {
+      const rawEntity = mHinglishCat[1].trim();
+      const entityName = this.cleanEntity(rawEntity);
+      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|everything|all|this|that|and|kar|do|kardo|ko|se|aur|uske|aap|apki|meri|mera|related|connected|data|info)$/i.test(entityName)) {
+        return {
+          isDelete: true,
+          entityName: this.capitalizeWords(entityName),
+          cascade: true
+        };
+      }
+    }
+
+    // 4. Original English Entity Bubble Deletion:
     // e.g. "in family i delete my pet bubble whose name was Tomy and its stems ware morning walk with him daily"
     // e.g. "delete my pet bubble Tomy and all its stems"
     // e.g. "delete Tomy bubble"
@@ -465,7 +510,7 @@ Output ONLY valid JSON.`;
     if (m1) {
       const rawEntity = m1[1].trim();
       const entityName = this.cleanEntity(rawEntity);
-      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|everything|all|this|that|and|kar|do|kardo|ko|se|aur|uske)$/i.test(entityName)) {
+      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|everything|all|this|that|and|kar|do|kardo|ko|se|aur|uske|connected|related|data|info)$/i.test(entityName)) {
         return {
           isDelete: true,
           entityName: this.capitalizeWords(entityName),
@@ -474,7 +519,7 @@ Output ONLY valid JSON.`;
       }
     }
 
-    // 2. Hinglish:
+    // 5. Original Hinglish Bubble Deletion:
     // e.g. "Tomy bubble ko delete kar do aur uske saare stems bhi"
     // e.g. "Tomy bubble delete kar do"
     // e.g. "Tomy ko delete kar do"
@@ -483,7 +528,7 @@ Output ONLY valid JSON.`;
     if (m2) {
       const rawEntity = m2[1].trim();
       const entityName = this.cleanEntity(rawEntity);
-      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|everything|all|this|that|and|kar|do|kardo|ko|se|aur|uske)$/i.test(entityName)) {
+      if (this.isValidEntityName(entityName) && !/^(bubble|branch|detail|stem|node|memory|fact|everything|all|this|that|and|kar|do|kardo|ko|se|aur|uske|connected|related|data|info)$/i.test(entityName)) {
         return {
           isDelete: true,
           entityName: this.capitalizeWords(entityName),
@@ -526,6 +571,17 @@ Output ONLY valid JSON.`;
     resolvedEntity = this.capitalizeWords(this.cleanEntity(resolvedEntity || 'Entity'));
     const slug = resolvedEntity.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
+    // Build comprehensive search terms for categories and entities
+    const searchTerms = new Set<string>([slug, resolvedEntity.toLowerCase()]);
+    if (slug === 'pet' || slug === 'dog' || slug === 'cat') {
+      searchTerms.add('pet');
+      searchTerms.add('dog');
+      searchTerms.add('cat');
+      searchTerms.add('breed');
+      searchTerms.add('ezra');
+      searchTerms.add('rottweiler');
+    }
+
     // 1. Fetch active memories touching this entity
     const { data: mems } = await supabaseAdmin
       .from('memories')
@@ -539,10 +595,22 @@ Output ONLY valid JSON.`;
     for (const m of (mems || [])) {
       const k = (m.key || '').toLowerCase();
       const v = (m.value || '').toLowerCase();
-      const matches = k.includes(slug) || v.includes(resolvedEntity.toLowerCase()) || v.includes(slug) || m.id === target.nodeId;
+      const keySegments = k.split(/[^a-z0-9]+/);
+      const valueWords = v.split(/[^a-z0-9]+/);
+
+      const matches = Array.from(searchTerms).some(term => {
+        const t = term.toLowerCase();
+        // Exact segment or word boundary matching prevents 'cat' from matching 'location' or 'application'
+        return keySegments.includes(t) ||
+               valueWords.includes(t) ||
+               k.startsWith(`${t}_`) ||
+               k.endsWith(`_${t}`) ||
+               k.includes(`_${t}_`) ||
+               (t.length > 4 && (k.includes(t) || v.includes(t)));
+      }) || m.id === target.nodeId;
 
       if (matches) {
-        if (!rootMemory && (k === `pet_${slug}` || k === `dog_${slug}` || k === `cat_${slug}` || k === `friend_${slug}` || k === slug || m.id === target.nodeId)) {
+        if (!rootMemory && (Array.from(searchTerms).some(term => k === `pet_${term}` || k === `dog_${term}` || k === `cat_${term}` || k === `friend_${term}` || k === term) || m.id === target.nodeId)) {
           rootMemory = { id: m.id, key: m.key, value: m.value };
         } else {
           matchingMems.push({ id: m.id, key: m.key, value: m.value, department: m.memory_type });
@@ -562,7 +630,15 @@ Output ONLY valid JSON.`;
     for (const r of (allReminders || [])) {
       const t = (r.text || '').toLowerCase();
       const n = ((r as any).notes || '').toLowerCase();
-      if (t.includes(slug) || t.includes(resolvedEntity.toLowerCase()) || n.includes(slug) || n.includes(resolvedEntity.toLowerCase())) {
+      const textWords = t.split(/[^a-z0-9]+/);
+      const noteWords = n.split(/[^a-z0-9]+/);
+
+      const rMatch = Array.from(searchTerms).some(term => {
+        const trm = term.toLowerCase();
+        return textWords.includes(trm) || noteWords.includes(trm) || (trm.length > 4 && (t.includes(trm) || n.includes(trm)));
+      });
+
+      if (rMatch) {
         matchingReminders.push({ id: r.id, text: r.text, due_time: r.due_time });
       }
     }
@@ -590,6 +666,16 @@ Output ONLY valid JSON.`;
     const preview = await this.previewCascadingDelete(userId, target);
     const { entityName, stems, reminders, rootMemory } = preview;
     const slug = entityName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+    const searchTerms = new Set<string>([slug, entityName.toLowerCase()]);
+    if (slug === 'pet' || slug === 'dog' || slug === 'cat') {
+      searchTerms.add('pet');
+      searchTerms.add('dog');
+      searchTerms.add('cat');
+      searchTerms.add('breed');
+      searchTerms.add('ezra');
+      searchTerms.add('rottweiler');
+    }
 
     logger.info('[EntityRelationshipCorrection] Executing cascading bubble deletion', {
       userId,
@@ -619,17 +705,46 @@ Output ONLY valid JSON.`;
           .in('id', allMemIds);
       }
 
-      // Also invalidate any memories by key or value matching slug
-      await supabaseAdmin
-        .from('memories')
-        .update({
-          is_archived: true,
-          lifecycle_state: 'INVALIDATED',
-          supersession_reason: `[Cascading Bubble Deletion] ${target.reason || `Deleted parent bubble ${entityName}`}`,
-          updated_at: now
-        })
-        .eq('user_id', userId)
-        .or(`key.ilike.%${slug}%,value.ilike.%${entityName}%`);
+      // Also invalidate any memories and working memory by key or value matching search terms
+      for (const term of searchTerms) {
+        const trm = term.toLowerCase();
+        // Guard short terms (like 'cat' or 'dog') from loose substring matching words like 'location'
+        const memFilter = trm.length <= 3
+          ? `key.ilike.${trm}_%,key.ilike.%_${trm},key.ilike.%_${trm}_%,key.eq.${trm},value.ilike.${trm} %,value.ilike.% ${trm} %,value.ilike.% ${trm},value.eq.${trm}`
+          : `key.ilike.%${trm}%,value.ilike.%${trm}%`;
+
+        await supabaseAdmin
+          .from('memories')
+          .update({
+            is_archived: true,
+            lifecycle_state: 'INVALIDATED',
+            supersession_reason: `[Cascading Bubble Deletion] ${target.reason || `Deleted parent bubble ${entityName}`}`,
+            updated_at: now
+          })
+          .eq('user_id', userId)
+          .or(memFilter);
+
+        await supabaseAdmin
+          .from('working_memory')
+          .delete()
+          .eq('user_id', userId)
+          .or(memFilter);
+
+        const remFilter = trm.length <= 3
+          ? `text.ilike.${trm} %,text.ilike.% ${trm} %,text.ilike.% ${trm},text.eq.${trm},notes.ilike.${trm} %,notes.ilike.% ${trm} %,notes.ilike.% ${trm},notes.eq.${trm}`
+          : `text.ilike.%${trm}%,notes.ilike.%${trm}%`;
+
+        await supabaseAdmin
+          .from('reminders')
+          .update({
+            status: 'cancelled',
+            updated_at: now
+          })
+          .eq('user_id', userId)
+          .neq('status', 'cancelled')
+          .neq('status', 'completed')
+          .or(remFilter);
+      }
 
       // 2. Cancel all matching reminders
       const reminderIds = reminders.map(r => r.id);

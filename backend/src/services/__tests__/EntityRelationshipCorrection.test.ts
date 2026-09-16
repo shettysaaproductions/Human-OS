@@ -274,6 +274,52 @@ describe('Entity Relationship Correction & Branch Severing Engine', () => {
       expect(deleteIntent?.cascade).toBe(true);
     });
 
+    it('detects category deletion: "Can you please delete everything you know about pet in my memory"', () => {
+      const input = 'Can you please delete everything you know about pet in my memory';
+      const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(input);
+
+      expect(deleteIntent).not.toBeNull();
+      expect(deleteIntent?.isDelete).toBe(true);
+      expect(deleteIntent?.entityName).toBe('Pet');
+      expect(deleteIntent?.cascade).toBe(true);
+    });
+
+    it('detects category deletion: "delete all details connected to my pet"', () => {
+      const input = 'delete all details connected to my pet';
+      const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(input);
+
+      expect(deleteIntent).not.toBeNull();
+      expect(deleteIntent?.entityName).toBe('Pet');
+      expect(deleteIntent?.cascade).toBe(true);
+    });
+
+    it('detects scoped memory deletion: "delete pet from memory"', () => {
+      const input = 'delete pet from memory';
+      const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(input);
+
+      expect(deleteIntent).not.toBeNull();
+      expect(deleteIntent?.entityName).toBe('Pet');
+      expect(deleteIntent?.cascade).toBe(true);
+    });
+
+    it('detects Hinglish category deletion: "pet related data ko delete kar do"', () => {
+      const input = 'pet related data ko delete kar do';
+      const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(input);
+
+      expect(deleteIntent).not.toBeNull();
+      expect(deleteIntent?.entityName).toBe('Pet');
+      expect(deleteIntent?.cascade).toBe(true);
+    });
+
+    it('detects named entity Hinglish deletion: "Ezra ko delete kar do"', () => {
+      const input = 'Ezra ko delete kar do';
+      const deleteIntent = entityRelationshipCorrectionService.detectDeleteIntent(input);
+
+      expect(deleteIntent).not.toBeNull();
+      expect(deleteIntent?.entityName).toBe('Ezra');
+      expect(deleteIntent?.cascade).toBe(true);
+    });
+
     it('does not falsely trigger delete on normal conversation', () => {
       expect(entityRelationshipCorrectionService.detectDeleteIntent('I took Tomy for a walk')).toBeNull();
       expect(entityRelationshipCorrectionService.detectDeleteIntent('Can you remind me about Tomy at 5pm?')).toBeNull();
