@@ -20,6 +20,7 @@ import { geminiLivePool } from '../lib/geminiLivePool';
 import { config } from '../config';
 import WebSocket from 'ws';
 import { GoogleGenAI } from '@google/genai';
+import { isInterimThinkingPhrase, stripThinkingPrefix } from './VoiceResponseLifecycle';
 
 export function detectAudioMimeType(buffer: Buffer): string {
   if (buffer.length >= 12) {
@@ -1068,35 +1069,94 @@ class NovaVoiceService {
   ): Promise<{ audio_base64: string; duration_seconds: number } | null> {
     if (!text || !text.trim()) return null;
 
-    // Clean text of internal tags or system markers before speech
-    const cleanText = text
-      .replace(/<[^>]+>/g, '')
-      .replace(/\[Replying to:.*?\]/gs, '')
-      .trim();
-    if (!cleanText) return null;
+    // Reject thinking phrases, fallback messages, and status placeholders immediately
+    if (isInterimThinkingPhrase(text)) {
+      logger.warn('[NovaVoiceService] Refusing to synthesize voice reply for thinking/fallback phrase', {
+        textSnippet: text.slice(0, 60),
+      });
+      return null;
+    }
 
-    return new Promise((resolve) => {
-      let key = '';
+    // Clean text of internal tags, system markers, and verbal hesitation prefixes
+    const cleanText = stripThinkingPrefix(text);
+    if (!cleanText || isInterimThinkingPhrase(cleanText)) {
+      logger.warn('[NovaVoiceService] Text empty or thinking phrase after prefix strip, aborting voice synthesis', {
+        cleanTextSnippet: cleanText.slice(0, 60),
+      });
+      return null;
+    }
+
+    const candidateKeys: string[] = [];
+    try {
+      const primaryKey = geminiLivePool.getDirectKey();
+      if (primaryKey) candidateKeys.push(primaryKey);
+    } catch {}
+
+    for (let i = 5; i <= 19; i++) {
+      const k = process.env[`GEMINI_API_KEY_${i}`];
+      if (k && k.trim() && !candidateKeys.includes(k.trim())) {
+        candidateKeys.push(k.trim());
+      }
+    }
+    for (let i = 1; i <= 4; i++) {
+      const k = process.env[`GEMINI_API_KEY_${i}`];
+      if (k && k.trim() && !candidateKeys.includes(k.trim())) {
+        candidateKeys.push(k.trim());
+      }
+    }
+    if (process.env.GEMINI_API_KEY && !candidateKeys.includes(process.env.GEMINI_API_KEY.trim())) {
+      candidateKeys.push(process.env.GEMINI_API_KEY.trim());
+    }
+
+    if (candidateKeys.length === 0) {
+      logger.warn('[NovaVoiceService] No key available for synthesizeVoiceReply');
+      return null;
+    }
+
+    const attempts = Math.min(candidateKeys.length, 3);
+    for (let i = 0; i < attempts; i++) {
+      const key = candidateKeys[i];
       try {
-        key = geminiLivePool.getDirectKey();
-      } catch {
-        key = process.env.GEMINI_API_KEY_5 || process.env.GEMINI_API_KEY || '';
+        const result = await this.synthesizeWithKey(cleanText, voiceName, key, 12000);
+        if (result) return result;
+      } catch (err: any) {
+        logger.warn('[NovaVoiceService] Key attempt failed in voice synthesis, trying next key', {
+          attempt: i + 1,
+          error: err?.message,
+        });
       }
+    }
 
-      if (!key) {
-        logger.warn('[NovaVoiceService] No key available for synthesizeVoiceReply');
-        return resolve(null);
-      }
+    return null;
+  }
 
+  private synthesizeWithKey(
+    cleanText: string,
+    voiceName: string,
+    key: string,
+    timeoutMs = 12000
+  ): Promise<{ audio_base64: string; duration_seconds: number } | null> {
+    return new Promise((resolve) => {
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;
       const ws = new WebSocket(wsUrl);
       const pcmChunks: Buffer[] = [];
+      let resolved = false;
+
+      const finish = (result: { audio_base64: string; duration_seconds: number } | null) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
+        try { ws.close(); } catch {}
+        resolve(result);
+      };
 
       const timeout = setTimeout(() => {
-        try { ws.close(); } catch {}
-        logger.warn('[NovaVoiceService] synthesizeVoiceReply timed out after 20s');
-        resolve(null);
-      }, 20000);
+        logger.warn('[NovaVoiceService] synthesizeVoiceReply attempt timed out', {
+          timeoutMs,
+          keyPrefix: key.slice(0, 8),
+        });
+        finish(null);
+      }, timeoutMs);
 
       ws.on('open', () => {
         const setupFrame = {
@@ -1151,11 +1211,9 @@ class NovaVoiceService {
           }
 
           if (msg.serverContent?.turnComplete) {
-            clearTimeout(timeout);
-            try { ws.close(); } catch {}
             const totalPcm = Buffer.concat(pcmChunks);
             if (totalPcm.length === 0) {
-              return resolve(null);
+              return finish(null);
             }
             const wav = pcmToWav(totalPcm, 24000);
             const duration = Math.round((totalPcm.length / (24000 * 2)) * 10) / 10;
@@ -1164,7 +1222,7 @@ class NovaVoiceService {
               wavBytes: wav.length,
               voiceName,
             });
-            resolve({ audio_base64: wav.toString('base64'), duration_seconds: duration });
+            finish({ audio_base64: wav.toString('base64'), duration_seconds: duration });
           }
         } catch (err: any) {
           logger.warn('[NovaVoiceService] Error during voice synthesis message processing', { error: err?.message });
@@ -1172,9 +1230,14 @@ class NovaVoiceService {
       });
 
       ws.on('error', (err) => {
-        clearTimeout(timeout);
-        logger.warn('[NovaVoiceService] synthesizeVoiceReply WS error', { error: err?.message });
-        resolve(null);
+        logger.warn('[NovaVoiceService] synthesizeVoiceReply WS error', { error: err?.message, keyPrefix: key.slice(0, 8) });
+        finish(null);
+      });
+
+      ws.on('close', () => {
+        if (!resolved) {
+          finish(null);
+        }
       });
     });
   }

@@ -369,15 +369,33 @@ const MOBILE_FALLBACK_FILTER = [
 export const isBadMessage = (content: string) =>
   MOBILE_FALLBACK_FILTER.some(p => content.includes(p));
 
+export const isInterimThinkingPhrase = (content?: string): boolean => {
+  if (!content) return false;
+  const raw = content.trim().toLowerCase();
+  return (
+    raw.includes('mujhe thoda sochne de') ||
+    raw.includes('main abhi batati hu') ||
+    raw.includes('main abhi batata hu') ||
+    raw.includes('give me a moment') ||
+    raw.includes("i'll text you right back") ||
+    raw.includes('let me think') ||
+    raw.includes('currently analyzing') ||
+    raw.includes('main check karti hoon') ||
+    raw.includes('main check karti hu') ||
+    raw.includes('main dekh rahi hoon') ||
+    raw.includes('main dekh rahi hu') ||
+    raw.includes('let me analyze that') ||
+    raw.includes('let me listen again') ||
+    raw.startsWith('hmm...') ||
+    raw === 'wait' ||
+    raw === 'ruko' ||
+    raw === 'ek minute'
+  );
+};
+
 export const isFallbackMessage = (content?: string): boolean => {
   if (!content) return false;
-  return (
-    content.startsWith('Hmm... mujhe thoda sochne de') ||
-    content.startsWith('Hmm... give me a moment') ||
-    content.startsWith('Hmm... let me think') ||
-    content.includes("I'll text you right back in a bit") ||
-    content.includes("main abhi batati hu thodi der me")
-  );
+  return isInterimThinkingPhrase(content);
 };
 
 // DB rows carry UUID ids; locally-generated messages (SSE `msg_…`, proactive
@@ -669,10 +687,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 }
               });
 
-              const isVoiceMsg = !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply);
-              const audioB64 = msg.meta?.audio_base64;
-              const audioDur = msg.meta?.audio_duration;
-              const isVoiceReply = !!msg.meta?.is_voice_reply;
+              const isThinking = isFallbackMessage(msg.content);
+              const isVoiceReply = !isThinking && !!msg.meta?.is_voice_reply;
+              const isVoiceMsg = !isThinking && !!(msg.meta?.is_voice_message || isVoiceReply);
+              const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
+              const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
 
               finalChunks.forEach((chunkContent, idx) => {
                 formattedHistory.push({
@@ -696,10 +715,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 });
               });
             } else {
-              const isVoiceMsg = !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply);
-              const audioB64 = msg.meta?.audio_base64;
-              const audioDur = msg.meta?.audio_duration;
-              const isVoiceReply = !!msg.meta?.is_voice_reply;
+              const isThinking = isFallbackMessage(msg.content);
+              const isVoiceReply = !isThinking && !!msg.meta?.is_voice_reply;
+              const isVoiceMsg = !isThinking && !!(msg.meta?.is_voice_message || isVoiceReply);
+              const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
+              const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
 
               formattedHistory.push({
                 id: msg.id,
@@ -1098,20 +1118,21 @@ export const useChatStore = create<ChatState>((set, get) => {
           const updateLocalMessageIfNeeded = (localId: string) => {
             const localMsg = currentMessages.find(m => m.id === localId);
             if (localMsg) {
+              const isThinking = isFallbackMessage(msg.content) || isFallbackMessage(localMsg.content);
               const needsThoughtUpdate = msg.meta?.hasThoughts && !localMsg.hasThoughts;
               const needsOptionsUpdate = msg.meta?.options && !localMsg.options;
-              const needsAudioUpdate = (msg.meta?.audio_base64 && !localMsg.audio_base64) || (msg.meta?.is_voice_reply && !localMsg.reply_audio_base64);
+              const needsAudioUpdate = !isThinking && ((msg.meta?.audio_base64 && !localMsg.audio_base64) || (msg.meta?.is_voice_reply && !localMsg.reply_audio_base64));
               if (needsThoughtUpdate || needsOptionsUpdate || needsAudioUpdate) {
                 set((s) => ({
                   messages: s.messages.map(m => m.id === localId ? { 
                     ...m, 
                     hasThoughts: m.hasThoughts || msg.meta?.hasThoughts,
                     options: m.options || msg.meta?.options,
-                    audio_base64: m.audio_base64 || msg.meta?.audio_base64,
-                    audio_duration: m.audio_duration || msg.meta?.audio_duration,
-                    reply_audio_base64: m.reply_audio_base64 || (msg.meta?.is_voice_reply ? msg.meta?.audio_base64 : undefined),
-                    reply_audio_duration: m.reply_audio_duration || (msg.meta?.is_voice_reply ? msg.meta?.audio_duration : undefined),
-                    is_voice_message: m.is_voice_message ?? !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply),
+                    audio_base64: !isThinking ? (m.audio_base64 || msg.meta?.audio_base64) : undefined,
+                    audio_duration: !isThinking ? (m.audio_duration || msg.meta?.audio_duration) : undefined,
+                    reply_audio_base64: !isThinking ? (m.reply_audio_base64 || (msg.meta?.is_voice_reply ? msg.meta?.audio_base64 : undefined)) : undefined,
+                    reply_audio_duration: !isThinking ? (m.reply_audio_duration || (msg.meta?.is_voice_reply ? msg.meta?.audio_duration : undefined)) : undefined,
+                    is_voice_message: !isThinking ? (m.is_voice_message ?? !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply)) : false,
                     meta: msg.meta,
                   } : m)
                 }));
@@ -1168,9 +1189,10 @@ export const useChatStore = create<ChatState>((set, get) => {
             const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
               ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
               : [msg.content];
-            const isVoiceReply = !!msg.meta?.is_voice_reply;
-            const audioB64 = msg.meta?.audio_base64;
-            const audioDur = msg.meta?.audio_duration;
+            const isThinking = isFallbackMessage(msg.content);
+            const isVoiceReply = !isThinking && !!msg.meta?.is_voice_reply;
+            const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
+            const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
 
             chunks.forEach((chunkContent: string, idx: number) => {
               const newMsg: Message = {

@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
-import { useChatStore, Message } from '../store/useChatStore';
+import { useChatStore, Message, isFallbackMessage } from '../store/useChatStore';
 import { api } from '../services/api';
 import { chatService } from '../services/chatService';
 import { notificationService, setChatScreenActive } from '../services/notificationService';
@@ -1393,7 +1393,8 @@ export function ChatScreen() {
             })()}
             {/* Voice Message Player Card */}
             {(() => {
-              const hasVoiceMessage = !!(
+              const isFallbackOrThinking = isFallbackMessage(item.content);
+              const hasVoiceMessage = !isFallbackOrThinking && !!(
                 item.is_voice_message ||
                 item.audio_uri ||
                 item.audio_base64 ||

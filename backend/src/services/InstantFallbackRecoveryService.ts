@@ -93,7 +93,7 @@ class InstantFallbackRecoveryService {
     // Verify whether a real assistant message has already landed in this conversation
     const { data: latestMsgs } = await supabaseAdmin
       .from('chat_history')
-      .select('id, role, content, created_at')
+      .select('id, role, content, meta, created_at')
       .eq('conversation_id', conversationId)
       .eq('role', 'assistant')
       .order('created_at', { ascending: false })
@@ -101,7 +101,13 @@ class InstantFallbackRecoveryService {
 
     if (latestMsgs && latestMsgs.length > 0) {
       const last = latestMsgs[0];
-      // If the latest message is NOT the fallback phrase, a real reply already succeeded!
+      // If the latest message is a voice reply or NOT the fallback phrase, skip recovery!
+      if ((last as any).meta?.is_voice_reply) {
+        logger.info('[InstantRecovery] Latest assistant message is a voice reply, skipping fallback recovery', {
+          lastReplySnippet: last.content?.slice(0, 50),
+        });
+        return;
+      }
       if (last.content && !last.content.includes('mujhe thoda sochne de') && !last.content.includes('moment to think')) {
         logger.info('[InstantRecovery] Real reply already present in chat, skipping recovery', {
           lastReplySnippet: last.content.slice(0, 50),

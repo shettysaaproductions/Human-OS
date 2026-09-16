@@ -33,6 +33,7 @@ import { lifeBlueprintCuriosityEngine } from '../services/LifeBlueprintCuriosity
 import { entityRelationshipCorrectionService, EntityCorrection } from '../services/EntityRelationshipCorrectionService';
 import { universalBranchRelocationService } from '../services/UniversalBranchRelocationService';
 import { DOMAIN_TAXONOMY } from '../lib/memoryDomains';
+import { voiceResponseLifecycle, isInterimThinkingPhrase, stripThinkingPrefix } from '../services/VoiceResponseLifecycle';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1066,6 +1067,18 @@ chatRouter.post(
       ) ? userMessageId : crypto.randomUUID();
 
       logger.info('[Chat][P0-A] Turn ID assigned', { userId, turnId, userMessageId });
+
+      if (hasVoiceMessage) {
+        voiceResponseLifecycle.startTurn(
+          turnId,
+          userId,
+          activeConversationId,
+          normalizedMessages[normalizedMessages.length - 1].audio_base64
+        );
+        if (primaryMessage) {
+          voiceResponseLifecycle.setUserTranscript(turnId, primaryMessage);
+        }
+      }
 
       // ── [PHASE 1 — PRODUCTION MODE] Semantic Processing Queue ────────────────
       let semanticJobId: string | null = null;
@@ -2222,11 +2235,21 @@ NEVER say "kya hua?", "sab theek hai?", "kuch toh bolo", "kuch soch rahe ho?", o
                     const sanitizedFastReply = validateAndRepairGrounding(sanitizeReply(fastReply.trim()), primaryMessage, brainContext);
                     result = { reply: sanitizedFastReply || NOVA_EMPTY_REPLY, subconscious_actions: [] };
                   } else {
-                    result = { reply: requestFallbackReply, subconscious_actions: [] };
+                    result = {
+                      reply: hasVoiceMessage
+                        ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                        : requestFallbackReply,
+                      subconscious_actions: []
+                    };
                   }
                 } catch (retryErr) {
                   logger.error('[Chat] Fast retry handler also failed', { userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
-                  result = { reply: requestFallbackReply, subconscious_actions: [] };
+                  result = {
+                    reply: hasVoiceMessage
+                      ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                      : requestFallbackReply,
+                    subconscious_actions: []
+                  };
                 }
               } else {
                 throw llmErr;
@@ -2263,11 +2286,15 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
                 if (fastReply && !isPromptLeak(fastReply)) {
                   rawReply = validateAndRepairGrounding(sanitizeReply(fastReply), primaryMessage, brainContext);
                 } else {
-                  rawReply = requestFallbackReply;
+                  rawReply = hasVoiceMessage
+                    ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                    : requestFallbackReply;
                 }
               } catch (e: any) {
                 logger.error('[Chat] Fast retry on prompt leak failed', { error: e.message });
-                rawReply = requestFallbackReply;
+                rawReply = hasVoiceMessage
+                  ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                  : requestFallbackReply;
               }
             }
             if (result.subconscious_actions && result.subconscious_actions.length > 0) {
@@ -2350,10 +2377,14 @@ Casual "tu/tum". Plain conversational text only.`;
               rawReply = isEnglishUser
                 ? "Well, I can't really talk much about that topic 😂 Let's chat about something else?"
                 : 'Acha, is topic par main jyada bol nahi sakti yaar 😂 kuch aur baat karte hain?';
+            } else if (hasVoiceMessage) {
+              rawReply = isEnglishUser
+                ? "Sorry, I couldn't catch that clearly due to a connection glitch. Could you say that again?"
+                : "Yaar, connection glitch ki wajah se main theek se sun nahi paayi, ek baar phir bolegi?";
             } else {
               rawReply = requestFallbackReply;
             }
-            logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId, isContentPolicy });
+            logger.warn('[ASYNC] Saved fallback reply due to LLM failure', { userId, isContentPolicy, hasVoiceMessage });
           } else {
             throw new ExternalServiceError('NVIDIA', errStr);
           }
@@ -2513,8 +2544,12 @@ Casual "tu/tum". Plain conversational text only.`;
       // Streaming: the 'done' event was already flushed above — writing again after
       // res.end() would throw. Non-streaming: send an empty 200 so the client never
       if (finalBubbles.length === 0) {
-        logger.info('[Chat] LLM returned a blank reply or leaks were stripped. Forcing friendly fallback bubble.', { userId });
-        finalBubbles = [requestFallbackReply];
+        logger.info('[Chat] LLM returned a blank reply or leaks were stripped. Forcing friendly fallback bubble.', { userId, hasVoiceMessage });
+        finalBubbles = [
+          hasVoiceMessage
+            ? (isEnglishUser ? "Sorry, I couldn't catch that clearly. Could you say that again?" : "Yaar, main theek se sun nahi paayi, ek baar phir bolegi?")
+            : requestFallbackReply
+        ];
       }
       const reply = finalBubbles.join('\n\n');
 
@@ -2671,20 +2706,62 @@ Casual "tu/tum". Plain conversational text only.`;
         // Save as a single cohesive turn with <NOVA_MESSAGE_BREAK>
         // Progressively unrolled on mobile with human delays (5-10s) and reflected on as a single whole.
         const replyTargetId = is_proactive ? null : userMessageId;
-        const combinedContent = finalBubbles.join('\n<NOVA_MESSAGE_BREAK>\n');
+        let combinedContent = finalBubbles.join('\n<NOVA_MESSAGE_BREAK>\n');
 
         replyAudioBase64 = undefined;
         replyAudioDuration = undefined;
 
         if (hasVoiceMessage && !is_proactive) {
+          voiceResponseLifecycle.transitionState(turnId, 'FINALIZING');
+
+          // Ensure thinking prefix is stripped so Nova directly speaks the final answer
+          let cleanVoiceText = stripThinkingPrefix(combinedContent);
+
+          // If the text is an interim thinking phrase or empty, trigger inline synchronous recovery
+          if (isInterimThinkingPhrase(cleanVoiceText)) {
+            logger.warn('[Chat] Voice turn candidate is an interim thinking phrase, recovering inline', {
+              turnId,
+              candidate: cleanVoiceText.slice(0, 60),
+            });
+            try {
+              const { cognitiveRouter } = await import('../lib/cognitiveRouter');
+              const recoveryPrompt = isEnglishUser
+                ? `You are Nova, an intimate virtual best friend replying to a user's voice message in warm English. Directly answer what the user asked or confirm what they requested in 1-2 natural sentences. Do NOT output thinking filler or phrases like "let me think".`
+                : `You are Nova, an intimate virtual best friend replying to a user's voice message in warm Hinglish. Directly answer what the user asked or confirm what they requested in 1-2 natural sentences. Do NOT output thinking filler or phrases like "mujhe sochne de" or "ek minute". Casual tu/tum.`;
+
+              const recovered = await cognitiveRouter.complete('CONVERSATION', [
+                { role: 'system', content: recoveryPrompt },
+                { role: 'user', content: primaryMessage }
+              ], { maxTokens: 250, temperature: 0.7, timeoutMs: 5000 });
+
+              if (recovered && !isInterimThinkingPhrase(recovered)) {
+                cleanVoiceText = stripThinkingPrefix(recovered);
+                combinedContent = cleanVoiceText;
+                finalBubbles = [cleanVoiceText];
+              }
+            } catch (recErr: any) {
+              logger.error('[Chat] Inline recovery for voice turn failed', { error: recErr?.message });
+            }
+          }
+
+          // If still a thinking phrase or empty, set a clean, truthful fallback response
+          if (isInterimThinkingPhrase(cleanVoiceText)) {
+            cleanVoiceText = isEnglishUser
+              ? "I understood your message, but had a brief glitch answering. Could you say that again?"
+              : "Maine sun toh liya, par network glitch ki wajah se bol nahi paayi. Ek baar phir bolegi?";
+            combinedContent = cleanVoiceText;
+            finalBubbles = [cleanVoiceText];
+          }
+
           try {
             const { novaVoiceService } = await import('../services/NovaVoiceService');
             const voiceToUse = profile?.companion_voice || 'Kore';
-            const voiceReply = await novaVoiceService.synthesizeVoiceReply(combinedContent, voiceToUse);
+            const voiceReply = await novaVoiceService.synthesizeVoiceReply(cleanVoiceText, voiceToUse);
             if (voiceReply) {
               replyAudioBase64 = voiceReply.audio_base64;
               replyAudioDuration = voiceReply.duration_seconds;
               logger.info('[Chat] Dual-modality voice reply synthesized successfully', {
+                turnId,
                 durationSeconds: replyAudioDuration,
                 voiceName: voiceToUse
               });
@@ -2692,6 +2769,9 @@ Casual "tu/tum". Plain conversational text only.`;
           } catch (voiceErr: any) {
             logger.warn('[Chat] Failed to synthesize voice reply for voice message', { error: voiceErr?.message });
           }
+
+          // Single finalization gate: transition to COMPLETED
+          voiceResponseLifecycle.finalizeTurn(turnId, cleanVoiceText, replyAudioBase64, replyAudioDuration);
         }
 
         const rowData = {
@@ -2794,8 +2874,8 @@ Casual "tu/tum". Plain conversational text only.`;
               userMessage: primaryMessage,
             });
 
-            // Trigger instant upfront self-healing if fallback was saved
-            if (combinedContent.includes('mujhe thoda sochne de') || combinedContent.includes('moment to think')) {
+            // Trigger instant upfront self-healing if fallback was saved (strictly text chat only, NEVER voice)
+            if (!hasVoiceMessage && (combinedContent.includes('mujhe thoda sochne de') || combinedContent.includes('moment to think'))) {
               import('../services/InstantFallbackRecoveryService').then(({ instantFallbackRecoveryService }) => {
                 instantFallbackRecoveryService.triggerInstantUpfrontRecovery({
                   userId,

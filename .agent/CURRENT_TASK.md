@@ -1,29 +1,28 @@
 # CURRENT TASK
 
 ## Task ID
-NOVA-VOICE-LIVE-STREAM-BREAKTHROUGH-v0.3.19
+VOICE-RESPONSE-LIFECYCLE-ZERO-THINKING-AUDIO-v0.3.26
 
 ## Objective
-Fix Nova Voice Mode end-to-end:
-1. **Root Cause Discovered & Resolved**:
-   - Google deprecated `gemini-2.0-flash-exp` for bidirectional live audio (`bidiGenerateContent`) in the Gemini Live v1beta API.
-   - Any client attempting to open a WebSocket with `model: 'models/gemini-2.0-flash-exp'` was instantly closed with WebSocket code 1008: `models/gemini-2.0-flash-exp is not found for API version v1beta, or is not supported for bidiGenerateContent`.
-   - Verified via Google's `ModelService.ListModels` that the official active model for live bidirectional audio is **`models/gemini-2.5-flash-native-audio-latest`**.
-   - Direct end-to-end WebSocket test with `models/gemini-2.5-flash-native-audio-latest` confirmed full bidirectional streaming audio (receiving `audio/pcm;rate=24000` chunks).
-2. **Backend WebSocket Proxy Architecture**:
-   - Implemented secure backend WebSocket proxy (`backend/src/services/NovaVoiceProxy.ts`) attached to the HTTP server at `/voice/ws`.
-   - Mobile client connects to `wss://[backend]/voice/ws?token=[JWT]&voice=[voiceName]`.
-   - Backend validates Supabase JWT, loads user memory context and tool definitions, connects upstream to Gemini Live, sends setup frame, and bidirectionally relays audio and client content.
-   - Keys from `geminiLivePool` and Google Cloud OAuth credentials (`AQ.` prefix) are fully accepted and managed securely on the server.
-3. **Mobile Client Updates**:
-   - `mobile/src/hooks/useVoiceSession.ts`: Replaced direct Google WebSocket connection with backend proxy WebSocket connection.
-   - Converted `prefetchSession` into a lightweight server warm-up health ping (`/health`) to prevent cold-start delays.
-   - Handled proxy errors and graceful teardown.
-   - Updated `updateHistory.json` with `v0.3.19-beta` changelog.
+Eliminate all interim thinking and status audio from Nova's voice response pipeline, enforce silent background reasoning and action execution, and ensure spoken audio corresponds exclusively to the single authoritative final answer:
+1. **Root Cause**:
+   - User voice note prompted interim conversational fillers ("Hmm... mujhe thoda sochne de, main abhi batati hu...").
+   - These interim fillers were synthesized into "Nova's Voice Reply" cards before the substantive answer arrived.
+   - Background fallback recovery created duplicate assistant bubbles.
+2. **Implementation**:
+   - Created `VoiceResponseLifecycle.ts` with strict state machine (`RECEIVED` -> `UNDERSTANDING` -> `THINKING` -> `ACTING` -> `FINALIZING` -> `COMPLETED`).
+   - Implemented `isInterimThinkingPhrase` and `stripThinkingPrefix` across Hindi, English, and Hinglish.
+   - Added single finalization gate (`finalizeTurn`) preventing race conditions or duplicate assistant responses.
+   - Added thinking phrase filter in `NovaVoiceService.synthesizeVoiceReply` returning `null` immediately.
+   - Upgraded voice synthesis with multi-key rotation across keys 5–19 to prevent rate-limit dropouts.
+   - Disallowed `FALLBACK_REPLY` and `InstantFallbackRecoveryService` on voice turns.
+   - Added client-side defense in `useChatStore.ts` and `ChatScreen.tsx` to ensure thinking text never renders as audio.
+   - Updated `updateHistory.json` with `v0.3.26-beta`.
 
 ## Verification Gates Passed
-- Direct WebSocket Node test with `AQ.` key and `models/gemini-2.5-flash-native-audio-latest`: **100% SUCCESS** (`setupComplete` received, audio chunks received at 24kHz PCM, turn complete).
+- `backend/src/scripts/test_voice_response_lifecycle.ts`: **48 PASSED, 0 FAILED**.
+- `backend/src/scripts/test_voice_note_e2e.ts`: **6 PASSED, 0 FAILED**.
 - `cd backend && npm run build`: **EXIT 0** (0 errors).
 - `cd mobile && npx tsc --noEmit`: **EXIT 0** (0 errors).
-- Git pushed to `origin main` (commit `350a0fa`).
-
+- EAS Production OTA Published: Update Group `b1ca6461-3f7c-4dec-9924-81b14ba8d94b` (Android `01a0aa1a-2414-7bab-8c05-243b765a0ae9`, iOS `01a0aa1a-2414-7a71-a435-220f91ec42bb`).
+- Push broadcast dispatched to all registered user devices via `broadcast_update_push.ts`.

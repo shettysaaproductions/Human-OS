@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.26-beta",
+    "date": "2026-09-16",
+    "title": "🧠 Silent Reasoning, Zero-Thinking Voice & Authoritative Response Lifecycle",
+    "message": [
+      "Authoritative Voice Response Lifecycle: Strict state progression (RECEIVED → UNDERSTANDING → THINKING → ACTING → FINALIZING → COMPLETED). Only finalized, completed answers produce voice output.",
+      "Zero Interim Thinking Audio: Eliminated all internal thinking phrases, status placeholders, and model hesitations ('Hmm... mujhe sochne de', 'Let me think...', 'Main check karti hoon') from ever becoming spoken audio.",
+      "Silent Background Action Execution: Reminders, memory tree updates, and branch relocations execute silently in the background before speaking the natural final confirmation.",
+      "Exact Text & Audio Matching: Spoken voice replies strictly consume verified final text, guaranteeing one cohesive assistant turn per user voice note with zero duplicate bubbles."
+    ]
+  },
+  {
     "version": "0.3.25-beta",
     "date": "2026-09-16",
     "title": "🎙️ True Multimodal Voice Notes & Dual-Modality Spoken Audio Replies",
