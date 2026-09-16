@@ -409,16 +409,33 @@ class NovaVoiceService {
           let query = supabaseAdmin.from('memory_bubbles').select('id, label, slug, bubble_type, domain_key, relation_type').eq('user_id', userId).eq('is_archived', false);
           if (domain) query = query.eq('domain_key', String(domain).toLowerCase());
           const { data: bubbles } = await query;
-          return { bubbles: bubbles || [] };
+          return {
+            success: true,
+            bubbles: bubbles || [],
+            state: 'completed',
+            user_message: `Read ${bubbles?.length || 0} memory bubbles.`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_tree_read failed', { error: err.message });
-          return { error: err.message };
+          return {
+            success: false,
+            error_code: 'READ_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'memory_tree_search': {
         const { query } = toolArgs;
-        if (!query) return { results: [] };
+        if (!query) {
+          return {
+            success: false,
+            error_code: 'MISSING_QUERY',
+            bubbles: [],
+            facts: [],
+            user_message: 'Query parameter is required',
+          };
+        }
         try {
           const q = String(query).trim().toLowerCase();
           const { data: bubbles } = await supabaseAdmin
@@ -435,40 +452,74 @@ class NovaVoiceService {
             .or(`key.ilike.%${q}%,value.ilike.%${q}%`)
             .limit(10);
           return {
+            success: true,
             bubbles: (bubbles || []).map(b => `${b.label} (${b.relation_type || b.domain_key})`),
             facts: (memories || []).map(m => `${m.key}: ${m.value}`),
+            state: 'completed',
+            user_message: `Found ${(bubbles?.length || 0)} bubbles and ${(memories?.length || 0)} facts.`,
           };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_tree_search failed', { error: err.message });
-          return { error: err.message };
+          return {
+            success: false,
+            error_code: 'SEARCH_FAILED',
+            bubbles: [],
+            facts: [],
+            user_message: err.message,
+          };
         }
       }
 
       case 'memory_entity_read': {
         const { entity_name } = toolArgs;
-        if (!entity_name) return { error: 'Missing entity_name' };
+        if (!entity_name) {
+          return {
+            success: false,
+            error_code: 'MISSING_ENTITY_NAME',
+            user_message: 'Entity name is required',
+          };
+        }
         try {
           const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
           const resolved = await canonicalMemoryTreeService.resolveEntity(userId, entity_name);
           if (resolved.bubbleId) {
             const subtree = await canonicalMemoryTreeService.getSubtree(userId, resolved.bubbleId);
             return {
+              success: true,
+              entity_id: resolved.bubbleId,
+              bubble_id: resolved.bubbleId,
               entity: resolved.entityName,
               relation: resolved.relationType || resolved.domainKey,
               memories: subtree?.memories.map(m => `${m.key}: ${m.value}`) || [],
               reminders: subtree?.reminders.map(r => r.text) || [],
+              state: 'completed',
+              user_message: `Entity ${resolved.entityName} resolved with ${subtree?.memories.length || 0} memories.`,
             };
           }
-          return { message: `No active entity bubble found for "${entity_name}"` };
+          return {
+            success: false,
+            error_code: 'ENTITY_NOT_FOUND',
+            user_message: `No active entity bubble found for "${entity_name}".`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_entity_read failed', { error: err.message });
-          return { error: err.message };
+          return {
+            success: false,
+            error_code: 'READ_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'memory_tree_create': {
         const { entity_name, relation_type, domain, fact_value } = toolArgs;
-        if (!entity_name) return { success: false, error: 'Missing entity_name' };
+        if (!entity_name) {
+          return {
+            success: false,
+            error_code: 'MISSING_ENTITY_NAME',
+            user_message: 'Entity name is required',
+          };
+        }
         try {
           const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
           const { memoryRepository } = await import('./memoryRepository');
@@ -494,16 +545,36 @@ class NovaVoiceService {
               bubble_id: bubble.id,
             } as any, `Voice command: ${entity_name}`);
           }
-          return { success: true, entity: bubble.label, domain: bubble.domain_key, relation: bubble.relation_type };
+          return {
+            success: true,
+            action_id: `create_${bubble.id}`,
+            entity_id: bubble.id,
+            bubble_id: bubble.id,
+            entity: bubble.label,
+            domain: bubble.domain_key,
+            relation: bubble.relation_type,
+            state: 'completed',
+            user_message: `Successfully created ${bubble.label} under ${bubble.domain_key}.`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_tree_create failed', { error: err.message });
-          return { success: false, error: err.message };
+          return {
+            success: false,
+            error_code: 'CREATE_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'memory_tree_update': {
         const { entity_name, attribute_key, attribute_value } = toolArgs;
-        if (!entity_name || !attribute_key || !attribute_value) return { success: false, error: 'Missing parameters' };
+        if (!entity_name || !attribute_key || !attribute_value) {
+          return {
+            success: false,
+            error_code: 'MISSING_PARAMETERS',
+            user_message: 'Missing entity_name, attribute_key, or attribute_value',
+          };
+        }
         try {
           const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
           const { memoryRepository } = await import('./memoryRepository');
@@ -526,16 +597,34 @@ class NovaVoiceService {
             source_authority: 'explicit_user',
             bubble_id: bubble.id,
           } as any, `Voice update: ${entity_name} ${attribute_key}`);
-          return { success: true, updated: `${factKey}: ${attribute_value}` };
+          return {
+            success: true,
+            action_id: `update_${bubble.id}`,
+            entity_id: bubble.id,
+            bubble_id: bubble.id,
+            updated: `${factKey}: ${attribute_value}`,
+            state: 'completed',
+            user_message: `Updated ${entity_name} ${attribute_key}.`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_tree_update failed', { error: err.message });
-          return { success: false, error: err.message };
+          return {
+            success: false,
+            error_code: 'UPDATE_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'memory_tree_correct': {
         const { entity_name, new_relation, new_domain, reason } = toolArgs;
-        if (!entity_name || !new_relation) return { success: false, error: 'Missing entity_name or new_relation' };
+        if (!entity_name || !new_relation) {
+          return {
+            success: false,
+            error_code: 'MISSING_PARAMETERS',
+            user_message: 'Missing entity_name or new_relation',
+          };
+        }
         try {
           const { universalBranchRelocationService } = await import('./UniversalBranchRelocationService');
           const statement = `${entity_name} is actually ${new_relation}${new_domain ? ` under ${new_domain}` : ''}. ${reason || ''}`;
@@ -543,42 +632,87 @@ class NovaVoiceService {
           if (proposal) {
             await universalBranchRelocationService.stagePendingRelocation(userId, proposal);
             return {
+              success: true,
+              state: 'needs_confirmation',
               needs_confirmation: true,
               doubtExplanation: proposal.doubtExplanation,
               prompt_for_user: `Wait, earlier I had ${proposal.entityName} as ${proposal.oldRelation}. Now you are saying ${proposal.entityName} is ${proposal.newRelation}. Should I move this entire memory branch?`,
+              user_message: `Needs user confirmation to move ${entity_name}.`,
             };
           }
-          return { success: false, error: `Could not stage relocation for ${entity_name}` };
+          return {
+            success: false,
+            error_code: 'PROPOSAL_FAILED',
+            user_message: `Could not stage relocation for ${entity_name}`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_tree_correct failed', { error: err.message });
-          return { success: false, error: err.message };
+          return {
+            success: false,
+            error_code: 'CORRECT_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'memory_tree_move': {
         const { entity_name, user_confirmation } = toolArgs;
-        if (!entity_name || !user_confirmation) return { success: false, error: 'Missing parameters' };
+        if (!entity_name || !user_confirmation) {
+          return {
+            success: false,
+            error_code: 'MISSING_PARAMETERS',
+            user_message: 'Missing entity_name or user_confirmation',
+          };
+        }
         try {
           const { universalBranchRelocationService } = await import('./UniversalBranchRelocationService');
           const isAffirmative = universalBranchRelocationService.isAffirmativeResponse(user_confirmation);
           if (!isAffirmative) {
-            return { success: false, message: 'Move aborted because explicit affirmative confirmation was not given.' };
+            return {
+              success: false,
+              state: 'aborted',
+              error_code: 'CONFIRMATION_REJECTED',
+              user_message: 'Move aborted because explicit affirmative confirmation was not given.',
+            };
           }
           const pending = await universalBranchRelocationService.getPendingRelocation(userId);
           if (!pending) {
-            return { success: false, message: 'No pending relocation proposal found.' };
+            return {
+              success: false,
+              state: 'not_found',
+              error_code: 'NO_PENDING_PROPOSAL',
+              user_message: 'No pending relocation proposal found.',
+            };
           }
           const result = await universalBranchRelocationService.executeBranchRelocation(userId, pending);
-          return { success: result.success, message: result.message };
+          return {
+            success: result.success,
+            state: result.success ? 'completed' : 'failed',
+            action_id: pending.entitySlug ? `relocate_${pending.entitySlug}` : undefined,
+            entity_id: pending.targetParentBubbleId || pending.rootMemoryId,
+            bubble_id: pending.targetParentBubbleId,
+            error_code: result.success ? undefined : 'EXECUTION_FAILED',
+            user_message: result.message,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] memory_tree_move failed', { error: err.message });
-          return { success: false, error: err.message };
+          return {
+            success: false,
+            error_code: 'MOVE_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'save_memory': {
         const { key, value } = toolArgs;
-        if (!key || !value) return { success: false, error: 'Missing key or value' };
+        if (!key || !value) {
+          return {
+            success: false,
+            error_code: 'MISSING_PARAMETERS',
+            user_message: 'Missing key or value',
+          };
+        }
         try {
           let cleanKey = key.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_:]/g, '');
           const cleanVal = String(value).trim();
@@ -597,16 +731,31 @@ class NovaVoiceService {
             source_authority: 'explicit_user',
           }, 'Voice tool: save_memory');
           logger.info('[NovaVoiceService] Memory successfully saved via canonical memory gateway', { userId, key: cleanKey, value: cleanVal });
-          return { success: true };
+          return {
+            success: true,
+            action_id: `mem_${cleanKey}`,
+            state: 'completed',
+            user_message: `Fact remembered: ${cleanKey}`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] save_memory failed', { error: err.message });
-          return { success: false, error: err.message };
+          return {
+            success: false,
+            error_code: 'SAVE_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'schedule_reminder': {
         const { title, time_phrase, recurrence } = toolArgs;
-        if (!title || !time_phrase) return { success: false, error: 'Missing title or time_phrase' };
+        if (!title || !time_phrase) {
+          return {
+            success: false,
+            error_code: 'MISSING_PARAMETERS',
+            user_message: 'Missing title or time_phrase',
+          };
+        }
         try {
           const { ReminderEngine } = await import('./ReminderEngine');
           const { resolveUserTzOffsetHours } = await import('./ReminderEngine');
@@ -621,16 +770,34 @@ class NovaVoiceService {
           if (recurrence) spec.recurrence_unit = recurrence;
           const parsed = engine.parse(spec);
           const scheduled = await engine.scheduleAll(userId, parsed);
-          return { success: true, count: scheduled.length, reminders: scheduled.map((r: any) => ({ id: r.id, scheduled_for: r.scheduled_for })) };
+          return {
+            success: true,
+            action_id: scheduled[0]?.id,
+            count: scheduled.length,
+            reminders: scheduled.map((r: any) => ({ id: r.id, scheduled_for: r.scheduled_for })),
+            state: 'completed',
+            user_message: `Reminder scheduled: ${title} (${scheduled[0]?.scheduled_for || time_phrase})`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] schedule_reminder failed', { error: err.message });
-          return { success: false, error: err.message };
+          return {
+            success: false,
+            error_code: 'REMINDER_FAILED',
+            user_message: err.message,
+          };
         }
       }
 
       case 'recall_memory': {
         const { query } = toolArgs;
-        if (!query) return { memories: [] };
+        if (!query) {
+          return {
+            success: false,
+            error_code: 'MISSING_QUERY',
+            memories: [],
+            user_message: 'Query parameter is required',
+          };
+        }
         try {
           const searchTerms = query.toLowerCase().split(/\s+/).filter((t: string) => t.length > 2);
           const { data: memories } = await supabaseAdmin
@@ -640,31 +807,62 @@ class NovaVoiceService {
             .eq('is_archived', false)
             .or(searchTerms.map((t: string) => `key.ilike.%${t}%,value.ilike.%${t}%`).join(','))
             .limit(10);
-          return { memories: (memories || []).map(m => `${m.key}: ${m.value}`) };
+          return {
+            success: true,
+            memories: (memories || []).map(m => `${m.key}: ${m.value}`),
+            state: 'completed',
+            user_message: `Recalled ${(memories?.length || 0)} facts.`,
+          };
         } catch (err: any) {
           logger.error('[NovaVoiceService] recall_memory failed', { error: err.message });
-          return { memories: [] };
+          return {
+            success: false,
+            error_code: 'RECALL_FAILED',
+            memories: [],
+            user_message: err.message,
+          };
         }
       }
 
       case 'web_search': {
         const { query } = toolArgs;
-        if (!query) return { results: 'No query provided' };
+        if (!query) {
+          return {
+            success: false,
+            error_code: 'MISSING_QUERY',
+            results: 'No query provided',
+            user_message: 'No query provided',
+          };
+        }
         try {
           const { webSearchService } = await import('./WebSearchService');
           const result = await (webSearchService as any).executeSearch(query);
-          return { results: result || `No results found for: ${query}` };
+          return {
+            success: true,
+            results: result || `No results found for: ${query}`,
+            state: 'completed',
+            user_message: `Search completed for: ${query}`,
+          };
         } catch (err: any) {
-          // If executeSearch doesn't exist, try the evaluate+execute pattern
           try {
             const { webSearchService } = await import('./WebSearchService');
             const result = await (webSearchService as any).searchAndSummarize?.(query)
               || await (webSearchService as any).performSearch?.(query)
               || `Search completed for: ${query}`;
-            return { results: result };
+            return {
+              success: true,
+              results: result,
+              state: 'completed',
+              user_message: `Search completed for: ${query}`,
+            };
           } catch {
             logger.error('[NovaVoiceService] web_search failed', { error: err.message });
-            return { results: `Search unavailable: ${err.message}` };
+            return {
+              success: false,
+              error_code: 'SEARCH_FAILED',
+              results: `Search unavailable: ${err.message}`,
+              user_message: err.message,
+            };
           }
         }
       }

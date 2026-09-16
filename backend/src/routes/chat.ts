@@ -1003,6 +1003,7 @@ chatRouter.post(
           if (msg.is_voice_message) {
             metaPayload.is_voice_message = true;
             if (msg.audio_duration) metaPayload.audio_duration = msg.audio_duration;
+            if (msg.audio_base64) metaPayload.audio_base64 = msg.audio_base64;
           }
           const result = await qt.track('save_user_message', 'chat_history', () =>
             supabaseAdmin.from('chat_history')

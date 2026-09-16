@@ -33,6 +33,7 @@ import {
 import {
   writeAsStringAsync,
   readAsStringAsync,
+  getInfoAsync,
   cacheDirectory,
   EncodingType,
 } from 'expo-file-system/legacy';
@@ -779,7 +780,13 @@ export function ChatScreen() {
   const isSelectionMode = selectedMessageIds.length > 0;
 
   // Audio recording and playback state for Voice Messages
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const lastRecordedUrlRef = useRef<string | null>(null);
+  const isSubmittingVoiceRef = useRef<boolean>(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY, (status) => {
+    if (status?.url) {
+      lastRecordedUrlRef.current = status.url;
+    }
+  });
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -809,7 +816,10 @@ export function ChatScreen() {
       }
 
       setRecordingSeconds(0);
-      await recorder.record();
+      lastRecordedUrlRef.current = null;
+      // Android AudioRecorder requires prepareToRecordAsync() before record(), otherwise record() is ignored
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setIsRecording(true);
 
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
@@ -818,7 +828,7 @@ export function ChatScreen() {
       }, 1000);
     } catch (err: any) {
       console.warn('[VoiceMessage] Failed to start recording', err);
-      Alert.alert('Recording Error', 'Could not access the microphone. Please try again.');
+      Alert.alert('Recording Error', `Could not access the microphone: ${err?.message || 'Please try again.'}`);
     }
   };
 
@@ -830,6 +840,7 @@ export function ChatScreen() {
       }
       setIsRecording(false);
       setRecordingSeconds(0);
+      lastRecordedUrlRef.current = null;
       try {
         await recorder.stop();
       } catch {}
@@ -839,6 +850,9 @@ export function ChatScreen() {
   };
 
   const stopAndSendVoiceRecording = async () => {
+    if (isSubmittingVoiceRef.current) return;
+    isSubmittingVoiceRef.current = true;
+
     try {
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
@@ -849,9 +863,19 @@ export function ChatScreen() {
       setRecordingSeconds(0);
 
       await recorder.stop();
-      const recordedUri = recorder.uri;
+      const status = recorder.getStatus();
+      const recordedUri = (recorder as any).uri || status?.url || lastRecordedUrlRef.current;
       if (!recordedUri) {
         console.warn('[VoiceMessage] No recorded audio URI found');
+        Alert.alert('Recording Error', 'Could not locate the recorded audio file. Please try speaking again.');
+        return;
+      }
+
+      // Check physical file existence and minimum size (> 100 bytes)
+      const fileInfo = await getInfoAsync(recordedUri);
+      if (!fileInfo.exists || (fileInfo as any).size < 100) {
+        console.warn('[VoiceMessage] Audio file does not exist or is too small', recordedUri, fileInfo);
+        Alert.alert('Recording Empty', 'The recording was too short or empty. Please record for at least 1-2 seconds.');
         return;
       }
 
@@ -859,15 +883,19 @@ export function ChatScreen() {
         encoding: EncodingType.Base64,
       });
 
-      if (!base64Audio) {
-        console.warn('[VoiceMessage] Empty base64 audio read from recording');
+      if (!base64Audio || base64Audio.length < 50) {
+        console.warn('[VoiceMessage] Empty or corrupt base64 audio read from recording');
+        Alert.alert('Recording Error', 'Could not read audio data from recording. Please try again.');
         return;
       }
 
+      console.log(`[VoiceMessage] Successfully recorded ${duration}s voice message (${base64Audio.length} b64 chars). Sending...`);
       sendMessage('', undefined, undefined, base64Audio, recordedUri, duration, true);
     } catch (err: any) {
       console.warn('[VoiceMessage] Failed to stop and send recording', err);
-      Alert.alert('Voice Message Error', 'Failed to send voice message. Please try again.');
+      Alert.alert('Voice Message Error', `Failed to send voice message: ${err?.message || 'Please try again.'}`);
+    } finally {
+      isSubmittingVoiceRef.current = false;
     }
   };
 

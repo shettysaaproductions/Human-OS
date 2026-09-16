@@ -1,17 +1,50 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — Canonical Memory Tree Pipeline, Entity Resolution Gate & Voice Tool Unification
+2026-09-16 — Voice Audio Routing, Voice Note Reliability, Standardized Tool Contract & Autonomous Action Lifecycle Engine (v0.3.24-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION READY (Zero EAS OTA needed — backend only)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.24-beta Published + Broadcasted)
+
+### EAS Production OTA Deployment (v0.3.24-beta)
+- **Update Group ID**: `1f988cd4-3199-481e-aa5e-5fb7bccbe515`
+- **Android Update ID**: `01a0a9ce-dc31-7c94-8921-504a17bc302a`
+- **iOS Update ID**: `01a0a9ce-dc31-7d86-ab3d-321bb0cf03cb`
+- **Runtime Version**: `1.1.0`
+- **Branch**: `production`
+- **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Key Capabilities Delivered: Canonical Memory Tree Creation & Invariant Enforcement
+### Key Capabilities Delivered in this Phase
+
+1. **Android Physical Voice Audio Routing (`useVoiceSession.ts`)**:
+   - Fixed `expo-audio` route switching using real instantiated `AudioRecorder` input discovery.
+   - Dynamic switching across `speaker`, `earpiece` (phone receiver), and `bluetooth` headset.
+   - Automatic fallback to speaker on Bluetooth disconnect.
+   - Structured diagnostic logging tags: `AUDIO_DEVICE_LIST`, `ACTIVE_OUTPUT_DEVICE`, `ACTIVE_INPUT_DEVICE`, `REQUESTED_ROUTE`, `ACTUAL_ROUTE`, `ROUTE_CHANGE_RESULT`, `BLUETOOTH_CONNECTED`, `BLUETOOTH_DISCONNECTED`.
+
+2. **Voice Message Recording & Persistence (`ChatScreen.tsx`, `chat.ts`)**:
+   - Added Android `recorder.prepareToRecordAsync()` to prevent silent recorder drop.
+   - Fixed recorded URI extraction supporting Android `status.url` / `recorder.getStatus().url`.
+   - Double-tap send protection using `isSubmittingVoiceRef`.
+   - File existence validation with `getInfoAsync` and user-facing error reporting.
+   - Preserved `audio_base64` in user message `chat_history.meta` to guarantee persistent playback across app restarts.
+
+3. **Standardized Voice Tool Return Contract (`NovaVoiceService.ts`)**:
+   - Standardized all 11 Gemini Live voice tools to return strict structured contracts:
+     `{ success: boolean, action_id?: string, entity_id?: string, bubble_id?: string, state?: string, error_code?: string, user_message?: string, ... }`.
+   - Zero unhandled exceptions or untyped strings returned to Gemini Live.
+
+4. **Autonomous Action Engine (`AutonomousActionService.ts`)**:
+   - High-precision intent classification distinguishing `REMINDER` (user calling/acting) vs `CALLBACK` ("Nova, call me at 6") vs `PROACTIVE_OUTREACH`.
+   - Full callback lifecycle state machine: `scheduled` -> `due` -> `dispatching` -> `ringing` -> `answered` / `declined` / `missed` -> `completed`.
+   - Guardrails & Consent: quiet hours (22:00-07:00), `proactive_calls_enabled`, `callback_calls_enabled`, opt-out suppression.
+   - Multi-signal "Ignoring Nova" logic with bounded escalation (halts voice calls after 3 consecutive unreplied outreaches, falls back to text chat).
+   - Atomic idempotency via `action_idempotency` table.
 
 1. **Comprehensive Memory Creation Path Audit**:
    - Audited every memory insertion path across the backend (`memoryRepository`, `NovaVoiceService`, `ReminderEngine`, `FactAssertionConsumer`, `ConsolidatedMemoryAgent`, `onboardingService`, `chat.ts`).

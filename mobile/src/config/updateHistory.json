@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.24-beta",
+    "date": "2026-09-16",
+    "title": "⚡ Physical Audio Routing, Voice Note Reliability & Autonomous Actions",
+    "message": [
+      "Reliable Voice Recording: Fixed Android AudioRecorder lifecycle and URI resolution, with double-tap protection and persistent base64 audio storage in chat history.",
+      "Hardware Audio Routing: Dynamic switching between Speaker, Earpiece (phone receiver), and Bluetooth headset with automatic disconnect fallback and explicit diagnostic telemetry.",
+      "Standardized Voice Tool Contract: All 11 Gemini Live voice tools now return strict structured contracts with user-facing messages and deterministic states during voice calls.",
+      "Autonomous Action Engine: Precise differentiation between Reminders, Voice Callbacks ('Nova, call me at 6'), and Proactive Outreach, with full callback lifecycle management, quiet hours, and bounded escalation."
+    ]
+  },
+  {
     "version": "0.3.23-beta",
     "date": "2026-09-16",
     "title": "🎙️ Voice Notes, Dual Modality & WhatsApp Audio Routing",

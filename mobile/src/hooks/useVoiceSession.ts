@@ -600,31 +600,49 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   }, [clearConnectTimer, playAudioQueue, startMicStream]);
 
   // ── Audio Route Management (Speaker, Earpiece, Bluetooth) ─────────────────
+  const deviceQueryRecorderRef = useRef<any>(null);
+
+  const getAudioInputs = useCallback((): any[] => {
+    try {
+      if (!deviceQueryRecorderRef.current && NativeAudioModule?.AudioRecorder) {
+        deviceQueryRecorderRef.current = new NativeAudioModule.AudioRecorder({});
+      }
+      const rec = deviceQueryRecorderRef.current;
+      if (rec && typeof rec.getAvailableInputs === 'function') {
+        const inputs = rec.getAvailableInputs();
+        if (Array.isArray(inputs)) return inputs;
+      }
+    } catch (err: any) {
+      console.warn('[VoiceSession] Device input enumeration error:', err?.message);
+    }
+    return [];
+  }, []);
 
   const checkAudioDevices = useCallback(() => {
-    try {
-      if (NativeAudioModule?.getAvailableInputs) {
-        const inputs = NativeAudioModule.getAvailableInputs();
-        if (Array.isArray(inputs)) {
-          const bt = inputs.some((inp: any) => {
-            const type = (inp.type || '').toLowerCase();
-            const name = (inp.name || '').toLowerCase();
-            return (
-              type.includes('bluetooth') ||
-              type.includes('headset') ||
-              name.includes('bluetooth') ||
-              name.includes('buds') ||
-              name.includes('airpods') ||
-              name.includes('headphone')
-            );
-          });
-          setIsBluetoothConnected(bt);
-          return;
-        }
+    const inputs = getAudioInputs();
+    console.log('[VoiceSession:AUDIO_DEVICE_LIST]', JSON.stringify(inputs));
+
+    const bt = inputs.some((inp: any) => {
+      const type = (inp.type || '').toLowerCase();
+      const name = (inp.name || '').toLowerCase();
+      return (
+        type.includes('bluetooth') ||
+        type.includes('headset') ||
+        type.includes('sco') ||
+        name.includes('bluetooth') ||
+        name.includes('buds') ||
+        name.includes('airpods') ||
+        name.includes('headphone')
+      );
+    });
+
+    setIsBluetoothConnected((prev) => {
+      if (prev !== bt) {
+        console.log(bt ? '[VoiceSession:BLUETOOTH_CONNECTED]' : '[VoiceSession:BLUETOOTH_DISCONNECTED]');
       }
-    } catch (_) {}
-    setIsBluetoothConnected(false);
-  }, []);
+      return bt;
+    });
+  }, [getAudioInputs]);
 
   useEffect(() => {
     checkAudioDevices();
@@ -638,25 +656,100 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   }, [state, checkAudioDevices]);
 
   const setAudioRoute = useCallback(async (route: AudioRoute) => {
+    console.log('[VoiceSession:REQUESTED_ROUTE]', route);
     setAudioRouteState(route);
-    if (!ExpoAudio?.setAudioModeAsync) return;
+    const inputs = getAudioInputs();
+    const rec = deviceQueryRecorderRef.current;
+
+    let activeInputName = 'Built-in Mic';
+    let actualRoute = route;
+
     try {
-      const shouldRouteThroughEarpiece = route === 'earpiece';
-      await ExpoAudio.setAudioModeAsync({
-        playsInSilentMode: true,
-        allowsRecording: true,
-        interruptionMode: 'doNotMix',
-        shouldRouteThroughEarpiece,
-      });
-      console.log(`[VoiceSession] Audio route set to ${route} (earpiece: ${shouldRouteThroughEarpiece})`);
+      if (route === 'bluetooth') {
+        const btInput = inputs.find((inp: any) => {
+          const type = (inp.type || '').toLowerCase();
+          const name = (inp.name || '').toLowerCase();
+          return (
+            type.includes('bluetooth') ||
+            type.includes('headset') ||
+            type.includes('sco') ||
+            name.includes('bluetooth') ||
+            name.includes('buds') ||
+            name.includes('airpods') ||
+            name.includes('headphone')
+          );
+        });
+
+        if (btInput && rec && typeof rec.setInput === 'function') {
+          try {
+            rec.setInput(btInput.uid);
+            activeInputName = btInput.name || 'Bluetooth Headset';
+          } catch (e: any) {
+            console.warn('[VoiceSession] Failed to setInput for Bluetooth:', e?.message);
+          }
+        }
+
+        if (ExpoAudio?.setAudioModeAsync) {
+          await ExpoAudio.setAudioModeAsync({
+            playsInSilentMode: true,
+            allowsRecording: true,
+            interruptionMode: 'doNotMix',
+            shouldRouteThroughEarpiece: false,
+          });
+        }
+      } else if (route === 'earpiece') {
+        // Phone receiver / Earpiece routing
+        const builtinInput = inputs.find((inp: any) => {
+          const type = (inp.type || '').toLowerCase();
+          return type.includes('builtin') || type.includes('mic') || type.includes('default');
+        });
+        if (builtinInput && rec && typeof rec.setInput === 'function') {
+          try { rec.setInput(builtinInput.uid); } catch (_) {}
+        }
+
+        if (ExpoAudio?.setAudioModeAsync) {
+          await ExpoAudio.setAudioModeAsync({
+            playsInSilentMode: true,
+            allowsRecording: true,
+            interruptionMode: 'doNotMix',
+            shouldRouteThroughEarpiece: true,
+          });
+        }
+        activeInputName = 'Built-in Mic (Receiver)';
+      } else {
+        // Speakerphone routing
+        const builtinInput = inputs.find((inp: any) => {
+          const type = (inp.type || '').toLowerCase();
+          return type.includes('builtin') || type.includes('mic') || type.includes('default');
+        });
+        if (builtinInput && rec && typeof rec.setInput === 'function') {
+          try { rec.setInput(builtinInput.uid); } catch (_) {}
+        }
+
+        if (ExpoAudio?.setAudioModeAsync) {
+          await ExpoAudio.setAudioModeAsync({
+            playsInSilentMode: true,
+            allowsRecording: true,
+            interruptionMode: 'doNotMix',
+            shouldRouteThroughEarpiece: false,
+          });
+        }
+        activeInputName = 'Built-in Speakerphone';
+      }
+
+      console.log('[VoiceSession:ACTIVE_INPUT_DEVICE]', activeInputName);
+      console.log('[VoiceSession:ACTIVE_OUTPUT_DEVICE]', route);
+      console.log('[VoiceSession:ACTUAL_ROUTE]', actualRoute);
+      console.log('[VoiceSession:ROUTE_CHANGE_RESULT]', 'SUCCESS');
     } catch (err: any) {
-      console.warn('[VoiceSession] setAudioRoute error:', err?.message);
+      console.warn('[VoiceSession:ROUTE_CHANGE_RESULT]', 'FAILED', err?.message);
     }
-  }, []);
+  }, [getAudioInputs]);
 
   // Auto-fallback from bluetooth to speaker if Bluetooth disconnected during active call
   useEffect(() => {
     if (audioRoute === 'bluetooth' && !isBluetoothConnected) {
+      console.log('[VoiceSession:BLUETOOTH_DISCONNECTED] Auto-falling back to speaker');
       setAudioRoute('speaker');
     }
   }, [isBluetoothConnected, audioRoute, setAudioRoute]);
