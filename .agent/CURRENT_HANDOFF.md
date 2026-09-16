@@ -1,14 +1,14 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-15 — v0.3.20-beta OTA: Continuous PCM Jitter Buffering & Zero Stuttering
+2026-09-16 — v0.3.22-beta OTA: WhatsApp-Style Voice Calling & Living Brain Sync
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
-Latest commit: `6938cba`
+Latest commit: `e5576ab`
 
-## Status: OTA DEPLOYING & TEST PENDING
+## Status: OTA DEPLOYED (v0.3.22-beta) & VERIFIED
 
 ---
 
@@ -47,12 +47,13 @@ Latest commit: `6938cba`
 
 ### OTA / Deployment Record
 
-| Version | Update Group ID | Android Update ID | Commit |
-|---|---|---|---|
-| v0.3.19-beta | d2f2b44a-96d9-4f93-b4cd-a4bfbf3a9817 | 01a0a3f7-b57a-74d3-8cbf-17936be9dbd7 | 65ceed6 |
-| v0.3.16-beta | e3dd1dd5-f437-46f3-a0dc-6d942a9f2a67 | 01a0a057-b66e-7354-92e6-a4aa7268a51a | 324e69e |
-| v0.3.15-beta | 48c6db6f-f465-4c7f-96a7-8b2632a50cd4 | 01a0a043-3693-7b91-9bca-8303b9471d8b | d34d8c1 |
-| v0.3.14-beta | (prev session) | — | a3c1e9e |
+| Version | Update Group ID | Android Update ID | iOS Update ID | Commit |
+|---|---|---|---|---|
+| v0.3.22-beta | 70445126-e3d9-4989-b519-b379dc1e4856 | 01a0a63a-6049-768d-9409-b4dc94591d4b | 01a0a63a-6049-710d-a84d-83cdf3350fbb | e5576ab |
+| v0.3.21-beta | 1b2e26be-3074-4a77-9db1-c742cc3a935a | 01a0a5e2-0305-7149-90dc-6a4a125e55b9 | 01a0a5e2-0305-72ff-a842-baaac5b7bb44 | bda7f34 |
+| v0.3.19-beta | d2f2b44a-96d9-4f93-b4cd-a4bfbf3a9817 | 01a0a3f7-b57a-74d3-8cbf-17936be9dbd7 | — | 65ceed6 |
+| v0.3.16-beta | e3dd1dd5-f437-46f3-a0dc-6d942a9f2a67 | 01a0a057-b66e-7354-92e6-a4aa7268a51a | — | 324e69e |
+| v0.3.15-beta | 48c6db6f-f465-4c7f-96a7-8b2632a50cd4 | 01a0a043-3693-7b91-9bca-8303b9471d8b | — | d34d8c1 |
 
 ---
 
