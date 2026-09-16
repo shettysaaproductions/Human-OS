@@ -6,7 +6,7 @@
  * + attached reminders move together, with mandatory confirmation and stale-state checks.
  */
 
-import crypto from 'crypto';
+import { createHash } from 'crypto';
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
@@ -152,30 +152,17 @@ export class UniversalBranchRelocationService {
     return grounded.length === 1 ? grounded[0] : null;
   }
 
-  detectRelocationIntentSync(
-    text: string,
-    recentMessages: Array<{ role: string; content: string }> = []
-  ): (DetectedRelocation & { entityName: string }) | null {
+  detectRelocationIntentSync(text: string, recentMessages: Array<{ role: string; content: string }> = []): (DetectedRelocation & { entityName: string }) | null {
     if (!text?.trim()) return null;
     const clean = text.trim();
     const lower = clean.toLowerCase();
 
     const isCharacter = /(?:not\\s+my\\s+friend|isn't\\s+my\\s+friend|dost\\s+nahi(?:\\s+hai|\\s+tha)?).*?(?:character|short\\s+film|film\\s+project|script|project)/i.test(lower) ||
       /(?:character|short\\s+film|film\\s+project|script|project\\s+character).*?(?:not\\s+my\\s+friend|dost\\s+nahi)/i.test(lower);
-
     if (isCharacter) {
       const explicit = this.extractExplicitEntity(clean);
-      if (!explicit) return null; // Never guess or hard-code an entity.
-      return {
-        entityName: explicit,
-        oldDomain: 'family',
-        oldRelation: 'Friend',
-        newDomain: 'work',
-        newRelation: lower.includes('short film') ? 'Short Film Character' : 'Project Character',
-        targetParentLabel: undefined,
-        rawText: clean,
-        isFictionalOrCharacter: true,
-      };
+      if (!explicit) return null;
+      return { entityName: explicit, oldDomain: 'family', oldRelation: 'Friend', newDomain: 'work', newRelation: lower.includes('short film') ? 'Short Film Character' : 'Project Character', rawText: clean, isFictionalOrCharacter: true };
     }
 
     const isPet = /(?:not\\s+a\\s+person|human\\s+nahi|insaan?\\s+nahi).*?(?:pet|dog|cat|puppy|kitten|kutta|billi)/i.test(lower);
@@ -194,7 +181,6 @@ export class UniversalBranchRelocationService {
       return { entityName, oldDomain: undefined, oldRelation: undefined, newDomain: domain, newRelation: titleFor(domain), targetParentLabel: target, rawText: clean };
     }
 
-    // Direct negation/assertion, but only where both sides are explicit.
     const direct = clean.match(/^([A-Za-z][A-Za-z0-9 _-]{1,40})\\s+(?:is|was)\\s+(?:not|isn't|wasn't)\\s+(?:my|a|an|the)?\\s*([^,.;]+)[,;.]?\\s+(?:he|she|it|they)\\s+(?:is|was|are)\\s+(?:my|a|an|the)?\\s*([^,.;]+)$/i);
     if (direct) {
       const entityName = this.capitalizeWords(this.cleanEntity(direct[1]));
@@ -209,7 +195,6 @@ export class UniversalBranchRelocationService {
   async detectRelocationIntent(userId: string, text: string, recentMessages: Array<{ role: string; content: string }> = []): Promise<BranchRelocationProposal | null> {
     if (!text?.trim()) return null;
     let detected = this.detectRelocationIntentSync(text, recentMessages);
-
     if (!detected && /(?:the one i was talking about|jiski baat|jo baat kar raha|actually|not my friend|dost nahi|character|pet|move|shift|transfer)/i.test(text)) {
       try {
         const antecedent = await this.resolveAntecedent(userId, recentMessages);
@@ -217,22 +202,12 @@ export class UniversalBranchRelocationService {
         const fallbackDomain = inferDomain(text, 'lifestyle');
         const isCharacter = /character|short film|script|project/i.test(text);
         const isPet = /pet|dog|cat|puppy|kitten|kutta|billi/i.test(text);
-        detected = {
-          entityName: antecedent,
-          oldDomain: isCharacter || isPet ? 'family' : undefined,
-          oldRelation: isCharacter ? 'Friend' : isPet ? 'Person / Friend' : undefined,
-          newDomain: isCharacter ? 'work' : isPet ? 'family' : fallbackDomain,
-          newRelation: isCharacter ? 'Project Character' : isPet ? (/cat|kitten|billi/i.test(text) ? 'Pet Cat' : 'Pet Dog') : titleFor(fallbackDomain),
-          rawText: text,
-          isFictionalOrCharacter: isCharacter,
-          isPetRevelation: isPet,
-        };
+        detected = { entityName: antecedent, oldDomain: isCharacter || isPet ? 'family' : undefined, oldRelation: isCharacter ? 'Friend' : isPet ? 'Person / Friend' : undefined, newDomain: isCharacter ? 'work' : isPet ? 'family' : fallbackDomain, newRelation: isCharacter ? 'Project Character' : isPet ? (/cat|kitten|billi/i.test(text) ? 'Pet Cat' : 'Pet Dog') : titleFor(fallbackDomain), rawText: text, isFictionalOrCharacter: isCharacter, isPetRevelation: isPet };
       } catch (err) {
         logger.warn('[UniversalBranchRelocation] antecedent resolution failed', { error: String(err) });
         return null;
       }
     }
-
     if (!detected) return null;
     return this.buildProposal(userId, detected);
   }
@@ -242,62 +217,34 @@ export class UniversalBranchRelocationService {
     const slug = normalizeSlug(entityName);
     if (!slug) return null;
 
-    const { data: memories, error: memoryError } = await supabaseAdmin
-      .from('memories')
-      .select('id,key,value,memory_type,bubble_id,updated_at')
-      .eq('user_id', userId)
-      .eq('is_archived', false);
+    const { data: memories, error: memoryError } = await supabaseAdmin.from('memories').select('id,key,value,memory_type,bubble_id,updated_at').eq('user_id', userId).eq('is_archived', false);
     if (memoryError) throw memoryError;
-
     const rows = memories || [];
+
     const explicitRoots = rows.filter(m => {
       const k = String(m.key || '').toLowerCase();
       return k === slug || new RegExp(`^(?:friend|family|colleague|pet|character|${detected.newDomain})_${slug}$`, 'i').test(k);
     });
 
-    let branchBubbleId: string | null = null;
     const bubbleCounts = new Map<string, number>();
     for (const r of rows) if (r.bubble_id && (String(r.key || '').toLowerCase().includes(slug) || String(r.value || '').toLowerCase().includes(entityName.toLowerCase()))) bubbleCounts.set(r.bubble_id, (bubbleCounts.get(r.bubble_id) || 0) + 1);
-    if (bubbleCounts.size) branchBubbleId = [...bubbleCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-
+    const branchBubbleId = bubbleCounts.size ? [...bubbleCounts.entries()].sort((a, b) => b[1] - a[1])[0][0] : null;
     let branchRows = branchBubbleId ? rows.filter(r => r.bubble_id === branchBubbleId) : [];
-    if (!branchRows.length) {
-      branchRows = rows.filter(r => {
-        const k = String(r.key || '').toLowerCase();
-        const v = String(r.value || '').toLowerCase();
-        return k === slug || k.includes(`_${slug}`) || k.startsWith(`${slug}_`) || v.includes(entityName.toLowerCase());
-      });
-    }
+    if (!branchRows.length) branchRows = rows.filter(r => { const k = String(r.key || '').toLowerCase(); const v = String(r.value || '').toLowerCase(); return k === slug || k.includes(`_${slug}`) || k.startsWith(`${slug}_`) || v.includes(entityName.toLowerCase()); });
     if (!branchRows.length) return null;
 
     const root = explicitRoots[0] || branchRows.find(r => r.key === slug || !r.key.includes('_')) || branchRows[0];
     const oldDomain = detected.oldDomain || (root.memory_type as LifeDomainKey) || 'lifestyle';
     const oldRelation = detected.oldRelation || String(root.value || titleFor(oldDomain));
 
-    const { data: reminders, error: reminderError } = await supabaseAdmin
-      .from('reminders')
-      .select('id,text,trigger_at,bubble_id,notes,status,updated_at')
-      .eq('user_id', userId)
-      .not('status', 'in', '(cancelled,completed)');
+    const { data: reminders, error: reminderError } = await supabaseAdmin.from('reminders').select('id,text,trigger_at,bubble_id,notes,status,updated_at').eq('user_id', userId).not('status', 'in', '(cancelled,completed)');
     if (reminderError) throw reminderError;
-
-    const matchingReminders = (reminders || []).filter(r =>
-      (branchBubbleId && r.bubble_id === branchBubbleId) ||
-      String(r.text || '').toLowerCase().includes(entityName.toLowerCase()) ||
-      String(r.notes || '').toLowerCase().includes(entityName.toLowerCase())
-    );
-
-    const targetParentLabel = detected.targetParentLabel && !/^work$|^career$|^family$|^relationships?$|^lifestyle$|^goals?$|^identity$/i.test(detected.targetParentLabel.trim())
-      ? detected.targetParentLabel.trim()
-      : undefined;
+    const matchingReminders = (reminders || []).filter(r => (branchBubbleId && r.bubble_id === branchBubbleId) || String(r.text || '').toLowerCase().includes(entityName.toLowerCase()) || String(r.notes || '').toLowerCase().includes(entityName.toLowerCase()));
 
     let targetParentBubbleId: string | undefined;
+    const targetParentLabel = detected.targetParentLabel && !/^work$|^career$|^family$|^relationships?$|^lifestyle$|^goals?$|^identity$/i.test(detected.targetParentLabel.trim()) ? detected.targetParentLabel.trim() : undefined;
     if (targetParentLabel) {
-      const { data: bubbles, error: bubbleError } = await supabaseAdmin
-        .from('memory_bubbles')
-        .select('id,label,slug,parent_bubble_id,domain_key,is_archived')
-        .eq('user_id', userId)
-        .eq('is_archived', false);
+      const { data: bubbles, error: bubbleError } = await supabaseAdmin.from('memory_bubbles').select('id,label,slug,parent_bubble_id').eq('user_id', userId).eq('is_archived', false);
       if (bubbleError) throw bubbleError;
       const wanted = normalizeSlug(targetParentLabel);
       const candidate = (bubbles || []).find(b => normalizeSlug(String(b.label || '')) === wanted || String(b.slug || '').endsWith(`:${wanted}`));
@@ -315,30 +262,13 @@ export class UniversalBranchRelocationService {
       : `Earlier I had ${entityName} under ${oldTitle} (${oldRelation}). You are asking me to place it under ${newTitle} (${detected.newRelation}). I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`;
 
     const expectedUpdated = branchRows.map(r => ({ id: r.id, updated_at: r.updated_at })).filter(x => x.updated_at);
-    const targetKey = `entity_${slug}`;
-
     return {
-      entityName,
-      entitySlug: slug,
-      oldDomain,
-      oldRelation,
-      newDomain: detected.newDomain,
-      newRelation: detected.newRelation,
-      rootMemoryId: root.id,
-      rootMemoryKey: root.key,
-      stemsCount: Math.max(0, branchRows.length - 1),
+      entityName, entitySlug: slug, oldDomain, oldRelation, newDomain: detected.newDomain, newRelation: detected.newRelation,
+      rootMemoryId: root.id, rootMemoryKey: root.key, stemsCount: Math.max(0, branchRows.length - 1),
       stems: branchRows.filter(r => r.id !== root.id).map(r => ({ id: r.id, key: r.key, value: r.value, department: r.memory_type, updated_at: r.updated_at, bubble_id: r.bubble_id })),
-      remindersCount: matchingReminders.length,
-      reminders: matchingReminders.map(r => ({ id: r.id, text: r.text, due_time: r.trigger_at, bubble_id: r.bubble_id })),
-      doubtExplanation,
-      targetKey,
-      targetParentBubbleId,
-      targetParentLabel,
-      rawText: detected.rawText,
-      createdAt: new Date().toISOString(),
-      expectedUpdated,
-      isFictionalOrCharacter: detected.isFictionalOrCharacter,
-      isPetRevelation: detected.isPetRevelation,
+      remindersCount: matchingReminders.length, reminders: matchingReminders.map(r => ({ id: r.id, text: r.text, due_time: r.trigger_at, bubble_id: r.bubble_id })),
+      doubtExplanation, targetKey: `entity_${slug}`, targetParentBubbleId, targetParentLabel, rawText: detected.rawText,
+      createdAt: new Date().toISOString(), expectedUpdated, isFictionalOrCharacter: detected.isFictionalOrCharacter, isPetRevelation: detected.isPetRevelation
     };
   }
 
@@ -355,10 +285,7 @@ export class UniversalBranchRelocationService {
     const { data, error } = await supabaseAdmin.from('working_memory').select('value,created_at').eq('user_id', userId).eq('key', key).maybeSingle();
     if (error) throw error;
     if (!data?.value) return null;
-    if (Date.now() - new Date(data.created_at).getTime() > 30 * 60 * 1000) {
-      await this.clearPendingRelocation(userId);
-      return null;
-    }
+    if (Date.now() - new Date(data.created_at).getTime() > 30 * 60 * 1000) { await this.clearPendingRelocation(userId); return null; }
     try { return JSON.parse(data.value) as BranchRelocationProposal; } catch { await this.clearPendingRelocation(userId); return null; }
   }
 
@@ -381,42 +308,24 @@ export class UniversalBranchRelocationService {
   async executeBranchRelocation(userId: string, proposal: BranchRelocationProposal): Promise<RelocationExecutionResult> {
     const memoryIds = Array.from(new Set([proposal.rootMemoryId, ...proposal.stems.map(s => s.id)].filter(Boolean))) as string[];
     const reminderIds = Array.from(new Set(proposal.reminders.map(r => r.id).filter(Boolean)));
-    const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ entity: proposal.entityName, memoryIds, reminderIds, target: proposal.newDomain, relation: proposal.newRelation, raw: proposal.rawText })).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify({ entity: proposal.entityName, memoryIds, reminderIds, target: proposal.newDomain, relation: proposal.newRelation, raw: proposal.rawText })).digest('hex');
 
     const { data, error } = await supabaseAdmin.rpc('move_memory_branch_atomic_v3', {
-      p_user_id: userId,
-      p_memory_ids: memoryIds,
-      p_reminder_ids: reminderIds,
-      p_entity_name: proposal.entityName,
-      p_source_domain: proposal.oldDomain,
-      p_target_domain: proposal.newDomain,
-      p_old_relation: proposal.oldRelation,
-      p_new_relation: proposal.newRelation,
-      p_target_parent_bubble_id: proposal.targetParentBubbleId || null,
-      p_target_parent_label: proposal.targetParentLabel || null,
-      p_confirmation_fingerprint: fingerprint,
+      p_user_id: userId, p_memory_ids: memoryIds, p_reminder_ids: reminderIds, p_entity_name: proposal.entityName,
+      p_source_domain: proposal.oldDomain, p_target_domain: proposal.newDomain, p_old_relation: proposal.oldRelation,
+      p_new_relation: proposal.newRelation, p_target_parent_bubble_id: proposal.targetParentBubbleId || null,
+      p_target_parent_label: proposal.targetParentLabel || null, p_confirmation_fingerprint: fingerprint,
       p_expected_updated: proposal.expectedUpdated || [],
     });
     if (error) {
       logger.error('[UniversalBranchRelocation] atomic move failed', { userId, entityName: proposal.entityName, error: error.message });
       return { success: false, message: error.message, entityName: proposal.entityName, oldDomain: proposal.oldDomain, newDomain: proposal.newDomain, movedStemsCount: 0, movedRemindersCount: 0, eradicatedPhantomsCount: 0 };
     }
-
     await this.clearPendingRelocation(userId);
     invalidateAnalyticsCache(userId);
-
     const movedMemories = Number(data?.moved_memory_count || memoryIds.length);
     const movedReminders = Number(data?.moved_reminder_count || reminderIds.length);
-    return {
-      success: true,
-      message: `Successfully moved ${proposal.entityName} and its complete memory branch to ${titleFor(proposal.newDomain)} (${proposal.newRelation}).`,
-      entityName: proposal.entityName,
-      oldDomain: proposal.oldDomain,
-      newDomain: proposal.newDomain,
-      movedStemsCount: Math.max(0, movedMemories - 1),
-      movedRemindersCount: movedReminders,
-      eradicatedPhantomsCount: 0,
-    };
+    return { success: true, message: `Successfully moved ${proposal.entityName} and its complete memory branch to ${titleFor(proposal.newDomain)} (${proposal.newRelation}).`, entityName: proposal.entityName, oldDomain: proposal.oldDomain, newDomain: proposal.newDomain, movedStemsCount: Math.max(0, movedMemories - 1), movedRemindersCount: movedReminders, eradicatedPhantomsCount: 0 };
   }
 
   async eradicatePhantomEntity(userId: string, entityName: string, phantomRole: string, realRole: string): Promise<{ eradicated: boolean; count: number }> {
@@ -424,11 +333,7 @@ export class UniversalBranchRelocationService {
     const phantomSlug = normalizeSlug(phantomRole);
     const { data, error } = await supabaseAdmin.from('memories').select('id,key,value').eq('user_id', userId).eq('is_archived', false);
     if (error) throw error;
-    const ids = (data || []).filter(m => {
-      const k = String(m.key || '').toLowerCase();
-      const v = String(m.value || '').toLowerCase();
-      return (k.includes(slug) && k.includes(phantomSlug)) || (v.includes(entityName.toLowerCase()) && v.includes(phantomRole.toLowerCase()));
-    }).map(m => m.id);
+    const ids = (data || []).filter(m => { const k = String(m.key || '').toLowerCase(); const v = String(m.value || '').toLowerCase(); return (k.includes(slug) && k.includes(phantomSlug)) || (v.includes(entityName.toLowerCase()) && v.includes(phantomRole.toLowerCase())); }).map(m => m.id);
     if (!ids.length) return { eradicated: false, count: 0 };
     const now = new Date().toISOString();
     const { error: updateError } = await supabaseAdmin.from('memories').update({ is_archived: true, lifecycle_state: 'SUPERSEDED', supersession_reason: `[Phantom Eradication] User clarified: ${entityName} is ${realRole}, not ${phantomRole}.`, updated_at: now }).eq('user_id', userId).in('id', ids);
