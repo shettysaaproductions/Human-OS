@@ -24,6 +24,18 @@ import * as Clipboard from 'expo-clipboard';
 import { ScrollView as GHScrollView, Swipeable } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import { VoiceMode } from '../components/VoiceMode';
+import {
+  useAudioRecorder,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  createAudioPlayer,
+} from 'expo-audio';
+import {
+  writeAsStringAsync,
+  readAsStringAsync,
+  cacheDirectory,
+  EncodingType,
+} from 'expo-file-system/legacy';
 
 // Utility functions for WhatsApp-style formatting
 const formatTime = (dateString?: string) => {
@@ -766,6 +778,145 @@ export function ChatScreen() {
   const lastKnownNewestIdRef = useRef<string | null>(null);
   const isSelectionMode = selectedMessageIds.length > 0;
 
+  // Audio recording and playback state for Voice Messages
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activePlayerRef = useRef<any>(null);
+  const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (activePlayerRef.current) {
+        try { activePlayerRef.current.pause(); } catch {}
+      }
+    };
+  }, []);
+
+  const startVoiceRecording = async () => {
+    try {
+      const { granted } = await requestRecordingPermissionsAsync();
+      if (!granted) {
+        Alert.alert('Microphone Permission', 'Please enable microphone access in settings to send voice messages.');
+        return;
+      }
+      if (activePlayerRef.current) {
+        try { activePlayerRef.current.pause(); } catch {}
+        activePlayerRef.current = null;
+        setActivePlayingId(null);
+      }
+
+      setRecordingSeconds(0);
+      await recorder.record();
+      setIsRecording(true);
+
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.warn('[VoiceMessage] Failed to start recording', err);
+      Alert.alert('Recording Error', 'Could not access the microphone. Please try again.');
+    }
+  };
+
+  const cancelVoiceRecording = async () => {
+    try {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      setIsRecording(false);
+      setRecordingSeconds(0);
+      try {
+        await recorder.stop();
+      } catch {}
+    } catch (err) {
+      console.warn('[VoiceMessage] Cancel recording error', err);
+    }
+  };
+
+  const stopAndSendVoiceRecording = async () => {
+    try {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      const duration = recordingSeconds || 1;
+      setIsRecording(false);
+      setRecordingSeconds(0);
+
+      await recorder.stop();
+      const recordedUri = recorder.uri;
+      if (!recordedUri) {
+        console.warn('[VoiceMessage] No recorded audio URI found');
+        return;
+      }
+
+      const base64Audio = await readAsStringAsync(recordedUri, {
+        encoding: EncodingType.Base64,
+      });
+
+      if (!base64Audio) {
+        console.warn('[VoiceMessage] Empty base64 audio read from recording');
+        return;
+      }
+
+      sendMessage('', undefined, undefined, base64Audio, recordedUri, duration, true);
+    } catch (err: any) {
+      console.warn('[VoiceMessage] Failed to stop and send recording', err);
+      Alert.alert('Voice Message Error', 'Failed to send voice message. Please try again.');
+    }
+  };
+
+  const handleTogglePlayAudio = async (messageId: string, audioSource?: string) => {
+    if (!audioSource) return;
+
+    if (activePlayingId === messageId) {
+      if (activePlayerRef.current) {
+        try { activePlayerRef.current.pause(); } catch {}
+        activePlayerRef.current = null;
+      }
+      setActivePlayingId(null);
+      return;
+    }
+
+    if (activePlayerRef.current) {
+      try { activePlayerRef.current.pause(); } catch {}
+      activePlayerRef.current = null;
+      setActivePlayingId(null);
+    }
+
+    try {
+      let fileUri = audioSource;
+      if (!audioSource.startsWith('file://') && !audioSource.startsWith('http')) {
+        const rawB64 = audioSource.replace(/^data:audio\/\w+;base64,/, '');
+        const tempPath = `${cacheDirectory}play_${messageId.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.wav`;
+        await writeAsStringAsync(tempPath, rawB64, { encoding: EncodingType.Base64 });
+        fileUri = tempPath;
+      }
+
+      const player = createAudioPlayer({ uri: fileUri });
+      activePlayerRef.current = player;
+      setActivePlayingId(messageId);
+
+      player.addListener?.('playbackStatusUpdate', (status: any) => {
+        if (status?.didJustFinish || status?.isLoaded === false) {
+          setActivePlayingId(null);
+          activePlayerRef.current = null;
+        }
+      });
+
+      player.play();
+    } catch (err: any) {
+      console.warn('[VoicePlayback] Error playing audio', err);
+      setActivePlayingId(null);
+      activePlayerRef.current = null;
+    }
+  };
+
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showCopyToast = useCallback((msg: string = 'Copied to clipboard') => {
     if (toastTimerRef.current) {
@@ -1210,6 +1361,69 @@ export function ChatScreen() {
                     <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>🔍 Tap to zoom</Text>
                   </View>
                 </TouchableOpacity>
+              );
+            })()}
+            {/* Voice Message Player Card */}
+            {(() => {
+              const hasVoiceMessage = !!(
+                item.is_voice_message ||
+                item.audio_uri ||
+                item.audio_base64 ||
+                item.meta?.is_voice_message ||
+                item.meta?.is_voice_reply ||
+                item.meta?.audio_base64 ||
+                item.reply_audio_base64
+              );
+              if (!hasVoiceMessage) return null;
+
+              const audioSource = item.audio_uri || item.audio_base64 || item.reply_audio_base64 || item.meta?.audio_base64;
+              const duration = item.audio_duration || item.reply_audio_duration || item.meta?.audio_duration || 0;
+              const isPlaying = activePlayingId === item.id;
+
+              return (
+                <View style={{
+                  backgroundColor: isUser ? 'rgba(0,0,0,0.22)' : 'rgba(139, 92, 246, 0.15)',
+                  borderRadius: 12,
+                  padding: 8,
+                  marginBottom: 6,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  minWidth: 160,
+                }}>
+                  <TouchableOpacity
+                    onPress={() => handleTogglePlayAudio(item.id, audioSource)}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      backgroundColor: isUser ? '#8B5CF6' : '#22C55E',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={{ fontSize: 16, color: '#fff', marginLeft: isPlaying ? 0 : 2 }}>
+                      {isPlaying ? '⏸' : '▶'}
+                    </Text>
+                  </TouchableOpacity>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: '700',
+                      color: isUser ? colors.buttonText : colors.assistantText
+                    }}>
+                      {isUser ? 'Voice Note' : "Nova's Voice Reply"} 🎙️
+                    </Text>
+                    <Text style={{
+                      fontSize: 11,
+                      color: isUser ? 'rgba(255,255,255,0.75)' : colors.textSecondary,
+                      marginTop: 2
+                    }}>
+                      {isPlaying ? 'Playing audio...' : (duration ? `${Math.round(duration)}s` : 'Voice recording')}
+                    </Text>
+                  </View>
+                </View>
               );
             })()}
             {item.isSystemMessage ? (
@@ -1827,83 +2041,114 @@ export function ChatScreen() {
               </TouchableOpacity>
             </View>
           )}
-          <View style={[s.inputContainer, { borderTopColor: colors.border }]}>
-            <TouchableOpacity onPress={handlePickImage} style={{ padding: 10 }}>
-              <Text style={{ fontSize: 24 }}>👁️</Text>
-            </TouchableOpacity>
-            {/* Mic button — launches Nova Voice Mode */}
-            <TouchableOpacity
-              onPress={() => setIsVoiceModeVisible(true)}
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 19,
-                backgroundColor: 'rgba(139, 92, 246, 0.22)',
-                borderWidth: 1,
-                borderColor: '#8B5CF6',
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 2,
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={{ fontSize: 20 }}>🎙️</Text>
-            </TouchableOpacity>
-            <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
-              <TextInput
-                ref={inputRef}
-                style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg, marginLeft: 4, paddingRight: inputText ? 36 : 16 }]}
-                value={inputText}
-                onChangeText={(text) => {
-                  setInputText(text);
-                  presenceService.onTypingStart();
-                }}
-                onFocus={() => {
-                  presenceService.onTypingStart();
-                  setTimeout(() => {
-                    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-                  }, 100);
-                }}
-                placeholder="Message Nova..."
-                placeholderTextColor={colors.placeholder}
-                multiline
-                maxLength={2000}
-                textAlignVertical="top"
-              />
-              {inputText.length > 0 && (
-                <TouchableOpacity
-                  style={s.clearInputBtn}
-                  onPress={() => setInputText('')}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={{ color: colors.textSecondary, fontSize: 14 }}>✕</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            {inputText.length > 1800 && (
-              <Text style={[s.charCountText, { color: inputText.length >= 2000 ? '#EF4444' : '#F59E0B' }]}>
-                {inputText.length}/2000
-              </Text>
-            )}
-            {isTyping && !inputText.trim() && !selectedImage ? (
+          {isRecording ? (
+            <View style={[s.inputContainer, { borderTopColor: colors.border, backgroundColor: 'rgba(239, 68, 68, 0.08)', paddingVertical: 10 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8, paddingLeft: 6 }}>
+                <Text style={{ fontSize: 16 }}>🔴</Text>
+                <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 15 }}>
+                  Recording {Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:{(recordingSeconds % 60).toString().padStart(2, '0')}
+                </Text>
+              </View>
               <TouchableOpacity
-                style={[s.sendBtn, s.stopBtn]}
-                onPress={() => abortGeneration()}
-                activeOpacity={0.8}
+                onPress={cancelVoiceRecording}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 18,
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  marginRight: 8,
+                }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <View style={s.stopIconSquare} />
+                <Text style={{ color: '#EF4444', fontWeight: '600', fontSize: 13 }}>✕ Cancel</Text>
               </TouchableOpacity>
-            ) : (
               <TouchableOpacity
-                style={[s.sendBtn, !inputText.trim() && !selectedImage && s.sendBtnDisabled]}
-                onPress={() => handleSend()}
-                disabled={!inputText.trim() && !selectedImage}
+                onPress={stopAndSendVoiceRecording}
+                style={[s.sendBtn, { backgroundColor: '#8B5CF6' }]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Text style={s.sendBtnText}>↑</Text>
               </TouchableOpacity>
-            )}
-          </View>
+            </View>
+          ) : (
+            <View style={[s.inputContainer, { borderTopColor: colors.border }]}>
+              <TouchableOpacity onPress={handlePickImage} style={{ padding: 10 }}>
+                <Text style={{ fontSize: 24 }}>👁️</Text>
+              </TouchableOpacity>
+              {/* Mic button — Records voice message directly */}
+              <TouchableOpacity
+                onPress={startVoiceRecording}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  backgroundColor: 'rgba(139, 92, 246, 0.22)',
+                  borderWidth: 1,
+                  borderColor: '#8B5CF6',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 2,
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={{ fontSize: 20 }}>🎙️</Text>
+              </TouchableOpacity>
+              <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
+                <TextInput
+                  ref={inputRef}
+                  style={[s.input, { color: colors.textPrimary, backgroundColor: colors.inputBg, marginLeft: 4, paddingRight: inputText ? 36 : 16 }]}
+                  value={inputText}
+                  onChangeText={(text) => {
+                    setInputText(text);
+                    presenceService.onTypingStart();
+                  }}
+                  onFocus={() => {
+                    presenceService.onTypingStart();
+                    setTimeout(() => {
+                      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                    }, 100);
+                  }}
+                  placeholder="Message Nova..."
+                  placeholderTextColor={colors.placeholder}
+                  multiline
+                  maxLength={2000}
+                  textAlignVertical="top"
+                />
+                {inputText.length > 0 && (
+                  <TouchableOpacity
+                    style={s.clearInputBtn}
+                    onPress={() => setInputText('')}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={{ color: colors.textSecondary, fontSize: 14 }}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {inputText.length > 1800 && (
+                <Text style={[s.charCountText, { color: inputText.length >= 2000 ? '#EF4444' : '#F59E0B' }]}>
+                  {inputText.length}/2000
+                </Text>
+              )}
+              {isTyping && !inputText.trim() && !selectedImage ? (
+                <TouchableOpacity
+                  style={[s.sendBtn, s.stopBtn]}
+                  onPress={() => abortGeneration()}
+                  activeOpacity={0.8}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <View style={s.stopIconSquare} />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[s.sendBtn, !inputText.trim() && !selectedImage && s.sendBtnDisabled]}
+                  onPress={() => handleSend()}
+                  disabled={!inputText.trim() && !selectedImage}
+                >
+                  <Text style={s.sendBtnText}>↑</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
         </SafeAreaView>
       </KeyboardAvoidingView>

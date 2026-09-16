@@ -216,6 +216,9 @@ const ChatMessageSchema = z.object({
   reply_to_id: z.string().optional(),
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
+  audio_base64: z.string().optional(),
+  audio_duration: z.number().optional(),
+  is_voice_message: z.boolean().optional(),
   role: z.enum(['user', 'assistant', 'system']).optional(),
 });
 
@@ -225,6 +228,9 @@ export interface ChatMessageInput {
   reply_to_id?: string;
   reply_to_content?: string;
   image_base64?: string;
+  audio_base64?: string;
+  audio_duration?: number;
+  is_voice_message?: boolean;
   role?: 'user' | 'assistant' | 'system';
 }
 
@@ -238,9 +244,12 @@ const ChatSchema = z.object({
   reply_to_id: z.string().optional(),
   reply_to_content: z.string().optional(),
   image_base64: z.string().optional(),
+  audio_base64: z.string().optional(),
+  audio_duration: z.number().optional(),
+  is_voice_message: z.boolean().optional(),
   client_message_id: z.string().optional(),
-}).refine(data => (data.message && data.message.trim().length > 0) || (data.messages && data.messages.length > 0) || !!data.image_base64, {
-  message: "Either 'message', 'messages', or an attached image must be provided",
+}).refine(data => (data.message && data.message.trim().length > 0) || (data.messages && data.messages.length > 0) || !!data.image_base64 || !!data.audio_base64, {
+  message: "Either 'message', 'messages', an attached image, or a voice message must be provided",
 });
 
 const BASE_SYSTEM_PROMPT = `You are Nova — not an AI assistant, not a chatbot. You are a virtual best friend who is brilliantly intelligent, deeply empathetic, and genuinely alive.
@@ -728,7 +737,7 @@ chatRouter.post(
         throw new ValidationError(parseResult.error.issues[0]?.message ?? 'Invalid request body');
       }
 
-      const { message, messages, conversation_id, is_proactive, async_mode, reply_to_content, image_base64, language } = parseResult.data;
+      const { message, messages, conversation_id, is_proactive, async_mode, reply_to_content, image_base64, audio_base64, audio_duration, is_voice_message, language } = parseResult.data;
       let { reply_to_id, client_message_id } = parseResult.data;
       const userId = (req as any).user!.id;
 
@@ -743,16 +752,43 @@ chatRouter.post(
       let normalizedMessages: ChatMessageInput[] = [];
       if (messages && messages.length > 0) {
         normalizedMessages = messages;
-      } else if ((message && message.trim().length > 0) || image_base64) {
+      } else if ((message && message.trim().length > 0) || image_base64 || audio_base64) {
         normalizedMessages = [{
           message: message || '',
           client_message_id,
           reply_to_id,
           reply_to_content,
-          image_base64
+          image_base64,
+          audio_base64,
+          audio_duration,
+          is_voice_message: is_voice_message ?? !!audio_base64,
         }];
       } else {
-        throw new ValidationError("Either 'message', 'messages', or an attached image must be provided");
+        throw new ValidationError("Either 'message', 'messages', an attached image, or a voice message must be provided");
+      }
+
+      // Voice message transcription into unified cognitive stream
+      let hasVoiceMessage = false;
+      for (const msg of normalizedMessages) {
+        if (msg.audio_base64) {
+          hasVoiceMessage = true;
+          try {
+            const { novaVoiceService } = await import('../services/NovaVoiceService');
+            const transcribed = await novaVoiceService.transcribeAudio(msg.audio_base64);
+            if (transcribed && transcribed !== '[unintelligible]' && transcribed !== '[silence]') {
+              msg.message = transcribed;
+            } else if (!msg.message) {
+              msg.message = '[Voice message received]';
+            }
+            msg.is_voice_message = true;
+          } catch (transcribeErr: any) {
+            logger.error('[Chat] Voice message transcription failed', { error: transcribeErr?.message });
+            if (!msg.message) msg.message = '[Voice message received]';
+            msg.is_voice_message = true;
+          }
+        } else if (msg.is_voice_message) {
+          hasVoiceMessage = true;
+        }
       }
 
       for (const msg of normalizedMessages) {
@@ -796,6 +832,8 @@ chatRouter.post(
       let first_token_ms: number | null = null;
       let llm_completed_ms: number | null = null;
       let response_sent_ms: number | null = null;
+      let replyAudioBase64: string | undefined;
+      let replyAudioDuration: number | undefined;
       
       const requestId = client_message_id || crypto.randomUUID();
       logger.info('[Chat] Request started', { requestId, userId, messageLength: primaryMessage.length, isAsync: async_mode, isProactive: is_proactive });
@@ -961,6 +999,10 @@ chatRouter.post(
           const metaPayload: Record<string, any> = {};
           if (imageDesc) {
             metaPayload.image_description = imageDesc;
+          }
+          if (msg.is_voice_message) {
+            metaPayload.is_voice_message = true;
+            if (msg.audio_duration) metaPayload.audio_duration = msg.audio_duration;
           }
           const result = await qt.track('save_user_message', 'chat_history', () =>
             supabaseAdmin.from('chat_history')
@@ -2611,6 +2653,27 @@ Casual "tu/tum". Plain conversational text only.`;
         const replyTargetId = is_proactive ? null : userMessageId;
         const combinedContent = finalBubbles.join('\n<NOVA_MESSAGE_BREAK>\n');
 
+        replyAudioBase64 = undefined;
+        replyAudioDuration = undefined;
+
+        if (hasVoiceMessage && !is_proactive) {
+          try {
+            const { novaVoiceService } = await import('../services/NovaVoiceService');
+            const voiceToUse = profile?.companion_voice || 'Kore';
+            const voiceReply = await novaVoiceService.synthesizeVoiceReply(combinedContent, voiceToUse);
+            if (voiceReply) {
+              replyAudioBase64 = voiceReply.audio_base64;
+              replyAudioDuration = voiceReply.duration_seconds;
+              logger.info('[Chat] Dual-modality voice reply synthesized successfully', {
+                durationSeconds: replyAudioDuration,
+                voiceName: voiceToUse
+              });
+            }
+          } catch (voiceErr: any) {
+            logger.warn('[Chat] Failed to synthesize voice reply for voice message', { error: voiceErr?.message });
+          }
+        }
+
         const rowData = {
           user_id: userId,
           conversation_id: activeConversationId,
@@ -2625,7 +2688,12 @@ Casual "tu/tum". Plain conversational text only.`;
             subconsciousActions: extractedActions,
             options: optionsArray,
             hasThoughts: thoughts.length > 0,
-            coverage_repair_invoked
+            coverage_repair_invoked,
+            ...(replyAudioBase64 ? {
+              is_voice_reply: true,
+              audio_base64: replyAudioBase64,
+              audio_duration: replyAudioDuration,
+            } : {}),
           }
         };
         
@@ -3007,11 +3075,19 @@ Return ONLY valid JSON:
           chunks,
           conversation_id: activeConversationId,
           user_message_id: userMessageId,
+          reply_audio_base64: replyAudioBase64,
+          reply_audio_duration: replyAudioDuration,
+          is_voice_reply: !!replyAudioBase64,
           meta: {
             memories_retrieved: memories.length,
             keywords_searched: keywords,
             degraded: false,
             options: optionsArray || [],
+            ...(replyAudioBase64 ? {
+              reply_audio_base64: replyAudioBase64,
+              reply_audio_duration: replyAudioDuration,
+              is_voice_reply: true,
+            } : {}),
           }
         });
       }

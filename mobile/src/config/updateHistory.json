@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.23-beta",
+    "date": "2026-09-16",
+    "title": "🎙️ Voice Notes, Dual Modality & WhatsApp Audio Routing",
+    "message": [
+      "Voice Messages in Chat: Tap the 🎙️ mic button in chat to record voice notes with live timer and cancel controls. Voice notes go through the full Nova cognitive brain including memory and reminders.",
+      "Dual-Modality Responses: Nova responds to voice notes with both a spoken voice reply card and a complete transcript bubble.",
+      "WhatsApp-Style Audio Routing: Switch seamlessly between Speaker, Earpiece/Phone, and Bluetooth devices during live calls with real-time hardware detection.",
+      "Dynamic Voice Persona Switching: Switching Nova's voice persona (Kore, Aoede, Charon, Fenrir, Puck) updates her actual spoken voice in Gemini Live and persists across sessions."
+    ]
+  },
+  {
     "version": "0.3.22-beta",
     "date": "2026-09-15",
     "title": "📞 WhatsApp-Style Voice Calling & Living Brain Sync",

@@ -72,6 +72,10 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
     isMuted,
     selectVoice,
     isNativeAvailable,
+    audioRoute,
+    availableAudioRoutes,
+    setAudioRoute,
+    isBluetoothConnected,
   } = useVoiceSession();
 
   // Animation refs
@@ -84,6 +88,16 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
 
   const transcriptRef = useRef<ScrollView>(null);
   const [showVoicePicker, setShowVoicePicker] = useState(false);
+  const [showRoutePicker, setShowRoutePicker] = useState(false);
+
+  const handleRoutePress = () => {
+    if (availableAudioRoutes.length > 2) {
+      setShowRoutePicker(true);
+    } else {
+      const nextRoute = audioRoute === 'speaker' ? 'earpiece' : 'speaker';
+      setAudioRoute(nextRoute);
+    }
+  };
 
   // Slide in on open + prefetch session as soon as screen opens
   useEffect(() => {
@@ -266,6 +280,17 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
                state === 'error' ? (errorMessage || 'Connection issue') :
                'Tap to start call'}
             </Text>
+            {/* Active audio route indicator pill */}
+            <TouchableOpacity
+              style={styles.activeRouteBadge}
+              onPress={handleRoutePress}
+              activeOpacity={0.7}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Text style={styles.activeRouteBadgeText}>
+                {audioRoute === 'earpiece' ? '📱 Earpiece' : audioRoute === 'bluetooth' ? '🎧 Bluetooth' : '🔊 Speaker'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Glowing Orb & Concentric Pulse Rings */}
@@ -350,6 +375,20 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
 
           {/* WhatsApp-style Bottom Action Dock */}
           <View style={styles.bottomDock}>
+            {/* Audio Route Selector (Speaker / Earpiece / Bluetooth) */}
+            <TouchableOpacity
+              style={[styles.dockBtn, audioRoute === 'speaker' && styles.dockBtnActive]}
+              onPress={handleRoutePress}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.dockIcon}>
+                {audioRoute === 'earpiece' ? '📱' : audioRoute === 'bluetooth' ? '🎧' : '🔊'}
+              </Text>
+              <Text style={styles.dockLabel}>
+                {audioRoute === 'earpiece' ? 'Earpiece' : audioRoute === 'bluetooth' ? 'Bluetooth' : 'Speaker'}
+              </Text>
+            </TouchableOpacity>
+
             {/* Mute Mic */}
             <TouchableOpacity
               style={[styles.dockBtn, isMuted && styles.dockBtnActive]}
@@ -360,16 +399,7 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
               <Text style={styles.dockLabel}>{isMuted ? 'Unmute' : 'Mute'}</Text>
             </TouchableOpacity>
 
-            {/* End Call (Big Red Circle) */}
-            <TouchableOpacity
-              style={styles.endCallCircleBtn}
-              onPress={handleClose}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.endCallIcon}>📞</Text>
-            </TouchableOpacity>
-
-            {/* Voice Pitch / Persona */}
+            {/* Voice Persona */}
             <TouchableOpacity
               style={styles.dockBtn}
               onPress={() => setShowVoicePicker(true)}
@@ -378,9 +408,81 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
               <Text style={styles.dockIcon}>🗣️</Text>
               <Text style={styles.dockLabel}>{selectedVoice}</Text>
             </TouchableOpacity>
+
+            {/* End Call (Big Red Circle) */}
+            <TouchableOpacity
+              style={styles.endCallCircleBtn}
+              onPress={handleClose}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.endCallIcon}>📞</Text>
+            </TouchableOpacity>
           </View>
 
         </View>
+
+        {/* Audio Route Picker Modal */}
+        <Modal visible={showRoutePicker} transparent animationType="slide">
+          <View style={styles.pickerOverlay}>
+            <View style={styles.pickerSheet}>
+              <Text style={styles.pickerTitle}>Select Audio Output</Text>
+
+              {/* Speaker */}
+              <TouchableOpacity
+                style={[styles.voiceOption, audioRoute === 'speaker' && styles.voiceOptionSelected]}
+                onPress={() => {
+                  setAudioRoute('speaker');
+                  setShowRoutePicker(false);
+                }}
+              >
+                <Text style={{ fontSize: 24, marginRight: 12 }}>🔊</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.voiceOptionLabel}>Speaker</Text>
+                  <Text style={styles.voiceOptionDesc}>Play through device loudspeaker</Text>
+                </View>
+                {audioRoute === 'speaker' ? <Text style={styles.voiceOptionCheck}>✓</Text> : null}
+              </TouchableOpacity>
+
+              {/* Phone / Earpiece */}
+              <TouchableOpacity
+                style={[styles.voiceOption, audioRoute === 'earpiece' && styles.voiceOptionSelected]}
+                onPress={() => {
+                  setAudioRoute('earpiece');
+                  setShowRoutePicker(false);
+                }}
+              >
+                <Text style={{ fontSize: 24, marginRight: 12 }}>📱</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.voiceOptionLabel}>Phone / Earpiece</Text>
+                  <Text style={styles.voiceOptionDesc}>Private call ear receiver</Text>
+                </View>
+                {audioRoute === 'earpiece' ? <Text style={styles.voiceOptionCheck}>✓</Text> : null}
+              </TouchableOpacity>
+
+              {/* Bluetooth (Only shown when available) */}
+              {isBluetoothConnected ? (
+                <TouchableOpacity
+                  style={[styles.voiceOption, audioRoute === 'bluetooth' && styles.voiceOptionSelected]}
+                  onPress={() => {
+                    setAudioRoute('bluetooth');
+                    setShowRoutePicker(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 24, marginRight: 12 }}>🎧</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.voiceOptionLabel}>Bluetooth</Text>
+                    <Text style={styles.voiceOptionDesc}>Connected Bluetooth audio device</Text>
+                  </View>
+                  {audioRoute === 'bluetooth' ? <Text style={styles.voiceOptionCheck}>✓</Text> : null}
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity style={styles.pickerClose} onPress={() => setShowRoutePicker(false)}>
+                <Text style={styles.pickerCloseText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {/* Voice Picker Modal */}
         <Modal visible={showVoicePicker} transparent animationType="slide">
@@ -502,6 +604,23 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 15,
     fontWeight: '500',
+  },
+  activeRouteBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  activeRouteBadgeText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   orbContainer: {
     alignItems: 'center',

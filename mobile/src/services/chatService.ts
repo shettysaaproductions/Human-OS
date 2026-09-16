@@ -42,7 +42,7 @@ export const chatService = {
     return response.data;
   },
 
-  async sendMessageAsync(messages: { message: string, reply_to_id?: string, reply_to_content?: string, image_base64?: string, client_message_id?: string }[], conversationId?: string): Promise<{ conversation_id: string, user_message_id?: string } | null> {
+  async sendMessageAsync(messages: { message: string, reply_to_id?: string, reply_to_content?: string, image_base64?: string, audio_base64?: string, audio_duration?: number, is_voice_message?: boolean, client_message_id?: string }[], conversationId?: string): Promise<{ conversation_id: string, user_message_id?: string } | null> {
     // Fill in default IDs for any message missing one (to match backend fallback)
     const formattedMessages = messages.map(m => ({
       ...m,

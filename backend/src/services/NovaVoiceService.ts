@@ -18,6 +18,31 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { geminiLivePool } from '../lib/geminiLivePool';
 import { config } from '../config';
+import WebSocket from 'ws';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+function pcmToWav(pcmData: Buffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): Buffer {
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const dataSize = pcmData.length;
+  const header = Buffer.alloc(44);
+
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcmData]);
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -546,6 +571,172 @@ class NovaVoiceService {
     } catch (err: any) {
       logger.error('[NovaVoiceService] Transcript memory extraction failed', { error: err.message });
     }
+  }
+
+  /**
+   * Synthesizes spoken voice audio (WAV base64) for Nova's reply using Gemini Live.
+   * Matches Nova's configured voice persona (Kore, Aoede, Charon, Fenrir, Puck).
+   */
+  async synthesizeVoiceReply(
+    text: string,
+    voiceName = 'Kore'
+  ): Promise<{ audio_base64: string; duration_seconds: number } | null> {
+    if (!text || !text.trim()) return null;
+
+    // Clean text of internal tags or system markers before speech
+    const cleanText = text
+      .replace(/<[^>]+>/g, '')
+      .replace(/\[Replying to:.*?\]/gs, '')
+      .trim();
+    if (!cleanText) return null;
+
+    return new Promise((resolve) => {
+      let key = '';
+      try {
+        key = geminiLivePool.getDirectKey();
+      } catch {
+        key = process.env.GEMINI_API_KEY_5 || process.env.GEMINI_API_KEY || '';
+      }
+
+      if (!key) {
+        logger.warn('[NovaVoiceService] No key available for synthesizeVoiceReply');
+        return resolve(null);
+      }
+
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;
+      const ws = new WebSocket(wsUrl);
+      const pcmChunks: Buffer[] = [];
+
+      // 8s timeout: gives ample time for WebSocket connection and synthesis generation
+      const timeout = setTimeout(() => {
+        try { ws.close(); } catch {}
+        logger.warn('[NovaVoiceService] synthesizeVoiceReply timed out');
+        resolve(null);
+      }, 8000);
+
+      ws.on('open', () => {
+        const setupFrame = {
+          setup: {
+            model: 'models/gemini-2.5-flash-native-audio-latest',
+            systemInstruction: {
+              parts: [
+                {
+                  text: 'You are Nova. Speak the exact provided response directly in natural, warm spoken dialogue. Do not add commentary.',
+                },
+              ],
+            },
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName },
+                },
+              },
+            },
+          },
+        };
+        ws.send(JSON.stringify(setupFrame));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.setupComplete !== undefined) {
+            ws.send(
+              JSON.stringify({
+                clientContent: {
+                  turns: [
+                    {
+                      role: 'user',
+                      parts: [{ text: cleanText }],
+                    },
+                  ],
+                  turnComplete: true,
+                },
+              })
+            );
+          }
+
+          if (msg.serverContent?.modelTurn?.parts) {
+            for (const part of msg.serverContent.modelTurn.parts) {
+              if (part.inlineData?.mimeType?.startsWith('audio/pcm') && part.inlineData?.data) {
+                const buf = Buffer.from(part.inlineData.data, 'base64');
+                pcmChunks.push(buf);
+              }
+            }
+          }
+
+          if (msg.serverContent?.turnComplete) {
+            clearTimeout(timeout);
+            try { ws.close(); } catch {}
+            const totalPcm = Buffer.concat(pcmChunks);
+            if (totalPcm.length === 0) {
+              return resolve(null);
+            }
+            const wav = pcmToWav(totalPcm, 24000);
+            const duration = Math.round((totalPcm.length / (24000 * 2)) * 10) / 10;
+            logger.info('[NovaVoiceService] Synthesized voice reply successfully', {
+              durationSeconds: duration,
+              wavBytes: wav.length,
+              voiceName,
+            });
+            resolve({ audio_base64: wav.toString('base64'), duration_seconds: duration });
+          }
+        } catch (err: any) {
+          logger.warn('[NovaVoiceService] Error during voice synthesis message processing', { error: err?.message });
+        }
+      });
+
+      ws.on('error', (err) => {
+        clearTimeout(timeout);
+        logger.warn('[NovaVoiceService] synthesizeVoiceReply WS error', { error: err?.message });
+        resolve(null);
+      });
+    });
+  }
+
+  /**
+   * Transcribes user voice recording using Gemini multimodal input.
+   */
+  async transcribeAudio(audioBase64: string, mimeType = 'audio/wav'): Promise<string> {
+    const rawKeys: string[] = [];
+    for (let i = 1; i <= 4; i++) {
+      const k = process.env[`GEMINI_API_KEY_${i}`];
+      if (k?.trim()) rawKeys.push(k.trim());
+    }
+    if (process.env.GEMINI_API_KEY) rawKeys.push(process.env.GEMINI_API_KEY.trim());
+
+    const keysToTry = rawKeys.length > 0 ? rawKeys : [''];
+
+    for (const key of keysToTry) {
+      if (!key) continue;
+      try {
+        const client = new GoogleGenerativeAI(key);
+        const model = client.getGenerativeModel({ model: 'gemini-flash-latest' });
+        const result = await model.generateContent([
+          {
+            text: 'Transcribe this spoken audio message verbatim. It may be in English, Hindi, or Hinglish. If silent or unintelligible, output "[unintelligible]". Output ONLY the raw spoken words without commentary or quotes.',
+          },
+          {
+            inlineData: {
+              data: audioBase64,
+              mimeType: mimeType || 'audio/wav',
+            },
+          },
+        ]);
+
+        const text = result.response.text().trim();
+        logger.info('[NovaVoiceService] Transcribed user audio message successfully', {
+          textLength: text.length,
+          preview: text.substring(0, 80),
+        });
+        return text;
+      } catch (err: any) {
+        logger.warn('[NovaVoiceService] Transcription key attempt failed', { error: err?.message });
+      }
+    }
+
+    throw new Error('All Gemini keys failed to transcribe audio');
   }
 }
 

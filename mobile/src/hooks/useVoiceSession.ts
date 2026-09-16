@@ -32,7 +32,8 @@
  *   - Event-driven didJustFinish queue drain
  */
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import * as SecureStore from 'expo-secure-store';
 // Use legacy subpath — works in all existing APKs regardless of expo-file-system version
 import {
   writeAsStringAsync,
@@ -181,6 +182,8 @@ export type VoiceSessionState =
   | 'speaking'
   | 'error';
 
+export type AudioRoute = 'speaker' | 'earpiece' | 'bluetooth';
+
 export interface UseVoiceSessionReturn {
   state: VoiceSessionState;
   transcript: TranscriptEntry[];
@@ -194,8 +197,12 @@ export interface UseVoiceSessionReturn {
   mute: () => void;
   unmute: () => void;
   isMuted: boolean;
-  selectVoice: (voiceId: string) => void;
+  selectVoice: (voiceId: string) => Promise<void>;
   isNativeAvailable: boolean;
+  audioRoute: AudioRoute;
+  availableAudioRoutes: AudioRoute[];
+  setAudioRoute: (route: AudioRoute) => Promise<void>;
+  isBluetoothConnected: boolean;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -205,8 +212,20 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [availableVoices, setAvailableVoices] = useState<AvailableVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
+  const [audioRoute, setAudioRouteState] = useState<AudioRoute>('speaker');
+  const [isBluetoothConnected, setIsBluetoothConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Load persistent voice persona preference from SecureStore
+  useEffect(() => {
+    SecureStore.getItemAsync('nova_preferred_voice').then((stored) => {
+      if (stored && ['Kore', 'Aoede', 'Charon', 'Fenrir', 'Puck'].includes(stored)) {
+        console.log('[VoiceSession] Loaded preferred voice persona from storage:', stored);
+        setSelectedVoice(stored);
+      }
+    }).catch(() => {});
+  }, []);
 
   const isNativeAvailable = ExpoAudio !== null;
 
@@ -580,6 +599,120 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
   }, [clearConnectTimer, playAudioQueue, startMicStream]);
 
+  // ── Audio Route Management (Speaker, Earpiece, Bluetooth) ─────────────────
+
+  const checkAudioDevices = useCallback(() => {
+    try {
+      if (NativeAudioModule?.getAvailableInputs) {
+        const inputs = NativeAudioModule.getAvailableInputs();
+        if (Array.isArray(inputs)) {
+          const bt = inputs.some((inp: any) => {
+            const type = (inp.type || '').toLowerCase();
+            const name = (inp.name || '').toLowerCase();
+            return (
+              type.includes('bluetooth') ||
+              type.includes('headset') ||
+              name.includes('bluetooth') ||
+              name.includes('buds') ||
+              name.includes('airpods') ||
+              name.includes('headphone')
+            );
+          });
+          setIsBluetoothConnected(bt);
+          return;
+        }
+      }
+    } catch (_) {}
+    setIsBluetoothConnected(false);
+  }, []);
+
+  useEffect(() => {
+    checkAudioDevices();
+    let interval: any = null;
+    if (state === 'listening' || state === 'speaking' || state === 'processing') {
+      interval = setInterval(checkAudioDevices, 2500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [state, checkAudioDevices]);
+
+  const setAudioRoute = useCallback(async (route: AudioRoute) => {
+    setAudioRouteState(route);
+    if (!ExpoAudio?.setAudioModeAsync) return;
+    try {
+      const shouldRouteThroughEarpiece = route === 'earpiece';
+      await ExpoAudio.setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece,
+      });
+      console.log(`[VoiceSession] Audio route set to ${route} (earpiece: ${shouldRouteThroughEarpiece})`);
+    } catch (err: any) {
+      console.warn('[VoiceSession] setAudioRoute error:', err?.message);
+    }
+  }, []);
+
+  // Auto-fallback from bluetooth to speaker if Bluetooth disconnected during active call
+  useEffect(() => {
+    if (audioRoute === 'bluetooth' && !isBluetoothConnected) {
+      setAudioRoute('speaker');
+    }
+  }, [isBluetoothConnected, audioRoute, setAudioRoute]);
+
+  const availableAudioRoutes: AudioRoute[] = useMemo(() => {
+    const routes: AudioRoute[] = ['speaker', 'earpiece'];
+    if (isBluetoothConnected) {
+      routes.push('bluetooth');
+    }
+    return routes;
+  }, [isBluetoothConnected]);
+
+  // ── WebSocket Connection to Backend Proxy ─────────────────────────────────
+
+  const connectProxyWs = useCallback((accessToken: string, voiceName: string) => {
+    const wsUrl = getBackendVoiceWsUrl(accessToken, voiceName);
+    console.log(`[VoiceSession] Connecting WebSocket to backend proxy with voice: [${voiceName}]...`);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log(`[VoiceSession] Backend proxy WS opened with voice [${voiceName}] — waiting for setupComplete...`);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.proxyError) {
+          console.error('[VoiceSession] Proxy error:', data.proxyError.code, data.proxyError.message);
+          clearConnectTimer();
+          setErrorMessage(data.proxyError.message || 'Voice connection error');
+          setState('error');
+          return;
+        }
+      } catch {}
+      handleWsMessage(event);
+    };
+
+    ws.onerror = (err) => {
+      console.error('[VoiceSession] WebSocket error:', err);
+      clearConnectTimer();
+      setErrorMessage('Connection error — please try again');
+      setState('error');
+    };
+
+    ws.onclose = (event) => {
+      console.log('[VoiceSession] WebSocket closed:', event.code, event.reason || '(no reason)');
+      clearConnectTimer();
+      stopMicStream();
+      if (event.code !== 1000 && event.code !== 1005) {
+        setErrorMessage(`Connection closed (${event.code})`);
+        setState('error');
+      }
+    };
+  }, [clearConnectTimer, handleWsMessage, stopMicStream]);
+
   // ── Session Lifecycle ──────────────────────────────────────────────────────
 
   const startSession = useCallback(async (voiceNameOverride?: string) => {
@@ -593,9 +726,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     sessionIdRef.current  = `voice_${Date.now()}`;
     sessionStartRef.current = Date.now();
 
-    // 35-second hard timeout — accounts for Render free-tier cold start (~20-30s)
-    // After backend wakes and session config is fetched, the WS + setupComplete
-    // should arrive in <5s, well within this window.
     clearConnectTimer();
     connectTimerRef.current = setTimeout(() => {
       if (wsRef.current) {
@@ -615,7 +745,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
 
     try {
-      // Get the current JWT access token for backend auth
       const accessToken = useAuthStore.getState().accessToken;
       if (!accessToken) {
         clearConnectTimer();
@@ -624,7 +753,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         return;
       }
 
-      // Clear the prefetch cache (proxy builds its own session)
       cachedSessionRef.current = null;
       setPrefetchState('idle');
       setAvailableVoices([
@@ -635,57 +763,14 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         { id: 'Puck',   label: 'Puck',   description: 'Bright & energetic' },
       ]);
 
-      // Connect to our backend proxy — it handles the Gemini Live connection
-      // using a server-side API key (never exposed to mobile bundle)
-      const wsUrl = getBackendVoiceWsUrl(accessToken, voiceName);
-      console.log('[VoiceSession] Opening WebSocket to backend proxy...');
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        // Backend proxy handles setup frame — nothing to send on open
-        console.log('[VoiceSession] Backend proxy WS opened — waiting for setupComplete...');
-      };
-
-      // Wrap handleWsMessage to also detect proxyError frames
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.proxyError) {
-            console.error('[VoiceSession] Proxy error:', data.proxyError.code, data.proxyError.message);
-            clearConnectTimer();
-            setErrorMessage(data.proxyError.message || 'Voice connection error');
-            setState('error');
-            return;
-          }
-        } catch {}
-        handleWsMessage(event);
-      };
-
-      ws.onerror = (err) => {
-        console.error('[VoiceSession] WebSocket error:', err);
-        clearConnectTimer();
-        setErrorMessage('Connection error — please try again');
-        setState('error');
-      };
-
-      ws.onclose = (event) => {
-        console.log('[VoiceSession] WebSocket closed:', event.code, event.reason || '(no reason)');
-        clearConnectTimer();
-        stopMicStream();
-        if (event.code !== 1000 && event.code !== 1005) {
-          setErrorMessage(`Connection closed (${event.code})`);
-          setState('error');
-        }
-      };
-
+      connectProxyWs(accessToken, voiceName);
     } catch (err: any) {
       clearConnectTimer();
       console.error('[VoiceSession] startSession failed:', err?.message);
       setErrorMessage(err?.message || 'Failed to start voice session');
       setState('error');
     }
-  }, [selectedVoice, requestAudioPermissions, handleWsMessage, clearConnectTimer, stopMicStream]);
+  }, [selectedVoice, requestAudioPermissions, clearConnectTimer, stopMicStream, connectProxyWs]);
 
   const endSession = useCallback(async () => {
     clearConnectTimer();
@@ -706,10 +791,6 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       wsRef.current = null;
     }
 
-    // Clean up leftover temp WAV files (best-effort)
-    // Note: No directory listing in legacy API — files auto-cleared by OS on low storage
-    // Active cleanup happens per-chunk in cleanAndAdvance()
-
     if (transcript.length > 0) {
       voiceService.endSession({
         transcript,
@@ -727,15 +808,28 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const unmute = useCallback(() => {
     mutedRef.current = false;
     setIsMuted(false);
-    // Restart mic stream if it died while muted
     if (!audioStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
       startMicStream();
     }
   }, [startMicStream]);
 
-  const selectVoice = useCallback((voiceId: string) => {
+  const selectVoice = useCallback(async (voiceId: string) => {
     setSelectedVoice(voiceId);
-  }, []);
+    SecureStore.setItemAsync('nova_preferred_voice', voiceId).catch(() => {});
+    // If a call session is currently active, seamlessly reconnect with the newly selected voice
+    if (wsRef.current && (state === 'listening' || state === 'speaking' || state === 'processing')) {
+      console.log(`[VoiceSession] Seamlessly switching voice persona to: ${voiceId}`);
+      const accessToken = useAuthStore.getState().accessToken;
+      if (accessToken) {
+        try {
+          wsRef.current.close(1000, 'Switching voice persona');
+        } catch (_) {}
+        wsRef.current = null;
+        stopMicStream();
+        connectProxyWs(accessToken, voiceId);
+      }
+    }
+  }, [state, stopMicStream, connectProxyWs]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -761,6 +855,10 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     isMuted,
     selectVoice,
     isNativeAvailable,
+    audioRoute,
+    availableAudioRoutes,
+    setAudioRoute,
+    isBluetoothConnected,
   };
 }
 

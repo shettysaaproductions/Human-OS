@@ -45,6 +45,12 @@ export interface Message {
   user_reaction?: 'THUMBS_UP' | 'THUMBS_DOWN' | 'LIKE' | null;
   image_base64?: string;
   image_uri?: string;
+  audio_base64?: string;
+  audio_uri?: string;
+  audio_duration?: number;
+  is_voice_message?: boolean;
+  reply_audio_base64?: string;
+  reply_audio_duration?: number;
   hasThoughts?: boolean;
   thoughts?: Array<{ engine: string; type: string; detail: string; data?: any }>;
   isSystemMessage?: boolean; // soft-error or system-generated messages (not from LLM or user)
@@ -71,14 +77,14 @@ interface ChatState {
   oldestMessageId: string | null;
   replyingTo: Message | null;
   setReplyingTo: (msg: Message | null) => void;
-  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string, imageBase64?: string, imageUri?: string }[];
+  pendingQueue: { id: string, content: string, replyToId?: string, replyToContent?: string, imageBase64?: string, imageUri?: string, audioBase64?: string, audioUri?: string, audioDuration?: number, isVoiceMessage?: boolean }[];
   diagnostics: ChatDiagnostics | null;
   developerMode: boolean;
   setDeveloperMode: (val: boolean) => void;
   
   hydrateMessages: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
-  sendMessage: (content: string, imageBase64?: string, imageUri?: string) => Promise<void>;
+  sendMessage: (content: string, imageBase64?: string, imageUri?: string, audioBase64?: string, audioUri?: string, audioDuration?: number, isVoiceMessage?: boolean) => Promise<void>;
   abortGeneration: () => void;
   retryMessage: (messageId: string) => Promise<void>;
   clearMessages: () => void;
@@ -467,6 +473,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           reply_to_id: b.replyToId,
           reply_to_content: b.replyToContent,
           image_base64: b.imageBase64,
+          audio_base64: b.audioBase64,
+          audio_duration: b.audioDuration,
+          is_voice_message: b.isVoiceMessage,
           client_message_id: b.id
         }));
 
@@ -876,7 +885,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    sendMessage: async (content: string, imageBase64?: string, imageUri?: string) => {
+    sendMessage: async (
+      content: string,
+      imageBase64?: string,
+      imageUri?: string,
+      audioBase64?: string,
+      audioUri?: string,
+      audioDuration?: number,
+      isVoiceMessage?: boolean
+    ) => {
       // If previous reply polling was active, cancel it before dispatching new turn
       stopReplyPolling();
       const replyingTo = get().replyingTo;
@@ -890,6 +907,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         reply_to_content: replyingTo?.content,
         image_base64: imageBase64,
         image_uri: imageUri,
+        audio_base64: audioBase64,
+        audio_uri: audioUri,
+        audio_duration: audioDuration,
+        is_voice_message: isVoiceMessage,
       };
 
       const newQueue = [...get().pendingQueue, { 
@@ -899,6 +920,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         replyToContent: replyingTo?.content,
         imageBase64,
         imageUri,
+        audioBase64,
+        audioUri,
+        audioDuration,
+        isVoiceMessage,
       }];
       set((state) => ({ 
         messages: [...state.messages, userMsg],
@@ -942,6 +967,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           content: msg.content, 
           imageBase64: msg.image_base64, 
           imageUri: msg.image_uri,
+          audioBase64: msg.audio_base64,
+          audioUri: msg.audio_uri,
+          audioDuration: msg.audio_duration,
+          isVoiceMessage: msg.is_voice_message,
           replyToId: msg.reply_to_id, 
           replyToContent: msg.reply_to_content 
         }]
