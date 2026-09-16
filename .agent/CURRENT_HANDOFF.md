@@ -1,73 +1,95 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — v0.3.23-beta OTA: Voice Messages, Dual Modality & WhatsApp Audio Routing
+2026-09-16 — Canonical Memory Tree Pipeline, Entity Resolution Gate & Voice Tool Unification
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: OTA DEPLOYED (v0.3.23-beta) & VERIFIED
+## Status: VERIFIED & PRODUCTION READY (Zero EAS OTA needed — backend only)
 
 ---
 
-### Key Capabilities Delivered in v0.3.23-beta
+### Key Capabilities Delivered: Canonical Memory Tree Creation & Invariant Enforcement
 
-1. **WhatsApp-Style Call Audio Routing**:
-   - Seamless routing between `speaker`, `earpiece` (phone call style), and `bluetooth`.
-   - Real-time Bluetooth hardware detection via `NativeAudioModule.getAvailableInputs()` polled every 2.5s during active calls.
-   - WhatsApp-style Audio Output modal with live badge (`🔊 Speaker`, `📱 Earpiece`, `🎧 Bluetooth`).
+1. **Comprehensive Memory Creation Path Audit**:
+   - Audited every memory insertion path across the backend (`memoryRepository`, `NovaVoiceService`, `ReminderEngine`, `FactAssertionConsumer`, `ConsolidatedMemoryAgent`, `onboardingService`, `chat.ts`).
+   - Identified and closed flat memory bypasses by routing all persistent semantic memories through the canonical bubble resolver.
 
-2. **Dynamic Nova Voice Persona Switching**:
-   - Users can switch voice personas (`Kore`, `Aoede`, `Charon`, `Fenrir`, `Puck`).
-   - Mid-call persona switching seamlessly reconnects upstream Gemini Live WebSocket with the new voice while retaining transcript, timer, and duration.
-   - Selected persona persists across app restarts via `SecureStore` (`nova_preferred_voice`).
+2. **Canonical Memory Tree Service (`CanonicalMemoryTreeService.ts`)**:
+   - **Unified Pipeline**: `conversation → entity/context understanding → entity resolution → domain inference → canonical bubble resolution/creation → parent branch resolution → child/sub-branch creation → memory attachment → relationship attachment → reminder attachment → provenance/authority → retrieval`.
+   - **Stable Entity Identity**: Disconnected entity identity from surface name. Same name (`Ramesh` friend vs `Ramesh` film character) safely coexists under separate stable entity bubbles and domains (`family` vs `work`).
+   - **Semantic Ownership & Hierarchy**: Nested third-party relationships correctly structured (`User -> Ijaz -> Suresh` father of Ijaz, NEVER `User -> Suresh`).
+   - **Pronoun Antecedent Disambiguation**: Resolves unambiguous pronouns (`he/she`); detects ambiguity (`"I was talking about Ramesh and Suresh. He works in Pune"`) and refuses mutation, triggering clarification.
+   - **Temporal Invariants**: Separates `HISTORICAL` memories ("was my friend in college") from `CURRENT` memories ("is my friend") without destructive overwriting.
 
-3. **Chat Mic Button = Voice Message (NOT Live Call)**:
-   - Header `📞` button remains the dedicated trigger for real-time live calls (`VoiceMode.tsx`).
-   - Chat input bar `🎙️` button records voice notes directly in the chat screen.
-   - Dedicated recording bar displays real-time recording timer (`🔴 Recording 00:05`), `✕ Cancel` button, and `↑ Send` button.
-   - Audio is recorded via `expo-audio`, encoded to base64, and transmitted to `/api/chat`.
+3. **Voice Memory Bypass Eradication (`NovaVoiceService.ts`)**:
+   - Replaced flat `save_memory` bypass with 7 first-class canonical memory tree voice tools:
+     - `memory_tree_read`
+     - `memory_tree_search`
+     - `memory_entity_read`
+     - `memory_tree_create`
+     - `memory_tree_update`
+     - `memory_tree_correct`
+     - `memory_tree_move`
+   - Voice calls and text chat now share the exact same canonical memory authority, bubble tree, and key schema (`entity:<slug>:<predicate>`).
+   - Legacy `save_memory` now auto-canonicalizes arbitrary keys to prevent data drop.
+   - Transcript memory extraction persists directly through `memoryRepository.upsertMemory()`.
 
-4. **Dual Modality Response & Unified Cognitive Pipeline**:
-   - Voice messages are transcribed via `gemini-flash-latest` and processed through the exact same cognitive pipeline (`TurnAnalyzer`, deterministic memory, reminder detector, tool execution, DB persistence, Watchtower).
-   - Nova responds with **both** spoken audio (`reply_audio_base64`, played via embedded Voice Note Player card) and full text transcript bubbles.
-   - Audio player cards render with custom play/pause toggles and duration indicators for both user voice notes and Nova's replies.
+4. **Canonical Reminder Entity Attachment (`ReminderEngine.ts` & `chat.ts`)**:
+   - Extended `ReminderEngine` to resolve entity mentions in reminder titles (e.g. `"Call Ramesh about short film"`) and attach `reminders.bubble_id` directly to the entity's bubble.
+   - Guardian zero-hallucination reminders in `chat.ts` now automatically anchor to canonical entity bubbles.
+
+5. **Production Memory Invariant Auditor (`MemoryInvariantAuditor.ts`)**:
+   - Diagnostic suite verifying 9 core graph invariants:
+     - Orphan bubbles (bubbles pointing to non-existent parents)
+     - Graph cycles
+     - Duplicate active entities per parent/domain
+     - Orphan memories (unattached to active bubbles)
+     - Orphan reminders
+     - Cross-user reference integrity
+     - Lifecycle conflicts (`is_archived` vs `CURRENT`)
+     - Superseded facts treated as current
+     - Stale relocation proposals
 
 ---
 
-### OTA / Deployment Record
+### Verification Results
 
-| Version | Update Group ID | Android Update ID | iOS Update ID | Commit |
-|---|---|---|---|---|
-| v0.3.23-beta (Patch 2) | 47bea498-17e8-4476-9293-af1bb4113724 | 01a0a983-4e80-7749-8c8c-70f7b038324e | 01a0a983-4e80-7502-a8c1-3ac8a74953e5 | 971c22a |
-| v0.3.23-beta | 50bfb348-a660-4f9a-b868-c53392147af0 | 01a0a933-61b8-7fde-9ecc-8c12e650420b | 01a0a933-61b8-73a3-ba64-c3d308996501 | 061a06b |
-| v0.3.22-beta | 70445126-e3d9-4989-b519-b379dc1e4856 | 01a0a63a-6049-768d-9409-b4dc94591d4b | 01a0a63a-6049-710d-a84d-83cdf3350fbb | e5576ab |
-| v0.3.21-beta | 1b2e26be-3074-4a77-9db1-c742cc3a935a | 01a0a5e2-0305-7149-90dc-6a4a125e55b9 | 01a0a5e2-0305-72ff-a842-baaac5b7bb44 | bda7f34 |
-| v0.3.19-beta | d2f2b44a-96d9-4f93-b4cd-a4bfbf3a9817 | 01a0a3f7-b57a-74d3-8cbf-17936be9dbd7 | — | 65ceed6 |
-| v0.3.16-beta | e3dd1dd5-f437-46f3-a0dc-6d942a9f2a67 | 01a0a057-b66e-7354-92e6-a4aa7268a51a | — | 324e69e |
-| v0.3.15-beta | 48c6db6f-f465-4c7f-96a7-8b2632a50cd4 | 01a0a043-3693-7b91-9bca-8303b9471d8b | — | d34d8c1 |
+1. **E2E Scenarios A-L Suite (`backend/src/scripts/test_canonical_tree_e2e_scenarios.ts`)**:
+   - `Scenario A & E`: Nested relationship ownership (`User -> Ijaz -> Suresh`) strictly preserved — **PASSED**
+   - `Scenario D`: Same surface name != same entity identity (`Ramesh` friend vs `Ramesh` character) — **PASSED**
+   - `Scenario C`: Entity classification (Person vs Pet) — **PASSED**
+   - `Scenario L`: Ambiguous pronoun antecedent ("Ramesh and Suresh... he works in Pune") blocks mutation & prompts clarification — **PASSED**
+   - `Scenario G`: Entity-anchored reminders (`Call Ramesh`) attach to entity bubble ID — **PASSED**
+   - `Scenario H, I, J`: Cross-modality voice & text canonical interoperability — **PASSED**
+   - `Scenario K`: Correction convergence over long conversations — **PASSED**
+   - `Invariant Auditor`: **0 anomalies detected across all 9 graph invariants** — **PASSED**
+
+2. **Pre-flight Compilation**:
+   - `cd backend && npx tsc --noEmit` -> **0 errors (Exit 0)**
+   - `cd backend && npm run build` -> **Exit 0**
+   - `cd backend && npx jest --testPathPattern="UniversalBranchRelocation"` -> **16/16 tests passing (Exit 0)**
+   - `cd mobile && npx tsc --noEmit` -> **0 errors (Exit 0)**
 
 ---
 
-### Files Modified This Session
+### Files Added / Modified
 
-| File | Change |
-|---|---|
-| `backend/src/routes/chat.ts` | Multi-modal audio transcription, voice note storage in `chat_history.meta`, dual-modality response synthesis & payload delivery |
-| `backend/src/services/NovaVoiceService.ts` | `pcmToWav`, `synthesizeVoiceReply` via Gemini Live native audio, `transcribeAudio` via `gemini-flash-latest` |
-| `mobile/src/hooks/useVoiceSession.ts` | WhatsApp audio routing (`speaker`/`earpiece`/`bluetooth`), dynamic Bluetooth detection, seamless voice switching reconnect & persistence |
-| `mobile/src/components/VoiceMode.tsx` | Audio routing selector modal, active route badge, seamless persona switching |
-| `mobile/src/screens/ChatScreen.tsx` | Voice recording input bar (`🔴 00:05`, Cancel, Send), Voice Note & Nova Reply Audio Player Cards with play/pause and progress |
-| `mobile/src/store/useChatStore.ts` | Added audio properties to `Message` and pending queue, updated queue dispatcher |
-| `mobile/src/services/chatService.ts` | `sendMessageAsync` signature extended with `audio_base64`, `audio_duration`, and `is_voice_message` |
-| `mobile/src/config/updateHistory.json` | `v0.3.23-beta` release note entry at index 0 |
+| File | Status | Description |
+|---|---|---|
+| `backend/src/services/CanonicalMemoryTreeService.ts` | **NEW** | Canonical entity resolution, tree creation, domain inference, nested ownership, and temporal memory handling |
+| `backend/src/services/MemoryInvariantAuditor.ts` | **NEW** | Production diagnostic auditor verifying graph invariants and preventing corruption |
+| `backend/src/scripts/test_canonical_tree_e2e_scenarios.ts` | **NEW** | Comprehensive E2E scenario regression suite (Scenarios A through L) |
+| `backend/src/services/memoryRepository.ts` | **MODIFIED** | Intercepts all memory upserts to automatically attach canonical bubbles and enforce key schemas |
+| `backend/src/services/NovaVoiceService.ts` | **MODIFIED** | Replaced flat voice bypass with 7 canonical memory tree tools and unified transcript extraction |
+| `backend/src/services/ReminderEngine.ts` | **MODIFIED** | Automatically resolves entity mentions in reminder titles and anchors `bubble_id` |
+| `backend/src/routes/chat.ts` | **MODIFIED** | Attached guardian zero-hallucination reminders to canonical entity bubbles |
 
 ---
 
 ### NEXT ACTION
-**Verify on Device**:
-1. Launch app to load OTA update `v0.3.23-beta`.
-2. Tap `🎙️` mic in chat: record voice message, test cancel, send.
-3. Observe Nova's response: both Voice Player card and transcript text appear.
-4. Tap `📞` in header to start live call: test Speaker / Earpiece / Bluetooth audio route toggling and voice persona changes.
+- All changes verified on live production database.
+- Commit backend changes and push to `origin/main`.
+- Deploy automatically via Render backend pipeline. No mobile OTA required.

@@ -2915,8 +2915,24 @@ Return ONLY valid JSON:
             if (match) {
               const parsed = JSON.parse(match[0]);
               if (parsed.task && parsed.trigger_at) {
+                let reminderBubbleId: string | null = null;
+                try {
+                  const { canonicalMemoryTreeService } = await import('../services/CanonicalMemoryTreeService');
+                  const resolved = await canonicalMemoryTreeService.resolveEntity(userId, parsed.task);
+                  if (!resolved.isAmbiguous && resolved.entityName && resolved.entityName !== 'Entity') {
+                    const b = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(userId, {
+                      entityName: resolved.entityName,
+                      entityType: resolved.entityType,
+                      domainKey: resolved.domainKey,
+                      relationType: resolved.relationType,
+                    });
+                    if (b?.id) reminderBubbleId = b.id;
+                  }
+                } catch {}
+
                 await supabaseAdmin.from('reminders').insert({
                   user_id: userId,
+                  bubble_id: reminderBubbleId,
                   text: parsed.task,
                   trigger_at: parsed.trigger_at,
                   status: 'active',

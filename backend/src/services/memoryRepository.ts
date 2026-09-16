@@ -179,11 +179,31 @@ export class MemoryRepository {
     } : {});
 
     try {
+      // Resolve or create canonical memory bubble
+      let resolvedBubbleId: string | null = (normalizedMemory as any).bubble_id || null;
+      try {
+        const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
+        const b = await canonicalMemoryTreeService.resolveOrCreateBubbleForMemory(
+          userId,
+          {
+            key: normalizedMemory.key,
+            value: normalizedMemory.value,
+            type: normalizedMemory.type,
+          },
+          sourceMessage
+        );
+        if (b?.id) {
+          resolvedBubbleId = b.id;
+        }
+      } catch (bErr: any) {
+        logger.warn('[MemoryRepository] Failed to resolve canonical bubble', { error: bErr.message });
+      }
+
       // ── Layer 2: Query ALL active/unarchived rows for this canonical key ────
       const { data: existingRows, error: fetchErr } = await qt.track('upsert_memory_check', 'memories', () =>
         supabaseAdmin
           .from('memories')
-          .select('id, user_id, key, value, importance, confidence, frequency, emotional_weight, source_authority, is_archived, protection_source, lifecycle_state, compression_status, created_at, updated_at')
+          .select('id, user_id, key, value, importance, confidence, frequency, emotional_weight, source_authority, is_archived, protection_source, lifecycle_state, compression_status, bubble_id, created_at, updated_at')
           .eq('user_id', userId)
           .eq('key', normalizedMemory.key)
           .eq('is_archived', false)
@@ -225,6 +245,7 @@ export class MemoryRepository {
               source_authority: authorityRank(incomingAuthority) >= authorityRank(matchingRow.source_authority)
                 ? incomingAuthority
                 : matchingRow.source_authority,
+              bubble_id: matchingRow.bubble_id || resolvedBubbleId || undefined,
               updated_at: new Date().toISOString(),
               last_accessed_at: new Date().toISOString(),
               ...(normalizedMemory.is_protected ? {
@@ -246,6 +267,9 @@ export class MemoryRepository {
       }
 
       const executeInsert = async (payload: any, trackerName: string) => {
+        if (resolvedBubbleId && !payload.bubble_id) {
+          payload.bubble_id = resolvedBubbleId;
+        }
         const { data, error } = await qt.track(trackerName, 'memories', () =>
           supabaseAdmin.from('memories').insert(payload).select('id').maybeSingle()
         );
@@ -478,6 +502,10 @@ export class MemoryRepository {
             outcome: 'exactly_one_CURRENT',
             incomingAuthority
           });
+        }
+
+        if (rpcResult?.new_id && resolvedBubbleId) {
+          await supabaseAdmin.from('memories').update({ bubble_id: resolvedBubbleId }).eq('id', rpcResult.new_id);
         }
 
         // Pre-Heartbeat Hardening: Invalidate stale working memory for this canonical key

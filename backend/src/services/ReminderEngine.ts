@@ -150,6 +150,7 @@ export interface ParsedReminder {
   end_condition?: 'until_cancelled' | 'until_date' | 'until_count';
   is_auto: boolean;
   notes?: string;
+  bubble_id?: string | null;
 }
 
 export interface ScheduledReminderRow {
@@ -566,9 +567,29 @@ export class ReminderEngine {
         });
         results[i] = { ...match, alreadyExists: true };
       } else {
+        let reminderBubbleId: string | null = (r as any).bubble_id || null;
+        if (!reminderBubbleId && r.text) {
+          try {
+            const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
+            const resolved = await canonicalMemoryTreeService.resolveEntity(userId, r.text);
+            if (!resolved.isAmbiguous && resolved.entityName && resolved.entityName !== 'Entity') {
+              const b = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(userId, {
+                entityName: resolved.entityName,
+                entityType: resolved.entityType,
+                domainKey: resolved.domainKey,
+                relationType: resolved.relationType,
+              });
+              if (b?.id) reminderBubbleId = b.id;
+            }
+          } catch (e: any) {
+            logger.warn('[ReminderEngine] Bubble resolution error for reminder (non-fatal)', { error: e.message });
+          }
+        }
+
         insertIndices.push(i);
         rowsToInsert.push({
           user_id: userId,
+          bubble_id: reminderBubbleId,
           text: r.text || 'Reminder',
           trigger_at: r.trigger_at ? r.trigger_at.toISOString() : null,
           recurrence_type: r.recurrence_type || null,

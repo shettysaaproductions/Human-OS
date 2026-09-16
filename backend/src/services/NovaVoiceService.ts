@@ -90,6 +90,91 @@ const NOVA_VOICE_TOOLS: VoiceTool[] = [
   {
     functionDeclarations: [
       {
+        name: 'memory_tree_read',
+        description: 'Read the hierarchical memory tree or a specific domain (family, work, lifestyle, goals, identity) for the user.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            domain: { type: 'STRING', description: 'Optional domain key: family, work, lifestyle, goals, identity' },
+          },
+        },
+      },
+      {
+        name: 'memory_tree_search',
+        description: 'Search across the user\'s hierarchical memory bubble tree for people, characters, pets, projects, or facts.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            query: { type: 'STRING', description: 'What to search for in the memory tree' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'memory_entity_read',
+        description: 'Read a specific entity bubble, including its relationship, descendants, connected memories, and active reminders.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            entity_name: { type: 'STRING', description: 'Name of the person, pet, character, or project e.g. "Ramesh", "Bruno"' },
+          },
+          required: ['entity_name'],
+        },
+      },
+      {
+        name: 'memory_tree_create',
+        description: 'Create a new canonical entity bubble in the tree. Correctly places the entity under Family, Work, or Lifestyle with its relationship.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            entity_name: { type: 'STRING', description: 'Name of the entity e.g. "Ramesh", "Bruno"' },
+            relation_type: { type: 'STRING', description: 'Relationship e.g. "Friend", "Father", "Pet Dog", "Short Film Character"' },
+            domain: { type: 'STRING', description: 'Domain: "family", "work", "lifestyle", "goals"' },
+            fact_value: { type: 'STRING', description: 'Initial fact to attach to this entity' },
+          },
+          required: ['entity_name'],
+        },
+      },
+      {
+        name: 'memory_tree_update',
+        description: 'Update attributes or add new memory stems to an existing entity bubble in the hierarchical tree.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            entity_name: { type: 'STRING', description: 'Name of the entity' },
+            attribute_key: { type: 'STRING', description: 'Attribute name e.g. "location", "occupation", "hobby"' },
+            attribute_value: { type: 'STRING', description: 'Value of the attribute e.g. "Mumbai", "Graphic Designer"' },
+          },
+          required: ['entity_name', 'attribute_key', 'attribute_value'],
+        },
+      },
+      {
+        name: 'memory_tree_correct',
+        description: 'Report a contradiction or identity revelation about an entity (e.g. Ramesh is not a friend, but a fictional character in a short film). Stages a pending relocation proposal and returns doubt explanation to ask the user for confirmation BEFORE any mutation happens.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            entity_name: { type: 'STRING', description: 'Name of the entity e.g. "Ramesh"' },
+            new_relation: { type: 'STRING', description: 'Correct relation e.g. "Short Film Character", "Pet Dog"' },
+            new_domain: { type: 'STRING', description: 'Target domain e.g. "work", "family"' },
+            reason: { type: 'STRING', description: 'Explanation or user statement' },
+          },
+          required: ['entity_name', 'new_relation'],
+        },
+      },
+      {
+        name: 'memory_tree_move',
+        description: 'Execute the staged subtree relocation after the user has given explicit affirmative confirmation.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            entity_name: { type: 'STRING', description: 'Name of the entity being relocated' },
+            user_confirmation: { type: 'STRING', description: 'User affirmative phrase e.g. "yes", "haan pakka", "kar do"' },
+          },
+          required: ['entity_name', 'user_confirmation'],
+        },
+      },
+      {
         name: 'save_memory',
         description: 'Save an important long-term fact about the user. Call silently in background when user reveals personal details like their name, job, family, goals, or interests. Do NOT announce this to the user.',
         parameters: {
@@ -318,38 +403,200 @@ class NovaVoiceService {
 
     switch (toolName) {
 
+      case 'memory_tree_read': {
+        const { domain } = toolArgs;
+        try {
+          let query = supabaseAdmin.from('memory_bubbles').select('id, label, slug, bubble_type, domain_key, relation_type').eq('user_id', userId).eq('is_archived', false);
+          if (domain) query = query.eq('domain_key', String(domain).toLowerCase());
+          const { data: bubbles } = await query;
+          return { bubbles: bubbles || [] };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_tree_read failed', { error: err.message });
+          return { error: err.message };
+        }
+      }
+
+      case 'memory_tree_search': {
+        const { query } = toolArgs;
+        if (!query) return { results: [] };
+        try {
+          const q = String(query).trim().toLowerCase();
+          const { data: bubbles } = await supabaseAdmin
+            .from('memory_bubbles')
+            .select('id, label, slug, domain_key, relation_type')
+            .eq('user_id', userId)
+            .eq('is_archived', false)
+            .ilike('label', `%${q}%`);
+          const { data: memories } = await supabaseAdmin
+            .from('memories')
+            .select('key, value, memory_type')
+            .eq('user_id', userId)
+            .eq('is_archived', false)
+            .or(`key.ilike.%${q}%,value.ilike.%${q}%`)
+            .limit(10);
+          return {
+            bubbles: (bubbles || []).map(b => `${b.label} (${b.relation_type || b.domain_key})`),
+            facts: (memories || []).map(m => `${m.key}: ${m.value}`),
+          };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_tree_search failed', { error: err.message });
+          return { error: err.message };
+        }
+      }
+
+      case 'memory_entity_read': {
+        const { entity_name } = toolArgs;
+        if (!entity_name) return { error: 'Missing entity_name' };
+        try {
+          const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
+          const resolved = await canonicalMemoryTreeService.resolveEntity(userId, entity_name);
+          if (resolved.bubbleId) {
+            const subtree = await canonicalMemoryTreeService.getSubtree(userId, resolved.bubbleId);
+            return {
+              entity: resolved.entityName,
+              relation: resolved.relationType || resolved.domainKey,
+              memories: subtree?.memories.map(m => `${m.key}: ${m.value}`) || [],
+              reminders: subtree?.reminders.map(r => r.text) || [],
+            };
+          }
+          return { message: `No active entity bubble found for "${entity_name}"` };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_entity_read failed', { error: err.message });
+          return { error: err.message };
+        }
+      }
+
+      case 'memory_tree_create': {
+        const { entity_name, relation_type, domain, fact_value } = toolArgs;
+        if (!entity_name) return { success: false, error: 'Missing entity_name' };
+        try {
+          const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
+          const { memoryRepository } = await import('./memoryRepository');
+          const bubble = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(userId, {
+            entityName: entity_name,
+            relationType: relation_type || 'Entity',
+            domainKey: domain || 'family',
+          });
+          if (fact_value) {
+            const entitySlug = entity_name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+            const cleanRel = (relation_type || '').toLowerCase().trim();
+            const factKey = /^(?:colleague|friend|pet|coworker|mentor|doctor)/i.test(cleanRel)
+              ? `${cleanRel}_${entitySlug}`
+              : `entity:${entitySlug}:details`;
+            await memoryRepository.upsertMemory(userId, {
+              key: factKey,
+              value: String(fact_value).trim(),
+              type: (domain as any) || 'family',
+              importance: 8,
+              confidence: 0.95,
+              shouldPersist: true,
+              source_authority: 'explicit_user',
+              bubble_id: bubble.id,
+            } as any, `Voice command: ${entity_name}`);
+          }
+          return { success: true, entity: bubble.label, domain: bubble.domain_key, relation: bubble.relation_type };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_tree_create failed', { error: err.message });
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'memory_tree_update': {
+        const { entity_name, attribute_key, attribute_value } = toolArgs;
+        if (!entity_name || !attribute_key || !attribute_value) return { success: false, error: 'Missing parameters' };
+        try {
+          const { canonicalMemoryTreeService } = await import('./CanonicalMemoryTreeService');
+          const { memoryRepository } = await import('./memoryRepository');
+          const resolved = await canonicalMemoryTreeService.resolveEntity(userId, entity_name);
+          const bubble = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(userId, {
+            entityName: resolved.entityName || entity_name,
+            domainKey: resolved.domainKey || 'family',
+            relationType: resolved.relationType,
+          });
+          const entitySlug = entity_name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+          const cleanAttr = attribute_key.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+          const factKey = `entity:${entitySlug}:${cleanAttr}`;
+          await memoryRepository.upsertMemory(userId, {
+            key: factKey,
+            value: String(attribute_value).trim(),
+            type: resolved.domainKey as any,
+            importance: 8,
+            confidence: 0.95,
+            shouldPersist: true,
+            source_authority: 'explicit_user',
+            bubble_id: bubble.id,
+          } as any, `Voice update: ${entity_name} ${attribute_key}`);
+          return { success: true, updated: `${factKey}: ${attribute_value}` };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_tree_update failed', { error: err.message });
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'memory_tree_correct': {
+        const { entity_name, new_relation, new_domain, reason } = toolArgs;
+        if (!entity_name || !new_relation) return { success: false, error: 'Missing entity_name or new_relation' };
+        try {
+          const { universalBranchRelocationService } = await import('./UniversalBranchRelocationService');
+          const statement = `${entity_name} is actually ${new_relation}${new_domain ? ` under ${new_domain}` : ''}. ${reason || ''}`;
+          const proposal = await universalBranchRelocationService.detectRelocationIntent(userId, statement);
+          if (proposal) {
+            await universalBranchRelocationService.stagePendingRelocation(userId, proposal);
+            return {
+              needs_confirmation: true,
+              doubtExplanation: proposal.doubtExplanation,
+              prompt_for_user: `Wait, earlier I had ${proposal.entityName} as ${proposal.oldRelation}. Now you are saying ${proposal.entityName} is ${proposal.newRelation}. Should I move this entire memory branch?`,
+            };
+          }
+          return { success: false, error: `Could not stage relocation for ${entity_name}` };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_tree_correct failed', { error: err.message });
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'memory_tree_move': {
+        const { entity_name, user_confirmation } = toolArgs;
+        if (!entity_name || !user_confirmation) return { success: false, error: 'Missing parameters' };
+        try {
+          const { universalBranchRelocationService } = await import('./UniversalBranchRelocationService');
+          const isAffirmative = universalBranchRelocationService.isAffirmativeResponse(user_confirmation);
+          if (!isAffirmative) {
+            return { success: false, message: 'Move aborted because explicit affirmative confirmation was not given.' };
+          }
+          const pending = await universalBranchRelocationService.getPendingRelocation(userId);
+          if (!pending) {
+            return { success: false, message: 'No pending relocation proposal found.' };
+          }
+          const result = await universalBranchRelocationService.executeBranchRelocation(userId, pending);
+          return { success: result.success, message: result.message };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] memory_tree_move failed', { error: err.message });
+          return { success: false, error: err.message };
+        }
+      }
+
       case 'save_memory': {
         const { key, value } = toolArgs;
         if (!key || !value) return { success: false, error: 'Missing key or value' };
         try {
-          const cleanKey = key.toLowerCase().replace(/\s+/g, '_');
+          let cleanKey = key.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_:]/g, '');
           const cleanVal = String(value).trim();
-          const { data: existing } = await supabaseAdmin
-            .from('memories')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('key', cleanKey)
-            .maybeSingle();
-
-          if (existing) {
-            await supabaseAdmin.from('memories').update({
-              value: cleanVal,
-              importance: 5,
-              updated_at: new Date().toISOString(),
-              is_archived: false,
-            }).eq('id', existing.id);
-          } else {
-            await supabaseAdmin.from('memories').insert({
-              user_id: userId,
-              key: cleanKey,
-              value: cleanVal,
-              importance: 5,
-              source_authority: 'subconscious_inference',
-              memory_type: 'fact',
-              is_archived: false,
-            });
+          const { isKnownCanonicalKey } = await import('../lib/memoryKeySchema');
+          if (!isKnownCanonicalKey(cleanKey)) {
+            cleanKey = `entity:user:${cleanKey.replace(/:/g, '_')}`;
           }
-          logger.info('[NovaVoiceService] Memory successfully saved via voice tool', { userId, key: cleanKey, value: cleanVal });
+          const { memoryRepository } = await import('./memoryRepository');
+          await memoryRepository.upsertMemory(userId, {
+            key: cleanKey,
+            value: cleanVal,
+            type: 'lifestyle' as any,
+            importance: 8,
+            confidence: 0.95,
+            shouldPersist: true,
+            source_authority: 'explicit_user',
+          }, 'Voice tool: save_memory');
+          logger.info('[NovaVoiceService] Memory successfully saved via canonical memory gateway', { userId, key: cleanKey, value: cleanVal });
           return { success: true };
         } catch (err: any) {
           logger.error('[NovaVoiceService] save_memory failed', { error: err.message });
@@ -535,7 +782,6 @@ class NovaVoiceService {
     try {
       const { cognitiveRouter } = await import('../lib/cognitiveRouter');
       const { promptBuilder } = await import('./promptBuilder');
-      const { backgroundActions } = await import('./BackgroundActionService');
 
       // Process all user turns with their corresponding Nova context
       const pairs: { user: string; nova: string }[] = [];
@@ -564,7 +810,22 @@ class NovaVoiceService {
             a.tool === 'MemoryRepository' || a.tool === 'MomentEngine' || a.tool === 'LifeEventExtractor'
           );
           if (memoryActions.length > 0) {
-            await backgroundActions.processActions(userId, `voice_${Date.now()}`, memoryActions, 'IN');
+            const { memoryRepository } = await import('./memoryRepository');
+            for (const a of memoryActions) {
+              if (a.data?.key && a.data?.value) {
+                await memoryRepository.upsertMemory(userId, {
+                  key: a.data.key,
+                  value: a.data.value,
+                  type: a.data.domain || a.data.type || 'lifestyle',
+                  importance: 6,
+                  confidence: 0.9,
+                  shouldPersist: true,
+                  source_authority: 'deterministic',
+                }, pair.user).catch((e: any) => {
+                  logger.warn('[NovaVoiceService] Transcript memory persistence failed', { key: a.data.key, error: e?.message });
+                });
+              }
+            }
           }
         }
       }
