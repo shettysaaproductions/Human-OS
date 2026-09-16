@@ -3,7 +3,8 @@ import { supabaseAdmin } from '../../lib/supabase';
 
 jest.mock('../../lib/supabase', () => ({
   supabaseAdmin: {
-    from: jest.fn()
+    from: jest.fn(),
+    rpc: jest.fn()
   }
 }));
 
@@ -17,14 +18,40 @@ describe('Universal Branch Relocation Service & Confirmation Protocol Engine', (
   });
 
   describe('1. Relocation Intent Detection & Pattern Recognition', () => {
-    it('detects user exact short film character revelation with antecedent', () => {
+    it('detects user exact short film character revelation with antecedent', async () => {
+      (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'memories') {
+          return {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                eq: jest.fn().mockResolvedValue({
+                  data: [{ id: 'mem-1', key: 'friend_ramesh', value: 'Ramesh is a friend', memory_type: 'family' }]
+                })
+              })
+            })
+          };
+        }
+        if (table === 'reminders') {
+          return {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                neq: jest.fn().mockReturnValue({
+                  neq: jest.fn().mockResolvedValue({ data: [] })
+                })
+              })
+            })
+          };
+        }
+        return { select: jest.fn().mockReturnThis() };
+      });
+
       const input = 'the one i was talking about was not my friend he was my character of a project on which I am working on to create a short film';
       const recentMessages = [
         { role: 'user', content: 'Ramesh ke baare mein baat kar raha tha' },
         { role: 'assistant', content: 'Acha, Ramesh tumhara dost hai?' }
       ];
 
-      const detected = universalBranchRelocationService.detectRelocationIntentSync(input, recentMessages);
+      const detected = await universalBranchRelocationService.detectRelocationIntent('user-1', input, recentMessages);
 
       expect(detected).not.toBeNull();
       expect(detected?.entityName).toBe('Ramesh');
@@ -246,6 +273,11 @@ describe('Universal Branch Relocation Service & Confirmation Protocol Engine', (
         createdAt: new Date().toISOString(),
         isFictionalOrCharacter: true
       };
+
+      (supabaseAdmin.rpc as jest.Mock).mockResolvedValue({
+        data: { moved_memory_count: 3, moved_reminder_count: 1, descendant_bubble_count: 0 },
+        error: null,
+      });
 
       const result = await universalBranchRelocationService.executeBranchRelocation('user-1', proposal);
 

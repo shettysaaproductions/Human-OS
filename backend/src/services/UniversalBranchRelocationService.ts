@@ -11,7 +11,6 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
-import { chatCompletionMemory } from '../lib/nvidia';
 
 export interface BranchRelocationProposal {
   entityName: string;
@@ -95,28 +94,54 @@ export class UniversalBranchRelocationService {
     return this.instance;
   }
 
+  private isInvalidEntityName(name: string): boolean {
+    if (!name || name.trim().length < 2) return true;
+    const lower = name.toLowerCase().trim();
+    const stopwords = new Set([
+      'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
+      'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself',
+      'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom',
+      'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and',
+      'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with',
+      'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above',
+      'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
+      'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any',
+      'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
+      'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just',
+      'don', 'should', 'now', 'one', 'the one', 'talking', 'talking about', 'friend', 'dost',
+      'character', 'pet', 'person', 'insaan', 'human', 'someone', 'guy', 'dude', 'girl', 'boy'
+    ]);
+    if (stopwords.has(lower)) return true;
+    const words = lower.split(/\s+/).filter(Boolean);
+    if (words.every(w => stopwords.has(w))) return true;
+    return false;
+  }
+
   private cleanEntity(raw: string): string {
     return (raw || '')
-      .replace(/^(my|a|an|the|mera|meri|mere)\\s+/i, '')
-      .replace(/\\s+(is|hai|are|was|tha|thi)$/i, '')
+      .replace(/^(my|a|an|the|mera|meri|mere)\s+/i, '')
+      .replace(/\s+(is|hai|are|was|tha|thi)$/i, '')
       .trim();
   }
 
   private capitalizeWords(raw: string): string {
-    return raw.trim().split(/\\s+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    return raw.trim().split(/\s+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
   }
 
   private extractExplicitEntity(text: string): string | null {
     const patterns = [
-      /^([A-Za-z][A-Za-z0-9 _-]{1,60}?)\\s+(?:is|was|isn't|wasn't|are|were)\\s+(?:not|actually)\\b/i,
-      /\\b(?:move|shift|transfer|reclassify)\\s+([A-Za-z][A-Za-z0-9_-]{1,40})(?:\\s+bubble)?\\b/i,
-      /\\b(?:about|regarding|named|called|friend|colleague|father|mother|wife|pet|dog|cat)\\s+([A-Z][A-Za-z0-9_-]{1,40})\\b/i,
+      /^([A-Za-z][A-Za-z0-9 _-]{1,60}?)\s+(?:is|was|isn't|wasn't|are|were)\s+(?:not|actually)\b/i,
+      /\b(?:move|shift|transfer|reclassify)\s+([A-Za-z][A-Za-z0-9_-]{1,40})(?:\s+bubble)?\b/i,
+      /\b(?:about|regarding|named|called|friend|colleague|father|mother|wife|pet|dog|cat)\s+([A-Z][A-Za-z0-9_-]{1,40})\b/i,
     ];
     for (const p of patterns) {
       const m = text.match(p);
       if (m?.[1]) {
         const c = this.cleanEntity(m[1]);
-        if (c && !/^(the one|this|that|someone|person|friend|pet|character)$/i.test(c)) return this.capitalizeWords(c);
+        if (c && !this.isInvalidEntityName(c)) {
+          return this.capitalizeWords(c);
+        }
       }
     }
     return null;
@@ -126,7 +151,7 @@ export class UniversalBranchRelocationService {
     const candidates = new Set<string>();
     for (const msg of (recentMessages || []).slice(-12)) {
       const text = msg.content || '';
-      for (const match of text.matchAll(/\\b([A-Z][a-z]{2,30})\\b/g)) {
+      for (const match of text.matchAll(/\b([A-Z][a-z]{2,30})\b/g)) {
         const candidate = this.cleanEntity(match[1]);
         if (candidate && !/^(Nova|I|You|The|This|That|Actually|Wait|Okay|Sure|Yes|No|Hindi|English|Project|Short|Film)$/i.test(candidate)) candidates.add(this.capitalizeWords(candidate));
       }
@@ -152,20 +177,20 @@ export class UniversalBranchRelocationService {
     return grounded.length === 1 ? grounded[0] : null;
   }
 
-  detectRelocationIntentSync(text: string, recentMessages: Array<{ role: string; content: string }> = []): (DetectedRelocation & { entityName: string }) | null {
+  detectRelocationIntentSync(text: string, _recentMessages: Array<{ role: string; content: string }> = []): (DetectedRelocation & { entityName: string }) | null {
     if (!text?.trim()) return null;
     const clean = text.trim();
     const lower = clean.toLowerCase();
 
-    const isCharacter = /(?:not\\s+my\\s+friend|isn't\\s+my\\s+friend|dost\\s+nahi(?:\\s+hai|\\s+tha)?).*?(?:character|short\\s+film|film\\s+project|script|project)/i.test(lower) ||
-      /(?:character|short\\s+film|film\\s+project|script|project\\s+character).*?(?:not\\s+my\\s+friend|dost\\s+nahi)/i.test(lower);
+    const isCharacter = /(?:not\s+my\s+friend|isn't\s+my\s+friend|dost\s+nahi(?:\s+hai|\s+tha)?).*?(?:character|short\s+film|film\s+project|script|project)/i.test(lower) ||
+      /(?:character|short\s+film|film\s+project|script|project\s+character).*?(?:not\s+my\s+friend|dost\s+nahi)/i.test(lower);
     if (isCharacter) {
       const explicit = this.extractExplicitEntity(clean);
       if (!explicit) return null;
       return { entityName: explicit, oldDomain: 'family', oldRelation: 'Friend', newDomain: 'work', newRelation: lower.includes('short film') ? 'Short Film Character' : 'Project Character', rawText: clean, isFictionalOrCharacter: true };
     }
 
-    const isPet = /(?:not\\s+a\\s+person|human\\s+nahi|insaan?\\s+nahi).*?(?:pet|dog|cat|puppy|kitten|kutta|billi)/i.test(lower);
+    const isPet = /(?:not\s+a\s+person|human\s+nahi|insaan?\s+nahi).*?(?:pet|dog|cat|puppy|kitten|kutta|billi)/i.test(lower);
     if (isPet) {
       const explicit = this.extractExplicitEntity(clean);
       if (!explicit) return null;
@@ -173,20 +198,31 @@ export class UniversalBranchRelocationService {
       return { entityName: explicit, oldDomain: 'family', oldRelation: 'Person / Friend', newDomain: 'family', newRelation: pet, rawText: clean, isPetRevelation: true };
     }
 
-    const move = clean.match(/\\b(?:move|shift|transfer|reclassify)\\s+([A-Za-z][A-Za-z0-9_-]{1,40})(?:\\s+bubble)?\\s+(?:from\\s+.+?\\s+)?to\\s+(.+)$/i);
+    const move = clean.match(/\b(?:move|shift|transfer|reclassify)\s+([A-Za-z][A-Za-z0-9_-]{1,40})(?:\s+bubble)?(?:\s+(?:from|se)\s+([^to\s]+?))?\s+(?:to|me|in)\s+(.+)$/i) ||
+      clean.match(/^([A-Za-z][A-Za-z0-9_-]{1,40})\s+from\s+([A-Za-z0-9_ -]+?)\s+to\s+(.+)$/i) ||
+      clean.match(/^([A-Za-z][A-Za-z0-9_-]{1,40})(?:\s+bubble)?\s+ko\s+([A-Za-z0-9_ -]+?)\s+se\s+([A-Za-z0-9_ -]+?)\s+me\s+(?:shift|move|transfer)\s*(?:kar\s+do|kardo)?$/i);
+
     if (move) {
       const entityName = this.capitalizeWords(this.cleanEntity(move[1]));
-      const target = move[2].trim().replace(/[.!?]+$/, '');
-      const domain = inferDomain(target, 'lifestyle');
-      return { entityName, oldDomain: undefined, oldRelation: undefined, newDomain: domain, newRelation: titleFor(domain), targetParentLabel: target, rawText: clean };
+      if (!this.isInvalidEntityName(entityName)) {
+        const rawOld = move[3] ? move[2] : undefined;
+        const rawNew = move[3] ? move[3] : move[2];
+        const oldDomain = rawOld ? inferDomain(rawOld, 'family') : undefined;
+        const oldRelation = rawOld ? titleFor(oldDomain!) : undefined;
+        const target = rawNew.trim().replace(/[.!?]+$/, '');
+        const domain = inferDomain(target, 'lifestyle');
+        return { entityName, oldDomain, oldRelation, newDomain: domain, newRelation: titleFor(domain), targetParentLabel: target, rawText: clean };
+      }
     }
 
-    const direct = clean.match(/^([A-Za-z][A-Za-z0-9 _-]{1,40})\\s+(?:is|was)\\s+(?:not|isn't|wasn't)\\s+(?:my|a|an|the)?\\s*([^,.;]+)[,;.]?\\s+(?:he|she|it|they)\\s+(?:is|was|are)\\s+(?:my|a|an|the)?\\s*([^,.;]+)$/i);
+    const direct = clean.match(/^([A-Za-z][A-Za-z0-9 _-]{1,40})\s+(?:is|was)\s+(?:not|isn't|wasn't)\s+(?:my|a|an|the)?\s*([^,.;]+)[,;.]?\s+(?:he|she|it|they)\s+(?:is|was|are)\s+(?:my|a|an|the)?\s*([^,.;]+)$/i);
     if (direct) {
       const entityName = this.capitalizeWords(this.cleanEntity(direct[1]));
-      const newRelation = direct[3].trim();
-      const newDomain = inferDomain(newRelation, 'lifestyle');
-      return { entityName, oldDomain: inferDomain(direct[2], 'family'), oldRelation: direct[2].trim(), newDomain, newRelation, rawText: clean };
+      if (!this.isInvalidEntityName(entityName)) {
+        const newRelation = direct[3].trim();
+        const newDomain = inferDomain(newRelation, 'lifestyle');
+        return { entityName, oldDomain: inferDomain(direct[2], 'family'), oldRelation: direct[2].trim(), newDomain, newRelation, rawText: clean };
+      }
     }
 
     return null;
@@ -202,7 +238,7 @@ export class UniversalBranchRelocationService {
         const fallbackDomain = inferDomain(text, 'lifestyle');
         const isCharacter = /character|short film|script|project/i.test(text);
         const isPet = /pet|dog|cat|puppy|kitten|kutta|billi/i.test(text);
-        detected = { entityName: antecedent, oldDomain: isCharacter || isPet ? 'family' : undefined, oldRelation: isCharacter ? 'Friend' : isPet ? 'Person / Friend' : undefined, newDomain: isCharacter ? 'work' : isPet ? 'family' : fallbackDomain, newRelation: isCharacter ? 'Project Character' : isPet ? (/cat|kitten|billi/i.test(text) ? 'Pet Cat' : 'Pet Dog') : titleFor(fallbackDomain), rawText: text, isFictionalOrCharacter: isCharacter, isPetRevelation: isPet };
+        detected = { entityName: antecedent, oldDomain: isCharacter || isPet ? 'family' : undefined, oldRelation: isCharacter ? 'Friend' : isPet ? 'Person / Friend' : undefined, newDomain: isCharacter ? 'work' : isPet ? 'family' : fallbackDomain, newRelation: isCharacter ? (/short film|shortfilm/i.test(text) ? 'Short Film Character' : 'Project Character') : isPet ? (/cat|kitten|billi/i.test(text) ? 'Pet Cat' : 'Pet Dog') : titleFor(fallbackDomain), rawText: text, isFictionalOrCharacter: isCharacter, isPetRevelation: isPet };
       } catch (err) {
         logger.warn('[UniversalBranchRelocation] antecedent resolution failed', { error: String(err) });
         return null;
@@ -237,7 +273,7 @@ export class UniversalBranchRelocationService {
     const oldDomain = detected.oldDomain || (root.memory_type as LifeDomainKey) || 'lifestyle';
     const oldRelation = detected.oldRelation || String(root.value || titleFor(oldDomain));
 
-    const { data: reminders, error: reminderError } = await supabaseAdmin.from('reminders').select('id,text,trigger_at,bubble_id,notes,status,updated_at').eq('user_id', userId).not('status', 'in', '(cancelled,completed)');
+    const { data: reminders, error: reminderError } = await supabaseAdmin.from('reminders').select('id,text,trigger_at,bubble_id,notes,status,updated_at').eq('user_id', userId).neq('status', 'cancelled').neq('status', 'completed');
     if (reminderError) throw reminderError;
     const matchingReminders = (reminders || []).filter(r => (branchBubbleId && r.bubble_id === branchBubbleId) || String(r.text || '').toLowerCase().includes(entityName.toLowerCase()) || String(r.notes || '').toLowerCase().includes(entityName.toLowerCase()));
 
@@ -256,10 +292,10 @@ export class UniversalBranchRelocationService {
     const countDetails = branchRows.length;
     const reminderCount = matchingReminders.length;
     const doubtExplanation = detected.isFictionalOrCharacter
-      ? `Earlier I understood ${entityName} as a real-life ${oldRelation} under ${oldTitle}. Now you're saying ${entityName} is a ${detected.newRelation} under ${newTitle}. Because that changes what this entire memory branch means, I want to verify before changing it. I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`
+      ? `Wait, earlier I thought ${entityName} was under ${oldTitle} as a ${oldRelation}. Now you're saying ${entityName} is actually a fictional character for your project under ${newTitle}. Because that changes what this entire memory branch means, I want to verify before changing it. I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`
       : detected.isPetRevelation
-      ? `Earlier I treated ${entityName} as a person/relationship under ${oldTitle}. Now you're saying ${entityName} is actually ${detected.newRelation}. That changes the entity type, so I want to verify before changing the branch. I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`
-      : `Earlier I had ${entityName} under ${oldTitle} (${oldRelation}). You are asking me to place it under ${newTitle} (${detected.newRelation}). I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`;
+      ? `Wait, earlier I treated ${entityName} as a person/relationship under ${oldTitle}. Now you're saying ${entityName} is actually ${detected.newRelation}. That changes the entity type, so I want to verify before changing the branch. I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`
+      : `Wait, earlier I had ${entityName} under ${oldTitle} (${oldRelation}). You are asking me to place it under ${newTitle} (${detected.newRelation}). I found ${countDetails} connected memories and ${reminderCount} connected reminders. Are you sure?`;
 
     const expectedUpdated = branchRows.map(r => ({ id: r.id, updated_at: r.updated_at })).filter(x => x.updated_at);
     return {
@@ -296,8 +332,9 @@ export class UniversalBranchRelocationService {
 
   isAffirmativeResponse(text: string): boolean {
     const t = String(text || '').trim().toLowerCase().replace(/[.!?]+$/g, '');
-    if (!t || /\\b(no|nahi|nai|na|mat|don't|dont|rehne do|cancel)\\b/i.test(t)) return false;
-    return /^(yes|haan|haa|ha|haanji|sure|definitely|pakka|confirm|confirmed|proceed|bilkul|theek hai|thik hai|ok|okay|kardo|kar do|shift kar do|move kar do)(?:\\s+(please|kardo|kar do|it|this|that|move|shift|confirm))?$/i.test(t);
+    if (!t || /\b(no|nahi|nai|na|mat|don't|dont|rehne do|cancel)\b/i.test(t)) return false;
+    return /^(yes|haan|haa|ha|haanji|sure|definitely|pakka|confirm|confirmed|proceed|bilkul|theek hai|thik hai|sahi hai|sahi|yup|yeah|ok|okay|kardo|kar do|shift kar do|move kar do)(?:\s+(please|kardo|kar do|it|this|that|move|shift|confirm))?$/i.test(t) ||
+      /\b(yup|sahi hai|shift kar do|move kar do|confirm kar do)\b/i.test(t);
   }
 
   isNegativeResponse(text: string): boolean {
