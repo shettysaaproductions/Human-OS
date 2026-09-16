@@ -137,4 +137,108 @@ describe('Anti-Nagging Silence Respect & ProactiveGate Authorization', () => {
     // Reminders are user-requested alarms, so they bypass unreplied_previous_outreach
     expect(result.allowed).toBe(true);
   });
+
+  it('3. Allows non-reminder outreach when previous conversation ended > 6 hours ago with an assistant message', async () => {
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'working_memory') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null })
+        };
+      }
+      if (table === 'chat_history') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          order: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockImplementation(() => {
+            // Last assistant message was 8 hours ago (naturally concluded conversation)
+            return Promise.resolve({ data: { created_at: new Date(Date.now() - 8 * 3600 * 1000).toISOString() } });
+          })
+        };
+      }
+      if (table === 'nova_outreach_log') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          is: jest.fn().mockReturnThis(),
+          not: jest.fn().mockReturnThis(),
+          gte: jest.fn().mockReturnThis(),
+          order: jest.fn().mockReturnThis(),
+          // No unreplied outreach
+          then: (resolve: any) => resolve({ data: [] }),
+          insert: jest.fn().mockReturnThis(),
+          single: jest.fn().mockResolvedValue({ data: { id: 'out-morning-1' }, error: null })
+        };
+      }
+      return {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        maybeSingle: jest.fn().mockResolvedValue({ data: null })
+      };
+    });
+
+    const result = await proactiveGate.acquire(userId, {
+      outreachType: 'morning_checkin',
+      logicalKey: 'nace:agenda:morning_greeting',
+      skipQuietHoursCheck: true,
+      skipMinGapCheck: true
+    });
+
+    // Outreach should be allowed because 8 hours have passed since the previous chat
+    expect(result.allowed).toBe(true);
+  });
+
+  it('4. Allows subsequent outreach when 1 prior outreach occurred > 6 hours ago and cooldown passed', async () => {
+    (supabaseAdmin.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'working_memory') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null })
+        };
+      }
+      if (table === 'chat_history') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          order: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: { created_at: new Date(Date.now() - 10 * 3600 * 1000).toISOString() } })
+        };
+      }
+      if (table === 'nova_outreach_log') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          is: jest.fn().mockReturnThis(),
+          not: jest.fn().mockReturnThis(),
+          gte: jest.fn().mockReturnThis(),
+          order: jest.fn().mockReturnThis(),
+          // 1 outreach sent 7 hours ago
+          then: (resolve: any) => resolve({
+            data: [{ id: 'out-prev', created_at: new Date(Date.now() - 7 * 3600 * 1000).toISOString() }]
+          }),
+          insert: jest.fn().mockReturnThis(),
+          single: jest.fn().mockResolvedValue({ data: { id: 'out-followup-2' }, error: null })
+        };
+      }
+      return {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        maybeSingle: jest.fn().mockResolvedValue({ data: null })
+      };
+    });
+
+    const result = await proactiveGate.acquire(userId, {
+      outreachType: 'agenda_followup',
+      logicalKey: 'nace:agenda:followup_next_day',
+      skipQuietHoursCheck: true
+    });
+
+    // Allowed because 7 hours > 6 hours anti-nagging threshold and > 60m escalation cooldown
+    expect(result.allowed).toBe(true);
+  });
 });

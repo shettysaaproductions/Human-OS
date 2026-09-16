@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.31-beta",
+    "date": "2026-09-17",
+    "title": "📱 WhatsApp-Style Earpiece Screen-Off, Smart Recurring Reminders & Goal Hub",
+    "message": [
+      "WhatsApp-Style Earpiece Screen-Off: Pitch-black OLED shield automatically turns off the screen when listening through the earpiece receiver, eliminating accidental ear/face touches with instant tap-to-wake HUD controls.",
+      "Smart Recurring Reminders: Rich natural recurrence engine supporting 'everyday', 'daily', 'roz', 'har din', 'twice a day', 'only 2 times', and custom day schedules with interval badges and limits displayed directly in your Reminders Hub.",
+      "Automatic Past-Due Cleanup: Zero cluttered screens — back-dated and expired one-time reminders are automatically filtered, with a 1-tap 'Clear Past Reminders' cleanup tool.",
+      "Interactive Goal Management: Goals are now fully interactive — view progress metrics, adjust completion percentages (-10%, +10%, +25%, 50%, 100%), edit titles/deadlines, mark complete, delete, or create new goals directly from the Goals tab.",
+      "Intelligent Proactive Outreach: Eliminated artificial silence bottlenecks so Nova naturally checks in after hours of silence without repetitive fillers or spamming."
+    ]
+  },
+  {
     "version": "0.3.30-beta",
     "date": "2026-09-16",
     "title": "🗑️ Deterministic Memory Deletion & Zero-Hallucination Action Gate",

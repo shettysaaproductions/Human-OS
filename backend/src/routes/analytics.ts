@@ -677,6 +677,282 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
   }
 });
 
+/**
+ * POST /analytics/goals
+ * Manually create a new goal in the Goals tab.
+ * Persists into kg_nodes (entity_type='goal') and memories (memory_type='goals').
+ */
+analyticsRouter.post('/goals', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { title, description, category, target_date, progress } = req.body;
+    if (!title || !title.trim()) {
+      res.status(400).json({ error: 'Goal title is required' });
+      return;
+    }
+
+    const cleanTitle = title.trim();
+    const cleanDesc = (description || '').trim();
+    const cleanCategory = (category || 'Goals').trim();
+    const progVal = typeof progress === 'number' ? Math.min(100, Math.max(0, progress)) : 0;
+    const isCompleted = progVal >= 100;
+    const status = isCompleted ? 'completed' : 'active';
+
+    // 1. Insert into kg_nodes
+    const { data: node, error: kgError } = await supabaseAdmin
+      .from('kg_nodes')
+      .insert({
+        user_id: userId,
+        name: cleanTitle,
+        entity_type: 'goal',
+        attributes: {
+          title: cleanTitle,
+          description: cleanDesc,
+          category: cleanCategory,
+          progress: progVal,
+          status,
+          deadline: target_date || null,
+          target_date: target_date || null,
+          created_at: new Date().toISOString()
+        }
+      })
+      .select('*')
+      .single();
+
+    if (kgError) {
+      logger.error('Failed to insert goal into kg_nodes', { error: kgError.message });
+      throw kgError;
+    }
+
+    // 2. Also register in memories for LLM knowledge
+    try {
+      await supabaseAdmin
+        .from('memories')
+        .insert({
+          user_id: userId,
+          memory_type: 'goals',
+          key: `goal_${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 30)}`,
+          value: cleanDesc ? `${cleanTitle}: ${cleanDesc}` : cleanTitle,
+          source_authority: 'user_explicit',
+          metadata: {
+            category: cleanCategory,
+            target_date: target_date || null,
+            progress: progVal,
+            status
+          }
+        });
+    } catch (memErr) {
+      logger.warn('[Analytics/goals] Memory insert warning (non-fatal):', { error: String(memErr) });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Goal created successfully',
+      data: node
+    });
+  } catch (err) {
+    logger.error('Failed to create goal', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
+/**
+ * PUT /analytics/goals/:id
+ * Update an existing goal (title, description, category, deadline, progress, status).
+ */
+analyticsRouter.put('/goals/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const goalId = req.params.id;
+    const { title, description, category, target_date, progress, status: reqStatus } = req.body;
+
+    let newStatus = reqStatus;
+    if (typeof progress === 'number') {
+      if (progress >= 100 && !newStatus) newStatus = 'completed';
+      else if (progress < 100 && newStatus === 'completed') newStatus = 'active';
+    }
+
+    // Try finding in kg_nodes first
+    const { data: existingNode } = await supabaseAdmin
+      .from('kg_nodes')
+      .select('*')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existingNode) {
+      const updatedAttributes = {
+        ...(existingNode.attributes || {}),
+        ...(description !== undefined ? { description: description.trim() } : {}),
+        ...(category !== undefined ? { category: category.trim() } : {}),
+        ...(target_date !== undefined ? { deadline: target_date, target_date } : {}),
+        ...(progress !== undefined ? { progress } : {}),
+        ...(newStatus !== undefined ? { status: newStatus } : {}),
+        updated_at: new Date().toISOString()
+      };
+
+      const updatePayload: any = { attributes: updatedAttributes };
+      if (title && title.trim()) {
+        updatePayload.name = title.trim();
+      }
+
+      const { error: updateErr } = await supabaseAdmin
+        .from('kg_nodes')
+        .update(updatePayload)
+        .eq('id', goalId)
+        .eq('user_id', userId);
+
+      if (updateErr) throw updateErr;
+
+      res.status(200).json({ success: true, message: 'Goal updated successfully' });
+      return;
+    }
+
+    // Check life_threads
+    const { data: existingThread } = await supabaseAdmin
+      .from('life_threads')
+      .select('*')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existingThread) {
+      const threadUpdate: any = {};
+      if (title && title.trim()) threadUpdate.title = title.trim();
+      if (description !== undefined) threadUpdate.description = description.trim();
+      if (newStatus) threadUpdate.status = newStatus === 'completed' ? 'completed' : 'active';
+
+      await supabaseAdmin
+        .from('life_threads')
+        .update(threadUpdate)
+        .eq('id', goalId)
+        .eq('user_id', userId);
+
+      res.status(200).json({ success: true, message: 'Goal updated successfully' });
+      return;
+    }
+
+    // Check memories
+    const { data: existingMem } = await supabaseAdmin
+      .from('memories')
+      .select('*')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existingMem) {
+      const memUpdate: any = {};
+      if (title && title.trim()) {
+        memUpdate.value = description ? `${title.trim()}: ${description.trim()}` : title.trim();
+      }
+      if (newStatus === 'completed') {
+        memUpdate.is_archived = true;
+      }
+      await supabaseAdmin
+        .from('memories')
+        .update(memUpdate)
+        .eq('id', goalId)
+        .eq('user_id', userId);
+
+      res.status(200).json({ success: true, message: 'Goal updated successfully' });
+      return;
+    }
+
+    res.status(404).json({ error: 'Goal not found' });
+  } catch (err) {
+    logger.error('Failed to update goal', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
+/**
+ * DELETE /analytics/goals/:id
+ * Safely delete / archive a goal from the Goals tab.
+ */
+analyticsRouter.delete('/goals/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const goalId = req.params.id;
+
+    // 1. Check kg_nodes
+    const { data: node } = await supabaseAdmin
+      .from('kg_nodes')
+      .select('id')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (node) {
+      await supabaseAdmin
+        .from('kg_nodes')
+        .delete()
+        .eq('id', goalId)
+        .eq('user_id', userId);
+
+      res.status(200).json({ success: true, message: 'Goal deleted successfully' });
+      return;
+    }
+
+    // 2. Check life_threads (mark archived/abandoned per safety)
+    const { data: thread } = await supabaseAdmin
+      .from('life_threads')
+      .select('id')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (thread) {
+      await supabaseAdmin
+        .from('life_threads')
+        .update({ status: 'archived' })
+        .eq('id', goalId)
+        .eq('user_id', userId);
+
+      res.status(200).json({ success: true, message: 'Goal archived successfully' });
+      return;
+    }
+
+    // 3. Check memories
+    const { data: mem } = await supabaseAdmin
+      .from('memories')
+      .select('id')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (mem) {
+      await supabaseAdmin
+        .from('memories')
+        .update({ is_archived: true })
+        .eq('id', goalId)
+        .eq('user_id', userId);
+
+      res.status(200).json({ success: true, message: 'Goal archived successfully' });
+      return;
+    }
+
+    res.status(404).json({ error: 'Goal not found' });
+  } catch (err) {
+    logger.error('Failed to delete goal', { error: err instanceof Error ? err.message : String(err) });
+    next(err);
+  }
+});
+
 // GET /analytics/timeline — combines episodic moments and key life milestones
 analyticsRouter.get('/timeline', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

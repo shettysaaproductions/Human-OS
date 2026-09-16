@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ValidationError } from '../types/errors';
 import { supabaseAdmin } from '../lib/supabase';
 import crypto from 'crypto';
+import { logger } from '../lib/logger';
 import { reminderSchedulerService } from '../services/ReminderSchedulerService';
 
 export const remindersRouter: import('express').Router = Router();
@@ -129,6 +130,16 @@ remindersRouter.get(
       const userId = (req as any).user.id;
       const statusFilter = (req.query.status as string) || 'active';
 
+      // Auto-scan: Expire past-due non-recurring reminders (grace period 15 mins)
+      const nowCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      await supabaseAdmin
+        .from('reminders')
+        .update({ status: 'completed' })
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .is('recurrence_type', null)
+        .lt('trigger_at', nowCutoff);
+
       let query = supabaseAdmin
         .from('reminders')
         .select('*')
@@ -151,6 +162,42 @@ remindersRouter.get(
       if (error) throw error;
 
       res.status(200).json({ success: true, reminders: reminders || [] });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /reminders/clear-past
+ * Scans and clears/completes all back-dated, past-due non-recurring reminders.
+ */
+remindersRouter.post(
+  '/clear-past',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user.id;
+      const nowIso = new Date().toISOString();
+
+      const { data, error } = await supabaseAdmin
+        .from('reminders')
+        .update({ status: 'completed' })
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .is('recurrence_type', null)
+        .lt('trigger_at', nowIso)
+        .select('id');
+
+      if (error) throw error;
+
+      const clearedCount = data?.length || 0;
+      logger.info(`[Reminders] Cleared ${clearedCount} past-due reminders for user ${userId}`);
+
+      res.status(200).json({
+        success: true,
+        message: `Cleared ${clearedCount} past-due reminder${clearedCount === 1 ? '' : 's'}`,
+        clearedCount,
+      });
     } catch (err) {
       next(err);
     }

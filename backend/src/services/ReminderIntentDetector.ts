@@ -606,7 +606,7 @@ export class ReminderIntentDetector {
       isAmbiguous: false,
       formattedTime,
       isRecurring,
-      recurrenceType: isRecurring ? (activeDays && activeDays.length > 0 ? 'weekly' : 'daily') : undefined,
+      recurrenceType: isRecurring ? (activeDays && activeDays.length > 0 ? 'weeks' : 'days') : undefined,
       recurrenceInterval: isRecurring ? 1 : undefined,
       activeDays
     };

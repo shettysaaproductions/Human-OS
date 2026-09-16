@@ -201,12 +201,32 @@ export class ProactiveGate {
 
     // ── 4.5. Anti-Nagging Silence Respect Guard ──────────────────────────────
     // CRITICAL: Non-reminder proactive outreaches (curiosity questions, NACE agenda check-ins, unprompted follow-ups)
-    // MUST NOT spam the user if they have not replied to Nova's prior outreach or last assistant message!
+    // MUST NOT spam the user if they have not replied to Nova's recent outreach or recent assistant message.
+    // However:
+    // 1) An assistant-ended conversation older than 6 hours is simply concluded history, NOT a reason to permanently mute Nova for days/weeks.
+    // 2) An unreplied outreach within recent hours (< 6h) or excessive unreplied count (>= 3) must be respected.
     // Reminders (user-requested alarms) are exempt since they were explicitly scheduled by the user for a specific time.
-    const isAssistantUnanswered = !!(lastAssistantMsgAt && (!lastUserMsgAt || lastAssistantMsgAt > lastUserMsgAt));
-    if (outreachType !== 'reminder' && (ignoredCount >= 1 || isAssistantUnanswered)) {
+    const assistantMsgAgeHours = lastAssistantMsgAt
+      ? (Date.now() - lastAssistantMsgAt.getTime()) / 3600000
+      : Infinity;
+
+    const outreachAgeHours = lastOutreachAt
+      ? (Date.now() - lastOutreachAt.getTime()) / 3600000
+      : Infinity;
+
+    // Check if assistant spoke recently (< 6 hours) without a reply
+    const isRecentUnansweredAssistant = !!(
+      lastAssistantMsgAt &&
+      (!lastUserMsgAt || lastAssistantMsgAt > lastUserMsgAt) &&
+      assistantMsgAgeHours < 6
+    );
+
+    // Check if an outreach was sent recently (< 6 hours) and remains unreplied, OR ignoredCount is excessive (>= 3)
+    const isRecentUnrepliedOutreach = ignoredCount >= 1 && (outreachAgeHours < 6 || ignoredCount >= 3);
+
+    if (outreachType !== 'reminder' && (isRecentUnrepliedOutreach || isRecentUnansweredAssistant)) {
       logger.info('[ProactiveGate] BLOCK — unreplied previous outreach (anti-nagging guard)', {
-        ...logCtx, ignoredCount, isAssistantUnanswered
+        ...logCtx, ignoredCount, isRecentUnansweredAssistant, assistantMsgAgeHours, outreachAgeHours
       });
       return {
         allowed: false,

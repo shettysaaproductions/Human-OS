@@ -208,7 +208,18 @@ export function resolveUserTzOffsetHours(profile?: { timezone_offset?: number | 
  *   - "N baje" / "N am/pm" / "at N" / "shaam/subah/dopahar/raat" → time_of_day (24h)
  *   - "HH:MM"              → time_of_day
  */
-export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: string; rawTime: string; isAmbiguous: boolean; periodWord?: string }, userTzOffsetHours: number = 5.5): ReminderSpec | null {
+export function buildReminderSpecFromIntent(intent: {
+  text: string;
+  timePhrase: string;
+  rawTime: string;
+  isAmbiguous: boolean;
+  periodWord?: string;
+  isRecurring?: boolean;
+  recurrenceType?: 'minutes' | 'hours' | 'days' | 'weeks' | 'months' | 'years';
+  recurrenceInterval?: number;
+  recurrenceLimit?: number;
+  activeDays?: string[];
+}, userTzOffsetHours: number = 5.5): ReminderSpec | null {
   const fullText = intent.text;
   const textLower = fullText.toLowerCase();
   // Period word from TurnAnalyzer (authoritative — extracted from same regex that captured rawTime)
@@ -217,7 +228,7 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
   // Strip reminder-intent keywords and time phrases from the text to get a clean title
   let title = fullText
     .replace(/\b(yaad dila(o|na)?|yaad kar dena|yaad kara|mujhe yaad|remind me|set reminder|alarm laga|mujhe remind|yaad rakhna|yaad dena|bata dena|yaad karna)\b/gi, '')
-    .replace(/\b(kal|aaj|subah|shaam|dopahar|raat|morning|evening|afternoon|night)\b/gi, '')
+    .replace(/\b(kal|aaj|subah|shaam|dopahar|raat|morning|evening|afternoon|night|everyday|every\s+day|daily|roz|har\s+roz|har\s+din)\b/gi, '')
     .replace(/\b\d{1,2}(?::\d{2})?\s*(am|pm|baje)?\b/gi, '')
     .replace(/\b(in\s+\d+\s*min(utes?)?|in\s+\d+\s*hour(s)?)\b/gi, '')
     .replace(/\s{2,}/g, ' ')
@@ -233,28 +244,44 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
   if (!title) title = 'Reminder';
   title = title.substring(0, 80);
 
+  // Helper to attach recurrence metadata
+  const attachRecurrence = (spec: ReminderSpec): ReminderSpec => {
+    if (intent.isRecurring || /\b(everyday|every\s+day|daily|roz|har\s+roz|har\s+din)\b/i.test(textLower)) {
+      spec.recurrence_interval_unit = intent.recurrenceType || 'days';
+      spec.recurrence_interval_value = intent.recurrenceInterval || 1;
+    }
+    if (intent.recurrenceLimit) {
+      spec.recurrence_limit = intent.recurrenceLimit;
+      spec.end_condition = 'until_count';
+    }
+    if (intent.activeDays && intent.activeDays.length > 0) {
+      spec.active_days = intent.activeDays;
+    }
+    return spec;
+  };
+
   // 1. Relative time: "in N min", "after N min", "N minute baad"
   const inMinMatch = textLower.match(/(?:in|after)\s+(\d+)\s*min(?:utes?)?/i) ||
     textLower.match(/(\d+)\s*min(?:utes?|ut)?\s*(?:baad|me|mein|after)/i);
   if (inMinMatch) {
-    return { title, relative_value: parseInt(inMinMatch[1], 10), relative_unit: 'minutes', is_auto: false };
+    return attachRecurrence({ title, relative_value: parseInt(inMinMatch[1], 10), relative_unit: 'minutes', is_auto: false });
   }
   const inHrMatch = textLower.match(/(?:in|after)\s+(\d+)\s*hour(?:s)?/i) ||
     textLower.match(/(\d+)\s*(?:hours?|hrs?|ghante?)\s*(?:baad|me|mein|after)/i);
   if (inHrMatch) {
-    return { title, relative_value: parseInt(inHrMatch[1], 10), relative_unit: 'hours', is_auto: false };
+    return attachRecurrence({ title, relative_value: parseInt(inHrMatch[1], 10), relative_unit: 'hours', is_auto: false });
   }
   if (/\b(?:aadhe|aadha|half)\s*(?:ghante?|hour)\b/i.test(textLower)) {
-    return { title, relative_value: 30, relative_unit: 'minutes', is_auto: false };
+    return attachRecurrence({ title, relative_value: 30, relative_unit: 'minutes', is_auto: false });
   }
   // rawTime may also carry the 'min'/'hour' suffix from extractRaw
   if (intent.rawTime.endsWith('min')) {
     const v = parseInt(intent.rawTime, 10);
-    if (!isNaN(v)) return { title, relative_value: v, relative_unit: 'minutes', is_auto: false };
+    if (!isNaN(v)) return attachRecurrence({ title, relative_value: v, relative_unit: 'minutes', is_auto: false });
   }
   if (intent.rawTime.endsWith('hour')) {
     const v = parseInt(intent.rawTime, 10);
-    if (!isNaN(v)) return { title, relative_value: v, relative_unit: 'hours', is_auto: false };
+    if (!isNaN(v)) return attachRecurrence({ title, relative_value: v, relative_unit: 'hours', is_auto: false });
   }
 
   // 2. Date prefix: tomorrow, parso, today
@@ -294,7 +321,7 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
 
     if (hh > 12 && hh <= 23) {
       const timeStr = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-      return { title, date: dateStr, time_of_day: timeStr, is_auto: false };
+      return attachRecurrence({ title, date: dateStr, time_of_day: timeStr, is_auto: false });
     }
 
     if (isPM) {
@@ -319,7 +346,7 @@ export function buildReminderSpecFromIntent(intent: { text: string; timePhrase: 
     }
 
     const timeStr = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-    return { title, date: dateStr, time_of_day: timeStr, is_auto: false };
+    return attachRecurrence({ title, date: dateStr, time_of_day: timeStr, is_auto: false });
   }
 
   // No parseable time found and intent was not flagged ambiguous by TurnAnalyzer.

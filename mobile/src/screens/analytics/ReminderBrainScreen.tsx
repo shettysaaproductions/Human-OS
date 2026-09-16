@@ -133,7 +133,37 @@ export const ReminderBrainScreen = React.memo(function ReminderBrainScreen({
     await fetchReminders();
   }, []);
 
-  const activeReminders = useMemo(() => reminders.filter(r => r.status === 'active'), [reminders]);
+  const [clearingPast, setClearingPast] = useState(false);
+
+  const handleClearPastReminders = async () => {
+    try {
+      setClearingPast(true);
+      const res = await api.post('/reminders/clear-past');
+      Alert.alert('Past Reminders Cleared', res.data?.message || 'Back-dated reminders cleared successfully.');
+      await fetchReminders();
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.error || 'Could not clear past reminders.');
+    } finally {
+      setClearingPast(false);
+    }
+  };
+
+  const nowCutoff = useMemo(() => Date.now() - 15 * 60 * 1000, []);
+
+  const pastDueCount = useMemo(() => {
+    const nowMs = Date.now();
+    return reminders.filter(r => r.status === 'active' && !r.recurrence_type && r.trigger_at && new Date(r.trigger_at).getTime() < nowMs).length;
+  }, [reminders]);
+
+  const activeReminders = useMemo(() => reminders.filter(r => {
+    if (r.status !== 'active') return false;
+    if (!r.recurrence_type && r.trigger_at) {
+      const t = new Date(r.trigger_at).getTime();
+      if (!isNaN(t) && t < nowCutoff) return false;
+    }
+    return true;
+  }), [reminders, nowCutoff]);
+
   const recurringReminders = useMemo(() => reminders.filter(r => r.status === 'active' && !!r.recurrence_type), [reminders]);
   const completedReminders = useMemo(() => reminders.filter(r => r.status === 'completed'), [reminders]);
 
@@ -384,6 +414,19 @@ export const ReminderBrainScreen = React.memo(function ReminderBrainScreen({
         </TouchableOpacity>
       </View>
 
+      {/* Clear Past Reminders Action Banner */}
+      {pastDueCount > 0 && (
+        <TouchableOpacity
+          style={styles.clearPastBanner}
+          onPress={handleClearPastReminders}
+          disabled={clearingPast}
+        >
+          <Text style={styles.clearPastText}>
+            {clearingPast ? '🧹 Clearing past reminders...' : `🧹 Clear ${pastDueCount} Past-Due Reminder${pastDueCount > 1 ? 's' : ''}`}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {/* Reminders List */}
       {loading && !refreshing && reminders.length === 0 ? (
         <View style={styles.centerContainer}>
@@ -418,8 +461,18 @@ export const ReminderBrainScreen = React.memo(function ReminderBrainScreen({
               } else {
                 recBadge = `Days: ${item.active_days.map(d => d.slice(0, 3).toUpperCase()).join(', ')}`;
               }
+            } else if (item.recurrence_type === 'weeks') {
+              recBadge = item.recurrence_interval && item.recurrence_interval > 1
+                ? `Every ${item.recurrence_interval} weeks`
+                : 'Weekly';
             } else if (item.recurrence_type === 'days' || item.recurrence_type === 'daily') {
-              recBadge = 'Every day';
+              recBadge = item.recurrence_interval && item.recurrence_interval > 1
+                ? `Every ${item.recurrence_interval} days`
+                : 'Every day';
+            } else if (item.recurrence_type === 'hours') {
+              recBadge = item.recurrence_interval && item.recurrence_interval > 1
+                ? `Every ${item.recurrence_interval} hours`
+                : 'Hourly';
             } else if (item.recurrence_type === 'months') {
               recBadge = 'Monthly';
               if (item.active_months && item.active_months.length < 12) {
@@ -428,6 +481,10 @@ export const ReminderBrainScreen = React.memo(function ReminderBrainScreen({
               }
             } else if (item.batch_group_id) {
               recBadge = 'Sequential Batch';
+            }
+
+            if (item.recurrence_limit) {
+              recBadge = recBadge ? `${recBadge} • Max ${item.recurrence_limit}x` : `Max ${item.recurrence_limit} times`;
             }
 
             return (
@@ -1183,6 +1240,22 @@ const styles = StyleSheet.create({
   saveSubmitText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '700',
+  },
+  clearPastBanner: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  clearPastText: {
+    color: '#F87171',
+    fontSize: 12,
     fontWeight: '700',
   },
 });

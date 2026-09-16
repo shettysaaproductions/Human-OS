@@ -10,7 +10,7 @@
  *   - Swipe down or tap × to exit
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -89,6 +89,28 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
   const transcriptRef = useRef<ScrollView>(null);
   const [showVoicePicker, setShowVoicePicker] = useState(false);
   const [showRoutePicker, setShowRoutePicker] = useState(false);
+  const [isShieldHudVisible, setIsShieldHudVisible] = useState(true);
+  const shieldHudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetShieldHudTimer = useCallback(() => {
+    setIsShieldHudVisible(true);
+    if (shieldHudTimerRef.current) clearTimeout(shieldHudTimerRef.current);
+    shieldHudTimerRef.current = setTimeout(() => {
+      setIsShieldHudVisible(false);
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    if (audioRoute === 'earpiece') {
+      resetShieldHudTimer();
+    }
+  }, [audioRoute, resetShieldHudTimer]);
+
+  useEffect(() => {
+    return () => {
+      if (shieldHudTimerRef.current) clearTimeout(shieldHudTimerRef.current);
+    };
+  }, []);
 
   const handleRoutePress = () => {
     if (availableAudioRoutes.length > 2) {
@@ -418,6 +440,44 @@ export function VoiceMode({ visible, onClose, language = 'auto' }: VoiceModeProp
               <Text style={styles.endCallIcon}>📞</Text>
             </TouchableOpacity>
           </View>
+
+          {/* WhatsApp-style Earpiece Blackout Screen Shield for Live Calls */}
+          {audioRoute === 'earpiece' && (
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={resetShieldHudTimer}
+              style={styles.earpieceShieldOverlay}
+            >
+              {isShieldHudVisible ? (
+                <View style={styles.earpieceShieldContent}>
+                  <Text style={{ fontSize: 48, marginBottom: 16 }}>👂</Text>
+                  <Text style={styles.earpieceShieldTitle}>In-Ear Call Active</Text>
+                  <Text style={styles.earpieceShieldSubtitle}>
+                    Screen turned off to prevent face touches during the call. Audio is routing through the earpiece.
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 14, marginTop: 24 }}>
+                    <TouchableOpacity
+                      style={styles.shieldSwitchBtn}
+                      onPress={() => setAudioRoute('speaker')}
+                    >
+                      <Text style={{ fontSize: 16 }}>🔊</Text>
+                      <Text style={styles.shieldSwitchBtnText}>Speaker</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.shieldSwitchBtn, { backgroundColor: '#DC2626', borderColor: '#EF4444' }]}
+                      onPress={handleClose}
+                    >
+                      <Text style={{ fontSize: 16 }}>📞</Text>
+                      <Text style={[styles.shieldSwitchBtnText, { color: '#FFFFFF' }]}>End Call</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.shieldHint}>
+                    Tap anywhere to show controls • Screen turns off in 3.5s
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          )}
 
         </View>
 
@@ -809,5 +869,56 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 16,
     fontWeight: '600',
+  },
+  earpieceShieldOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000000',
+    zIndex: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  earpieceShieldContent: {
+    alignItems: 'center',
+    maxWidth: 320,
+  },
+  earpieceShieldTitle: {
+    color: '#F4F4F5',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  earpieceShieldSubtitle: {
+    color: '#71717A',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  shieldSwitchBtn: {
+    backgroundColor: '#27272A',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+  },
+  shieldSwitchBtnText: {
+    color: '#FAFAFA',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  shieldHint: {
+    color: '#52525B',
+    fontSize: 11,
+    marginTop: 24,
+    textAlign: 'center',
   },
 });

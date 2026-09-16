@@ -47,6 +47,16 @@ export interface ReminderIntent {
   periodWord?: string;
   /** True if intent was detected but no time phrase found — let LLM clarify */
   isAmbiguous: boolean;
+  /** True if this is a recurring reminder (e.g., daily, everyday, roz) */
+  isRecurring?: boolean;
+  /** Recurrence unit matching DB schema ('minutes' | 'hours' | 'days' | 'weeks' | 'months' | 'years') */
+  recurrenceType?: 'minutes' | 'hours' | 'days' | 'weeks' | 'months' | 'years';
+  /** Recurrence interval multiplier (e.g. 1, 2) */
+  recurrenceInterval?: number;
+  /** Maximum number of occurrences if user specified (e.g. "only 2 times", "sirf do baar") */
+  recurrenceLimit?: number;
+  /** Active days of week if specific days specified */
+  activeDays?: string[];
 }
 
 /**
@@ -545,8 +555,8 @@ export class TurnAnalyzer {
       { re: /(\d+)\s*min(?:utes?|ut)?\s*(?:baad|me|mein|after)/i, extractRaw: m => m[1] + 'min' },
       { re: /(\d+)\s*(?:hours?|hrs?|ghante?)\s*(?:baad|me|mein|after)/i, extractRaw: m => m[1] + 'hour' },
       { re: /\b(?:aadhe|aadha|half)\s*(?:ghante?|hour)\b/i, extractRaw: () => '30min' },
-      // "kal shaam 4 baje" / "tomorrow morning 9am" / "tomorrow at 9:30" / "kal 9 baje"
-      { re: /(kal|aaj|tomorrow|today|tonight|parso)\s+(?:(subah|shaam|raat|dopahar|morning|evening|afternoon|night)\s+)?(?:at\s+)?(\d{1,2}(?::\d{2})?)\s*(?:am|pm|baje)?/i,
+      // "everyday 7am" / "daily shaam 5 baje" / "roz subah 8" / "har din 9 baje" / "kal shaam 4 baje" / "tomorrow morning 9am"
+      { re: /(kal|aaj|tomorrow|today|tonight|parso|everyday|every\s+day|daily|roz|har\s+roz|har\s+din)\s+(?:(subah|shaam|raat|dopahar|morning|evening|afternoon|night)\s+)?(?:at\s+)?(\d{1,2}(?::\d{2})?)\s*(?:am|pm|baje)?/i,
         extractRaw: m => m[3],
         extractPeriod: m => m[2] || '' },
       // "shaam 4 baje" / "morning 8am" / "evening at 7pm" (no kal/aaj prefix)
@@ -580,7 +590,69 @@ export class TurnAnalyzer {
       return { text, timePhrase: '', rawTime: '', isAmbiguous: true };
     }
 
-    return { text, timePhrase, rawTime, periodWord: periodWord || undefined, isAmbiguous: false };
+    const isDaily = /\b(everyday|every\s+day|daily|roz|har\s+roz|har\s+din|har\s+ek\s+din|every\s+morning|every\s+evening|every\s+night|har\s+subah|har\s+shaam|har\s+raat)\b/i.test(lower);
+    const isWeekly = /\b(weekly|har\s+hafte|every\s+week|every\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(lower);
+    const isMonthly = /\b(monthly|har\s+mahine|every\s+month)\b/i.test(lower);
+    const isTwiceDaily = /\b(twice\s+a\s+day|2\s+times\s+a\s+day|two\s+times\s+a\s+day|do\s+baar\s+(?:ek\s+din\s+me|roz))\b/i.test(lower);
+
+    let isRecurring = isDaily || isWeekly || isMonthly || isTwiceDaily;
+    let recurrenceType: 'minutes' | 'hours' | 'days' | 'weeks' | 'months' | 'years' | undefined = undefined;
+    let recurrenceInterval: number | undefined = undefined;
+    let recurrenceLimit: number | undefined = undefined;
+
+    if (isMonthly) {
+      recurrenceType = 'months';
+      recurrenceInterval = 1;
+    } else if (isWeekly) {
+      recurrenceType = 'weeks';
+      recurrenceInterval = 1;
+    } else if (isDaily || isTwiceDaily) {
+      recurrenceType = 'days';
+      recurrenceInterval = 1;
+    }
+
+    // Recurrence limit: e.g. "only 2 times", "sirf 2 baar", "sirf do baar", "2 times"
+    const limitMatch = lower.match(/\b(?:only|sirf|just)\s*(\d+|ek|do|teen|chaar|panch|two|three|four)\s*(?:times|baar|bar)\b/i) ||
+      lower.match(/\b(\d+)\s*(?:times|baar|bar)\s*(?:only|sirf)\b/i);
+    if (limitMatch) {
+      const wordToNum: Record<string, number> = { ek: 1, do: 2, teen: 3, chaar: 4, panch: 5, one: 1, two: 2, three: 3, four: 4 };
+      const val = parseInt(limitMatch[1], 10) || wordToNum[limitMatch[1].toLowerCase()] || 0;
+      if (val > 0) {
+        recurrenceLimit = val;
+        isRecurring = true;
+      }
+    } else if (isTwiceDaily) {
+      recurrenceLimit = 2;
+    }
+
+    // Active days: e.g. "every monday", "weekdays", "weekends"
+    let activeDays: string[] | undefined = undefined;
+    const dayMatches = lower.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|somwar|mangalwar|budhwar|guruwar|shukrawar|shaniwar|ravivar)\b/gi);
+    if (dayMatches && dayMatches.length > 0) {
+      const DAY_MAP: Record<string, string> = {
+        monday: 'monday', somwar: 'monday',
+        tuesday: 'tuesday', mangalwar: 'tuesday',
+        wednesday: 'wednesday', budhwar: 'wednesday',
+        thursday: 'thursday', guruwar: 'thursday',
+        friday: 'friday', shukrawar: 'friday',
+        saturday: 'saturday', shaniwar: 'saturday',
+        sunday: 'sunday', ravivar: 'sunday'
+      };
+      activeDays = Array.from(new Set(dayMatches.map(d => DAY_MAP[d.toLowerCase()]).filter(Boolean)));
+    }
+
+    return {
+      text,
+      timePhrase,
+      rawTime,
+      periodWord: periodWord || undefined,
+      isAmbiguous: false,
+      isRecurring: isRecurring || undefined,
+      recurrenceType,
+      recurrenceInterval,
+      recurrenceLimit,
+      activeDays,
+    };
   }
 
   /**

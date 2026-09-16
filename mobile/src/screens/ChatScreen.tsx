@@ -29,6 +29,7 @@ import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
   createAudioPlayer,
+  setAudioModeAsync,
 } from 'expo-audio';
 import {
   writeAsStringAsync,
@@ -793,13 +794,45 @@ export function ChatScreen() {
   const activePlayerRef = useRef<any>(null);
   const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const [isEarpieceMode, setIsEarpieceMode] = useState(false);
+  const [isShieldHudVisible, setIsShieldHudVisible] = useState(true);
+  const shieldHudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetShieldHudTimer = useCallback(() => {
+    setIsShieldHudVisible(true);
+    if (shieldHudTimerRef.current) clearTimeout(shieldHudTimerRef.current);
+    shieldHudTimerRef.current = setTimeout(() => {
+      setIsShieldHudVisible(false);
+    }, 3500);
+  }, []);
+
+  const toggleEarpieceMode = useCallback((forceVal?: boolean) => {
+    setIsEarpieceMode(prev => {
+      const next = forceVal !== undefined ? forceVal : !prev;
+      setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: next,
+      }).catch(err => console.warn('[AudioMode] setAudioModeAsync earpiece toggle failed:', err));
+      if (next) {
+        resetShieldHudTimer();
+      }
+      return next;
+    });
+  }, [resetShieldHudTimer]);
 
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (shieldHudTimerRef.current) clearTimeout(shieldHudTimerRef.current);
       if (activePlayerRef.current) {
         try { activePlayerRef.current.pause(); } catch {}
       }
+      setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: false,
+      }).catch(() => {});
     };
   }, []);
 
@@ -907,6 +940,12 @@ export function ChatScreen() {
         activePlayerRef.current = null;
       }
       setActivePlayingId(null);
+      setIsEarpieceMode(false);
+      setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: false,
+      }).catch(() => {});
       return;
     }
 
@@ -914,6 +953,12 @@ export function ChatScreen() {
       try { activePlayerRef.current.pause(); } catch {}
       activePlayerRef.current = null;
       setActivePlayingId(null);
+      setIsEarpieceMode(false);
+      setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: false,
+      }).catch(() => {});
     }
 
     try {
@@ -963,6 +1008,12 @@ export function ChatScreen() {
         if (status?.didJustFinish || status?.isLoaded === false) {
           setActivePlayingId(null);
           activePlayerRef.current = null;
+          setIsEarpieceMode(false);
+          setAudioModeAsync({
+            playsInSilentMode: true,
+            interruptionMode: 'doNotMix',
+            shouldRouteThroughEarpiece: false,
+          }).catch(() => {});
         }
       });
 
@@ -972,6 +1023,12 @@ export function ChatScreen() {
       setActivePlayingId(null);
       activePlayerRef.current = null;
       setLoadingAudioId(null);
+      setIsEarpieceMode(false);
+      setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: false,
+      }).catch(() => {});
     }
   };
 
@@ -1485,9 +1542,33 @@ export function ChatScreen() {
                       color: isUser ? 'rgba(255,255,255,0.75)' : colors.textSecondary,
                       marginTop: 2
                     }}>
-                      {isPlaying ? 'Playing audio...' : (isLoading ? 'Loading audio...' : (duration ? `${Math.round(duration)}s` : 'Voice recording'))}
+                      {isPlaying ? (isEarpieceMode ? 'Playing via Earpiece 👂' : 'Playing audio...') : (isLoading ? 'Loading audio...' : (duration ? `${Math.round(duration)}s` : 'Voice recording'))}
                     </Text>
                   </View>
+                  {isPlaying && (
+                    <TouchableOpacity
+                      onPress={() => toggleEarpieceMode()}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 5,
+                        borderRadius: 12,
+                        backgroundColor: isEarpieceMode ? '#8B5CF6' : (isUser ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.08)'),
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Text style={{ fontSize: 13 }}>{isEarpieceMode ? '👂' : '🔊'}</Text>
+                      <Text style={{
+                        fontSize: 11,
+                        fontWeight: '700',
+                        color: isEarpieceMode ? '#fff' : (isUser ? colors.buttonText : colors.assistantText)
+                      }}>
+                        {isEarpieceMode ? 'Ear' : 'Speaker'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               );
             })()}
@@ -2446,6 +2527,81 @@ export function ChatScreen() {
           </View>
         </View>
       )}
+
+      {/* ── WhatsApp-style Earpiece Blackout Screen Shield ── */}
+      <Modal
+        visible={isEarpieceMode && !!activePlayingId}
+        animationType="fade"
+        transparent={false}
+        statusBarTranslucent
+        onRequestClose={() => toggleEarpieceMode(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={resetShieldHudTimer}
+          style={{
+            flex: 1,
+            backgroundColor: '#000000',
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 24,
+          }}
+        >
+          {isShieldHudVisible ? (
+            <View style={{ alignItems: 'center', maxWidth: 320 }}>
+              <Text style={{ fontSize: 48, marginBottom: 16 }}>👂</Text>
+              <Text style={{ color: '#F4F4F5', fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 8 }}>
+                Earpiece Mode Active
+              </Text>
+              <Text style={{ color: '#71717A', fontSize: 13, textAlign: 'center', lineHeight: 18, marginBottom: 28 }}>
+                Screen turned pitch-black to prevent accidental face touches. Audio is routing through your phone receiver.
+              </Text>
+
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => toggleEarpieceMode(false)}
+                  style={{
+                    backgroundColor: '#27272A',
+                    paddingVertical: 12,
+                    paddingHorizontal: 18,
+                    borderRadius: 24,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    borderWidth: 1,
+                    borderColor: '#3F3F46',
+                  }}
+                >
+                  <Text style={{ fontSize: 16 }}>🔊</Text>
+                  <Text style={{ color: '#FAFAFA', fontWeight: '600', fontSize: 13 }}>Speaker</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    if (activePlayingId) handleTogglePlayAudio(activePlayingId);
+                  }}
+                  style={{
+                    backgroundColor: '#DC2626',
+                    paddingVertical: 12,
+                    paddingHorizontal: 18,
+                    borderRadius: 24,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Text style={{ fontSize: 16 }}>⏸</Text>
+                  <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 13 }}>Pause</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ color: '#52525B', fontSize: 11, marginTop: 24 }}>
+                Tap screen to show HUD • Fades to black in 3.5s
+              </Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }

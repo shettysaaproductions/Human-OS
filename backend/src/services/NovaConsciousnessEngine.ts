@@ -184,15 +184,26 @@ export class NovaConsciousnessEngine {
     let intentsSuppressed = 0;
 
     try {
-      // Find active users (last 7 days)
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: activeUsers } = await supabaseAdmin
-        .from('chat_history')
-        .select('user_id')
-        .eq('role', 'user')
-        .gte('created_at', sevenDaysAgo);
+      // Find active and registered users (chat in last 30 days OR registered profiles)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const [{ data: activeUsers }, { data: userProfiles }] = await Promise.all([
+        supabaseAdmin
+          .from('chat_history')
+          .select('user_id')
+          .eq('role', 'user')
+          .gte('created_at', thirtyDaysAgo)
+          .limit(200),
+        supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .limit(100)
+      ]);
 
-      if (!activeUsers) {
+      const chatUserIds = (activeUsers || []).map(u => u.user_id);
+      const profileUserIds = (userProfiles || []).map(p => p.id);
+      const uniqueUserIds = [...new Set([...chatUserIds, ...profileUserIds])];
+
+      if (uniqueUserIds.length === 0) {
         logger.info('[NACE] Engine completed', {
           engine: 'NACE', event: 'engine_completed', runId: pulseRunId,
           usersEvaluated: 0, usersEligible: 0, intentsDispatched: 0,
@@ -201,7 +212,6 @@ export class NovaConsciousnessEngine {
         });
         return;
       }
-      const uniqueUserIds = [...new Set(activeUsers.map(u => u.user_id))];
       usersEvaluated = uniqueUserIds.length;
 
       logger.info(`[NACE] Pulse started for ${uniqueUserIds.length} users`);
