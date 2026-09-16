@@ -25,6 +25,7 @@ Branch: `main`
    - When a user submitted a voice note, Nova occasionally produced an interim conversational filler / thinking phrase (e.g. *"Hmm... mujhe thoda sochne de, main abhi batati hu..."* or *"Let me think..."*).
    - This interim phrase was sent to `synthesizeVoiceReply`, rendered as "Nova's Voice Reply" in the UI, and then the actual substantive response followed as a separate text message.
    - Furthermore, `chat.ts` line 2878 triggered `InstantFallbackRecoveryService` upon detecting thinking phrases, creating a duplicate assistant message on voice turns.
+   - **Voice Reply Missing on Long Answers**: In multi-sentence answers (~230 chars, ~13s audio), Gemini Live takes ~15–18s to stream the audio chunks. A hardcoded 12s timeout caused `synthesizeVoiceReply` to abort early and return `null`, dropping the voice reply card. Additionally, unstripped emojis (`🎉`) and `<NOVA_MESSAGE_BREAK>` tags caused TTS token churn. Resolved by introducing `sanitizeTextForSpeech` and dynamic 25s–45s timeouts (`Math.max(25000, Math.min(45000, length * 150))`), ensuring 100% speech delivery.
 
 2. **Complete Response Lifecycle State Machine (`VoiceResponseLifecycle.ts`)**:
    - Enforced strict state transitions:

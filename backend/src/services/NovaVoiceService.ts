@@ -1078,10 +1078,10 @@ class NovaVoiceService {
     }
 
     // Clean text of internal tags, system markers, and verbal hesitation prefixes
-    const cleanText = stripThinkingPrefix(text);
+    const cleanText = this.sanitizeTextForSpeech(text);
     if (!cleanText || isInterimThinkingPhrase(cleanText)) {
       logger.warn('[NovaVoiceService] Text empty or thinking phrase after prefix strip, aborting voice synthesis', {
-        cleanTextSnippet: cleanText.slice(0, 60),
+        cleanTextSnippet: cleanText?.slice(0, 60),
       });
       return null;
     }
@@ -1113,11 +1113,14 @@ class NovaVoiceService {
       return null;
     }
 
-    const attempts = Math.min(candidateKeys.length, 3);
+    // Dynamic timeout based on text length: 25s base, up to 45s for longer paragraphs
+    const timeoutMs = Math.max(25000, Math.min(45000, Math.round(cleanText.length * 150)));
+
+    const attempts = Math.min(candidateKeys.length, 2);
     for (let i = 0; i < attempts; i++) {
       const key = candidateKeys[i];
       try {
-        const result = await this.synthesizeWithKey(cleanText, voiceName, key, 12000);
+        const result = await this.synthesizeWithKey(cleanText, voiceName, key, timeoutMs);
         if (result) return result;
       } catch (err: any) {
         logger.warn('[NovaVoiceService] Key attempt failed in voice synthesis, trying next key', {
@@ -1130,11 +1133,32 @@ class NovaVoiceService {
     return null;
   }
 
+  /**
+   * Sanitizes assistant text for clear, natural spoken delivery by removing
+   * internal bubble separators, markdown tags, emojis, and verbal hesitations.
+   */
+  sanitizeTextForSpeech(text: string): string {
+    if (!text) return '';
+    let cleaned = text
+      .replace(/<NOVA_MESSAGE_BREAK>/gi, '. ')
+      .replace(/\r?\n+/g, ' ')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/__(.*?)__/g, '$1')
+      .replace(/_(.*?)_/g, '$1')
+      .replace(/#+\s*/g, '')
+      .replace(/[\u{1F300}-\u{1F9FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1FA70}-\u{1FAFF}]/gu, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    return stripThinkingPrefix(cleaned);
+  }
+
   private synthesizeWithKey(
     cleanText: string,
     voiceName: string,
     key: string,
-    timeoutMs = 12000
+    timeoutMs = 25000
   ): Promise<{ audio_base64: string; duration_seconds: number } | null> {
     return new Promise((resolve) => {
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;

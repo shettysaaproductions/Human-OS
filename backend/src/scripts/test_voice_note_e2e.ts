@@ -42,7 +42,9 @@ async function runVoiceNoteTests() {
     console.log('Transcribed output:', transcribed);
 
     const lower = transcribed.toLowerCase();
-    if (!lower.includes('cake') && !lower.includes('sakshi')) {
+    const hasCake = lower.includes('cake') || transcribed.includes('केक');
+    const hasSakshi = lower.includes('sakshi') || transcribed.includes('साक्षी');
+    if (!hasCake && !hasSakshi) {
       throw new Error(`Transcription did not recognize key entities. Output: "${transcribed}"`);
     }
 

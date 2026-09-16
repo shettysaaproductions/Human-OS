@@ -67,6 +67,7 @@ export function stripThinkingPrefix(text: string): string {
     .replace(/<subconscious_actions[\s\S]*?<\/subconscious_actions>/gi, '')
     .replace(/\*thinking\*[\s\S]*?\*/gi, '')
     .replace(/\[Replying to:.*?\]/gs, '')
+    .replace(/<NOVA_MESSAGE_BREAK>/gi, '. ')
     .trim();
 
   // Regex patterns for leading verbal hesitation and thinking markers
