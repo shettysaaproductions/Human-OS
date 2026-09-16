@@ -98,11 +98,13 @@ export const chatService = {
     }
 
     if (!response.ok) {
-      // Attach status so the caller can distinguish a real 4xx (permanent) from a
-      // transient network error instead of retrying a doomed request forever.
-      const err: any = new Error(`HTTP ${response.status}`);
+      let bodyData: any = null;
+      try {
+        bodyData = await response.json();
+      } catch {}
+      const err: any = new Error(`HTTP ${response.status}: ${bodyData?.message || response.statusText}`);
       err.status = response.status;
-      err.response = { status: response.status };
+      err.response = { status: response.status, data: bodyData };
       throw err;
     }
 

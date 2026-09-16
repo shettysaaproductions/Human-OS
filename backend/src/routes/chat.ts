@@ -775,16 +775,35 @@ chatRouter.post(
           try {
             const { novaVoiceService } = await import('../services/NovaVoiceService');
             const transcribed = await novaVoiceService.transcribeAudio(msg.audio_base64);
-            if (transcribed && transcribed !== '[unintelligible]' && transcribed !== '[silence]') {
-              msg.message = transcribed;
-            } else if (!msg.message) {
-              msg.message = '[Voice message received]';
+            if (!transcribed || transcribed === '[unintelligible]' || transcribed === '[silence]') {
+              logger.warn('[Chat] Voice note contains silence or unintelligible speech', { userId });
+              res.status(422).json({
+                success: false,
+                error_code: 'VOICE_AUDIO_PROCESSING_FAILED',
+                message: "I couldn't clearly understand that voice note. Please try speaking again.",
+              });
+              return;
             }
+            msg.message = transcribed;
             msg.is_voice_message = true;
+            logger.info('[Chat] Audio voice note successfully transcribed and ingested into cognitive turn', {
+              userId,
+              transcribedLength: transcribed.length,
+              preview: transcribed.slice(0, 60),
+            });
           } catch (transcribeErr: any) {
-            logger.error('[Chat] Voice message transcription failed', { error: transcribeErr?.message });
-            if (!msg.message) msg.message = '[Voice message received]';
-            msg.is_voice_message = true;
+            logger.error('[Chat] Voice message transcription failed', { error: transcribeErr?.message, userId });
+            const errCode = transcribeErr?.message?.startsWith('VOICE_FILE_INVALID')
+              ? 'VOICE_FILE_INVALID'
+              : 'VOICE_AUDIO_PROCESSING_FAILED';
+            res.status(422).json({
+              success: false,
+              error_code: errCode,
+              message: transcribeErr?.message?.startsWith('VOICE_FILE_INVALID')
+                ? 'The voice recording was empty or invalid. Please record and try again.'
+                : "I couldn't process that voice note. Please try speaking again.",
+            });
+            return;
           }
         } else if (msg.is_voice_message) {
           hasVoiceMessage = true;

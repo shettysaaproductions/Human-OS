@@ -281,11 +281,20 @@ const MSG_CACHE_KEY = 'humanOs_messageCache';
 const CONV_CACHE_KEY = 'humanOs_conversationId';
 async function saveMessageCache(messages: Message[], conversationId: string | null) {
   try {
-    // Strip heavy base64 image strings and exclude error/failed/sending states
+    // Strip heavy base64 strings (images, audio) and exclude error/failed/sending states
     const toCache = messages
       .filter(m => m.status !== 'sending' && m.status !== 'error' && m.status !== 'failed')
       .slice(-50)
-      .map(m => (m.image_base64 ? { ...m, image_base64: undefined } : m));
+      .map(m => {
+        const copy: any = { ...m };
+        if (copy.image_base64) delete copy.image_base64;
+        if (copy.audio_base64) delete copy.audio_base64;
+        if (copy.reply_audio_base64) delete copy.reply_audio_base64;
+        if (copy.meta?.audio_base64) {
+          copy.meta = { ...copy.meta, audio_base64: undefined };
+        }
+        return copy;
+      });
     await SecureStore.setItemAsync(MSG_CACHE_KEY, JSON.stringify(toCache));
     if (conversationId) await SecureStore.setItemAsync(CONV_CACHE_KEY, conversationId);
   } catch (e) {
@@ -660,6 +669,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 }
               });
 
+              const isVoiceMsg = !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply);
+              const audioB64 = msg.meta?.audio_base64;
+              const audioDur = msg.meta?.audio_duration;
+              const isVoiceReply = !!msg.meta?.is_voice_reply;
+
               finalChunks.forEach((chunkContent, idx) => {
                 formattedHistory.push({
                   id: `${msg.id}_part_${idx + 1}`,
@@ -673,10 +687,20 @@ export const useChatStore = create<ChatState>((set, get) => {
                   user_reaction: msg.user_reaction,
                   reply_to_content: msg.reply_to_content,
                   hasThoughts: msg.meta?.hasThoughts,
+                  is_voice_message: isVoiceMsg,
+                  audio_base64: idx === 0 ? audioB64 : undefined,
+                  audio_duration: idx === 0 ? audioDur : undefined,
+                  reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
+                  reply_audio_duration: idx === 0 && isVoiceReply ? audioDur : undefined,
                   meta: msg.meta,
                 });
               });
             } else {
+              const isVoiceMsg = !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply);
+              const audioB64 = msg.meta?.audio_base64;
+              const audioDur = msg.meta?.audio_duration;
+              const isVoiceReply = !!msg.meta?.is_voice_reply;
+
               formattedHistory.push({
                 id: msg.id,
                 role,
@@ -687,6 +711,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 user_reaction: msg.user_reaction,
                 reply_to_content: msg.reply_to_content,
                 hasThoughts: msg.meta?.hasThoughts,
+                is_voice_message: isVoiceMsg,
+                audio_base64: audioB64,
+                audio_duration: audioDur,
+                reply_audio_base64: isVoiceReply ? audioB64 : undefined,
+                reply_audio_duration: isVoiceReply ? audioDur : undefined,
                 meta: msg.meta,
               });
             }
@@ -1071,12 +1100,19 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (localMsg) {
               const needsThoughtUpdate = msg.meta?.hasThoughts && !localMsg.hasThoughts;
               const needsOptionsUpdate = msg.meta?.options && !localMsg.options;
-              if (needsThoughtUpdate || needsOptionsUpdate) {
+              const needsAudioUpdate = (msg.meta?.audio_base64 && !localMsg.audio_base64) || (msg.meta?.is_voice_reply && !localMsg.reply_audio_base64);
+              if (needsThoughtUpdate || needsOptionsUpdate || needsAudioUpdate) {
                 set((s) => ({
                   messages: s.messages.map(m => m.id === localId ? { 
                     ...m, 
                     hasThoughts: m.hasThoughts || msg.meta?.hasThoughts,
-                    options: m.options || msg.meta?.options 
+                    options: m.options || msg.meta?.options,
+                    audio_base64: m.audio_base64 || msg.meta?.audio_base64,
+                    audio_duration: m.audio_duration || msg.meta?.audio_duration,
+                    reply_audio_base64: m.reply_audio_base64 || (msg.meta?.is_voice_reply ? msg.meta?.audio_base64 : undefined),
+                    reply_audio_duration: m.reply_audio_duration || (msg.meta?.is_voice_reply ? msg.meta?.audio_duration : undefined),
+                    is_voice_message: m.is_voice_message ?? !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply),
+                    meta: msg.meta,
                   } : m)
                 }));
                 updatedExisting = true;
@@ -1132,6 +1168,10 @@ export const useChatStore = create<ChatState>((set, get) => {
             const chunks = msg.content.includes('<NOVA_MESSAGE_BREAK>')
               ? msg.content.split('<NOVA_MESSAGE_BREAK>').map((c: string) => c.trim()).filter(Boolean)
               : [msg.content];
+            const isVoiceReply = !!msg.meta?.is_voice_reply;
+            const audioB64 = msg.meta?.audio_base64;
+            const audioDur = msg.meta?.audio_duration;
+
             chunks.forEach((chunkContent: string, idx: number) => {
               const newMsg: Message = {
                 id: chunks.length > 1 ? `${msgId}_part_${idx + 1}` : msgId,
@@ -1142,6 +1182,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
                 hasThoughts: msg.meta?.hasThoughts,
+                is_voice_message: isVoiceReply,
+                audio_base64: idx === 0 ? audioB64 : undefined,
+                audio_duration: idx === 0 ? audioDur : undefined,
+                reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
+                reply_audio_duration: idx === 0 && isVoiceReply ? audioDur : undefined,
                 meta: msg.meta,
               };
               if (!seenAssistantInBatch) {
@@ -1161,6 +1206,10 @@ export const useChatStore = create<ChatState>((set, get) => {
               options: msg.meta?.options,
               user_reaction: msg.user_reaction,
               hasThoughts: msg.meta?.hasThoughts,
+              is_voice_message: !!msg.meta?.is_voice_message,
+              audio_base64: msg.meta?.audio_base64,
+              audio_duration: msg.meta?.audio_duration,
+              meta: msg.meta,
             });
           }
         }

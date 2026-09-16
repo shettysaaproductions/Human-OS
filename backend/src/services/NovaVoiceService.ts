@@ -19,7 +19,33 @@ import { logger } from '../lib/logger';
 import { geminiLivePool } from '../lib/geminiLivePool';
 import { config } from '../config';
 import WebSocket from 'ws';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
+
+export function detectAudioMimeType(buffer: Buffer): string {
+  if (buffer.length >= 12) {
+    const magic4 = buffer.subarray(0, 4).toString('ascii');
+    if (magic4 === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE') {
+      return 'audio/wav';
+    }
+    if (magic4 === 'OggS') {
+      return 'audio/ogg';
+    }
+    if (magic4 === 'fLaC') {
+      return 'audio/flac';
+    }
+    const ftyp = buffer.subarray(4, 8).toString('ascii');
+    if (ftyp === 'ftyp') {
+      return 'audio/mp4';
+    }
+    if (magic4.startsWith('ID3')) {
+      return 'audio/mp3';
+    }
+    if (buffer[0] === 0xFF && (buffer[1] & 0xE0) === 0xE0) {
+      return (buffer[1] & 0x06) === 0 ? 'audio/aac' : 'audio/mp3';
+    }
+  }
+  return 'audio/wav';
+}
 
 function pcmToWav(pcmData: Buffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): Buffer {
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
@@ -1066,12 +1092,11 @@ class NovaVoiceService {
       const ws = new WebSocket(wsUrl);
       const pcmChunks: Buffer[] = [];
 
-      // 8s timeout: gives ample time for WebSocket connection and synthesis generation
       const timeout = setTimeout(() => {
         try { ws.close(); } catch {}
-        logger.warn('[NovaVoiceService] synthesizeVoiceReply timed out');
+        logger.warn('[NovaVoiceService] synthesizeVoiceReply timed out after 20s');
         resolve(null);
-      }, 8000);
+      }, 20000);
 
       ws.on('open', () => {
         const setupFrame = {
@@ -1080,7 +1105,7 @@ class NovaVoiceService {
             systemInstruction: {
               parts: [
                 {
-                  text: 'You are Nova. Speak the exact provided response directly in natural, warm spoken dialogue. Do not add commentary.',
+                  text: 'You are Nova\'s text-to-speech voice engine. Your sole job is to speak aloud and voice the provided text verbatim in natural, warm spoken dialogue. Do not respond, do not answer questions, do not converse, and do not add any words of your own. Speak the exact input text word-for-word.',
                 },
               ],
             },
@@ -1107,7 +1132,7 @@ class NovaVoiceService {
                   turns: [
                     {
                       role: 'user',
-                      parts: [{ text: cleanText }],
+                      parts: [{ text: `Speak aloud word-for-word: "${cleanText}"` }],
                     },
                   ],
                   turnComplete: true,
@@ -1155,47 +1180,120 @@ class NovaVoiceService {
   }
 
   /**
-   * Transcribes user voice recording using Gemini multimodal input.
+   * Transcribes and understands user voice recording using Gemini multimodal input.
+   * Leverages gemini-3.6-flash across voice-dedicated key pool with automatic fallback.
    */
-  async transcribeAudio(audioBase64: string, mimeType = 'audio/wav'): Promise<string> {
-    const rawKeys: string[] = [];
-    for (let i = 1; i <= 4; i++) {
-      const k = process.env[`GEMINI_API_KEY_${i}`];
-      if (k?.trim()) rawKeys.push(k.trim());
+  async transcribeAudio(audioBase64: string, explicitMimeType?: string): Promise<string> {
+    if (!audioBase64 || typeof audioBase64 !== 'string') {
+      throw new Error('VOICE_FILE_INVALID: audio payload is empty or not a string');
     }
-    if (process.env.GEMINI_API_KEY) rawKeys.push(process.env.GEMINI_API_KEY.trim());
 
-    const keysToTry = rawKeys.length > 0 ? rawKeys : [''];
+    const cleanB64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '').trim();
+    if (cleanB64.length < 50) {
+      throw new Error('VOICE_FILE_INVALID: audio payload is too small');
+    }
 
-    for (const key of keysToTry) {
-      if (!key) continue;
-      try {
-        const client = new GoogleGenerativeAI(key);
-        const model = client.getGenerativeModel({ model: 'gemini-flash-latest' });
-        const result = await model.generateContent([
-          {
-            text: 'Transcribe this spoken audio message verbatim. It may be in English, Hindi, or Hinglish. If silent or unintelligible, output "[unintelligible]". Output ONLY the raw spoken words without commentary or quotes.',
-          },
-          {
-            inlineData: {
-              data: audioBase64,
-              mimeType: mimeType || 'audio/wav',
-            },
-          },
-        ]);
+    const audioBuf = Buffer.from(cleanB64, 'base64');
+    if (audioBuf.length < 100) {
+      throw new Error('VOICE_FILE_INVALID: decoded audio buffer is under 100 bytes');
+    }
 
-        const text = result.response.text().trim();
-        logger.info('[NovaVoiceService] Transcribed user audio message successfully', {
-          textLength: text.length,
-          preview: text.substring(0, 80),
-        });
-        return text;
-      } catch (err: any) {
-        logger.warn('[NovaVoiceService] Transcription key attempt failed', { error: err?.message });
+    const detectedMime = explicitMimeType && explicitMimeType !== 'audio/wav'
+      ? explicitMimeType
+      : detectAudioMimeType(audioBuf);
+
+    logger.info('[NovaVoiceService] Transcribing voice note', {
+      byteLength: audioBuf.length,
+      b64Length: cleanB64.length,
+      detectedMime,
+    });
+
+    const candidateKeys: string[] = [];
+
+    // 1. Primary: Direct key from voice pool
+    try {
+      const primaryKey = geminiLivePool.getDirectKey();
+      if (primaryKey) candidateKeys.push(primaryKey);
+    } catch {}
+
+    // 2. All voice-dedicated keys GEMINI_API_KEY_5 to GEMINI_API_KEY_19
+    for (let i = 5; i <= 19; i++) {
+      const k = process.env[`GEMINI_API_KEY_${i}`];
+      if (k && k.trim() && !candidateKeys.includes(k.trim())) {
+        candidateKeys.push(k.trim());
       }
     }
 
-    throw new Error('All Gemini keys failed to transcribe audio');
+    // 3. Fallback: text keys 1-4 and GEMINI_API_KEY
+    for (let i = 1; i <= 4; i++) {
+      const k = process.env[`GEMINI_API_KEY_${i}`];
+      if (k && k.trim() && !candidateKeys.includes(k.trim())) {
+        candidateKeys.push(k.trim());
+      }
+    }
+    if (process.env.GEMINI_API_KEY && !candidateKeys.includes(process.env.GEMINI_API_KEY.trim())) {
+      candidateKeys.push(process.env.GEMINI_API_KEY.trim());
+    }
+
+    if (candidateKeys.length === 0) {
+      throw new Error('VOICE_AUDIO_PROCESSING_FAILED: No Gemini API keys configured');
+    }
+
+    let lastError: any = null;
+
+    for (const key of candidateKeys) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: key });
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Transcription request timed out after 12s')), 12000);
+        });
+
+        const result: any = await Promise.race([
+          ai.models.generateContent({
+            model: 'gemini-3.6-flash',
+            contents: [
+              {
+                text: 'You are Nova\'s Voice Ingress Processor. Listen to this user audio recording. Accurately transcribe and understand the user\'s spoken words verbatim in their spoken language (English, Hindi, Hinglish, or mixed). Output ONLY the verbatim spoken words without quotation marks, markdown, or any introductory conversational commentary. If the audio is completely silent or contains only inaudible static/noise with no speech, output "[silence]".',
+              },
+              {
+                inlineData: {
+                  data: cleanB64,
+                  mimeType: detectedMime,
+                },
+              },
+            ],
+          }),
+          timeoutPromise,
+        ]);
+
+        const rawText = result.text ? result.text.trim() : '';
+        const cleaned = rawText.replace(/^["']|["']$/g, '').trim();
+
+        if (!cleaned || cleaned === '[silence]' || cleaned === '[unintelligible]') {
+          logger.warn('[NovaVoiceService] Audio contained silence or inaudible speech', { rawText });
+          throw new Error('VOICE_AUDIO_PROCESSING_FAILED: Audio was silent or inaudible');
+        }
+
+        logger.info('[NovaVoiceService] Transcribed user voice note successfully', {
+          detectedMime,
+          length: cleaned.length,
+          preview: cleaned.substring(0, 80),
+        });
+
+        return cleaned;
+      } catch (err: any) {
+        lastError = err;
+        // If it's silence, don't keep rotating keys since it's the audio content, not a key quota error
+        if (err?.message?.includes('silent or inaudible')) {
+          throw err;
+        }
+        logger.warn('[NovaVoiceService] Transcription key attempt failed, trying next key', {
+          error: err?.message,
+        });
+      }
+    }
+
+    throw new Error(`VOICE_AUDIO_PROCESSING_FAILED: ${lastError?.message || 'All keys failed'}`);
   }
 }
 

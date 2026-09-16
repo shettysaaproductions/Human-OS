@@ -1,21 +1,49 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — Voice Audio Routing, Voice Note Reliability, Standardized Tool Contract & Autonomous Action Lifecycle Engine (v0.3.24-beta)
+2026-09-16 — Voice Note Multimodal Intelligence, Dual-Modality Spoken Audio Replies & Persistent Replay (v0.3.25-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.24-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.25-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.24-beta)
-- **Update Group ID**: `1f988cd4-3199-481e-aa5e-5fb7bccbe515`
-- **Android Update ID**: `01a0a9ce-dc31-7c94-8921-504a17bc302a`
-- **iOS Update ID**: `01a0a9ce-dc31-7d86-ab3d-321bb0cf03cb`
+### EAS Production OTA Deployment (v0.3.25-beta)
+- **Update Group ID**: `378d907a-ac75-4dae-9eca-5208f28157eb`
+- **Android Update ID**: `01a0a9f7-7b80-7ba1-9449-731368740a9a`
+- **iOS Update ID**: `01a0a9f7-7b80-7cb8-8921-dc26e5f346ce`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
+
+---
+
+### Key Capabilities Delivered in this Phase (v0.3.25-beta)
+
+1. **Multimodal Audio Understanding via Gemini 3.6 Flash (`NovaVoiceService.ts`)**:
+   - Switched from deprecated REST endpoints and quota-exhausted keys 1–4 to `@google/genai` SDK with `gemini-3.6-flash` on the voice key pool (`GEMINI_API_KEY_5` through `19`).
+   - Integrated binary magic-number audio MIME type detection (WAV, MP4/M4A, AAC, OGG, MP3).
+   - Added a 12s per-attempt timeout with smooth rotation across candidate keys.
+   - Tested and verified on natural Hindi, English, and mixed Hinglish speech ("kal Sakshi ke birthday ka jo plan bola tha na, usme cake wala part yaad rakhna.").
+
+2. **Eradicated Generic Placeholder Hallucinations (`chat.ts`)**:
+   - Removed `msg.message = '[Voice message received]'` which had caused the LLM to hallucinate: "I'm currently analyzing the voice message...".
+   - Implemented strict fail-fast error handling: returns structured HTTP 422 `{ success: false, error_code: 'VOICE_AUDIO_PROCESSING_FAILED' | 'VOICE_FILE_INVALID', message: '...' }` when audio is silent, inaudible, or corrupt.
+   - Mobile displays a clean "Tap to retry" prompt without polluting chat history.
+
+3. **Dual-Modality Spoken Audio Replies (`NovaVoiceService.ts`, `chat.ts`)**:
+   - Upgraded `synthesizeVoiceReply` to 20,000ms timeout with verbatim text-to-speech engine system prompt to eliminate conversational divergence.
+   - Saves both `content` (text) and `meta: { is_voice_reply: true, audio_base64, audio_duration }` on the same assistant turn in `chat_history`.
+   - Returns `reply_audio_base64` and `reply_audio_duration` directly in the `/chat` API response.
+
+4. **Persistent Playback & Safe Mobile Hydration (`useChatStore.ts`, `chatService.ts`)**:
+   - Unpacks `audio_base64`, `audio_duration`, and `is_voice_message` from `meta` during both `hydrateMessages` and `checkProactiveMessages` so voice cards remain playable after app restart or navigating away.
+   - Strips heavy base64 audio strings from `SecureStore` message cache to prevent OS storage quota exceptions on Android/iOS.
+   - Parses structured backend error bodies in `chatService.sendMessageAsync`.
+
+5. **Automated E2E Verification (`test_voice_note_e2e.ts`)**:
+   - **6 PASSED, 0 FAILED**: MIME detection, multimodal Hinglish audio transcription, TurnAnalyzer/Canonical Memory Tree entity resolution from voice, dual-modality assistant audio reply generation, voice reminder recognition, and structured error contracts.
 
 ---
 

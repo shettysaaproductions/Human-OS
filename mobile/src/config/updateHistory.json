@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.25-beta",
+    "date": "2026-09-16",
+    "title": "🎙️ True Multimodal Voice Notes & Dual-Modality Spoken Audio Replies",
+    "message": [
+      "Gemini 3.6 Flash Voice Intelligence: Recorded voice notes are now understood directly by Google's multimodal audio model, eliminating generic placeholder text and transcription dropouts.",
+      "Unified Cognition & Canonical Memory: Voice notes enter Nova's exact cognitive pipeline — recalling friends, updating the memory tree, scheduling reminders, and recognizing corrections.",
+      "Spoken Voice Replies with Replay: Nova now speaks back with playable voice cards in chat that remain permanently playable across restarts and screen navigation.",
+      "Fail-Fast Error Handling: Audio issues report structured error codes (VOICE_AUDIO_PROCESSING_FAILED / VOICE_FILE_INVALID) with tap-to-retry rather than hallucinated responses."
+    ]
+  },
+  {
     "version": "0.3.24-beta",
     "date": "2026-09-16",
     "title": "⚡ Physical Audio Routing, Voice Note Reliability & Autonomous Actions",
