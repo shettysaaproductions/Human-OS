@@ -40,7 +40,7 @@ Branch: `main`
 
 | Version | Update Group ID | Android Update ID | iOS Update ID | Commit |
 |---|---|---|---|---|
-| v0.3.23-beta | 50bfb348-a660-4f9a-b868-c53392147af0 | 01a0a933-61b8-7fde-9ecc-8c12e650420b | 01a0a933-61b8-73a3-ba64-c3d308996501 | pending |
+| v0.3.23-beta | 50bfb348-a660-4f9a-b868-c53392147af0 | 01a0a933-61b8-7fde-9ecc-8c12e650420b | 01a0a933-61b8-73a3-ba64-c3d308996501 | 061a06b |
 | v0.3.22-beta | 70445126-e3d9-4989-b519-b379dc1e4856 | 01a0a63a-6049-768d-9409-b4dc94591d4b | 01a0a63a-6049-710d-a84d-83cdf3350fbb | e5576ab |
 | v0.3.21-beta | 1b2e26be-3074-4a77-9db1-c742cc3a935a | 01a0a5e2-0305-7149-90dc-6a4a125e55b9 | 01a0a5e2-0305-72ff-a842-baaac5b7bb44 | bda7f34 |
 | v0.3.19-beta | d2f2b44a-96d9-4f93-b4cd-a4bfbf3a9817 | 01a0a3f7-b57a-74d3-8cbf-17936be9dbd7 | — | 65ceed6 |
