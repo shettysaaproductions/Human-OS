@@ -1,5 +1,50 @@
--- V3: move a whole bubble subtree to an existing or newly-created target branch.
--- Supports arbitrary target branches under a domain, not just top-level departments.
+-- V4: Canonical memory bubble topology, indexes, bubble_id columns, and atomic branch relocation RPC.
+
+create extension if not exists pgcrypto;
+
+create table if not exists public.memory_bubbles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  parent_bubble_id uuid null references public.memory_bubbles(id) on delete restrict,
+  label text not null,
+  slug text not null,
+  bubble_type text not null default 'entity' check (bubble_type in ('domain','entity','branch','attribute')),
+  domain_key text,
+  relation_type text,
+  metadata jsonb not null default '{}'::jsonb,
+  is_archived boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(user_id, parent_bubble_id, slug)
+);
+
+create index if not exists idx_memory_bubbles_user_parent on public.memory_bubbles(user_id, parent_bubble_id);
+create index if not exists idx_memory_bubbles_user_slug on public.memory_bubbles(user_id, slug);
+
+alter table public.memories add column if not exists bubble_id uuid references public.memory_bubbles(id) on delete set null;
+create index if not exists idx_memories_user_bubble on public.memories(user_id, bubble_id) where bubble_id is not null;
+
+alter table public.reminders add column if not exists bubble_id uuid references public.memory_bubbles(id) on delete set null;
+create index if not exists idx_reminders_user_bubble on public.reminders(user_id, bubble_id) where bubble_id is not null;
+
+create table if not exists public.memory_bubble_moves (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  bubble_id uuid references public.memory_bubbles(id) on delete set null,
+  entity_name text not null,
+  source_domain text,
+  target_domain text not null,
+  old_relation text,
+  new_relation text,
+  memory_ids jsonb not null default '[]'::jsonb,
+  reminder_ids jsonb not null default '[]'::jsonb,
+  before_state jsonb not null default '{}'::jsonb,
+  after_state jsonb not null default '{}'::jsonb,
+  confirmation_fingerprint text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_memory_bubble_moves_user_created on public.memory_bubble_moves(user_id, created_at desc);
 
 create or replace function public.move_memory_branch_atomic_v3(
   p_user_id uuid, p_memory_ids uuid[], p_reminder_ids uuid[], p_entity_name text,
@@ -55,5 +100,6 @@ begin
  insert into memory_bubble_moves(user_id,bubble_id,entity_name,source_domain,target_domain,old_relation,new_relation,memory_ids,reminder_ids,before_state,after_state,confirmation_fingerprint,created_at) values(p_user_id,v_entity_bubble,p_entity_name,p_source_domain,p_target_domain,p_old_relation,p_new_relation,to_jsonb(coalesce(p_memory_ids,'{}')),to_jsonb(coalesce(p_reminder_ids,'{}')),v_before,v_after,p_confirmation_fingerprint,v_now);
  return jsonb_build_object('success',true,'bubble_id',v_entity_bubble,'target_parent_bubble_id',v_target_parent,'moved_memory_count',v_mem_count,'moved_reminder_count',v_rem_count,'descendant_bubble_count',v_descendant_count,'target_domain',p_target_domain,'target_relation',p_new_relation);
 end; $$;
+
 revoke all on function public.move_memory_branch_atomic_v3(uuid,uuid[],uuid[],text,text,text,text,text,uuid,text,text,jsonb) from public;
 grant execute on function public.move_memory_branch_atomic_v3(uuid,uuid[],uuid[],text,text,text,text,text,uuid,text,text,jsonb) to service_role;
