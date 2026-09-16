@@ -1,46 +1,45 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — Rapid Voice Processing, Instant Audio Sync & Zero-Desync Audio Guard (v0.3.28-beta)
+2026-09-16 — Indestructible Voice Cards & WhatsApp-Style Persistent Audio Caching (v0.3.29-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.28-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.29-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.28-beta)
-- **Update Group ID**: `f85d0f4f-a8ac-448d-ad3f-8e713d97b791`
-- **Android Update ID**: `01a0aa6e-7ed3-714f-a6d5-8a03073a14c8`
-- **iOS Update ID**: `01a0aa6e-7ed3-7c48-8813-4bd732a0d25a`
+### EAS Production OTA Deployment (v0.3.29-beta)
+- **Update Group ID**: `bdbe6068-68ef-4f6c-99fb-2d84c7dc9bb6`
+- **Android Update ID**: `01a0aa91-3359-78bb-acfe-8cca1e46170a`
+- **iOS Update ID**: `01a0aa91-3359-7e84-90a8-b0494c7a6cb8`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Critical Problems Solved & Core Invariants Enforced (v0.3.28-beta)
+### Critical Problems Solved & Core Invariants Enforced (v0.3.29-beta)
 
-1. **Voice Note Latency & Elimination of 2-Minute Timeout**:
-   - **Diagnosis**: Mobile app displayed soft timeout message *"Connection toh hai yaar, par thoda slow lag raha hai. Ek minute wait kar..."* after 120s of polling.
-   - **Root Cause**: `transcribeAudio` in `NovaVoiceService.ts` was sequentially iterating through up to 20 candidate Gemini API keys with 12-second timeouts (worst-case 240s stall before fallback), and `synthesizeVoiceReply` had 45s timeouts. This total backend latency exceeded mobile's `MAX_REPLY_WAIT_MS = 120_000`.
-   - **Fix**:
-     - Capped `transcribeAudio` candidate attempts to 3 with a 6-second timeout (max 18s total failover).
-     - Tightened `synthesizeVoiceReply` timeout dynamically between 12s and 22s max (`Math.round(cleanText.length * 100)`).
+1. **Indestructible WhatsApp-Style Voice Card UI**:
+   - **Diagnosis**: After navigating away to the Brain section (e.g. Brain Galaxy) and returning to Chat, voice note cards and play buttons completely disappeared, degrading to plain text bubbles.
+   - **Root Cause**: `ChatScreen.tsx` evaluated `hasVoiceMessage = !!(item.audio_uri || item.reply_audio_base64 || (item.is_voice_message && (item.audio_base64 || item.meta?.audio_base64)) || ...)`. When navigating away, `saveMessageCache` purposefully deleted large `audio_base64` strings before writing to SecureStore to respect device quotas. On unmount/remount, `loadMessageCache` restored messages with `audio_base64: undefined` and without a preserved `audio_uri`, evaluating `hasVoiceMessage` to `false` and destroying the voice card UI.
+   - **Fix**: Hardcoded voice note card rendering to depend strictly on message classification invariants: `item.is_voice_message || item.meta?.is_voice_message || item.meta?.is_voice_reply || item.audio_uri || item.audio_base64 || item.reply_audio_base64 || item.meta?.audio_base64`. Like WhatsApp, once a message is a voice note, its card and play button **never** disappear under any screen transition or cache reload.
 
-2. **Real-Time Voice Play Button (No Restart Required)**:
-   - **Diagnosis**: Assistant's voice reply initially appeared as text-only; the green voice play button only appeared after cold restarting the app.
-   - **Root Cause**: In `mobile/src/store/useChatStore.ts` line 1136, `updateLocalMessageIfNeeded` used `m.is_voice_message ?? !!(...)`. Because `m.is_voice_message` was boolean `false`, nullish coalescing evaluated to `false`. The voice flag was never toggled until `hydrateMessages` ran on startup.
-   - **Fix**: Changed to boolean OR `(m.is_voice_message || incomingVoiceMsg)`. Also updated `needsAudioUpdate` to detect incoming voice replies and audio payloads, dynamically transitioning local messages to voice cards in real-time.
+2. **Persistent Local Disk Audio Caching (`expo-file-system`)**:
+   - **Fix**: Implemented `getLocalVoiceUri(messageId)` and `writeVoiceFileIfPresent(messageId, b64)` in `useChatStore.ts`. Incoming base64 audio chunks are immediately saved to local persistent disk storage (`${FileSystem.cacheDirectory}voice_${messageId}.wav`) and assigned to `audio_uri`.
+   - **SecureStore Preservation**: `saveMessageCache` preserves `audio_uri` in SecureStore (a tiny ~50-byte string), ensuring instantaneous playback after app restarts or screen transitions without consuming RAM.
 
-3. **Zero Audio / Text Desync on `Aligned (v2)`**:
-   - **Diagnosis**: When Watchtower reflection revised an assistant reply to `Aligned (v2)`, playing the voice card spoke Version 1 text rather than Version 2 text, and duplicate bubbles appeared on screen.
-   - **Root Cause**: Watchtower Pass 3 mutated `content` in `chat_history` 28 seconds after turn completion without re-synthesizing `audio_base64`. Furthermore, `hydrateMessages` assigned `id: `${msg.id}_part_${idx + 1}`` even for single chunks, whereas polling used `id: msg.id`, causing ID mismatch and duplicate bubble injection.
-   - **Fix**:
-     - In `backend/src/routes/chat.ts`, Watchtower reflection is strictly skipped on voice turns (`if (!is_proactive && !hasVoiceMessage)`).
-     - In `backend/src/services/WatchtowerReflectionService.ts`, added invariant guard skipping text mutation if `is_voice_reply || audio_base64` is present.
-     - In `mobile/src/store/useChatStore.ts`, unified ID assignment across `hydrateMessages`, `loadMoreMessages`, and polling: `id: finalChunks.length > 1 ? `${msg.id}_part_${idx + 1}` : msg.id`.
-     - Added `needsContentUpdate` in `updateLocalMessageIfNeeded` with guard `!localMsg.is_voice_message` to update existing text bubbles in-place without duplicating.
+3. **Dedicated On-Demand Audio Retrieval Endpoint**:
+   - **Backend**: Added `GET /api/chat/:messageId/audio` in `backend/src/routes/chat.ts` to lazily fetch audio base64 and duration directly from `chat_history.meta` when needed.
+   - **Frontend**: Added `chatService.getMessageAudio(messageId)` and a 3-tier fallback in `handleTogglePlayAudio` in `ChatScreen.tsx`:
+     1. Play local disk URI (`file://...`) if present.
+     2. Play in-memory base64 and cache to disk.
+     3. Lazily fetch from backend audio endpoint, cache to disk, update store via `setAudioUri`, and play immediately with an inline activity indicator.
+
+4. **User Message Deduplication Metadata Fix**:
+   - **Diagnosis**: In `checkProactiveMessages` in `useChatStore.ts`, user message deduplication matched existing text content and ran `continue;`, dropping user voice metadata (`audio_base64`, `audio_duration`, `is_voice_message`).
+   - **Fix**: Updated deduplication logic to preserve and sync voice flags, durations, and audio URIs onto existing local user messages.
 
 ---
 
@@ -52,10 +51,10 @@ Branch: `main`
 
 2. **EAS Production OTA Publish**:
    - Successfully published to `production` branch.
-   - Update Group ID: `f85d0f4f-a8ac-448d-ad3f-8e713d97b791`.
+   - Update Group ID: `bdbe6068-68ef-4f6c-99fb-2d84c7dc9bb6`.
 
 3. **Push Notification Broadcast**:
-   - Successfully broadcasted `v0.3.28-beta` release alert to registered devices.
+   - Successfully broadcasted `v0.3.29-beta` release alert to registered devices.
 
 ---
 
@@ -63,11 +62,11 @@ Branch: `main`
 
 | File | Status | Description |
 |---|---|---|
-| `backend/src/routes/chat.ts` | **MODIFIED** | Skip Watchtower reflection scheduling on voice turns to preserve 1:1 audio-text fidelity |
-| `backend/src/services/NovaVoiceService.ts` | **MODIFIED** | Capped transcribe attempts to 3 (6s timeout) and voice synthesis to 12s-22s max |
-| `backend/src/services/WatchtowerReflectionService.ts` | **MODIFIED** | Added voice reply guard skipping text mutation on synthesized audio replies |
-| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Fixed ID symmetry (`_part_` only when >1 chunk), real-time boolean OR voice flag sync, and in-place content updates |
-| `mobile/src/config/updateHistory.json` | **MODIFIED** | Added `v0.3.28-beta` changelog for in-app update notification modal |
+| `backend/src/routes/chat.ts` | **MODIFIED** | Added dedicated lazy audio retrieval endpoint `GET /api/chat/:messageId/audio` |
+| `mobile/src/services/chatService.ts` | **MODIFIED** | Added `chatService.getMessageAudio(messageId)` client method |
+| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Added local disk caching of voice files, preserved `audio_uri` in cache, fixed user deduplication |
+| `mobile/src/screens/ChatScreen.tsx` | **MODIFIED** | Permanent voice card rendering invariant, on-demand audio fallback, loading spinner |
+| `mobile/src/config/updateHistory.json` | **MODIFIED** | Registered `v0.3.29-beta` changelog for in-app update notification modal |
 
 ---
 

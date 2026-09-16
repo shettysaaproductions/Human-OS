@@ -1,25 +1,25 @@
 # CURRENT TASK
 
 ## Task ID
-VOICE-RAPID-SYNC-ZERO-DESYNC-v0.3.28
+VOICE-INDESTRUCTIBLE-CARDS-PERSISTENT-CACHE-v0.3.29
 
 ## Objective
-Optimize multimodal voice note processing speed to <15s, fix real-time voice play button rendering without app restart, guarantee zero audio/text desync, and eliminate duplicate chat bubble rendering:
+Implement WhatsApp-style indestructible voice note cards and play buttons that never disappear after screen transitions or app restarts, coupled with persistent disk caching and lazy on-demand audio retrieval:
 1. **Root Cause**:
-   - `transcribeAudio` sequentially tried up to 20 candidate API keys with 12s timeout each, and `synthesizeVoiceReply` had 45s timeouts, causing voice note requests to exceed mobile's 120s polling ceiling and showing the soft-timeout error.
-   - `useChatStore.ts` line 1136 used nullish coalescing `m.is_voice_message ?? !!(...)` which evaluated to `false` when `m.is_voice_message === false`, hiding the play button until app restart.
-   - Watchtower Pass 3 updated message content to Version 2 in `chat_history` without regenerating `audio_base64`, causing the play button to speak Version 1 audio while displaying Version 2 text.
-   - `hydrateMessages` assigned `_part_1` even for single messages, while polling assigned `msg.id`, causing ID mismatches and duplicate bubbles on screen.
+   - `ChatScreen.tsx` evaluated `hasVoiceMessage` using a fragile condition requiring audio data (`item.audio_uri || item.reply_audio_base64 || (item.is_voice_message && item.audio_base64)...`).
+   - In `useChatStore.ts` `saveMessageCache`, base64 audio strings were intentionally stripped to stay within SecureStore storage limits.
+   - When navigating to Brain Galaxy and back, `loadMessageCache()` restored messages with `audio_base64: undefined` and without saved `audio_uri`, causing `hasVoiceMessage` to evaluate to `false` and destroying the voice card and play button UI.
+   - In `checkProactiveMessages`, user message deduplication dropped user voice metadata (`audio_base64`, `audio_duration`, `is_voice_message`).
 2. **Implementation**:
-   - Bounded `transcribeAudio` candidate attempts to 3 (6s timeout = max 18s failover) and tightened `synthesizeVoiceReply` timeout dynamically to 12s-22s max.
-   - Replaced nullish coalescing with boolean OR in `updateLocalMessageIfNeeded` and enabled dynamic audio metadata sync to render the play button immediately.
-   - Guarded Watchtower reflection in `chat.ts` and `WatchtowerReflectionService.ts` to skip spoken voice replies, preserving 1:1 audio-text fidelity.
-   - Standardized single-message IDs to `msg.id` across `hydrateMessages`, `loadMoreMessages`, and polling, preventing duplicate bubble rendering.
-   - Added in-place content update support in `updateLocalMessageIfNeeded` for text messages.
-   - Registered `v0.3.28-beta` in `updateHistory.json`.
+   - Hardcoded voice card UI rendering to depend on message type invariants (`is_voice_message || meta.is_voice_message || meta.is_voice_reply`), ensuring the voice card and play button never disappear regardless of RAM state.
+   - Implemented persistent disk caching via `expo-file-system/legacy` (`${cacheDirectory}voice_${id}.wav`) for all incoming voice audio, preserving `audio_uri` across SecureStore cache serialization.
+   - Added backend lazy audio retrieval endpoint `GET /api/chat/:messageId/audio` in `backend/src/routes/chat.ts`.
+   - Added `chatService.getMessageAudio(messageId)` and a 3-tier fallback player with inline loading indicator in `ChatScreen.tsx`.
+   - Fixed user message deduplication in `checkProactiveMessages` to sync voice metadata.
+   - Registered `v0.3.29-beta` in `mobile/src/config/updateHistory.json`.
 
 ## Verification Gates Passed
 - `cd backend && npm run build`: **EXIT 0** (0 errors).
 - `cd mobile && npx tsc --noEmit`: **EXIT 0** (0 errors).
-- EAS Production OTA Published: Update Group `f85d0f4f-a8ac-448d-ad3f-8e713d97b791` (Android `01a0aa6e-7ed3-714f-a6d5-8a03073a14c8`, iOS `01a0aa6e-7ed3-7c48-8813-4bd732a0d25a`).
+- EAS Production OTA Published: Update Group `bdbe6068-68ef-4f6c-99fb-2d84c7dc9bb6` (Android `01a0aa91-3359-78bb-acfe-8cca1e46170a`, iOS `01a0aa91-3359-7e84-90a8-b0494c7a6cb8`).
 - Push broadcast dispatched to all registered user devices via `broadcast_update_push.ts`.

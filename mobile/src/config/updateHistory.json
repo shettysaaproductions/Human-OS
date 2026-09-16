@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.29-beta",
+    "date": "2026-09-16",
+    "title": "🎙️ Indestructible Voice Cards & WhatsApp-Style Persistent Audio Caching",
+    "message": [
+      "WhatsApp-Style Permanent Voice Cards: Voice note bubbles and play buttons are now completely permanent and hardcoded — they never disappear when switching tabs, navigating to Brain Galaxy, or restarting the app.",
+      "Persistent Local Audio Caching: Voice audio is saved to secure local disk cache (voice_<id>.wav) surviving memory cleanup, tab switches, and app restarts for instantaneous playback.",
+      "Dedicated Audio Streaming Endpoint: If local cache is cleared or on a new device, missing audio is dynamically fetched from backend storage on demand with a seamless loading indicator.",
+      "Bulletproof Voice Invariant: Voice note cards render based on indestructible message type metadata rather than transient RAM state."
+    ]
+  },
+  {
     "version": "0.3.28-beta",
     "date": "2026-09-16",
     "title": "⚡ Rapid Voice Processing, Instant Audio Sync & Zero-Desync Audio Guard",

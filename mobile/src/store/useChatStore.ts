@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import { proactiveReplyService } from '../services/proactiveReplyService';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
+import { writeAsStringAsync, cacheDirectory, EncodingType } from 'expo-file-system/legacy';
 
 console.log('USECHATSTORE_LOADED');
 
@@ -96,6 +97,7 @@ interface ChatState {
   injectPendingMessage: (message: Message) => void;
   switchMessageVersion: (messageId: string, versionIndex: number) => Promise<void>;
   regenerateBranch: (messageId: string) => Promise<void>;
+  setAudioUri: (messageId: string, audioUri: string) => void;
 }
 
 // ── Processing lock + in-flight deduplication ────────────────────────────────
@@ -276,17 +278,35 @@ async function markDelivered(id: string): Promise<void> {
   }
 }
 
+// ── WhatsApp-style persistent voice file helpers ─────────────────────────────
+export function getLocalVoiceUri(messageId: string): string {
+  const cleanId = messageId.replace(/[^a-zA-Z0-9]/g, '_');
+  return `${cacheDirectory}voice_${cleanId}.wav`;
+}
+
+export function writeVoiceFileIfPresent(messageId: string, b64?: string): string | undefined {
+  if (!b64) return undefined;
+  const path = getLocalVoiceUri(messageId);
+  const rawB64 = b64.replace(/^data:audio\/\w+;base64,/, '');
+  writeAsStringAsync(path, rawB64, { encoding: EncodingType.Base64 }).catch(() => {});
+  return path;
+}
+
 // ── Message cache (instant startup — like WhatsApp) ───────────────────────────
 const MSG_CACHE_KEY = 'humanOs_messageCache';
 const CONV_CACHE_KEY = 'humanOs_conversationId';
 async function saveMessageCache(messages: Message[], conversationId: string | null) {
   try {
     // Strip heavy base64 strings (images, audio) and exclude error/failed/sending states
+    // audio_uri is preserved on disk so playback and cards are 100% hardcoded
     const toCache = messages
       .filter(m => m.status !== 'sending' && m.status !== 'error' && m.status !== 'failed')
       .slice(-50)
       .map(m => {
         const copy: any = { ...m };
+        if (!copy.audio_uri && (copy.audio_base64 || copy.reply_audio_base64 || copy.meta?.audio_base64)) {
+          copy.audio_uri = writeVoiceFileIfPresent(copy.id, copy.audio_base64 || copy.reply_audio_base64 || copy.meta?.audio_base64);
+        }
         if (copy.image_base64) delete copy.image_base64;
         if (copy.audio_base64) delete copy.audio_base64;
         if (copy.reply_audio_base64) delete copy.reply_audio_base64;
@@ -691,7 +711,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               const isVoiceReply = !isThinking && !!msg.meta?.is_voice_reply;
               const isVoiceMsg = !isThinking && !!(msg.meta?.is_voice_message || isVoiceReply);
               const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
-              const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
+              const audioDur = !isThinking ? (msg.meta?.audio_duration || msg.meta?.reply_audio_duration) : undefined;
+              const localAudioUri = audioB64 ? writeVoiceFileIfPresent(msg.id, audioB64) : undefined;
 
               finalChunks.forEach((chunkContent, idx) => {
                 formattedHistory.push({
@@ -707,6 +728,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                   reply_to_content: msg.reply_to_content,
                   hasThoughts: msg.meta?.hasThoughts,
                   is_voice_message: idx === 0 ? isVoiceMsg : false,
+                  audio_uri: idx === 0 ? localAudioUri : undefined,
                   audio_base64: idx === 0 ? audioB64 : undefined,
                   audio_duration: idx === 0 ? audioDur : undefined,
                   reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
@@ -720,6 +742,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               const isVoiceMsg = !isThinking && !!(msg.meta?.is_voice_message || isVoiceReply);
               const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
               const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
+              const localAudioUri = audioB64 ? writeVoiceFileIfPresent(msg.id, audioB64) : undefined;
 
               formattedHistory.push({
                 id: msg.id,
@@ -732,6 +755,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 reply_to_content: msg.reply_to_content,
                 hasThoughts: msg.meta?.hasThoughts,
                 is_voice_message: isVoiceMsg,
+                audio_uri: localAudioUri,
                 audio_base64: audioB64,
                 audio_duration: audioDur,
                 reply_audio_base64: isVoiceReply ? audioB64 : undefined,
@@ -908,7 +932,8 @@ export const useChatStore = create<ChatState>((set, get) => {
             const isVoiceReply = !isThinking && !!msg.meta?.is_voice_reply;
             const isVoiceMsg = !isThinking && !!(msg.meta?.is_voice_message || isVoiceReply);
             const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
-            const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
+            const audioDur = !isThinking ? (msg.meta?.audio_duration || msg.meta?.reply_audio_duration) : undefined;
+            const localAudioUri = audioB64 ? writeVoiceFileIfPresent(msg.id, audioB64) : undefined;
 
             finalChunks.forEach((chunkContent, idx) => {
               formattedOlder.push({
@@ -920,6 +945,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 user_reaction: msg.user_reaction,
                 hasThoughts: msg.meta?.hasThoughts,
                 is_voice_message: idx === 0 ? isVoiceMsg : false,
+                audio_uri: idx === 0 ? localAudioUri : undefined,
                 audio_base64: idx === 0 ? audioB64 : undefined,
                 audio_duration: idx === 0 ? audioDur : undefined,
                 reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
@@ -931,6 +957,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             const isVoiceMsg = !!msg.meta?.is_voice_message;
             const audioB64 = msg.meta?.audio_base64;
             const audioDur = msg.meta?.audio_duration;
+            const localAudioUri = audioB64 ? writeVoiceFileIfPresent(msg.id, audioB64) : undefined;
             formattedOlder.push({
               id: msg.id,
               role,
@@ -941,6 +968,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               user_reaction: msg.user_reaction,
               hasThoughts: msg.meta?.hasThoughts,
               is_voice_message: isVoiceMsg,
+              audio_uri: localAudioUri,
               audio_base64: audioB64,
               audio_duration: audioDur,
               meta: msg.meta
@@ -1152,10 +1180,12 @@ export const useChatStore = create<ChatState>((set, get) => {
               const incomingVoiceReply = !!msg.meta?.is_voice_reply;
               const incomingVoiceMsg = !!(msg.meta?.is_voice_message || incomingVoiceReply);
               const incomingAudioB64 = msg.meta?.audio_base64;
+              const incomingLocalUri = incomingAudioB64 ? writeVoiceFileIfPresent(localId, incomingAudioB64) : localMsg.audio_uri;
               const needsAudioUpdate = !isThinking && !isSubsequentPart && (
                 (incomingAudioB64 && !localMsg.audio_base64) ||
                 (incomingVoiceReply && !localMsg.reply_audio_base64) ||
-                (incomingVoiceMsg && !localMsg.is_voice_message)
+                (incomingVoiceMsg && !localMsg.is_voice_message) ||
+                (incomingLocalUri && !localMsg.audio_uri)
               );
               const needsContentUpdate = !isSubsequentPart && msg.content && msg.content !== localMsg.content && !localMsg.isSystemMessage;
 
@@ -1166,6 +1196,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                     content: (needsContentUpdate && !localMsg.is_voice_message) ? msg.content : m.content,
                     hasThoughts: m.hasThoughts || msg.meta?.hasThoughts,
                     options: m.options || msg.meta?.options,
+                    audio_uri: (!isThinking && !isSubsequentPart) ? (incomingLocalUri || m.audio_uri) : undefined,
                     audio_base64: (!isThinking && !isSubsequentPart) ? (incomingAudioB64 || m.audio_base64) : undefined,
                     audio_duration: (!isThinking && !isSubsequentPart) ? (msg.meta?.audio_duration || m.audio_duration) : undefined,
                     reply_audio_base64: (!isThinking && !isSubsequentPart) ? (incomingAudioB64 || m.reply_audio_base64) : undefined,
@@ -1197,9 +1228,21 @@ export const useChatStore = create<ChatState>((set, get) => {
             // will be > server reply timestamp, causing the reply to sort BEFORE the user message,
             // preventing assistantAfterLastUser from stopping the poller and hiding the reply!
             const localMsg = currentMessages.find(m => m.role === 'user' && m.content.trim() === msg.content.trim());
-            if (localMsg && (localMsg.timestamp !== msg.created_at || localMsg.id !== msg.id)) {
+            if (localMsg) {
+              const userAudioB64 = msg.meta?.audio_base64;
+              const userLocalUri = userAudioB64 ? writeVoiceFileIfPresent(msg.id, userAudioB64) : localMsg.audio_uri;
+              const isUserVoice = !!(msg.meta?.is_voice_message || localMsg.is_voice_message);
               set((s) => ({
-                messages: s.messages.map(m => m.id === localMsg.id ? { ...m, id: msg.id, timestamp: msg.created_at || new Date().toISOString() } : m)
+                messages: s.messages.map(m => m.id === localMsg.id ? { 
+                  ...m, 
+                  id: msg.id, 
+                  timestamp: msg.created_at || new Date().toISOString(),
+                  is_voice_message: isUserVoice,
+                  audio_uri: userLocalUri || m.audio_uri,
+                  audio_base64: userAudioB64 || m.audio_base64,
+                  audio_duration: msg.meta?.audio_duration || m.audio_duration,
+                  meta: msg.meta || m.meta,
+                } : m)
               }));
               updatedExisting = true;
             }
@@ -1232,6 +1275,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             const isVoiceMsg = !isThinking && !!(msg.meta?.is_voice_message || isVoiceReply);
             const audioB64 = !isThinking ? msg.meta?.audio_base64 : undefined;
             const audioDur = !isThinking ? msg.meta?.audio_duration : undefined;
+            const incomingLocalUri = audioB64 ? writeVoiceFileIfPresent(msgId, audioB64) : undefined;
 
             chunks.forEach((chunkContent: string, idx: number) => {
               const newMsg: Message = {
@@ -1244,6 +1288,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 user_reaction: msg.user_reaction,
                 hasThoughts: msg.meta?.hasThoughts,
                 is_voice_message: idx === 0 ? isVoiceMsg : false,
+                audio_uri: idx === 0 ? incomingLocalUri : undefined,
                 audio_base64: idx === 0 ? audioB64 : undefined,
                 audio_duration: idx === 0 ? audioDur : undefined,
                 reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
@@ -1441,6 +1486,17 @@ export const useChatStore = create<ChatState>((set, get) => {
         set({ isTyping: false });
         console.error('Failed to regenerate branch:', err);
       }
+    },
+
+    setAudioUri: (messageId: string, audioUri: string) => {
+      const cleanId = messageId.replace(/_part_\d+$/, '');
+      set((s) => ({
+        messages: s.messages.map(m => (m.id === messageId || m.id.startsWith(`${cleanId}_part_`) || m.id === cleanId)
+          ? { ...m, audio_uri: audioUri }
+          : m
+        )
+      }));
+      saveMessageCache([...get().messages], get().conversationId);
     },
     
     processQueue

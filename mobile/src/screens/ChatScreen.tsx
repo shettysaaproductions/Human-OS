@@ -792,6 +792,7 @@ export function ChatScreen() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activePlayerRef = useRef<any>(null);
   const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -900,8 +901,6 @@ export function ChatScreen() {
   };
 
   const handleTogglePlayAudio = async (messageId: string, audioSource?: string) => {
-    if (!audioSource) return;
-
     if (activePlayingId === messageId) {
       if (activePlayerRef.current) {
         try { activePlayerRef.current.pause(); } catch {}
@@ -919,11 +918,41 @@ export function ChatScreen() {
 
     try {
       let fileUri = audioSource;
-      if (!audioSource.startsWith('file://') && !audioSource.startsWith('http')) {
+
+      // 1. Verify existing file URI on disk
+      if (fileUri && fileUri.startsWith('file://')) {
+        const info = await getInfoAsync(fileUri).catch(() => null);
+        if (!info?.exists) {
+          fileUri = undefined;
+        }
+      }
+
+      // 2. If no valid file URI but base64 is available, write to disk
+      if (!fileUri && audioSource && !audioSource.startsWith('file://') && !audioSource.startsWith('http')) {
         const rawB64 = audioSource.replace(/^data:audio\/\w+;base64,/, '');
-        const tempPath = `${cacheDirectory}play_${messageId.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.wav`;
+        const tempPath = `${cacheDirectory}voice_${messageId.replace(/[^a-zA-Z0-9]/g, '_')}.wav`;
         await writeAsStringAsync(tempPath, rawB64, { encoding: EncodingType.Base64 });
         fileUri = tempPath;
+        useChatStore.getState().setAudioUri(messageId, tempPath);
+      }
+
+      // 3. Fallback: On-demand download from backend if audio is missing locally (WhatsApp-style)
+      if (!fileUri) {
+        setLoadingAudioId(messageId);
+        const remoteAudio = await chatService.getMessageAudio(messageId);
+        setLoadingAudioId(null);
+        if (remoteAudio?.audio_base64) {
+          const rawB64 = remoteAudio.audio_base64.replace(/^data:audio\/\w+;base64,/, '');
+          const tempPath = `${cacheDirectory}voice_${messageId.replace(/[^a-zA-Z0-9]/g, '_')}.wav`;
+          await writeAsStringAsync(tempPath, rawB64, { encoding: EncodingType.Base64 });
+          fileUri = tempPath;
+          useChatStore.getState().setAudioUri(messageId, tempPath);
+        }
+      }
+
+      if (!fileUri) {
+        console.warn('[VoicePlayback] No audio source available for message', messageId);
+        return;
       }
 
       const player = createAudioPlayer({ uri: fileUri });
@@ -942,6 +971,7 @@ export function ChatScreen() {
       console.warn('[VoicePlayback] Error playing audio', err);
       setActivePlayingId(null);
       activePlayerRef.current = null;
+      setLoadingAudioId(null);
     }
   };
 
@@ -1396,16 +1426,20 @@ export function ChatScreen() {
               const isFallbackOrThinking = isFallbackMessage(item.content);
               const isSubsequentChunk = (item.chunkIndex !== undefined && item.chunkIndex > 1) || (typeof item.id === 'string' && item.id.includes('_part_') && !item.id.endsWith('_part_1'));
               const hasVoiceMessage = !isFallbackOrThinking && !isSubsequentChunk && !!(
+                item.is_voice_message ||
+                item.meta?.is_voice_message ||
+                item.meta?.is_voice_reply ||
                 item.audio_uri ||
+                item.audio_base64 ||
                 item.reply_audio_base64 ||
-                (item.is_voice_message && (item.audio_base64 || item.meta?.audio_base64)) ||
-                (item.meta?.is_voice_reply && (item.reply_audio_base64 || item.meta?.audio_base64))
+                item.meta?.audio_base64
               );
               if (!hasVoiceMessage) return null;
 
               const audioSource = item.audio_uri || item.audio_base64 || item.reply_audio_base64 || item.meta?.audio_base64;
               const duration = item.audio_duration || item.reply_audio_duration || item.meta?.audio_duration || 0;
               const isPlaying = activePlayingId === item.id;
+              const isLoading = loadingAudioId === item.id;
 
               return (
                 <View style={{
@@ -1430,9 +1464,13 @@ export function ChatScreen() {
                     }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Text style={{ fontSize: 16, color: '#fff', marginLeft: isPlaying ? 0 : 2 }}>
-                      {isPlaying ? '⏸' : '▶'}
-                    </Text>
+                    {isLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={{ fontSize: 16, color: '#fff', marginLeft: isPlaying ? 0 : 2 }}>
+                        {isPlaying ? '⏸' : '▶'}
+                      </Text>
+                    )}
                   </TouchableOpacity>
                   <View style={{ flex: 1 }}>
                     <Text style={{
@@ -1447,7 +1485,7 @@ export function ChatScreen() {
                       color: isUser ? 'rgba(255,255,255,0.75)' : colors.textSecondary,
                       marginTop: 2
                     }}>
-                      {isPlaying ? 'Playing audio...' : (duration ? `${Math.round(duration)}s` : 'Voice recording')}
+                      {isPlaying ? 'Playing audio...' : (isLoading ? 'Loading audio...' : (duration ? `${Math.round(duration)}s` : 'Voice recording'))}
                     </Text>
                   </View>
                 </View>

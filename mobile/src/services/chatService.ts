@@ -22,6 +22,17 @@ export const chatService = {
     return response.data;
   },
 
+  getMessageAudio: async (messageId: string): Promise<{ audio_base64: string; audio_duration: number } | null> => {
+    try {
+      const cleanId = messageId.replace(/_part_\d+$/, '');
+      const response = await api.get(`/chat/${cleanId}/audio`);
+      return response.data;
+    } catch (e) {
+      console.warn('[chatService] Failed to get audio for message', messageId, e);
+      return null;
+    }
+  },
+
   // Read receipt: called when the user opens/foregrounds the chat. Tells the backend
   // "Nova's pending messages are now SEEN", which feeds `unreadNovaMessages` into the
   // situation brief so Nova can distinguish "left on read" from "never saw it".

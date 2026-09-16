@@ -3362,6 +3362,51 @@ chatRouter.get(
   }
 );
 
+// ── GET Audio (On-demand voice note / reply audio) ───────────────────────────
+chatRouter.get(
+  '/:messageId/audio',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user!.id;
+      const { messageId } = req.params;
+
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(messageId)) {
+        res.status(404).json({ error: 'Invalid message ID' });
+        return;
+      }
+
+      const { data: row, error } = await supabaseAdmin
+        .from('chat_history')
+        .select('id, meta')
+        .eq('id', messageId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error || !row) {
+        res.status(404).json({ error: 'Message not found' });
+        return;
+      }
+
+      const meta = (row.meta as any) || {};
+      const audioBase64 = meta.audio_base64;
+      const audioDuration = meta.audio_duration;
+
+      if (!audioBase64) {
+        res.status(404).json({ error: 'Audio not found for message' });
+        return;
+      }
+
+      res.status(200).json({
+        audio_base64: audioBase64,
+        audio_duration: audioDuration || 0,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // ── GET Thoughts (Lazy Load) ──────────────────────────────────────────────────
 chatRouter.get(
   '/:messageId/thoughts',
