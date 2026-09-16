@@ -1394,14 +1394,12 @@ export function ChatScreen() {
             {/* Voice Message Player Card */}
             {(() => {
               const isFallbackOrThinking = isFallbackMessage(item.content);
-              const hasVoiceMessage = !isFallbackOrThinking && !!(
-                item.is_voice_message ||
+              const isSubsequentChunk = (item.chunkIndex !== undefined && item.chunkIndex > 1) || (typeof item.id === 'string' && item.id.includes('_part_') && !item.id.endsWith('_part_1'));
+              const hasVoiceMessage = !isFallbackOrThinking && !isSubsequentChunk && !!(
                 item.audio_uri ||
-                item.audio_base64 ||
-                item.meta?.is_voice_message ||
-                item.meta?.is_voice_reply ||
-                item.meta?.audio_base64 ||
-                item.reply_audio_base64
+                item.reply_audio_base64 ||
+                (item.is_voice_message && (item.audio_base64 || item.meta?.audio_base64)) ||
+                (item.meta?.is_voice_reply && (item.reply_audio_base64 || item.meta?.audio_base64))
               );
               if (!hasVoiceMessage) return null;
 

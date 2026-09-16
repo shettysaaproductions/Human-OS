@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.27-beta",
+    "date": "2026-09-16",
+    "title": "🗣️ Human Voice Companion & Zero Prompt-Leak Guard",
+    "message": [
+      "Natural Human Voice Companion: Nova responds warmly like a real friend (e.g., casually asking about your office day or chilling at home) with zero robotic glitch messages.",
+      "Zero System Prompt & Rule Leakage: Comprehensive prompt leak eradication in both synthesized speech and text bubbles — internal instructions and rules never leak to the user.",
+      "Intelligent Temporal Intent Filtering: Precise distinction between conversational status ('i am in office right now') and past recall queries ('what did you say yesterday?').",
+      "Single Voice Card Per Turn: Eliminated duplicate voice reply cards across split bubbles — only the primary bubble displays the audio player."
+    ]
+  },
+  {
     "version": "0.3.26-beta",
     "date": "2026-09-16",
     "title": "🧠 Silent Reasoning, Zero-Thinking Voice & Authoritative Response Lifecycle",

@@ -12,8 +12,8 @@ import { watchtowerInspector } from './WatchtowerInspector';
  * Kept in-voice ("friend blaming their own network") so a blank model response never
  * exposes jargon the user shouldn't see. Mirrors FALLBACK_REPLY in routes/chat.ts.
  */
-export const NOVA_EMPTY_REPLY = 'Hmm... mujhe thoda sochne de, main abhi batati hu thodi der me.';
-export const NOVA_EMPTY_REPLY_EN = "Hmm... let me think about that for a second, I'll get right back to you.";
+export const NOVA_EMPTY_REPLY = 'Arey, main sun rahi hoon! Batao kya haal-chaal?';
+export const NOVA_EMPTY_REPLY_EN = "Hey! I'm right here listening. What's on your mind?";
 
 export function getNovaEmptyReply(isEnglish?: boolean): string {
   return isEnglish ? NOVA_EMPTY_REPLY_EN : NOVA_EMPTY_REPLY;
@@ -37,7 +37,7 @@ export function isPromptLeak(text: string): boolean {
 
   const lower = trimmed.toLowerCase();
 
-  // Known prompt phrases echoed by small models
+  // Known prompt phrases and rule headings echoed by small models
   const leakSignatures = [
     'output only your conversational reply',
     'no xml tags',
@@ -88,10 +88,28 @@ export function isPromptLeak(text: string): boolean {
     'no prompt rules',
     'never output rule names',
     'reply in 1-2 short',
+    'temporal rule',
+    'situational temporal rule',
+    'critical temporal rule',
+    'find the answer in the archive',
+    'archive above and tell them',
+    'do not bring up unrelated facts',
+    'unrelated facts from your long-term memory',
+    'this conversation is happening now',
+    'the user is asking about a past conversation',
+    'what was said recently',
+    'exact archive',
+    'situational timing & activity restraint',
+    'active reminders (source of truth)',
+    'critical anti-hallucination rule',
+    'future event logic',
+    'circadian sanity & midnight chores ban',
+    'entity wardrobe & common-sense plausibility',
+    'user mistake callout & reconciliation',
   ];
 
   for (const sig of leakSignatures) {
-    if (lower.startsWith(sig) || lower.includes('output only your conversational reply') || lower.includes('no formalities: use "tu/tum/"')) {
+    if (lower.startsWith(sig) || lower.includes(sig)) {
       return true;
     }
   }
@@ -101,6 +119,23 @@ export function isPromptLeak(text: string): boolean {
     return true;
   }
   if (/\boutput\s+only\b/i.test(lower) && /\b(?:plain\s+text|conversational\s+reply|whatsapp|dialogue)\b/i.test(lower)) {
+    return true;
+  }
+
+  // Detect rule headers leaked by models: "SITUATIONAL TEMPORAL RULE:", "CRITICAL TEMPORAL RULE:", etc.
+  if (/\b(?:SITUATIONAL|TEMPORAL|CRITICAL|ANTI-ROBOT|ANTI-HALLUCINATION|GROUNDING|SYSTEM)\b[^\n:]*RULE\s*:/i.test(trimmed)) {
+    return true;
+  }
+  if (/\b(?:RULE|DIRECTIVE|INSTRUCTION|GUIDELINE)\s*:\s*[A-Z]/i.test(trimmed)) {
+    return true;
+  }
+  if (/\bfind the answer in the archive\b/i.test(lower)) {
+    return true;
+  }
+  if (/\bunrelated facts from your long-term memory\b/i.test(lower)) {
+    return true;
+  }
+  if (/\bthis conversation is happening now\b/i.test(lower) && /\buser is currently at\b/i.test(lower)) {
     return true;
   }
 
@@ -173,6 +208,9 @@ export function sanitizeReply(reply: string): string {
     // e.g. "Current Status:" or "REMINDER SET:" — but NOT sentence openers like "Let's break it down:"
     // Rule: line must be ALL_CAPS, or every word starts with a capital (Title Case), AND ends with colon.
     .replace(/^(?:[A-Z][A-Z\s&'()\d]+|(?:[A-Z][a-z]+\s*)+):\s*$/gm, '')
+    // Strip rule headings and leaked rule directives
+    .replace(/^(?:[^\n:]*\b(?:SITUATIONAL|TEMPORAL|CRITICAL|ANTI-ROBOT|ANTI-HALLUCINATION|GROUNDING|SYSTEM)\b[^\n:]*RULE\s*:?|[^\n:]*\b(?:RULE|DIRECTIVE|INSTRUCTION|GUIDELINE)\s*:)[^\n]*/gmi, '')
+    .replace(/\b(?:find the answer in the archive|archive above and tell them|unrelated facts from your long-term memory|this conversation is happening now|user is asking about a past conversation)[^\n.]*[.]?/gi, '')
     // Strip specific internal orchestration tags (case insensitive)
     .replace(/^[\s]*(?:CURRENT TIME ACKNOWLEDGMENT|GET-TO-KNOW-YOU QUESTION|DISCOVERY PHASE|SITUATION BRIEF|INTERNAL UNDERSTANDING|USER PRESENCE:|BEHAVIOR PATTERN:|CURRENT TIME:|REMINDER NAG:|TIER 1:|TIER 2:|AUTONOMOUS BEHAVIORAL PATCHES|FOLLOW-UP ENGINE|SUBCONSCIOUS ACTIONS)[\s\S]*?(?=\n|$)/gmi, '')
     // Strip prompt instruction fragments and parrots

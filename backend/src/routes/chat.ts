@@ -95,6 +95,38 @@ async function isDuplicateAssistantMessage(userId: string, conversationId: strin
 }
 
 /**
+ * Natural companion fallback responses when an LLM call fails, leaks rules, or returns empty.
+ * Replies warmly as an empathetic human friend acknowledging what the user said, rather than
+ * reciting technical error messages or prompt rules.
+ */
+function getNaturalCompanionFallback(primaryMessage: string, isEnglishUser: boolean): string {
+  const lower = (primaryMessage || '').toLowerCase();
+  if (lower.includes('office') || lower.includes('kaam') || lower.includes('work') || lower.includes('desk') || lower.includes('meeting')) {
+    return isEnglishUser
+      ? "Got it, you're at the office! Hope work isn't too hectic today."
+      : "Achha, office me ho? Kaam kaisa chal raha hai?";
+  }
+  if (lower.includes('ghar') || lower.includes('home') || lower.includes('bed')) {
+    return isEnglishUser
+      ? "Nice! Chilling at home?"
+      : "Ghar pe ho? Badhiya, aaram se baitho.";
+  }
+  if (lower.includes('gym') || lower.includes('workout') || lower.includes('exercise') || lower.includes('run')) {
+    return isEnglishUser
+      ? "Nice, kill that workout!"
+      : "Sahi hai! Workout kaisa chal raha hai?";
+  }
+  if (lower.includes('college') || lower.includes('school') || lower.includes('class') || lower.includes('exam') || lower.includes('study')) {
+    return isEnglishUser
+      ? "I hear you! Hope your studies are going smoothly."
+      : "Sahi hai, studies pe dhyan do!";
+  }
+  return isEnglishUser
+    ? "I'm listening! Tell me what's on your mind."
+    : "Arey haan, main sun rahi hoon! Batao kya haal-chaal?";
+}
+
+/**
  * Persist an assistant row (typically FALLBACK_REPLY) into chat_history so a reply that
  * was shown live but whose request returned early (streaming error paths) still survives a
  * refresh — otherwise the user message stays orphaned/unanswered on the next getHistory.
@@ -1397,17 +1429,21 @@ chatRouter.post(
       });
       const lifeThreadsPromise = qt.track('get_life_threads', 'life_threads', () => supabaseAdmin.from('life_threads').select('id, topic, state, priority, provenance, last_relevant_at').eq('user_id', userId).in('state', ['active', 'waiting', 'blocked']).order('last_relevant_at', { ascending: false }).limit(5)).then(res => res).catch(() => ({ data: [] }));
 
-      const TEMPORAL_KEYWORDS = [
-        'yesterday', 'days ago', 'last week', 'last month', 'do you remember',
-        'what time', 'what day', 'when did', 'earlier today', 'this morning', 
-        'last night', 'tell me what', 'you said', 'i said', 'we talked',
-        'kal', 'parso', 'yaad hai', 'yaad karo', 'kab', 'kitne baje', 
-        'time kya tha', 'exact time', 'pehle', 'abhi', 'aaj subah',
-        'raat ko', 'dopahar', 'shaam ko', 'maine kaha tha', 'tune kaha tha',
-        'bataya tha', 'bola tha', 'likha tha'
+      const TEMPORAL_RECALL_PATTERNS = [
+        /\b(?:do\s+you\s+remember|remember\s+when|what\s+did\s+(?:i|you|we)\s+(?:say|tell|talk|mention))\b/i,
+        /\b(?:when\s+did\s+(?:i|you|we)|what\s+time\s+did\s+(?:i|you|we)|what\s+day\s+did\s+(?:i|you|we))\b/i,
+        /\b(?:you\s+said|i\s+said|we\s+talked\s+about)\b/i,
+        /\b(?:yaad\s+hai|yaad\s+karo|kab\s+bola\s+tha|kab\s+kaha\s+tha|kab\s+bataya\s+tha)\b/i,
+        /\b(?:maine\s+kaha\s+tha|tune\s+kaha\s+tha|maine\s+bola\s+tha|tune\s+bola\s+tha)\b/i,
+        /\b(?:kitne\s+baje\s+(?:bola|kaha|bataya|tha)|time\s+kya\s+tha|exact\s+time)\b/i,
       ];
+      const PAST_MARKERS = /\b(?:yesterday|days\s+ago|last\s+week|last\s+month|kal|parso|earlier\s+today|this\s+morning|last\s+night)\b/i;
+      const HAS_RECALL_OR_QUESTION = /\?|\b(?:kya|kab|kaun|kaise|kitne|batao|tell|what|when|who|which|where|remember|said|bola|kaha)\b/i;
       const isReminderIntent = reminderIntentDetector.hasReminderIntent(effectiveMessage);
-      const isTemporalQuery = !isReminderIntent && TEMPORAL_KEYWORDS.some(kw => effectiveMessage.toLowerCase().includes(kw));
+      const isTemporalQuery = !isReminderIntent && (
+        TEMPORAL_RECALL_PATTERNS.some(pat => pat.test(effectiveMessage)) ||
+        (PAST_MARKERS.test(effectiveMessage) && HAS_RECALL_OR_QUESTION.test(effectiveMessage) && /\b(?:say|said|talk|told|chat|msg|message|kaha|bola|bataya|likha|yaad)\b/i.test(effectiveMessage))
+      );
       const temporalPromise = isTemporalQuery
         ? qt.track('get_temporal_context', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content, created_at').eq('user_id', userId).gte('created_at', new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()).order('created_at', { ascending: false }).limit(80)).then(res => res).catch(() => ({ data: [] }))
         : Promise.resolve({ data: [] });
@@ -1608,7 +1644,7 @@ chatRouter.post(
           const tStr = `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()]}, ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]} ${d.getUTCDate()} · ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')} ${tzLabel}`;
           return `[${tStr}] ${m.role === 'assistant' ? 'Nova' : 'You'}: ${m.content.substring(0, 300)}${m.content.length > 300 ? '...' : ''}`;
         });
-        temporalContextBlock = '\n\n## WHAT WAS SAID RECENTLY (Exact Archive — last 30 days)\n' + lines.join('\n') + '\n\nCRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory.';
+        temporalContextBlock = '\n\n## RECENT CONVERSATION ARCHIVE (Context only)\n' + lines.join('\n') + '\n(Reference archive only if the user is asking about past conversations or specific timestamps. Always reply naturally as a warm human friend.)';
       }
 
       let remindersContext = '';
@@ -2237,7 +2273,7 @@ NEVER say "kya hua?", "sab theek hai?", "kuch toh bolo", "kuch soch rahe ho?", o
                   } else {
                     result = {
                       reply: hasVoiceMessage
-                        ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                        ? getNaturalCompanionFallback(primaryMessage, isEnglishUser)
                         : requestFallbackReply,
                       subconscious_actions: []
                     };
@@ -2246,7 +2282,7 @@ NEVER say "kya hua?", "sab theek hai?", "kuch toh bolo", "kuch soch rahe ho?", o
                   logger.error('[Chat] Fast retry handler also failed', { userId, error: retryErr instanceof Error ? retryErr.message : String(retryErr) });
                   result = {
                     reply: hasVoiceMessage
-                      ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                      ? getNaturalCompanionFallback(primaryMessage, isEnglishUser)
                       : requestFallbackReply,
                     subconscious_actions: []
                   };
@@ -2287,13 +2323,13 @@ Nova is female: use "Main samajh gayi", "Mast hai yaar". Plain text only.`;
                   rawReply = validateAndRepairGrounding(sanitizeReply(fastReply), primaryMessage, brainContext);
                 } else {
                   rawReply = hasVoiceMessage
-                    ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                    ? getNaturalCompanionFallback(primaryMessage, isEnglishUser)
                     : requestFallbackReply;
                 }
               } catch (e: any) {
                 logger.error('[Chat] Fast retry on prompt leak failed', { error: e.message });
                 rawReply = hasVoiceMessage
-                  ? (isEnglishUser ? "Sorry, I had trouble catching that clearly. Could you say that again?" : "Yaar, network glitch ki wajah se main sun nahi paayi, ek baar phir bolegi?")
+                  ? getNaturalCompanionFallback(primaryMessage, isEnglishUser)
                   : requestFallbackReply;
               }
             }
@@ -2547,7 +2583,7 @@ Casual "tu/tum". Plain conversational text only.`;
         logger.info('[Chat] LLM returned a blank reply or leaks were stripped. Forcing friendly fallback bubble.', { userId, hasVoiceMessage });
         finalBubbles = [
           hasVoiceMessage
-            ? (isEnglishUser ? "Sorry, I couldn't catch that clearly. Could you say that again?" : "Yaar, main theek se sun nahi paayi, ek baar phir bolegi?")
+            ? getNaturalCompanionFallback(primaryMessage, isEnglishUser)
             : requestFallbackReply
         ];
       }
@@ -2717,24 +2753,24 @@ Casual "tu/tum". Plain conversational text only.`;
           // Ensure thinking prefix is stripped so Nova directly speaks the final answer
           let cleanVoiceText = stripThinkingPrefix(combinedContent);
 
-          // If the text is an interim thinking phrase or empty, trigger inline synchronous recovery
-          if (isInterimThinkingPhrase(cleanVoiceText)) {
-            logger.warn('[Chat] Voice turn candidate is an interim thinking phrase, recovering inline', {
+          // If the text is an interim thinking phrase, prompt leak, or empty, trigger inline synchronous recovery
+          if (isInterimThinkingPhrase(cleanVoiceText) || isPromptLeak(cleanVoiceText)) {
+            logger.warn('[Chat] Voice turn candidate is an interim thinking phrase or prompt leak, recovering inline', {
               turnId,
               candidate: cleanVoiceText.slice(0, 60),
             });
             try {
               const { cognitiveRouter } = await import('../lib/cognitiveRouter');
               const recoveryPrompt = isEnglishUser
-                ? `You are Nova, an intimate virtual best friend replying to a user's voice message in warm English. Directly answer what the user asked or confirm what they requested in 1-2 natural sentences. Do NOT output thinking filler or phrases like "let me think".`
-                : `You are Nova, an intimate virtual best friend replying to a user's voice message in warm Hinglish. Directly answer what the user asked or confirm what they requested in 1-2 natural sentences. Do NOT output thinking filler or phrases like "mujhe sochne de" or "ek minute". Casual tu/tum.`;
+                ? `You are Nova, an intimate virtual best friend replying to a user's voice message in warm English. Directly answer what the user said in 1-2 natural sentences like a real human. Do NOT output thinking filler, rules, instructions, or labels.`
+                : `You are Nova, an intimate virtual best friend replying to a user's voice message in warm Hinglish. Directly answer what the user said in 1-2 natural sentences like a real human. Do NOT output thinking filler, rules, instructions, or labels. Casual tu/tum.`;
 
               const recovered = await cognitiveRouter.complete('CONVERSATION', [
                 { role: 'system', content: recoveryPrompt },
                 { role: 'user', content: primaryMessage }
               ], { maxTokens: 250, temperature: 0.7, timeoutMs: 5000 });
 
-              if (recovered && !isInterimThinkingPhrase(recovered)) {
+              if (recovered && !isInterimThinkingPhrase(recovered) && !isPromptLeak(recovered)) {
                 cleanVoiceText = stripThinkingPrefix(recovered);
                 combinedContent = cleanVoiceText;
                 finalBubbles = [cleanVoiceText];
@@ -2744,11 +2780,9 @@ Casual "tu/tum". Plain conversational text only.`;
             }
           }
 
-          // If still a thinking phrase or empty, set a clean, truthful fallback response
-          if (isInterimThinkingPhrase(cleanVoiceText)) {
-            cleanVoiceText = isEnglishUser
-              ? "I understood your message, but had a brief glitch answering. Could you say that again?"
-              : "Maine sun toh liya, par network glitch ki wajah se bol nahi paayi. Ek baar phir bolegi?";
+          // If still a thinking phrase or prompt leak, set a warm, natural human fallback
+          if (isInterimThinkingPhrase(cleanVoiceText) || isPromptLeak(cleanVoiceText)) {
+            cleanVoiceText = getNaturalCompanionFallback(primaryMessage, isEnglishUser);
             combinedContent = cleanVoiceText;
             finalBubbles = [cleanVoiceText];
           }

@@ -706,12 +706,12 @@ export const useChatStore = create<ChatState>((set, get) => {
                   user_reaction: msg.user_reaction,
                   reply_to_content: msg.reply_to_content,
                   hasThoughts: msg.meta?.hasThoughts,
-                  is_voice_message: isVoiceMsg,
+                  is_voice_message: idx === 0 ? isVoiceMsg : false,
                   audio_base64: idx === 0 ? audioB64 : undefined,
                   audio_duration: idx === 0 ? audioDur : undefined,
                   reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
                   reply_audio_duration: idx === 0 && isVoiceReply ? audioDur : undefined,
-                  meta: msg.meta,
+                  meta: idx === 0 ? msg.meta : (msg.meta ? { ...msg.meta, is_voice_reply: false, is_voice_message: false, audio_base64: undefined, audio_duration: undefined } : undefined),
                 });
               });
             } else {
@@ -1119,21 +1119,22 @@ export const useChatStore = create<ChatState>((set, get) => {
             const localMsg = currentMessages.find(m => m.id === localId);
             if (localMsg) {
               const isThinking = isFallbackMessage(msg.content) || isFallbackMessage(localMsg.content);
+              const isSubsequentPart = localId.includes('_part_') && !localId.endsWith('_part_1');
               const needsThoughtUpdate = msg.meta?.hasThoughts && !localMsg.hasThoughts;
               const needsOptionsUpdate = msg.meta?.options && !localMsg.options;
-              const needsAudioUpdate = !isThinking && ((msg.meta?.audio_base64 && !localMsg.audio_base64) || (msg.meta?.is_voice_reply && !localMsg.reply_audio_base64));
+              const needsAudioUpdate = !isThinking && !isSubsequentPart && ((msg.meta?.audio_base64 && !localMsg.audio_base64) || (msg.meta?.is_voice_reply && !localMsg.reply_audio_base64));
               if (needsThoughtUpdate || needsOptionsUpdate || needsAudioUpdate) {
                 set((s) => ({
                   messages: s.messages.map(m => m.id === localId ? { 
                     ...m, 
                     hasThoughts: m.hasThoughts || msg.meta?.hasThoughts,
                     options: m.options || msg.meta?.options,
-                    audio_base64: !isThinking ? (m.audio_base64 || msg.meta?.audio_base64) : undefined,
-                    audio_duration: !isThinking ? (m.audio_duration || msg.meta?.audio_duration) : undefined,
-                    reply_audio_base64: !isThinking ? (m.reply_audio_base64 || (msg.meta?.is_voice_reply ? msg.meta?.audio_base64 : undefined)) : undefined,
-                    reply_audio_duration: !isThinking ? (m.reply_audio_duration || (msg.meta?.is_voice_reply ? msg.meta?.audio_duration : undefined)) : undefined,
-                    is_voice_message: !isThinking ? (m.is_voice_message ?? !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply)) : false,
-                    meta: msg.meta,
+                    audio_base64: (!isThinking && !isSubsequentPart) ? (m.audio_base64 || msg.meta?.audio_base64) : undefined,
+                    audio_duration: (!isThinking && !isSubsequentPart) ? (m.audio_duration || msg.meta?.audio_duration) : undefined,
+                    reply_audio_base64: (!isThinking && !isSubsequentPart) ? (m.reply_audio_base64 || (msg.meta?.is_voice_reply ? msg.meta?.audio_base64 : undefined)) : undefined,
+                    reply_audio_duration: (!isThinking && !isSubsequentPart) ? (m.reply_audio_duration || (msg.meta?.is_voice_reply ? msg.meta?.audio_duration : undefined)) : undefined,
+                    is_voice_message: (!isThinking && !isSubsequentPart) ? (m.is_voice_message ?? !!(msg.meta?.is_voice_message || msg.meta?.is_voice_reply)) : false,
+                    meta: isSubsequentPart && msg.meta ? { ...msg.meta, is_voice_reply: false, is_voice_message: false, audio_base64: undefined, audio_duration: undefined } : msg.meta,
                   } : m)
                 }));
                 updatedExisting = true;
@@ -1204,12 +1205,12 @@ export const useChatStore = create<ChatState>((set, get) => {
                 options: msg.meta?.options,
                 user_reaction: msg.user_reaction,
                 hasThoughts: msg.meta?.hasThoughts,
-                is_voice_message: isVoiceReply,
+                is_voice_message: idx === 0 ? isVoiceReply : false,
                 audio_base64: idx === 0 ? audioB64 : undefined,
                 audio_duration: idx === 0 ? audioDur : undefined,
                 reply_audio_base64: idx === 0 && isVoiceReply ? audioB64 : undefined,
                 reply_audio_duration: idx === 0 && isVoiceReply ? audioDur : undefined,
-                meta: msg.meta,
+                meta: idx === 0 ? msg.meta : (msg.meta ? { ...msg.meta, is_voice_reply: false, is_voice_message: false, audio_base64: undefined, audio_duration: undefined } : undefined),
               };
               if (!seenAssistantInBatch) {
                 newMessages.push(newMsg);

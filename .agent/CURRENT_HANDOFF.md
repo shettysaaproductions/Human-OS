@@ -1,65 +1,65 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — Silent Reasoning, Zero-Thinking Voice & Authoritative Response Lifecycle (v0.3.26-beta)
+2026-09-16 — Human Voice Companion & Zero Prompt-Leak Guard (v0.3.27-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.26-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.27-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.26-beta)
-- **Update Group ID**: `b1ca6461-3f7c-4dec-9924-81b14ba8d94b`
-- **Android Update ID**: `01a0aa1a-2414-7bab-8c05-243b765a0ae9`
-- **iOS Update ID**: `01a0aa1a-2414-7a71-a435-220f91ec42bb`
+### EAS Production OTA Deployment (v0.3.27-beta)
+- **Update Group ID**: `a15ac043-cf3a-4dd1-9bcf-bb437c2eac0e`
+- **Android Update ID**: `01a0aa4a-b0dd-713f-a2fc-549f83771629`
+- **iOS Update ID**: `01a0aa4a-b0dd-787b-8216-97a500dfde52`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Critical Problem Solved & Core Invariants Enforced (v0.3.26-beta)
+### Critical Problem Solved & Core Invariants Enforced (v0.3.27-beta)
 
-1. **Root Cause**:
-   - When a user submitted a voice note, Nova occasionally produced an interim conversational filler / thinking phrase (e.g. *"Hmm... mujhe thoda sochne de, main abhi batati hu..."* or *"Let me think..."*).
-   - This interim phrase was sent to `synthesizeVoiceReply`, rendered as "Nova's Voice Reply" in the UI, and then the actual substantive response followed as a separate text message.
-   - Furthermore, `chat.ts` line 2878 triggered `InstantFallbackRecoveryService` upon detecting thinking phrases, creating a duplicate assistant message on voice turns.
-   - **Voice Reply Missing on Long Answers**: In multi-sentence answers (~230 chars, ~13s audio), Gemini Live takes ~15–18s to stream the audio chunks. A hardcoded 12s timeout caused `synthesizeVoiceReply` to abort early and return `null`, dropping the voice reply card. Additionally, unstripped emojis (`🎉`) and `<NOVA_MESSAGE_BREAK>` tags caused TTS token churn. Resolved by introducing `sanitizeTextForSpeech` and dynamic 25s–45s timeouts (`Math.max(25000, Math.min(45000, length * 150))`), ensuring 100% speech delivery.
+1. **Root Cause Diagnosis**:
+   - User voice note stating: *"i am in office right now"*.
+   - Nova replied with verbatim system prompt leaks:
+     - Bubble 1: *"SITUATIONAL TEMPORAL RULE: This conversation is happening now, and the user is currently at the office. CRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. 💫"*
+     - Bubble 2: *"Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory. 🎉"*
+   - Both bubbles displayed the voice card *"Nova's Voice Reply 🎙️ 22s"*.
+   - **Why this occurred**:
+     1. In `backend/src/routes/chat.ts`, `TEMPORAL_KEYWORDS` had `'abhi'`. Any message with "abhi" (present tense conversational word!) or similar words falsely triggered `isTemporalQuery = true`.
+     2. Line 1611 injected an aggressive prompt block: `CRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context...`.
+     3. The LLM suffered a meta-cognitive contradiction (the user is in the office right now, but prompt dictates that the user is asking about a past conversation), resulting in the model narrating and echoing internal rules.
+     4. `isPromptLeak` did not catch rule headers or archive search phrases, allowing the text to pass to TTS and client bubbles.
+     5. In `mobile/src/store/useChatStore.ts` and `ChatScreen.tsx`, chunk splitting attached voice audio metadata to every chunk, causing multiple bubbles to render the audio player card.
 
-2. **Complete Response Lifecycle State Machine (`VoiceResponseLifecycle.ts`)**:
-   - Enforced strict state transitions:
-     `RECEIVED` → `UNDERSTANDING` → `THINKING` → `ACTING` → `FINALIZING` → `COMPLETED` (or `FAILED`).
-   - Only `COMPLETED` may persist to `chat_history` or synthesize audio.
-   - Background tools, memory mutations, and reminder scheduling execute strictly during `ACTING`—silently without premature conversational outputs.
-   - If a tool fails, the pipeline transitions to truthful explanation synthesis, never a false success or unverified statement.
-   - Strips conversational thinking prefixes (e.g. *"Hmm... "*, *"Hmm, let me think... "*) so Nova answers authoritatively and directly.
-   - Single finalization gate (`finalizeTurn(turnId, ...)`): exactly one assistant response (text + voice) per user voice note.
+2. **Backend Prompt Leak & Temporal Invariants**:
+   - **Refined Temporal Query Detection**: Replaced greedy single keywords with strict regex patterns requiring explicit recall questions (`yaad hai`, `do you remember`, `what did you say`, `exact time`, `kab bola tha`). Present-tense conversational talk ("i am in office right now", "abhi office me hoon", "pehle ye sun") strictly evaluates to `false`.
+   - **Passive Reference Block**: Replaced shouting `CRITICAL TEMPORAL RULE:` with soft, non-intrusive reference context: `## RECENT CONVERSATION ARCHIVE (Context only)`.
+   - **Comprehensive Prompt Leak Detection**: Added signatures to `isPromptLeak` catching `temporal rule`, `situational temporal rule`, `critical temporal rule`, `find the answer in the archive`, and regex `/\b(?:SITUATIONAL|TEMPORAL|CRITICAL|ANTI-ROBOT|ANTI-HALLUCINATION|GROUNDING|SYSTEM)\b[^\n:]*RULE\s*:/i`.
+   - **Zero-Leak Finalization Gate**: Added `isPromptLeak` check to `VoiceResponseLifecycle.finalizeTurn` and `chat.ts` line 2721/2748.
+   - **Warm Human Companion Fallbacks**: Implemented `getNaturalCompanionFallback(primaryMessage, isEnglishUser)` acknowledging user context naturally ("Achha, office me ho? Kaam kaisa chal raha hai?" / "Got it, you're at the office! Hope work isn't too hectic today.") instead of robotic glitch phrases.
 
-3. **Multi-Layer Defensive Architecture**:
-   - **Layer 1 (Backend Voice Response Lifecycle)**: `VoiceResponseLifecycle.ts` validates every candidate reply. `isInterimThinkingPhrase` flags Hindi, Hinglish, and English thinking phrases. `stripThinkingPrefix` strips conversational prefixes.
-   - **Layer 2 (Backend Nova Voice Engine Guard & Key Rotation)**: `NovaVoiceService.synthesizeVoiceReply` validates incoming text against `isInterimThinkingPhrase` before opening any WebSocket connection. If an interim phrase is detected, it returns `null` immediately. Upgraded Live WebSocket connection with multi-key rotation across keys 5–19 to prevent 429 timeouts.
-   - **Layer 3 (Backend Chat Route Isolation)**: In `chat.ts`, prevented `FALLBACK_REPLY` from ever attaching to voice turns. Blocked `InstantFallbackRecoveryService` on voice turns (`!hasVoiceMessage`). On model timeouts/failures, initiates inline synchronous recovery via `cognitiveRouter` / `geminiComplete` so the single assistant turn receives the complete answer.
-   - **Layer 4 (Mobile Safe Hydration & Proactive Filtering)**: In `useChatStore.ts`, updated `hydrateMessages` and `checkProactiveMessages` to strip audio attributes from any fallback or thinking message.
-   - **Layer 5 (Mobile Chat UI Defense)**: In `ChatScreen.tsx`, guarded the voice reply card renderer with `!isFallbackMessage(item.content)` so thinking/fallback text can never render as an audio bubble.
+3. **Mobile Single Voice Card Per Turn Invariant**:
+   - In `useChatStore.ts` (`formattedHistory`, `updateLocalMessageIfNeeded`, and `newMessages` realtime chunks), isolated `is_voice_message`, `audio_base64`, `audio_duration`, `reply_audio_base64`, `reply_audio_duration`, and `meta.is_voice_reply` strictly to `idx === 0` (or `_part_1`).
+   - In `ChatScreen.tsx`, added `isSubsequentChunk` guard to `hasVoiceMessage` so subsequent bubbles (`_part_2`, `_part_3`, etc.) never render the voice note player card.
 
 ---
 
 ### Verification Results
 
-1. **Automated Unit & State Machine Regression Suite (`backend/src/scripts/test_voice_response_lifecycle.ts`)**:
-   - **48 PASSED, 0 FAILED**
-   - Verified:
-     - All Hindi, English, and Hinglish thinking phrases correctly detected by `isInterimThinkingPhrase`.
-     - Direct substantive replies correctly pass validation.
-     - Thinking prefixes stripped cleanly (including commas and ellipses).
-     - State machine transitions adhere strictly to `RECEIVED -> UNDERSTANDING -> THINKING -> ACTING -> FINALIZING -> COMPLETED`.
-     - Tool failure triggers truthful failure transition.
-     - Single finalization gate blocks duplicate attempts on the same turn.
+1. **Automated User Office Leak Fix Suite (`backend/src/scripts/test_user_office_leak_fix.ts`)**:
+   - Verified verbatim screenshot text caught by `isPromptLeak(leak1)` and `isPromptLeak(leak2)` (both `true`).
+   - Verified `sanitizeReply` discards leaks cleanly (returns empty string).
+   - Verified `checkTemporal("i am in office right now")` -> `false`.
+   - Verified `checkTemporal("abhi office me hoon")` -> `false`.
+   - Verified `checkTemporal("kal maine kya bola tha?")` -> `true`.
+   - Verified `checkTemporal("do you remember what we talked about yesterday?")` -> `true`.
+   - Verified genuine human conversation phrases are NOT marked as prompt leaks.
 
-2. **Automated Voice Note E2E Test Suite (`backend/src/scripts/test_voice_note_e2e.ts`)**:
-   - **6 PASSED, 0 FAILED**
-   - Verified audio MIME detection, multimodal speech understanding, TurnAnalyzer/memory tree integration, dual-modality audio generation, reminder processing, and structured error handling.
+2. **Automated Voice Response Lifecycle Regression Suite (`backend/src/scripts/test_voice_response_lifecycle.ts`)**:
+   - **48 PASSED, 0 FAILED**.
 
 3. **Pre-flight Compilation**:
    - `cd mobile && npx tsc --noEmit`: **0 errors (Exit 0)**
@@ -71,17 +71,16 @@ Branch: `main`
 
 | File | Status | Description |
 |---|---|---|
-| `backend/src/services/VoiceResponseLifecycle.ts` | **NEW** | Response lifecycle state machine, thinking phrase detector, prefix stripper, and single finalization gate |
-| `backend/src/scripts/test_voice_response_lifecycle.ts` | **NEW** | 48 automated test assertions verifying zero-thinking invariants and state machine transitions |
-| `backend/src/services/NovaVoiceService.ts` | **MODIFIED** | Added thinking phrase guard and multi-key rotation to `synthesizeVoiceReply` |
-| `backend/src/routes/chat.ts` | **MODIFIED** | Enforced voice lifecycle, blocked fallback replies on voice turns, blocked duplicate `InstantFallbackRecoveryService` |
-| `backend/src/services/InstantFallbackRecoveryService.ts` | **MODIFIED** | Ignored messages with `meta.is_voice_reply` |
-| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Guarded hydration and proactive message checks against thinking audio |
-| `mobile/src/screens/ChatScreen.tsx` | **MODIFIED** | Guarded voice reply player card against fallback/thinking messages |
-| `mobile/src/config/updateHistory.json` | **MODIFIED** | Added `v0.3.26-beta` release notes for in-app update notification modal |
+| `backend/src/routes/chat.ts` | **MODIFIED** | Refined temporal recall detection, softened archive context block, added `getNaturalCompanionFallback`, guarded voice finalization against prompt leaks |
+| `backend/src/services/NovaBrainService.ts` | **MODIFIED** | Expanded `isPromptLeak` and `sanitizeReply` to catch and strip situational/temporal rule leaks |
+| `backend/src/services/VoiceResponseLifecycle.ts` | **MODIFIED** | Added `isPromptLeak` check to `finalizeTurn` gate |
+| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Restricted voice audio metadata strictly to `idx === 0`, preventing audio card duplication on split bubbles |
+| `mobile/src/screens/ChatScreen.tsx` | **MODIFIED** | Added `isSubsequentChunk` guard to voice player card renderer |
+| `mobile/src/config/updateHistory.json` | **MODIFIED** | Added `v0.3.27-beta` release notes for in-app update notification modal |
+| `backend/src/scripts/test_user_office_leak_fix.ts` | **NEW** | Regression test verifying office scenario, temporal patterns, and prompt leak eradication |
 
 ---
 
 ### NEXT ACTION
-- All changes verified, committed, and deployed via EAS OTA (`b1ca6461-3f7c-4dec-9924-81b14ba8d94b`).
+- All changes verified, committed, EAS OTA published (`a15ac043-cf3a-4dd1-9bcf-bb437c2eac0e`), and push broadcast sent.
 - Push to `origin main` to trigger automatic Render backend deployment.

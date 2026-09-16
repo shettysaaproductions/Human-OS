@@ -15,6 +15,7 @@
  */
 
 import { logger } from '../lib/logger';
+import { isPromptLeak } from './NovaBrainService';
 
 export type VoiceTurnState =
   | 'RECEIVED'
@@ -263,9 +264,9 @@ export class VoiceResponseLifecycle {
     // Clean any leading thinking phrases from the text
     const cleanedText = stripThinkingPrefix(rawFinalText);
 
-    // Guard: under NO circumstances may a thinking phrase be accepted as final text
-    if (isInterimThinkingPhrase(cleanedText)) {
-      logger.error('[VoiceLifecycle] Rejected thinking/status phrase at finalization gate', {
+    // Guard: under NO circumstances may a thinking phrase or prompt leak be accepted as final text
+    if (isInterimThinkingPhrase(cleanedText) || isPromptLeak(cleanedText)) {
+      logger.error('[VoiceLifecycle] Rejected thinking/status phrase or prompt leak at finalization gate', {
         turnId,
         rawText: rawFinalText.slice(0, 60),
         cleanedText: cleanedText.slice(0, 60),

@@ -1,28 +1,29 @@
 # CURRENT TASK
 
 ## Task ID
-VOICE-RESPONSE-LIFECYCLE-ZERO-THINKING-AUDIO-v0.3.26
+VOICE-PROMPT-LEAK-ERADICATION-TEMPORAL-FIX-v0.3.27
 
 ## Objective
-Eliminate all interim thinking and status audio from Nova's voice response pipeline, enforce silent background reasoning and action execution, and ensure spoken audio corresponds exclusively to the single authoritative final answer:
+Eradicate verbatim system prompt / rule leaks from voice note replies, refine temporal intent detection so present-tense conversational status never triggers archive queries, ensure warm human companion dialogue, and eliminate duplicate voice player cards across split bubbles:
 1. **Root Cause**:
-   - User voice note prompted interim conversational fillers ("Hmm... mujhe thoda sochne de, main abhi batati hu...").
-   - These interim fillers were synthesized into "Nova's Voice Reply" cards before the substantive answer arrived.
-   - Background fallback recovery created duplicate assistant bubbles.
+   - Spoken user input *"i am in office right now"* matched `'abhi'` in `TEMPORAL_KEYWORDS`.
+   - `chat.ts` injected shouting prompt `CRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp...`.
+   - The LLM had a cognitive clash with the user's present location, reciting internal rule text into the answer.
+   - `isPromptLeak` did not catch rule headers or archive search phrases, allowing the text to be spoken and displayed in two bubbles.
+   - Mobile store spread voice audio metadata to both split chunks, creating two identical voice note cards.
 2. **Implementation**:
-   - Created `VoiceResponseLifecycle.ts` with strict state machine (`RECEIVED` -> `UNDERSTANDING` -> `THINKING` -> `ACTING` -> `FINALIZING` -> `COMPLETED`).
-   - Implemented `isInterimThinkingPhrase` and `stripThinkingPrefix` across Hindi, English, and Hinglish.
-   - Added single finalization gate (`finalizeTurn`) preventing race conditions or duplicate assistant responses.
-   - Added thinking phrase filter in `NovaVoiceService.synthesizeVoiceReply` returning `null` immediately.
-   - Upgraded voice synthesis with multi-key rotation across keys 5–19 to prevent rate-limit dropouts.
-   - Disallowed `FALLBACK_REPLY` and `InstantFallbackRecoveryService` on voice turns.
-   - Added client-side defense in `useChatStore.ts` and `ChatScreen.tsx` to ensure thinking text never renders as audio.
-   - Updated `updateHistory.json` with `v0.3.26-beta`.
+   - Refactored `chat.ts` `isTemporalQuery` with strict regex `TEMPORAL_RECALL_PATTERNS` requiring explicit question/recall intent.
+   - Replaced shouting `CRITICAL TEMPORAL RULE:` with passive reference guidance.
+   - Expanded `isPromptLeak` in `NovaBrainService.ts` to detect rule headers, situational/temporal rule fragments, and directive leaks.
+   - Added `isPromptLeak` check to `VoiceResponseLifecycle.finalizeTurn` and `chat.ts` voice finalization gate.
+   - Implemented `getNaturalCompanionFallback` for warm, empathetic responses ("Achha, office me ho? Kaam kaisa chal raha hai?").
+   - Restricted audio metadata in `useChatStore.ts` and `ChatScreen.tsx` strictly to `idx === 0`, completely preventing audio player duplication on subsequent chunks.
+   - Registered `v0.3.27-beta` in `updateHistory.json`.
 
 ## Verification Gates Passed
+- `backend/src/scripts/test_user_office_leak_fix.ts`: **ALL TESTS PASSED**.
 - `backend/src/scripts/test_voice_response_lifecycle.ts`: **48 PASSED, 0 FAILED**.
-- `backend/src/scripts/test_voice_note_e2e.ts`: **6 PASSED, 0 FAILED**.
 - `cd backend && npm run build`: **EXIT 0** (0 errors).
 - `cd mobile && npx tsc --noEmit`: **EXIT 0** (0 errors).
-- EAS Production OTA Published: Update Group `b1ca6461-3f7c-4dec-9924-81b14ba8d94b` (Android `01a0aa1a-2414-7bab-8c05-243b765a0ae9`, iOS `01a0aa1a-2414-7a71-a435-220f91ec42bb`).
+- EAS Production OTA Published: Update Group `a15ac043-cf3a-4dd1-9bcf-bb437c2eac0e` (Android `01a0aa4a-b0dd-713f-a2fc-549f83771629`, iOS `01a0aa4a-b0dd-787b-8216-97a500dfde52`).
 - Push broadcast dispatched to all registered user devices via `broadcast_update_push.ts`.
