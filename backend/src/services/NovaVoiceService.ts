@@ -1113,8 +1113,8 @@ class NovaVoiceService {
       return null;
     }
 
-    // Dynamic timeout based on text length: 25s base, up to 45s for longer paragraphs
-    const timeoutMs = Math.max(25000, Math.min(45000, Math.round(cleanText.length * 150)));
+    // Snappy timeout: 12s base, up to 22s for longer paragraphs (Gemini Live native audio generates in ~2-4s)
+    const timeoutMs = Math.max(12000, Math.min(22000, Math.round(cleanText.length * 100)));
 
     const attempts = Math.min(candidateKeys.length, 2);
     for (let i = 0; i < attempts; i++) {
@@ -1327,12 +1327,14 @@ class NovaVoiceService {
     }
 
     let lastError: any = null;
+    const maxAttempts = Math.min(candidateKeys.length, 3);
 
-    for (const key of candidateKeys) {
+    for (let i = 0; i < maxAttempts; i++) {
+      const key = candidateKeys[i];
       try {
         const ai = new GoogleGenAI({ apiKey: key });
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Transcription request timed out after 12s')), 12000);
+          setTimeout(() => reject(new Error('Transcription request timed out after 6s')), 6000);
         });
 
         const result: any = await Promise.race([

@@ -406,6 +406,14 @@ export class WatchtowerReflectionService {
         return;
       }
 
+      // Voice Reply Audio Invariant:
+      // Never mutate content if the message has a synthesized voice reply!
+      // Mutating text without updating audio creates a desync where the play button speaks the old text.
+      if ((messageRow.meta as any)?.is_voice_reply || (messageRow.meta as any)?.audio_base64) {
+        logger.info('[WATCHTOWER REFLECTION] Skipping text correction on voice reply to preserve 1:1 audio synchronization', { messageId });
+        return;
+      }
+
       // Prepare versions array with clean labels (never raw developer critique)
       const existingMeta = (messageRow.meta as any) || {};
       const versions: MessageVersionEntry[] = existingMeta.versions || [

@@ -2899,7 +2899,8 @@ Casual "tu/tum". Plain conversational text only.`;
           }
 
           // Watchtower Post-Reply Reflection & Self-Correction (evaluates whole turn)
-          if (!is_proactive) {
+          // Run strictly for text-only turns. Spoken voice replies must maintain 1:1 audio-text fidelity!
+          if (!is_proactive && !hasVoiceMessage) {
             watchtowerReflectionService.scheduleReflection({
               userId,
               conversationId: activeConversationId,

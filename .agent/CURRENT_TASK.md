@@ -1,29 +1,25 @@
 # CURRENT TASK
 
 ## Task ID
-VOICE-PROMPT-LEAK-ERADICATION-TEMPORAL-FIX-v0.3.27
+VOICE-RAPID-SYNC-ZERO-DESYNC-v0.3.28
 
 ## Objective
-Eradicate verbatim system prompt / rule leaks from voice note replies, refine temporal intent detection so present-tense conversational status never triggers archive queries, ensure warm human companion dialogue, and eliminate duplicate voice player cards across split bubbles:
+Optimize multimodal voice note processing speed to <15s, fix real-time voice play button rendering without app restart, guarantee zero audio/text desync, and eliminate duplicate chat bubble rendering:
 1. **Root Cause**:
-   - Spoken user input *"i am in office right now"* matched `'abhi'` in `TEMPORAL_KEYWORDS`.
-   - `chat.ts` injected shouting prompt `CRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp...`.
-   - The LLM had a cognitive clash with the user's present location, reciting internal rule text into the answer.
-   - `isPromptLeak` did not catch rule headers or archive search phrases, allowing the text to be spoken and displayed in two bubbles.
-   - Mobile store spread voice audio metadata to both split chunks, creating two identical voice note cards.
+   - `transcribeAudio` sequentially tried up to 20 candidate API keys with 12s timeout each, and `synthesizeVoiceReply` had 45s timeouts, causing voice note requests to exceed mobile's 120s polling ceiling and showing the soft-timeout error.
+   - `useChatStore.ts` line 1136 used nullish coalescing `m.is_voice_message ?? !!(...)` which evaluated to `false` when `m.is_voice_message === false`, hiding the play button until app restart.
+   - Watchtower Pass 3 updated message content to Version 2 in `chat_history` without regenerating `audio_base64`, causing the play button to speak Version 1 audio while displaying Version 2 text.
+   - `hydrateMessages` assigned `_part_1` even for single messages, while polling assigned `msg.id`, causing ID mismatches and duplicate bubbles on screen.
 2. **Implementation**:
-   - Refactored `chat.ts` `isTemporalQuery` with strict regex `TEMPORAL_RECALL_PATTERNS` requiring explicit question/recall intent.
-   - Replaced shouting `CRITICAL TEMPORAL RULE:` with passive reference guidance.
-   - Expanded `isPromptLeak` in `NovaBrainService.ts` to detect rule headers, situational/temporal rule fragments, and directive leaks.
-   - Added `isPromptLeak` check to `VoiceResponseLifecycle.finalizeTurn` and `chat.ts` voice finalization gate.
-   - Implemented `getNaturalCompanionFallback` for warm, empathetic responses ("Achha, office me ho? Kaam kaisa chal raha hai?").
-   - Restricted audio metadata in `useChatStore.ts` and `ChatScreen.tsx` strictly to `idx === 0`, completely preventing audio player duplication on subsequent chunks.
-   - Registered `v0.3.27-beta` in `updateHistory.json`.
+   - Bounded `transcribeAudio` candidate attempts to 3 (6s timeout = max 18s failover) and tightened `synthesizeVoiceReply` timeout dynamically to 12s-22s max.
+   - Replaced nullish coalescing with boolean OR in `updateLocalMessageIfNeeded` and enabled dynamic audio metadata sync to render the play button immediately.
+   - Guarded Watchtower reflection in `chat.ts` and `WatchtowerReflectionService.ts` to skip spoken voice replies, preserving 1:1 audio-text fidelity.
+   - Standardized single-message IDs to `msg.id` across `hydrateMessages`, `loadMoreMessages`, and polling, preventing duplicate bubble rendering.
+   - Added in-place content update support in `updateLocalMessageIfNeeded` for text messages.
+   - Registered `v0.3.28-beta` in `updateHistory.json`.
 
 ## Verification Gates Passed
-- `backend/src/scripts/test_user_office_leak_fix.ts`: **ALL TESTS PASSED**.
-- `backend/src/scripts/test_voice_response_lifecycle.ts`: **48 PASSED, 0 FAILED**.
 - `cd backend && npm run build`: **EXIT 0** (0 errors).
 - `cd mobile && npx tsc --noEmit`: **EXIT 0** (0 errors).
-- EAS Production OTA Published: Update Group `a15ac043-cf3a-4dd1-9bcf-bb437c2eac0e` (Android `01a0aa4a-b0dd-713f-a2fc-549f83771629`, iOS `01a0aa4a-b0dd-787b-8216-97a500dfde52`).
+- EAS Production OTA Published: Update Group `f85d0f4f-a8ac-448d-ad3f-8e713d97b791` (Android `01a0aa6e-7ed3-714f-a6d5-8a03073a14c8`, iOS `01a0aa6e-7ed3-7c48-8813-4bd732a0d25a`).
 - Push broadcast dispatched to all registered user devices via `broadcast_update_push.ts`.

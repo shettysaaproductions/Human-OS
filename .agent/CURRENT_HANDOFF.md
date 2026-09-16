@@ -1,86 +1,75 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-16 — Human Voice Companion & Zero Prompt-Leak Guard (v0.3.27-beta)
+2026-09-16 — Rapid Voice Processing, Instant Audio Sync & Zero-Desync Audio Guard (v0.3.28-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.27-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.28-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.27-beta)
-- **Update Group ID**: `a15ac043-cf3a-4dd1-9bcf-bb437c2eac0e`
-- **Android Update ID**: `01a0aa4a-b0dd-713f-a2fc-549f83771629`
-- **iOS Update ID**: `01a0aa4a-b0dd-787b-8216-97a500dfde52`
+### EAS Production OTA Deployment (v0.3.28-beta)
+- **Update Group ID**: `f85d0f4f-a8ac-448d-ad3f-8e713d97b791`
+- **Android Update ID**: `01a0aa6e-7ed3-714f-a6d5-8a03073a14c8`
+- **iOS Update ID**: `01a0aa6e-7ed3-7c48-8813-4bd732a0d25a`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Critical Problem Solved & Core Invariants Enforced (v0.3.27-beta)
+### Critical Problems Solved & Core Invariants Enforced (v0.3.28-beta)
 
-1. **Root Cause Diagnosis**:
-   - User voice note stating: *"i am in office right now"*.
-   - Nova replied with verbatim system prompt leaks:
-     - Bubble 1: *"SITUATIONAL TEMPORAL RULE: This conversation is happening now, and the user is currently at the office. CRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. 💫"*
-     - Bubble 2: *"Find the answer in the archive above and tell them the exact time or context. Do NOT bring up unrelated facts from your long-term memory. 🎉"*
-   - Both bubbles displayed the voice card *"Nova's Voice Reply 🎙️ 22s"*.
-   - **Why this occurred**:
-     1. In `backend/src/routes/chat.ts`, `TEMPORAL_KEYWORDS` had `'abhi'`. Any message with "abhi" (present tense conversational word!) or similar words falsely triggered `isTemporalQuery = true`.
-     2. Line 1611 injected an aggressive prompt block: `CRITICAL TEMPORAL RULE: The user is asking about a past conversation or timestamp. Find the answer in the archive above and tell them the exact time or context...`.
-     3. The LLM suffered a meta-cognitive contradiction (the user is in the office right now, but prompt dictates that the user is asking about a past conversation), resulting in the model narrating and echoing internal rules.
-     4. `isPromptLeak` did not catch rule headers or archive search phrases, allowing the text to pass to TTS and client bubbles.
-     5. In `mobile/src/store/useChatStore.ts` and `ChatScreen.tsx`, chunk splitting attached voice audio metadata to every chunk, causing multiple bubbles to render the audio player card.
+1. **Voice Note Latency & Elimination of 2-Minute Timeout**:
+   - **Diagnosis**: Mobile app displayed soft timeout message *"Connection toh hai yaar, par thoda slow lag raha hai. Ek minute wait kar..."* after 120s of polling.
+   - **Root Cause**: `transcribeAudio` in `NovaVoiceService.ts` was sequentially iterating through up to 20 candidate Gemini API keys with 12-second timeouts (worst-case 240s stall before fallback), and `synthesizeVoiceReply` had 45s timeouts. This total backend latency exceeded mobile's `MAX_REPLY_WAIT_MS = 120_000`.
+   - **Fix**:
+     - Capped `transcribeAudio` candidate attempts to 3 with a 6-second timeout (max 18s total failover).
+     - Tightened `synthesizeVoiceReply` timeout dynamically between 12s and 22s max (`Math.round(cleanText.length * 100)`).
 
-2. **Backend Prompt Leak & Temporal Invariants**:
-   - **Refined Temporal Query Detection**: Replaced greedy single keywords with strict regex patterns requiring explicit recall questions (`yaad hai`, `do you remember`, `what did you say`, `exact time`, `kab bola tha`). Present-tense conversational talk ("i am in office right now", "abhi office me hoon", "pehle ye sun") strictly evaluates to `false`.
-   - **Passive Reference Block**: Replaced shouting `CRITICAL TEMPORAL RULE:` with soft, non-intrusive reference context: `## RECENT CONVERSATION ARCHIVE (Context only)`.
-   - **Comprehensive Prompt Leak Detection**: Added signatures to `isPromptLeak` catching `temporal rule`, `situational temporal rule`, `critical temporal rule`, `find the answer in the archive`, and regex `/\b(?:SITUATIONAL|TEMPORAL|CRITICAL|ANTI-ROBOT|ANTI-HALLUCINATION|GROUNDING|SYSTEM)\b[^\n:]*RULE\s*:/i`.
-   - **Zero-Leak Finalization Gate**: Added `isPromptLeak` check to `VoiceResponseLifecycle.finalizeTurn` and `chat.ts` line 2721/2748.
-   - **Warm Human Companion Fallbacks**: Implemented `getNaturalCompanionFallback(primaryMessage, isEnglishUser)` acknowledging user context naturally ("Achha, office me ho? Kaam kaisa chal raha hai?" / "Got it, you're at the office! Hope work isn't too hectic today.") instead of robotic glitch phrases.
+2. **Real-Time Voice Play Button (No Restart Required)**:
+   - **Diagnosis**: Assistant's voice reply initially appeared as text-only; the green voice play button only appeared after cold restarting the app.
+   - **Root Cause**: In `mobile/src/store/useChatStore.ts` line 1136, `updateLocalMessageIfNeeded` used `m.is_voice_message ?? !!(...)`. Because `m.is_voice_message` was boolean `false`, nullish coalescing evaluated to `false`. The voice flag was never toggled until `hydrateMessages` ran on startup.
+   - **Fix**: Changed to boolean OR `(m.is_voice_message || incomingVoiceMsg)`. Also updated `needsAudioUpdate` to detect incoming voice replies and audio payloads, dynamically transitioning local messages to voice cards in real-time.
 
-3. **Mobile Single Voice Card Per Turn Invariant**:
-   - In `useChatStore.ts` (`formattedHistory`, `updateLocalMessageIfNeeded`, and `newMessages` realtime chunks), isolated `is_voice_message`, `audio_base64`, `audio_duration`, `reply_audio_base64`, `reply_audio_duration`, and `meta.is_voice_reply` strictly to `idx === 0` (or `_part_1`).
-   - In `ChatScreen.tsx`, added `isSubsequentChunk` guard to `hasVoiceMessage` so subsequent bubbles (`_part_2`, `_part_3`, etc.) never render the voice note player card.
+3. **Zero Audio / Text Desync on `Aligned (v2)`**:
+   - **Diagnosis**: When Watchtower reflection revised an assistant reply to `Aligned (v2)`, playing the voice card spoke Version 1 text rather than Version 2 text, and duplicate bubbles appeared on screen.
+   - **Root Cause**: Watchtower Pass 3 mutated `content` in `chat_history` 28 seconds after turn completion without re-synthesizing `audio_base64`. Furthermore, `hydrateMessages` assigned `id: `${msg.id}_part_${idx + 1}`` even for single chunks, whereas polling used `id: msg.id`, causing ID mismatch and duplicate bubble injection.
+   - **Fix**:
+     - In `backend/src/routes/chat.ts`, Watchtower reflection is strictly skipped on voice turns (`if (!is_proactive && !hasVoiceMessage)`).
+     - In `backend/src/services/WatchtowerReflectionService.ts`, added invariant guard skipping text mutation if `is_voice_reply || audio_base64` is present.
+     - In `mobile/src/store/useChatStore.ts`, unified ID assignment across `hydrateMessages`, `loadMoreMessages`, and polling: `id: finalChunks.length > 1 ? `${msg.id}_part_${idx + 1}` : msg.id`.
+     - Added `needsContentUpdate` in `updateLocalMessageIfNeeded` with guard `!localMsg.is_voice_message` to update existing text bubbles in-place without duplicating.
 
 ---
 
 ### Verification Results
 
-1. **Automated User Office Leak Fix Suite (`backend/src/scripts/test_user_office_leak_fix.ts`)**:
-   - Verified verbatim screenshot text caught by `isPromptLeak(leak1)` and `isPromptLeak(leak2)` (both `true`).
-   - Verified `sanitizeReply` discards leaks cleanly (returns empty string).
-   - Verified `checkTemporal("i am in office right now")` -> `false`.
-   - Verified `checkTemporal("abhi office me hoon")` -> `false`.
-   - Verified `checkTemporal("kal maine kya bola tha?")` -> `true`.
-   - Verified `checkTemporal("do you remember what we talked about yesterday?")` -> `true`.
-   - Verified genuine human conversation phrases are NOT marked as prompt leaks.
-
-2. **Automated Voice Response Lifecycle Regression Suite (`backend/src/scripts/test_voice_response_lifecycle.ts`)**:
-   - **48 PASSED, 0 FAILED**.
-
-3. **Pre-flight Compilation**:
-   - `cd mobile && npx tsc --noEmit`: **0 errors (Exit 0)**
+1. **Pre-flight Compilation**:
    - `cd backend && npm run build`: **0 errors (Exit 0)**
+   - `cd mobile && npx tsc --noEmit`: **0 errors (Exit 0)**
+
+2. **EAS Production OTA Publish**:
+   - Successfully published to `production` branch.
+   - Update Group ID: `f85d0f4f-a8ac-448d-ad3f-8e713d97b791`.
+
+3. **Push Notification Broadcast**:
+   - Successfully broadcasted `v0.3.28-beta` release alert to registered devices.
 
 ---
 
-### Files Added / Modified
+### Files Modified
 
 | File | Status | Description |
 |---|---|---|
-| `backend/src/routes/chat.ts` | **MODIFIED** | Refined temporal recall detection, softened archive context block, added `getNaturalCompanionFallback`, guarded voice finalization against prompt leaks |
-| `backend/src/services/NovaBrainService.ts` | **MODIFIED** | Expanded `isPromptLeak` and `sanitizeReply` to catch and strip situational/temporal rule leaks |
-| `backend/src/services/VoiceResponseLifecycle.ts` | **MODIFIED** | Added `isPromptLeak` check to `finalizeTurn` gate |
-| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Restricted voice audio metadata strictly to `idx === 0`, preventing audio card duplication on split bubbles |
-| `mobile/src/screens/ChatScreen.tsx` | **MODIFIED** | Added `isSubsequentChunk` guard to voice player card renderer |
-| `mobile/src/config/updateHistory.json` | **MODIFIED** | Added `v0.3.27-beta` release notes for in-app update notification modal |
-| `backend/src/scripts/test_user_office_leak_fix.ts` | **NEW** | Regression test verifying office scenario, temporal patterns, and prompt leak eradication |
+| `backend/src/routes/chat.ts` | **MODIFIED** | Skip Watchtower reflection scheduling on voice turns to preserve 1:1 audio-text fidelity |
+| `backend/src/services/NovaVoiceService.ts` | **MODIFIED** | Capped transcribe attempts to 3 (6s timeout) and voice synthesis to 12s-22s max |
+| `backend/src/services/WatchtowerReflectionService.ts` | **MODIFIED** | Added voice reply guard skipping text mutation on synthesized audio replies |
+| `mobile/src/store/useChatStore.ts` | **MODIFIED** | Fixed ID symmetry (`_part_` only when >1 chunk), real-time boolean OR voice flag sync, and in-place content updates |
+| `mobile/src/config/updateHistory.json` | **MODIFIED** | Added `v0.3.28-beta` changelog for in-app update notification modal |
 
 ---
 
 ### NEXT ACTION
-- All changes verified, committed, EAS OTA published (`a15ac043-cf3a-4dd1-9bcf-bb437c2eac0e`), and push broadcast sent.
-- Push to `origin main` to trigger automatic Render backend deployment.
+- Push verified changes to `origin main` to deploy backend updates to Render.

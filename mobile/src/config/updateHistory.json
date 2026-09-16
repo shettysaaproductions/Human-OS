@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.28-beta",
+    "date": "2026-09-16",
+    "title": "⚡ Rapid Voice Processing, Instant Audio Sync & Zero-Desync Audio Guard",
+    "message": [
+      "Sub-15s Rapid Voice Turnaround: Optimized multimodal audio transcription and voice reply synthesis with bounded timeouts and fast failover, eliminating 2-minute connection timeouts.",
+      "Real-Time Voice Play Button: Fixed state synchronization so Nova's voice reply card and audio play button render instantly upon delivery without requiring an app restart.",
+      "Zero Audio/Text Desync: Guaranteed 100% fidelity between spoken voice notes and displayed transcript text, preventing retroactive transcript rewriting on synthesized voice replies.",
+      "Duplicate Bubble Elimination: Unified message ID normalization across streaming, background polling, and cache hydration to prevent duplicate chat bubble rendering."
+    ]
+  },
+  {
     "version": "0.3.27-beta",
     "date": "2026-09-16",
     "title": "🗣️ Human Voice Companion & Zero Prompt-Leak Guard",
