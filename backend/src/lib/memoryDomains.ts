@@ -1025,7 +1025,7 @@ export function clusterMemoriesIntoWardrobes(
         id: `trait-suresh-biz`,
         key: 'father_business',
         label: 'Business',
-        value: 'Undergarments sales & distribution business',
+        value: cleanStr(fatherBizVal),
         category: 'detail',
         confidence: 'confirmed',
         isWorkingContext: memMap.get('father_business')?.isWorkingContext,
@@ -1041,14 +1041,14 @@ export function clusterMemoriesIntoWardrobes(
       roleTitle: 'Father',
       avatarEmoji: '👨‍🦳',
       color: '#EC4899',
-      summary: 'Father · Undergarments Distribution Business',
+      summary: `Father · ${cleanStr(fatherBizVal) || 'Apparel Business'}`,
       traits,
       connectedDots: [
         {
           targetEntityId: 'wardrobe-person-rajeshree',
           targetEntityName: 'Rajeshree',
           relation: 'FAMILY_APPAREL_HERITAGE',
-          insight: 'Combined undergarments distribution and tailoring craftsmanship form an entrepreneurial apparel heritage in the family.',
+          insight: 'Combined apparel retail and tailoring craftsmanship form an entrepreneurial heritage in the family.',
           badge: '👨‍🦳 Suresh ⇄ 👵 Rajeshree'
         }
       ],
@@ -1081,7 +1081,7 @@ export function clusterMemoriesIntoWardrobes(
         id: `trait-rajeshree-occ`,
         key: 'mother_occupation',
         label: 'Occupation',
-        value: 'Tailor / Garment Craftsmanship',
+        value: cleanStr(motherOccVal),
         category: 'skill',
         confidence: 'confirmed',
         isWorkingContext: memMap.get('mother_occupation')?.isWorkingContext,
@@ -1097,7 +1097,7 @@ export function clusterMemoriesIntoWardrobes(
       roleTitle: 'Mother',
       avatarEmoji: '👵',
       color: '#EC4899',
-      summary: 'Mother · Tailoring Work',
+      summary: `Mother · ${cleanStr(motherOccVal) || 'Tailoring Work'}`,
       traits,
       connectedDots: [
         {
@@ -2486,26 +2486,31 @@ export function buildDynamicKnowledgeGraph(
         relation = (k.includes('birth') || k.includes('bday') || k.includes('dob') || k.includes('date_of_birth')) ? 'BIRTHDAY' : k.includes('age') ? 'AGE' : (k.includes('nick') || k.includes('tiku') || k.includes('tuku')) ? 'NICKNAME' : k.includes('school') ? 'EDUCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Son (Shreshth / Tuku) in Family Tree`;
-      } else if (k.startsWith('father_')) {
+      } else if (k.startsWith('father_') || k.startsWith('papa_') || k === 'papa' || k === 'father') {
         // Guard against friend's father or unrelated narrative
         if (item.value.toLowerCase().includes('ijaz') || item.value.toLowerCase().includes('navi')) {
           continue;
         }
+        const fatherNameItem = allItems.find(i => i.key === 'father_name');
+        const fatherRawName = fatherNameItem?.value && !/^(father|papa|pitaji|dad|my father|mere papa)$/i.test(fatherNameItem.value.trim()) ? fatherNameItem.value.trim() : undefined;
+        const fatherDisplayName = fatherRawName ? `${fatherRawName} (Father)` : 'Father';
+        const fatherDisplayVal = fatherRawName ? `${fatherRawName} · Father` : 'Father';
+
         const fatherNodeId = allKeys.has('father_name') ? 'mem-father_name' : 'mem-entity-father';
         if (!nodeIds.has(fatherNodeId)) {
           nodes.push({
             id: fatherNodeId,
-            name: 'Father',
+            name: fatherDisplayName,
             entity_type: 'father',
             department: 'family',
             color: DOMAIN_TAXONOMY.family.color,
             radius: 20,
-            value: 'Father',
+            value: fatherDisplayVal,
             raw_key: 'father_name',
             emoji: '👨‍🦳',
             parentEntityId: 'dept-family',
             hierarchyLevel: 2,
-            treePath: [cleanUserName, 'Family & Relationships', 'Father']
+            treePath: [cleanUserName, 'Family & Relationships', fatherDisplayName]
           });
           nodeIds.add(fatherNodeId);
           deptCounts.family++;
@@ -2517,31 +2522,36 @@ export function buildDynamicKnowledgeGraph(
             color: DOMAIN_TAXONOMY.family.color,
             weight: 2,
             edgeType: 'ENTITY_BRANCH',
-            explanation: `Father branch under Family`
+            explanation: `Father branch under Family (${fatherDisplayName})`
           });
         }
         if (item.id === fatherNodeId) continue;
         parentId = fatherNodeId;
         hierarchyLevel = 3;
-        relation = k.includes('occupation') || k.includes('job') || k.includes('service') ? 'OCCUPATION' : k.includes('status') ? 'STATUS' : 'MEMBER_ATTRIBUTE';
+        relation = k.includes('business') ? 'BUSINESS' : k.includes('occupation') || k.includes('job') || k.includes('service') ? 'OCCUPATION' : k.includes('status') ? 'STATUS' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = `Detail stem of Father in Family Tree`;
-      } else if (k.startsWith('mother_')) {
+        explanation = `Detail stem of Father (${fatherDisplayName}) in Family Tree`;
+      } else if (k.startsWith('mother_') || k.startsWith('mummy_') || k === 'mummy' || k === 'mother') {
+        const motherNameItem = allItems.find(i => i.key === 'mother_name');
+        const motherRawName = motherNameItem?.value && !/^(mother|mummy|mom|maa|my mother|mere mummy)$/i.test(motherNameItem.value.trim()) ? motherNameItem.value.trim() : undefined;
+        const motherDisplayName = motherRawName ? `${motherRawName} (Mother)` : 'Mother';
+        const motherDisplayVal = motherRawName ? `${motherRawName} · Mother` : 'Mother';
+
         const motherNodeId = allKeys.has('mother_name') ? 'mem-mother_name' : 'mem-entity-mother';
         if (!nodeIds.has(motherNodeId)) {
           nodes.push({
             id: motherNodeId,
-            name: 'Mother',
+            name: motherDisplayName,
             entity_type: 'mother',
             department: 'family',
             color: DOMAIN_TAXONOMY.family.color,
             radius: 20,
-            value: 'Mother',
+            value: motherDisplayVal,
             raw_key: 'mother_name',
             emoji: '👵',
             parentEntityId: 'dept-family',
             hierarchyLevel: 2,
-            treePath: [cleanUserName, 'Family & Relationships', 'Mother']
+            treePath: [cleanUserName, 'Family & Relationships', motherDisplayName]
           });
           nodeIds.add(motherNodeId);
           deptCounts.family++;
@@ -2553,15 +2563,15 @@ export function buildDynamicKnowledgeGraph(
             color: DOMAIN_TAXONOMY.family.color,
             weight: 2,
             edgeType: 'ENTITY_BRANCH',
-            explanation: `Mother branch under Family`
+            explanation: `Mother branch under Family (${motherDisplayName})`
           });
         }
         if (item.id === motherNodeId) continue;
         parentId = motherNodeId;
         hierarchyLevel = 3;
-        relation = k.includes('occupation') || k.includes('job') ? 'OCCUPATION' : k.includes('status') ? 'STATUS' : 'MEMBER_ATTRIBUTE';
+        relation = k.includes('business') || k.includes('occupation') || k.includes('job') || k.includes('tailor') ? 'OCCUPATION' : k.includes('status') ? 'STATUS' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
-        explanation = `Detail stem of Mother in Family Tree`;
+        explanation = `Detail stem of Mother (${motherDisplayName}) in Family Tree`;
       } else if (k.startsWith('daughter_')) {
         const daughterNodeId = allKeys.has('daughter_name') ? 'mem-daughter_name' : 'mem-entity-daughter';
         if (!nodeIds.has(daughterNodeId)) {
@@ -2670,7 +2680,7 @@ export function buildDynamicKnowledgeGraph(
         relation = k.includes('occupation') || k.includes('job') ? 'OCCUPATION' : k.includes('location') ? 'LOCATION' : 'MEMBER_ATTRIBUTE';
         edgeType = 'ATTRIBUTE_STEM';
         explanation = `Detail stem of Brother in Family Tree`;
-      } else if (k.startsWith('pet_') || k.startsWith('dog_') || k.startsWith('cat_')) {
+      } else if ((k.startsWith('pet_') || k.startsWith('dog_') || k.startsWith('cat_')) && k.split('_').length < 3) {
         const petKey = allKeys.has('pet_name') ? 'mem-pet_name' : allKeys.has('dog_name') ? 'mem-dog_name' : (allKeys.has('cat_name') ? 'mem-cat_name' : 'mem-entity-pet');
         if (!nodeIds.has(petKey)) {
           const isDog = k.startsWith('dog_') || item.value.toLowerCase().includes('dog') || item.value.toLowerCase().includes('retriever') || item.value.toLowerCase().includes('shepherd');

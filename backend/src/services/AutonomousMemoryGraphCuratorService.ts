@@ -245,6 +245,16 @@ export class AutonomousMemoryGraphCuratorService {
         logger.warn('[MemoryGraphCurator] Non-fatal LLM curation error', { error: llmErr.message });
       }
 
+      // ── LAYER 3: DEDICATED MEMORY BUBBLE HIERARCHY & PHANTOM ERADICATION ──────────
+      try {
+        const bubbleCleanup = await this.curateMemoryBubbles(userId);
+        if (bubbleCleanup.bubblesMerged > 0 || bubbleCleanup.bubblesPruned > 0) {
+          result.kgCleaned += bubbleCleanup.bubblesPruned + bubbleCleanup.bubblesMerged;
+        }
+      } catch (bubbleErr: any) {
+        logger.warn('[MemoryGraphCurator] Non-fatal bubble curation error', { error: bubbleErr.message });
+      }
+
       // 3. Invalidate analytics & UI caches if changes were made
       const totalChanges = result.removalsApplied + result.mergesApplied + result.updatesApplied + result.additionsApplied + result.kgCleaned;
       if (totalChanges > 0) {
@@ -1119,6 +1129,114 @@ Curate the memory tree and knowledge graph against the conversation proof and re
         } catch {}
       }
     }
+  }
+
+  /**
+   * Curates memory_bubbles table:
+   * 1. Merges duplicate kinship bubbles (e.g. Papa/My Father into Suresh, Mummy into Rajeshree).
+   * 2. Re-links orphaned memories & reminders to the canonical person bubble.
+   * 3. Eradicates phantom phrase bubbles (e.g. 'Rehta Hai', 'Ka Name Sushant Hai', 'Mere Society Mein', 'Daily', 'Reminder', etc.).
+   * 4. Purges invalid kinship vocative rows from memories table (e.g. father_name = 'Papa').
+   */
+  async curateMemoryBubbles(userId: string): Promise<{ bubblesMerged: number; bubblesPruned: number }> {
+    let bubblesMerged = 0;
+    let bubblesPruned = 0;
+
+    const { data: bubbles, error: bubbleErr } = await supabaseAdmin
+      .from('memory_bubbles')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_archived', false);
+
+    if (bubbleErr || !bubbles || bubbles.length === 0) {
+      return { bubblesMerged, bubblesPruned };
+    }
+
+    // 1. Check family domain bubbles
+    const familyBubbles = bubbles.filter(b => b.domain_key === 'family' && b.bubble_type === 'entity');
+    const fatherBubble = familyBubbles.find(b => b.slug === 'entity:suresh' || (b.relation_type === 'Father' && !/^(papa|my father|father)$/i.test(b.label.trim())));
+    const motherBubble = familyBubbles.find(b => b.slug === 'entity:rajeshree' || (b.relation_type === 'Mother' && !/^(mummy|my mother|mother|mom)$/i.test(b.label.trim())));
+
+    // Merge Papa / My Father into Father bubble
+    if (fatherBubble) {
+      const phantomFatherBubbles = familyBubbles.filter(b => b.id !== fatherBubble.id && (/^(papa|my father|father)$/i.test(b.label.trim()) || b.slug === 'entity:papa' || b.slug === 'entity:my_father'));
+      for (const ph of phantomFatherBubbles) {
+        await supabaseAdmin.from('memories').update({ bubble_id: fatherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
+        await supabaseAdmin.from('reminders').update({ bubble_id: fatherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
+        await supabaseAdmin.from('memory_bubbles').update({ parent_bubble_id: fatherBubble.id }).eq('user_id', userId).eq('parent_bubble_id', ph.id);
+        await supabaseAdmin.from('memory_bubbles').update({ is_archived: true, updated_at: new Date().toISOString(), metadata: { archive_reason: 'merged_into_canonical_father' } }).eq('id', ph.id);
+        bubblesMerged++;
+      }
+    }
+
+    // Merge Mummy into Mother bubble
+    if (motherBubble) {
+      const phantomMotherBubbles = familyBubbles.filter(b => b.id !== motherBubble.id && (/^(mummy|my mother|mother|mom)$/i.test(b.label.trim()) || b.slug === 'entity:mummy'));
+      for (const ph of phantomMotherBubbles) {
+        await supabaseAdmin.from('memories').update({ bubble_id: motherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
+        await supabaseAdmin.from('reminders').update({ bubble_id: motherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
+        await supabaseAdmin.from('memory_bubbles').update({ parent_bubble_id: motherBubble.id }).eq('user_id', userId).eq('parent_bubble_id', ph.id);
+        await supabaseAdmin.from('memory_bubbles').update({ is_archived: true, updated_at: new Date().toISOString(), metadata: { archive_reason: 'merged_into_canonical_mother' } }).eq('id', ph.id);
+        bubblesMerged++;
+      }
+    }
+
+    // 2. Eradicate phantom phrase bubbles
+    const bannedBubblePatterns = [
+      /\b(rehta hai|rehti hai|rehte hai)\b/i,
+      /\b(ka name|ka naam|ki name|unka name|unka naam)\b/i,
+      /\b(mere society|society mein|society issue)\b/i,
+      /\b(chote bacho|bacho kapde|kapde bechte|tailor ka shop)\b/i,
+      /^('s place|place for|for the)/i,
+      /^(daily|reminder|drink|celebration|close friend|childhood friend|family member|acquaintance)$/i
+    ];
+
+    for (const b of bubbles) {
+      if (b.bubble_type === 'domain') continue;
+      const lbl = (b.label || '').trim();
+      if (bannedBubblePatterns.some(p => p.test(lbl)) || lbl.length > 35) {
+        await supabaseAdmin.from('memories').update({ bubble_id: null }).eq('user_id', userId).eq('bubble_id', b.id);
+        await supabaseAdmin.from('reminders').update({ bubble_id: null }).eq('user_id', userId).eq('bubble_id', b.id);
+        await supabaseAdmin.from('memory_bubbles').update({ is_archived: true, updated_at: new Date().toISOString(), metadata: { archive_reason: 'eradicated_phantom_phrase' } }).eq('id', b.id);
+        bubblesPruned++;
+      }
+    }
+
+    // 3. Purge corrupted vocatives in memories table
+    await supabaseAdmin
+      .from('memories')
+      .update({ is_archived: true, lifecycle_state: 'INVALIDATED', supersession_reason: 'kinship_vocative_not_a_name' })
+      .eq('user_id', userId)
+      .eq('key', 'father_name')
+      .in('value', ['Papa', 'My Father', 'Dad', 'Father', 'mere papa', 'papa']);
+
+    await supabaseAdmin
+      .from('memories')
+      .update({ is_archived: true, lifecycle_state: 'INVALIDATED', supersession_reason: 'kinship_vocative_not_a_name' })
+      .eq('user_id', userId)
+      .eq('key', 'mother_name')
+      .in('value', ['Mummy', 'Mother', 'Mom', 'Maa', 'mere mummy', 'mummy']);
+
+    // 4. Ensure father_business & mother_occupation are properly attached
+    if (fatherBubble) {
+      await supabaseAdmin
+        .from('memories')
+        .update({ bubble_id: fatherBubble.id })
+        .eq('user_id', userId)
+        .or('key.eq.father_business,key.eq.father_name')
+        .eq('is_archived', false);
+    }
+
+    if (motherBubble) {
+      await supabaseAdmin
+        .from('memories')
+        .update({ bubble_id: motherBubble.id })
+        .eq('user_id', userId)
+        .or('key.eq.mother_occupation,key.eq.mother_name')
+        .eq('is_archived', false);
+    }
+
+    return { bubblesMerged, bubblesPruned };
   }
 
   private capitalize(s: string): string {

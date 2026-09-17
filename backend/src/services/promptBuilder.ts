@@ -150,6 +150,12 @@ export class PromptBuilder {
 3. CONVERSATIONAL BUBBLE DEPTH & NATURAL CURIOSITY:
    - Memories are mental bubbles with deep branches, not flat 1-word tags.
    - When a memory bubble is brief (e.g. artist, or a friend like Sushant), do NOT hallucinate details to fill the gap. Instead, when the conversation flows, ask a natural curious question to enrich the bubble with their real story.
+4. HARD-PROOF GROUNDING FOR FAMILY & KINSHIP (ZERO EXTRAPOLATION):
+   - When the user asks about family names, relationships, or occupations (e.g. "mere papa ka naam kya hai?", "mere mummy kya karti hai?", "papa ka business kya hai?"):
+     * Your answer MUST BE STRICTLY GROUNDED in the HARD-PROOF facts recorded in [LONG-TERM MEMORY] or [WORKING MEMORY] (e.g. father_name: Suresh, mother_name: Rajeshree, father_business: sells kids clothes, mother_occupation: tailor shop).
+     * Past chat history is ONLY for context, cross-checking, or error correction — NOT for fresh replies about factual knowledge.
+     * NEVER confuse kinship roles/vocatives with personal names. "Papa", "Dad", "Pitaji" are roles; "Suresh" is his name. "Mummy", "Mom", "Maa" are roles; "Rajeshree" is her name. NEVER say "tumhare papa ka naam Papa hai" or "mummy ka naam Mummy hai"!
+     * If a fact is NOT in memory, honestly admit you haven't saved it yet and ask casually to remember it: "Mujhe abhi tak tumhare papa ka naam nahi pata yaar, bata do main yaad rakhungi 😊". NEVER guess or invent.
 `;
 
     if (mode === 'HUMAN_CHAT') {

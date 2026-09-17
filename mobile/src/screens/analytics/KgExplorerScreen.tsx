@@ -151,10 +151,22 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   if (k === 'venture_name' || k === 'business_venture' || k === 'cloud_kitchen_business' || k === 'dhaba_venture') {
     return { title: v || "Shetty's Dhaba", sub: 'Venture' };
   }
-  if (k === 'father_name') return { title: v || 'Father', sub: 'Father' };
-  if (k === 'mother_name') return { title: v || 'Mother', sub: 'Mother' };
-  if (k === 'mother_occupation' || k === 'mother_job') return { title: v || 'Tailor', sub: 'Mother Occupation' };
-  if (k === 'father_business' || k === 'father_job') return { title: v || 'Business', sub: 'Father Business' };
+  if (k === 'father_name' || k === 'father' || k === 'papa' || k.startsWith('father_') || k.startsWith('papa_')) {
+    if (k === 'father_business' || k === 'father_job' || k === 'papa_business') {
+      return { title: v || 'Business', sub: 'Father Business' };
+    }
+    const cleanV = (v || '').trim();
+    const isVocative = /^(father|papa|pitaji|dad|my father|mere papa)$/i.test(cleanV);
+    return { title: !isVocative && cleanV ? cleanV : 'Father', sub: 'Father' };
+  }
+  if (k === 'mother_name' || k === 'mother' || k === 'mummy' || k.startsWith('mother_') || k.startsWith('mummy_')) {
+    if (k === 'mother_occupation' || k === 'mother_job' || k === 'mummy_occupation') {
+      return { title: v || 'Tailor', sub: 'Mother Occupation' };
+    }
+    const cleanV = (v || '').trim();
+    const isVocative = /^(mother|mummy|mom|maa|my mother|mere mummy)$/i.test(cleanV);
+    return { title: !isVocative && cleanV ? cleanV : 'Mother', sub: 'Mother' };
+  }
   if (k === 'daughter_name') return { title: v || 'Daughter', sub: 'Daughter' };
   if (k === 'sister_name') return { title: v || 'Sister', sub: 'Sister' };
   if (k === 'brother_name') return { title: v || 'Brother', sub: 'Brother' };
@@ -429,8 +441,14 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       if (norm.includes('family_details') || norm === 'family_details') continue;
       if (norm.includes('sakshi') || norm.includes('wife')) norm = 'sakshi';
       if (norm.includes('shreshth') || norm.includes('son')) norm = 'shreshth';
+      if (norm.includes('suresh') || norm.includes('father') || norm.includes('papa') || norm.includes('pitaji') || norm.includes('dad')) norm = 'father';
+      if (norm.includes('rajeshree') || norm.includes('mother') || norm.includes('mummy') || norm.includes('maa') || norm.includes('mom')) norm = 'mother';
       if (norm.includes('tiku') || norm.includes('tuku') || norm.includes('family_nickname') || norm.includes('son_nickname')) {
         // Redundant nickname in branch list - should never be an entity branch
+        continue;
+      }
+      if (norm.includes('rehta_hai') || norm.includes('mere_society') || norm.includes('ka_name') || norm.includes('society_issue') || norm === 'daily' || norm === 'reminder' || norm === 'drink' || norm === 'celebration') {
+        // Phantom fragment branches - filter from rendering
         continue;
       }
 

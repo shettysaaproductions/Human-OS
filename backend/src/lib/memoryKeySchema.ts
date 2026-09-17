@@ -19,8 +19,8 @@
 const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: mother ──────────────────────────────────────────────────────────
   mother_name: [
-    'mothers_name', 'moms_name', 'mom_name', 'maa_name', 'maa', 'mom',
-    'mother', 'mummy_name', 'mata_name', 'maa_ka_naam', 'mummy_ka_naam', 'mom_ka_naam', 'mother_ka_naam', 'mother_real_name',
+    'mothers_name', 'moms_name', 'mom_name', 'maa_name',
+    'mummy_name', 'mata_name', 'maa_ka_naam', 'mummy_ka_naam', 'mom_ka_naam', 'mother_ka_naam', 'mother_real_name',
   ],
   mother_nickname: [
     'mothers_nickname', 'mom_nickname', 'moms_nickname', 'maa_ka_nickname', 'mummy_ka_nickname',
@@ -29,7 +29,7 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
   // ── Family: father ──────────────────────────────────────────────────────────
   father_name: [
     'fathers_name', 'dads_name', 'dad_name', 'papa_name', 'pita_name',
-    'dad', 'father', 'papa', 'baap_name', 'papa_ka_naam', 'father_ka_naam', 'pita_ka_naam', 'father_real_name',
+    'baap_name', 'papa_ka_naam', 'father_ka_naam', 'pita_ka_naam', 'father_real_name',
   ],
   father_nickname: [
     'fathers_nickname', 'dad_nickname', 'dads_nickname', 'papa_ka_nickname',
@@ -138,12 +138,19 @@ const CANONICAL_ALIAS_MAP: Record<string, string[]> = {
     'daughters_birth_date', 'daughter_dob', 'daughter_birthday', 'daughters_dob', 'daughters_birthday',
     'daughter_date_of_birth', 'beti_ka_bday', 'beti_ki_date_of_birth'
   ],
-  // ── Family: occupations ──────────────────────────────────────────────────────
+  // ── Family: occupations & businesses ──────────────────────────────────────────
   father_occupation: [
     'fathers_occupation', 'dad_occupation', 'dads_occupation', 'papa_ka_kaam', 'father_profession', 'father_job', 'dads_job'
   ],
+  father_business: [
+    'fathers_business', 'dad_business', 'dads_business', 'papa_business', 'father_business',
+    'papa_ka_business', 'father_ka_business', 'papa_kaam', 'father_work', 'papa_work', 'dads_work',
+    'papa_store', 'father_store', 'papa_shop', 'father_shop', 'clothes_business', 'kapde_business'
+  ],
   mother_occupation: [
-    'mothers_occupation', 'mom_occupation', 'moms_occupation', 'maa_ka_kaam', 'mother_profession', 'mother_job', 'moms_job'
+    'mothers_occupation', 'mom_occupation', 'moms_occupation', 'maa_ka_kaam', 'mother_profession', 'mother_job', 'moms_job',
+    'mummy_occupation', 'mummy_ka_kaam', 'mummy_job', 'mummy_shop', 'mother_shop', 'tailor_shop', 'mummy_tailor', 'mother_tailoring',
+    'mummy_business', 'mother_business'
   ],
   wife_occupation: [
     'wifes_occupation', 'wife_profession', 'wife_job', 'biwi_ka_kaam'

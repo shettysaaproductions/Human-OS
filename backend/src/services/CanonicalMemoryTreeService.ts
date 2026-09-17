@@ -103,6 +103,36 @@ function capitalizeWords(raw: string): string {
 function isInvalidEntityName(name: string): boolean {
   if (!name || name.trim().length < 2) return true;
   const lower = name.toLowerCase().trim();
+
+  // Ban fragments with leading punctuation or overly long phrases
+  if (/^['".,;?!]/.test(lower) || lower.length > 35) return true;
+
+  // Banned kinship vocatives & generic relational roles (NOT entity names!)
+  const kinshipVocatives = new Set([
+    'father', 'papa', 'pitaji', 'dad', 'daddy', 'baap', 'bapu', 'abbu',
+    'mother', 'mummy', 'mom', 'maa', 'mataji', 'ammi', 'aai',
+    'my father', 'my mother', 'mere papa', 'mere mummy', 'meri mummy', 'mera baap',
+    'son', 'beta', 'child', 'children', 'bache', 'bacho', 'kid', 'kids', 'daughter', 'beti', 'gudiya',
+    'wife', 'biwi', 'patni', 'husband', 'pati', 'brother', 'bhai', 'bhaiya', 'sister', 'behen', 'didi',
+    'uncle', 'aunty', 'chacha', 'chachi', 'mama', 'mami', 'bua', 'fufa',
+    'friend', 'dost', 'close friend', 'childhood friend', 'family member', 'acquaintance',
+    'stranger', 'colleague', 'coworker', 'mentor', 'boss', 'manager', 'partner'
+  ]);
+  if (kinshipVocatives.has(lower)) return true;
+
+  // Banned Hinglish conversational fragments and phantom phrases
+  const bannedPhrases = [
+    'rehta hai', 'rehti hai', 'rehte hai', 'rehta', 'rehti', 'rehte',
+    'mere society mein', 'society mein', 'society me', 'society issue',
+    'ka name', 'ka naam', 'ki name', 'ki naam', 'unka name', 'unka naam', 'uska name', 'uska naam',
+    'chote bacho', 'bacho kapde', 'kapde bechte', 'bechte hai', 'bechta hai', 'sell karte',
+    'tailor ka shop', 'shop run', 'run karti', 'run karta', 'daily', 'reminder', 'drink',
+    'celebration', 'ganpati celebrations', 'place for', 'for the', 'society'
+  ];
+  for (const phrase of bannedPhrases) {
+    if (lower === phrase || lower.includes(phrase)) return true;
+  }
+
   const stopwords = new Set([
     'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
     'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself',
@@ -117,11 +147,17 @@ function isInvalidEntityName(name: string): boolean {
     'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just',
     'don', 'should', 'now', 'one', 'the one', 'talking', 'talking about', 'friend', 'dost',
     'character', 'pet', 'person', 'insaan', 'human', 'someone', 'guy', 'dude', 'girl', 'boy',
-    'call', 'remind', 'meet', 'tell', 'ask', 'email', 'message', 'script', 'tomorrow', 'today'
+    'call', 'remind', 'meet', 'tell', 'ask', 'email', 'message', 'script', 'tomorrow', 'today',
+    'mera', 'meri', 'mere', 'apna', 'apni', 'apne', 'unka', 'unki', 'unke', 'uska', 'uski', 'uske',
+    'karna', 'karti', 'karta', 'karte', 'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'hoge',
+    'mein', 'me', 'se', 'ko', 'par', 'pe', 'bhi', 'toh', 'hi', 'kuch', 'bata'
   ]);
   if (stopwords.has(lower)) return true;
   const words = lower.split(/\s+/).filter(Boolean);
   if (words.every(w => stopwords.has(w))) return true;
+  if (words.length >= 2 && words.some(w => ['hai', 'tha', 'thi', 'the', 'karna', 'karti', 'karta', 'karte', 'rehta', 'rehti', 'mein', 'bechte', 'karte'].includes(w))) {
+    return true;
+  }
   return false;
 }
 
@@ -309,6 +345,157 @@ export class CanonicalMemoryTreeService {
         temporalState,
         isAmbiguous: false,
       };
+    }
+
+    // Pattern 1.5: Direct User Family Member Kinship & Name Resolution
+    // Enforces the Limited Relations Law:
+    // - "my father name is Suresh", "mere papa ka naam Suresh hai", "my mother name is Rajeshree"
+    // - "mere papa bacho kapde bechte hai", "mere mummy tailor ka shop run karti hai", "papa ko call karna"
+    // Always maps kinship vocatives (papa, mummy, dad, mom) to the canonical person entity (Suresh, Rajeshree)
+    const familyDeclarationMatch = text.match(/\b(?:my|mere|mera|meri)?\s*(father|papa|pitaji|dad|mother|mummy|mom|maa|mataji|wife|biwi|patni|husband|pati|son|beta|daughter|beti|sister|behen|brother|bhai)\s*(?:(?:'s)?\s*name\s+(?:is|hai)|(?:\s*ka|\s*ki|\s*ke)?\s*(?:name|naam)\s*(?:hai\s+)?|\s+is\s+|\s+hai\s+)\s*([A-Za-z][A-Za-z0-9_-]{1,30})\b/i);
+
+    const isFamilyDeclaration = !!(familyDeclarationMatch && !isInvalidEntityName(familyDeclarationMatch[2]));
+    const matchedFamilyRole = isFamilyDeclaration
+      ? familyDeclarationMatch[1].toLowerCase()
+      : (/\b(papa|pitaji|dad|baap|father)\b/i.test(lower) ? 'father'
+        : /\b(mummy|mom|maa|mataji|mother)\b/i.test(lower) ? 'mother'
+        : /\b(biwi|patni|wife)\b/i.test(lower) ? 'wife'
+        : /\b(pati|husband)\b/i.test(lower) ? 'husband'
+        : /\b(beta|son)\b/i.test(lower) ? 'son'
+        : /\b(beti|daughter)\b/i.test(lower) ? 'daughter'
+        : /\b(bhai|bhaiya|brother)\b/i.test(lower) ? 'brother'
+        : /\b(behen|didi|sister)\b/i.test(lower) ? 'sister'
+        : undefined);
+
+    if (matchedFamilyRole) {
+      const canonicalRel = matchedFamilyRole === 'papa' || matchedFamilyRole === 'pitaji' || matchedFamilyRole === 'dad' || matchedFamilyRole === 'baap' ? 'Father'
+        : matchedFamilyRole === 'mummy' || matchedFamilyRole === 'mom' || matchedFamilyRole === 'maa' || matchedFamilyRole === 'mataji' ? 'Mother'
+        : matchedFamilyRole === 'biwi' || matchedFamilyRole === 'patni' ? 'Wife'
+        : matchedFamilyRole === 'pati' ? 'Husband'
+        : matchedFamilyRole === 'beta' ? 'Son'
+        : matchedFamilyRole === 'beti' ? 'Daughter'
+        : matchedFamilyRole === 'bhai' || matchedFamilyRole === 'bhaiya' ? 'Brother'
+        : matchedFamilyRole === 'behen' || matchedFamilyRole === 'didi' ? 'Sister'
+        : capitalizeWords(matchedFamilyRole);
+
+      const declaredName = isFamilyDeclaration ? capitalizeWords(familyDeclarationMatch![2]) : undefined;
+
+      // 1. Check existing active bubbles in family domain for this relation
+      const { data: existingFamilyBubbles } = await supabaseAdmin
+        .from('memory_bubbles')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('domain_key', 'family')
+        .eq('relation_type', canonicalRel)
+        .eq('is_archived', false);
+
+      let targetBubble = existingFamilyBubbles?.find(b => !isInvalidEntityName(b.label));
+
+      // Also check if [rel]_name exists in memories
+      const { data: nameMem } = await supabaseAdmin
+        .from('memories')
+        .select('value, bubble_id')
+        .eq('user_id', userId)
+        .eq('key', `${canonicalRel.toLowerCase()}_name`)
+        .eq('is_archived', false)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const knownNameFromMem = (nameMem?.value && !isInvalidEntityName(nameMem.value)) ? capitalizeWords(nameMem.value) : undefined;
+
+      if (!targetBubble && knownNameFromMem) {
+        const { data: bubbleByName } = await supabaseAdmin
+          .from('memory_bubbles')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('domain_key', 'family')
+          .ilike('label', knownNameFromMem)
+          .eq('is_archived', false)
+          .maybeSingle();
+        if (bubbleByName) targetBubble = bubbleByName as MemoryBubbleRecord;
+      }
+
+      if (declaredName) {
+        if (targetBubble) {
+          if (targetBubble.label !== declaredName) {
+            const newSlug = `entity:${normalizeSlug(declaredName)}`;
+            await supabaseAdmin
+              .from('memory_bubbles')
+              .update({ label: declaredName, slug: newSlug, relation_type: canonicalRel, updated_at: new Date().toISOString() })
+              .eq('id', targetBubble.id);
+            targetBubble.label = declaredName;
+            targetBubble.slug = newSlug;
+          }
+          return {
+            entityId: targetBubble.slug,
+            entityName: declaredName,
+            entityType: 'person',
+            domainKey: 'family',
+            relationType: canonicalRel,
+            bubbleId: targetBubble.id,
+            isNew: false,
+            confidence: 0.99,
+            authority: 'EXPLICIT_USER',
+            temporalState,
+            isAmbiguous: false,
+          };
+        } else {
+          const created = await this.resolveOrCreateEntityBubble(userId, {
+            entityName: declaredName,
+            entityType: 'person',
+            domainKey: 'family',
+            relationType: canonicalRel,
+          });
+          return {
+            entityId: created.slug,
+            entityName: declaredName,
+            entityType: 'person',
+            domainKey: 'family',
+            relationType: canonicalRel,
+            bubbleId: created.id,
+            isNew: true,
+            confidence: 0.99,
+            authority: 'EXPLICIT_USER',
+            temporalState,
+            isAmbiguous: false,
+          };
+        }
+      } else if (targetBubble) {
+        return {
+          entityId: targetBubble.slug,
+          entityName: targetBubble.label,
+          entityType: 'person',
+          domainKey: 'family',
+          relationType: canonicalRel,
+          bubbleId: targetBubble.id,
+          isNew: false,
+          confidence: 0.98,
+          authority: 'EXPLICIT_USER',
+          temporalState,
+          isAmbiguous: false,
+        };
+      } else if (knownNameFromMem) {
+        const created = await this.resolveOrCreateEntityBubble(userId, {
+          entityName: knownNameFromMem,
+          entityType: 'person',
+          domainKey: 'family',
+          relationType: canonicalRel,
+        });
+        return {
+          entityId: created.slug,
+          entityName: knownNameFromMem,
+          entityType: 'person',
+          domainKey: 'family',
+          relationType: canonicalRel,
+          bubbleId: created.id,
+          isNew: false,
+          confidence: 0.95,
+          authority: 'EXPLICIT_USER',
+          temporalState,
+          isAmbiguous: false,
+        };
+      }
     }
 
     // Pattern 2: Project / Fictional Character
@@ -643,16 +830,64 @@ export class CanonicalMemoryTreeService {
     let entityTypeCandidate: 'person' | 'pet' | 'character' | 'project' | 'concept' = 'person';
 
     const friendMatch = key.match(/^friend_([a-z0-9_]+)$/);
-    const familyMatch = key.match(/^(?:father|mother|wife|husband|brother|sister|son|daughter)_([a-z0-9_]+)$/);
+    const familyMatch = key.match(/^(?:father|mother|wife|husband|brother|sister|son|daughter)_(.+)$/);
     const entityPropMatch = key.match(/^entity:([a-z0-9_]+):/);
     const prefixMatch = key.match(/^([a-z0-9_]+)_(?:location|occupation|city|work|job|age|phone|birthday|hobby)$/);
 
     if (friendMatch) {
-      entityNameCandidate = val;
-      relationCandidate = 'Friend';
+      if (!isInvalidEntityName(val)) {
+        entityNameCandidate = val;
+        relationCandidate = 'Friend';
+      }
     } else if (familyMatch) {
-      entityNameCandidate = val;
-      relationCandidate = capitalizeWords(key.split('_')[0]);
+      const rel = key.split('_')[0].toLowerCase();
+      const attr = familyMatch[1].toLowerCase();
+      const relTitle = capitalizeWords(rel);
+
+      if (attr === 'name' || attr === 'real_name') {
+        if (!isInvalidEntityName(val)) {
+          return this.resolveOrCreateEntityBubble(userId, {
+            entityName: val,
+            entityType: 'person',
+            domainKey: 'family',
+            relationType: relTitle,
+          });
+        }
+      } else {
+        // Attribute stem of family member (e.g. father_business, mother_occupation)
+        // Attach directly to the existing entity bubble for this family relation!
+        const { data: existingFamilyBubbles } = await supabaseAdmin
+          .from('memory_bubbles')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('domain_key', 'family')
+          .eq('relation_type', relTitle)
+          .eq('is_archived', false);
+
+        const targetBubble = existingFamilyBubbles?.find(b => !isInvalidEntityName(b.label));
+        if (targetBubble) {
+          return targetBubble as MemoryBubbleRecord;
+        }
+
+        // Also check if [rel]_name exists in memories
+        const { data: nameMem } = await supabaseAdmin
+          .from('memories')
+          .select('value, bubble_id')
+          .eq('user_id', userId)
+          .eq('key', `${rel}_name`)
+          .eq('is_archived', false)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const entityLabel = (nameMem?.value && !isInvalidEntityName(nameMem.value)) ? capitalizeWords(nameMem.value) : relTitle;
+        return this.resolveOrCreateEntityBubble(userId, {
+          entityName: entityLabel,
+          entityType: 'person',
+          domainKey: 'family',
+          relationType: relTitle,
+        });
+      }
     } else if (entityPropMatch) {
       entityNameCandidate = entityPropMatch[1];
     } else if (prefixMatch) {

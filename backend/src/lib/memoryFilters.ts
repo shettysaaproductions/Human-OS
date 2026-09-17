@@ -107,6 +107,15 @@ export function isGarbageMemoryValue(key: string, value: string, source?: string
     return true;
   }
 
+  // Reject kinship vocatives and role descriptors stored as entity names (e.g. father_name: "Papa", mother_name: "Mummy")
+  if (k.endsWith('_name')) {
+    const KINSHIP_VOCATIVES = /^(?:my\s+|mere\s+|meri\s+)?(?:father|papa|pitaji|dad|daddy|baap|bapu|mother|mummy|mom|maa|mataji|ammi|aai|wife|biwi|patni|husband|pati|son|beta|bacha|children|daughter|beti|brother|bhai|sister|behen|didi|friend|dost|uncle|aunty)$/i;
+    if (KINSHIP_VOCATIVES.test(v.trim())) {
+      logger.info('[MemoryFilter] BLOCKED kinship vocative as person name', { key, value: v, source });
+      return true;
+    }
+  }
+
   for (const pattern of GARBAGE_VALUE_PATTERNS) {
     if (pattern.test(v)) {
       logger.info('[MemoryFilter] BLOCKED garbage value', { key, value: v, source });
