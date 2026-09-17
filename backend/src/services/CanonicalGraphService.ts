@@ -9,6 +9,7 @@
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { cache } from '../lib/cache';
 import {
   LifeDomainKey,
   DOMAIN_TAXONOMY,
@@ -178,6 +179,34 @@ export class CanonicalGraphService {
       });
     }
 
+    // ── 4b. Cross-Entity Semantic Relationship Edges (Neural Bridges) ─────────
+    for (const b of validBubbles) {
+      const meta = (b.metadata as Record<string, any>) || {};
+      const relationships = Array.isArray(meta.relationships) ? meta.relationships : [];
+      const sourceNodeId = `bubble-${b.id}`;
+
+      for (const rel of relationships) {
+        if (rel.targetEntityId && bubbleNodeIdMap.has(rel.targetEntityId)) {
+          const targetNodeId = bubbleNodeIdMap.get(rel.targetEntityId)!;
+          const edgeId = `edge-rel-${b.id}-${rel.targetEntityId}`;
+          const reciprocalId = `edge-rel-${rel.targetEntityId}-${b.id}`;
+          if (!edges.some((e) => e.id === edgeId || e.id === reciprocalId)) {
+            edges.push({
+              id: edgeId,
+              source: sourceNodeId,
+              target: targetNodeId,
+              relation: rel.relationType ? rel.relationType.toUpperCase().replace(/\s+/g, '_') : 'RELATED_TO',
+              color: '#EC4899',
+              weight: 2,
+              isCrossDomain: true,
+              edgeType: 'NEURAL_BRIDGE',
+              explanation: `${b.label} is ${rel.relationType} to ${rel.targetEntityName || 'entity'}`,
+            });
+          }
+        }
+      }
+    }
+
     // ── 5. Build Level 3 Attribute Stems (Linked Memories) ──────────────────────
     const validMemories = memories || [];
     for (const m of validMemories) {
@@ -332,6 +361,167 @@ export class CanonicalGraphService {
     if (p.includes('skill') || p.includes('art') || p.includes('hobby')) return '🎨';
     return domain ? DOMAIN_TAXONOMY[domain]?.emoji || '•' : '•';
   }
+
+  /**
+   * Deterministically reconstructs the entire kg_nodes and kg_edges read projection
+   * starting from canonical memory_bubbles and their relationships.
+   * Leverages the authoritative memory_bubbles.id -> kg_nodes.bubble_id mapping.
+   */
+  async rebuildProjections(userId: string): Promise<{ nodesCreatedOrUpdated: number; edgesCreatedOrUpdated: number }> {
+    logger.info('[CanonicalGraphService] Rebuilding kg_nodes and kg_edges projections from canonical memory_bubbles', { userId });
+
+    // 1. Fetch all active entity & branch bubbles
+    const { data: bubbles, error: bErr } = await supabaseAdmin
+      .from('memory_bubbles')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_archived', false)
+      .in('bubble_type', ['entity', 'branch']);
+
+    if (bErr || !bubbles) {
+      logger.error('[CanonicalGraphService] Failed to fetch memory_bubbles for rebuild', { error: bErr?.message, userId });
+      return { nodesCreatedOrUpdated: 0, edgesCreatedOrUpdated: 0 };
+    }
+
+    let nodesCount = 0;
+    let edgesCount = 0;
+    const nowIso = new Date().toISOString();
+    const bubbleToKgNodeMap = new Map<string, string>(); // bubble.id -> kg_nodes.id
+
+    // 2. Synchronize kg_nodes by bubble_id
+    for (const b of bubbles) {
+      const { data: existingNode } = await supabaseAdmin
+        .from('kg_nodes')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('bubble_id', b.id)
+        .maybeSingle();
+
+      const attributes = {
+        bubble_id: b.id,
+        domain_key: b.domain_key,
+        relation_type: b.relation_type,
+        aliases: (b.metadata as any)?.aliases || [],
+        ...((b.metadata as any)?.attributes || {}),
+      };
+
+      if (existingNode) {
+        await supabaseAdmin
+          .from('kg_nodes')
+          .update({
+            name: b.label,
+            entity_type: b.bubble_type === 'entity' ? 'person' : b.bubble_type,
+            attributes,
+            updated_at: nowIso,
+          })
+          .eq('id', existingNode.id);
+        bubbleToKgNodeMap.set(b.id, existingNode.id);
+        nodesCount++;
+      } else {
+        const { data: insertedNode, error: insErr } = await supabaseAdmin
+          .from('kg_nodes')
+          .insert({
+            user_id: userId,
+            bubble_id: b.id,
+            name: b.label,
+            entity_type: b.bubble_type === 'entity' ? 'person' : b.bubble_type,
+            attributes,
+          })
+          .select('id')
+          .single();
+        if (!insErr && insertedNode) {
+          bubbleToKgNodeMap.set(b.id, insertedNode.id);
+          nodesCount++;
+        }
+      }
+    }
+
+    // 3. Synchronize kg_edges from metadata.relationships
+    for (const b of bubbles) {
+      const sourceKgId = bubbleToKgNodeMap.get(b.id);
+      if (!sourceKgId) continue;
+
+      const meta = (b.metadata as Record<string, any>) || {};
+      const rels = Array.isArray(meta.relationships) ? meta.relationships : [];
+
+      for (const rel of rels) {
+        if (!rel.targetEntityId) continue;
+        const targetKgId = bubbleToKgNodeMap.get(rel.targetEntityId);
+        if (!targetKgId) continue;
+
+        const relType = (rel.relationType || 'RELATED_TO').toUpperCase().replace(/\s+/g, '_');
+        const weight = Math.round((rel.confidence || 0.95) * 100);
+
+        const { data: existingEdge } = await supabaseAdmin
+          .from('kg_edges')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('source_node_id', sourceKgId)
+          .eq('target_node_id', targetKgId)
+          .maybeSingle();
+
+        if (existingEdge) {
+          await supabaseAdmin
+            .from('kg_edges')
+            .update({
+              relation_type: relType,
+              weight,
+              updated_at: nowIso,
+            })
+            .eq('id', existingEdge.id);
+          edgesCount++;
+        } else {
+          const { error: insEdgeErr } = await supabaseAdmin
+            .from('kg_edges')
+            .insert({
+              user_id: userId,
+              source_node_id: sourceKgId,
+              target_node_id: targetKgId,
+              relation_type: relType,
+              weight,
+            });
+          if (!insEdgeErr) edgesCount++;
+        }
+      }
+
+      // Hierarchy edge to parent entity if parent is also an entity bubble
+      if (b.parent_bubble_id && bubbleToKgNodeMap.has(b.parent_bubble_id)) {
+        const parentKgId = bubbleToKgNodeMap.get(b.parent_bubble_id)!;
+        const { data: existingHierarchyEdge } = await supabaseAdmin
+          .from('kg_edges')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('source_node_id', parentKgId)
+          .eq('target_node_id', sourceKgId)
+          .maybeSingle();
+
+        if (!existingHierarchyEdge) {
+          await supabaseAdmin.from('kg_edges').insert({
+            user_id: userId,
+            source_node_id: parentKgId,
+            target_node_id: sourceKgId,
+            relation_type: 'HAS_CHILD',
+            weight: 1,
+          });
+          edgesCount++;
+        }
+      }
+    }
+
+    this.invalidateGraphCache(userId);
+    logger.info('[CanonicalGraphService] Rebuilt projections complete', {
+      userId,
+      nodesCreatedOrUpdated: nodesCount,
+      edgesCreatedOrUpdated: edgesCount,
+    });
+    return { nodesCreatedOrUpdated: nodesCount, edgesCreatedOrUpdated: edgesCount };
+  }
+
+  invalidateGraphCache(userId: string): void {
+    const cacheKey = `${userId}:kg`;
+    cache.invalidate(cacheKey);
+  }
 }
 
 export const canonicalGraphService = CanonicalGraphService.getInstance();
+

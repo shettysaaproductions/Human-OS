@@ -1162,20 +1162,68 @@ class NovaVoiceService {
             a.tool === 'MemoryRepository' || a.tool === 'MomentEngine' || a.tool === 'LifeEventExtractor'
           );
           if (memoryActions.length > 0) {
+            const { canonicalEntityEngine } = await import('./CanonicalEntityEngine');
             const { memoryRepository } = await import('./memoryRepository');
             for (const a of memoryActions) {
               if (a.data?.key && a.data?.value) {
-                await memoryRepository.upsertMemory(userId, {
-                  key: a.data.key,
-                  value: a.data.value,
-                  type: a.data.domain || a.data.type || 'lifestyle',
-                  importance: 6,
-                  confidence: 0.9,
-                  shouldPersist: true,
-                  source_authority: 'deterministic',
-                }, pair.user).catch((e: any) => {
-                  logger.warn('[NovaVoiceService] Transcript memory persistence failed', { key: a.data.key, error: e?.message });
-                });
+                try {
+                  // Attempt entity resolution to enforce strict canonical ownership (Gate 3 & 9)
+                  const keyStr = a.data.key.toLowerCase();
+                  let targetEntityName: string | null = null;
+                  let targetRelation: string | undefined = undefined;
+
+                  if (keyStr.includes('wife_') || keyStr.includes('sakshi_')) {
+                    targetEntityName = 'Sakshi';
+                    targetRelation = 'Wife';
+                  } else if (keyStr.includes('son_') || keyStr.includes('tiku_') || keyStr.includes('shreshth_')) {
+                    targetEntityName = 'Shreshth';
+                    targetRelation = 'Son';
+                  } else if (keyStr.includes('father_') || keyStr.includes('suresh_')) {
+                    targetEntityName = 'Suresh';
+                    targetRelation = 'Father';
+                  } else if (keyStr.includes('mother_') || keyStr.includes('rajeshree_')) {
+                    targetEntityName = 'Rajeshree';
+                    targetRelation = 'Mother';
+                  } else if (keyStr.includes('ijaz_') || keyStr.includes('colleague_')) {
+                    targetEntityName = 'Ijaz';
+                    targetRelation = 'Friend';
+                  }
+
+                  if (targetEntityName) {
+                    const entity = await canonicalEntityEngine.createOrResolveEntity(
+                      userId,
+                      targetEntityName,
+                      targetRelation,
+                      'family'
+                    );
+                    await canonicalEntityEngine.attachFactToEntity(
+                      userId,
+                      entity.id,
+                      a.data.key,
+                      a.data.value,
+                      {
+                        source: 'live_voice',
+                        confidence: 0.9,
+                        acquisitionMode: 'user_stated',
+                        timestamp: new Date().toISOString(),
+                        evidenceText: pair.user,
+                      }
+                    );
+                  } else {
+                    // Legitimate user-level memory
+                    await memoryRepository.upsertMemory(userId, {
+                      key: a.data.key,
+                      value: a.data.value,
+                      type: a.data.domain || a.data.type || 'lifestyle',
+                      importance: 6,
+                      confidence: 0.9,
+                      shouldPersist: true,
+                      source_authority: 'deterministic',
+                    }, pair.user);
+                  }
+                } catch (e: any) {
+                  logger.warn('[NovaVoiceService] Canonical memory persistence failed', { key: a.data.key, error: e?.message });
+                }
               }
             }
           }

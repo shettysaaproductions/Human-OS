@@ -1,5 +1,88 @@
 export type ResponseMode = 'HUMAN_CHAT' | 'LONG_CONTEXT';
 
+export type ConversationDepth = 'SHORT_WHATSAPP' | 'NORMAL' | 'DEEP_STRUCTURED' | 'VOICE';
+
+export interface AdaptiveDepthPolicy {
+  depth: ConversationDepth;
+  reason: string;
+  recommendedMaxTokens: number;
+  temperature: number;
+  systemDirective: string;
+}
+
+export interface ConversationContextInput {
+  modality?: 'text' | 'voice_note' | 'live_voice';
+  recentMessages?: { role: string; content: string }[];
+  consecutiveShortReplies?: number;
+  userVelocity?: 'fast' | 'normal' | 'slow';
+}
+
+/**
+ * Authoritative Adaptive Communication Policy (Gate 7).
+ * Context + conversation history influences depth (SHORT_WHATSAPP / NORMAL / DEEP_STRUCTURED / VOICE),
+ * preserving Nova's core warm, companion personality throughout.
+ */
+export function classifyConversationDepth(
+  message: string,
+  context?: ConversationContextInput
+): AdaptiveDepthPolicy {
+  const lower = (message || '').toLowerCase().trim();
+  const len = lower.length;
+  const modality = context?.modality || 'text';
+
+  // 1. LIVE_VOICE Modality takes absolute precedence for audio flow
+  if (modality === 'live_voice') {
+    return {
+      depth: 'VOICE',
+      reason: 'Live voice modality requires conversational brevity and fluid dialogue flow',
+      recommendedMaxTokens: 250,
+      temperature: 0.7,
+      systemDirective: 'Mode: VOICE. Speak naturally and concisely like a friend in an audio call. Keep answers under 2-3 sentences. No bullet lists, markdown asterisks, or robotic formatting.',
+    };
+  }
+
+  // 2. Explicit In-depth / Analytical / Strategic Triggers
+  const isExplicitDeepDive = /\b(explain|detail|difference|compare|research|samjhao|batao in detail|deep dive|analysis|pros and cons|step by step|break down|architecture|roadmap|strategy)\b/i.test(lower);
+  const isCreativeDraft = /\b(write|poem|story|email|draft|script|lyrics|article|letter|essay|speech)\b/i.test(lower);
+  const isMultiQuestionComplex = (lower.match(/\?/g) || []).length >= 2 && len > 120;
+  const isLongStrategicPrompt = len > 220 && /\b(plan|strategy|system|design|learn|prepare|career)\b/i.test(lower);
+
+  if (isExplicitDeepDive || isCreativeDraft || isMultiQuestionComplex || isLongStrategicPrompt) {
+    return {
+      depth: 'DEEP_STRUCTURED',
+      reason: isExplicitDeepDive ? 'Explicit deep-dive or analytical explanation requested' : 'Complex or multi-question strategic inquiry',
+      recommendedMaxTokens: isCreativeDraft ? 1500 : 1000,
+      temperature: isCreativeDraft ? 0.85 : 0.6,
+      systemDirective: 'Mode: DEEP_STRUCTURED. The user requested deep, comprehensive explanation or structured assistance. Provide disciplined, step-by-step, actionable guidance with clear sections while maintaining Nova’s warm, empathetic companion tone.',
+    };
+  }
+
+  // 3. Short Casual WhatsApp Banter
+  const isSingleWordAffirmation = /^(?:ok|okay|k|cool|nice|hmm|hm|achha|acha|sahi|theek hai|thik hai|haan|ha|sure|yup|yep|yeah|yes|nope|nah|bye|gn)\.?$/i.test(lower);
+  const isQuickStatusUpdate = len < 60 && !lower.includes('?') && !/\b(kya|kab|kaise|kitna|kyun|how|what|when|why|who)\b/i.test(lower);
+  const isCasualGreeting = /^(?:hi|hey|hello|sup|yo|kya chal raha|kaise ho|wassup|hii+)\.?$/i.test(lower);
+  const isShortEmotionalVent = len < 90 && /\b(sad|tired|exhausted|bura laga|mood off|tension|stress|dukhi)\b/i.test(lower);
+
+  if (isSingleWordAffirmation || isQuickStatusUpdate || isCasualGreeting || isShortEmotionalVent) {
+    return {
+      depth: 'SHORT_WHATSAPP',
+      reason: 'Casual WhatsApp check-in, affirmation, or concise emotional presence',
+      recommendedMaxTokens: 250,
+      temperature: 0.75,
+      systemDirective: 'Mode: SHORT_WHATSAPP. Text like a real companion on WhatsApp: 1-2 punchy, authentic sentences max. Zero robotic pleasantries or unprompted lectures. Move the conversation forward naturally.',
+    };
+  }
+
+  // 4. Balanced Companion Chat (Default)
+  return {
+    depth: 'NORMAL',
+    reason: 'Standard conversational companion turn',
+    recommendedMaxTokens: 450,
+    temperature: 0.7,
+    systemDirective: 'Mode: NORMAL. Balanced conversational tone. Friendly, empathetic, and attentive (2-4 sentences). Answer directly with warmth.',
+  };
+}
+
 export interface ResponseConfig {
   mode: ResponseMode;        // Which mode the LLM should use
   maxTokens: number;         // Dynamic token cap
@@ -163,4 +246,10 @@ export function synthesizeContextualOptions(input: ContextualOptionsInput): stri
 
   return [];
 }
+
+export const responseIntelligence = {
+  classifyConversationDepth,
+  classifyIntent,
+  synthesizeContextualOptions,
+};
 

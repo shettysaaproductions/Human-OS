@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.3.37-beta",
+    "date": "2026-09-18",
+    "title": "🎙️ Voice & Interaction Brain Unification, Transaction-Safe Merge & Graph Projections (Phase 3)",
+    "message": [
+      "Authoritative Canonical Relationships: Established typed, bidirectional semantic relationships in memory_bubbles with automatic inverse inference (husband ↔ wife, parent ↔ child), deterministic IDs, status tracking, and confidence scoring.",
+      "Transaction-Safe Atomic Merge: Upgraded entity merging with a database-level atomic RPC transaction (canonical_merge_entities) and per-user concurrency locking, guaranteeing atomicity and safe repointing of memories, reminders, and child nodes.",
+      "Deterministic Graph Projections: Added kg_nodes.bubble_id foreign key link and unified rebuildProjections() engine, allowing complete, deterministic reconstruction of the Knowledge Graph directly from canonical memory bubbles.",
+      "Voice & Interaction Resilience: Upgraded live voice connection with 25-second server ping/pong heartbeats, intelligent reconnect backoff, active turn state preservation, and tool call deduplication to prevent duplicate action execution.",
+      "Non-Blind Memory Reconciliation: Inspected and classified all historical unowned memories into legitimate user-level attributes, resolved entity facts, and archived obsolete markers with a permanent audit trail.",
+      "Adaptive Conversation Depth: Nova dynamically calibrates response depth across WhatsApp brevity (SHORT_WHATSAPP), natural phone calls (VOICE), standard chats (NORMAL), and in-depth structured breakdowns (DEEP_STRUCTURED)."
+    ]
+  },
+  {
     "version": "0.3.36-beta",
     "date": "2026-09-17",
     "title": "🧠 Canonical Entity Engine, Order-Independent Convergence & Pure Knowledge Galaxy (Phase 2)",

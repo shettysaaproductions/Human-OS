@@ -33,6 +33,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 // Use legacy subpath — works in all existing APKs regardless of expo-file-system version
 import {
@@ -240,6 +241,10 @@ export function useVoiceSession(): UseVoiceSessionReturn {
   const activePlayerRef = useRef<any>(null);
   const mutedRef        = useRef(false);
   const connectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef       = useRef<number>(0);
+  const reconnectTimerRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isIntentionalDisconnectRef = useRef<boolean>(false);
+  const executedToolCallIdsRef     = useRef<Set<string>>(new Set());
 
   // ── Session Prefetch ───────────────────────────────────────────────────────
   // Call prefetchSession() when the voice screen opens so the backend
@@ -255,6 +260,13 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     if (connectTimerRef.current) {
       clearTimeout(connectTimerRef.current);
       connectTimerRef.current = null;
+    }
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
   }, []);
 
@@ -494,6 +506,8 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     if (data.setupComplete !== undefined) {
       console.log('[VoiceSession] ✅ setupComplete received — transitioning to listening');
       clearConnectTimer();
+      clearReconnectTimer();
+      reconnectAttemptsRef.current = 0;
       setState('listening');
       startMicStream();
       return;
@@ -573,9 +587,15 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       }
     }
 
-    // 5. Tool calls from Gemini Live
+    // 5. Tool calls from Gemini Live (Deduplicated on reconnect)
     if (data.toolCall?.functionCalls) {
       for (const fnCall of data.toolCall.functionCalls) {
+        if (fnCall.id && executedToolCallIdsRef.current.has(fnCall.id)) {
+          console.log('[VoiceSession] Deduplicated tool call after reconnect:', fnCall.id, fnCall.name);
+          continue;
+        }
+        if (fnCall.id) executedToolCallIdsRef.current.add(fnCall.id);
+
         voiceService.executeTool({
           toolName: fnCall.name,
           toolArgs: fnCall.args || {},
@@ -597,7 +617,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         });
       }
     }
-  }, [clearConnectTimer, playAudioQueue, startMicStream]);
+  }, [clearConnectTimer, clearReconnectTimer, playAudioQueue, startMicStream]);
 
   // ── Audio Route Management (Speaker, Earpiece, Bluetooth) ─────────────────
   const deviceQueryRecorderRef = useRef<any>(null);
@@ -799,17 +819,39 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       console.log('[VoiceSession] WebSocket closed:', event.code, event.reason || '(no reason)');
       clearConnectTimer();
       stopMicStream();
+
+      // Gate 4: Resilient auto-reconnect on abnormal 1006 / 1001 disconnects (up to 3 retries)
+      if (!isIntentionalDisconnectRef.current && (event.code === 1006 || event.code === 1001) && reconnectAttemptsRef.current < 3) {
+        const attempt = ++reconnectAttemptsRef.current;
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 4000); // 1s, 2s, 4s
+        console.log(`[VoiceSession] Abnormal drop (${event.code}). Auto-reconnecting in ${delayMs}ms (attempt ${attempt}/3)...`);
+        setState('connecting');
+        clearReconnectTimer();
+        reconnectTimerRef.current = setTimeout(() => {
+          const accessToken = useAuthStore.getState().accessToken;
+          if (accessToken && !isIntentionalDisconnectRef.current) {
+            connectProxyWs(accessToken, voiceName);
+          }
+        }, delayMs);
+        return;
+      }
+
       if (event.code !== 1000 && event.code !== 1005) {
         setErrorMessage(`Connection closed (${event.code})`);
         setState('error');
       }
     };
-  }, [clearConnectTimer, handleWsMessage, stopMicStream]);
+  }, [clearConnectTimer, clearReconnectTimer, handleWsMessage, stopMicStream]);
 
   // ── Session Lifecycle ──────────────────────────────────────────────────────
 
   const startSession = useCallback(async (voiceNameOverride?: string) => {
     const voiceName = voiceNameOverride || selectedVoice;
+    isIntentionalDisconnectRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    executedToolCallIdsRef.current.clear();
+    clearReconnectTimer();
+
     setErrorMessage(null);
     setState('connecting');
     setTranscript([]);
@@ -863,10 +905,12 @@ export function useVoiceSession(): UseVoiceSessionReturn {
       setErrorMessage(err?.message || 'Failed to start voice session');
       setState('error');
     }
-  }, [selectedVoice, requestAudioPermissions, clearConnectTimer, stopMicStream, connectProxyWs]);
+  }, [selectedVoice, requestAudioPermissions, clearConnectTimer, clearReconnectTimer, stopMicStream, connectProxyWs]);
 
   const endSession = useCallback(async () => {
+    isIntentionalDisconnectRef.current = true;
     clearConnectTimer();
+    clearReconnectTimer();
     setState('idle');
     const duration = Math.round((Date.now() - sessionStartRef.current) / 1000);
     stopMicStream();
@@ -891,7 +935,7 @@ export function useVoiceSession(): UseVoiceSessionReturn {
         durationSeconds: duration,
       }).catch(err => console.warn('[VoiceSession] endSession failed:', err?.message));
     }
-  }, [transcript, stopMicStream, clearConnectTimer]);
+  }, [transcript, stopMicStream, clearConnectTimer, clearReconnectTimer]);
 
   const mute = useCallback(() => {
     mutedRef.current = true;
@@ -924,14 +968,35 @@ export function useVoiceSession(): UseVoiceSessionReturn {
     }
   }, [state, stopMicStream, connectProxyWs]);
 
+  // ── Gate 4: AppState Foreground / Background Lifecycle Resilience ─────────
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      console.log('[VoiceSession] AppState changed to:', nextState);
+      if (nextState === 'active') {
+        if (!isIntentionalDisconnectRef.current && (state === 'listening' || state === 'speaking' || state === 'processing')) {
+          if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+            console.log('[VoiceSession] App returned to active with dropped socket — triggering auto-reconnect...');
+            const accessToken = useAuthStore.getState().accessToken;
+            if (accessToken) {
+              connectProxyWs(accessToken, selectedVoice);
+            }
+          }
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [state, selectedVoice, connectProxyWs]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      isIntentionalDisconnectRef.current = true;
       clearConnectTimer();
+      clearReconnectTimer();
       try { wsRef.current?.close(); } catch (_) {}
       stopMicStream();
     };
-  }, [stopMicStream, clearConnectTimer]);
+  }, [stopMicStream, clearConnectTimer, clearReconnectTimer]);
 
   return {
     state,

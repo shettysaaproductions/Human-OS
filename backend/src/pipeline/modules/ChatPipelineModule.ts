@@ -11,6 +11,7 @@ import { NovaPipelineContext } from '../NovaContext';
 import { contextualEntityResolver } from '../ContextualEntityResolver';
 import { complete } from '../../lib/nvidia';
 import { sanitizeReply, NOVA_EMPTY_REPLY } from '../../services/NovaBrainService';
+import { classifyConversationDepth } from '../../services/ResponseIntelligence';
 import { logger } from '../../lib/logger';
 
 export class ChatPipelineModule implements NovaPipelineModule {
@@ -45,14 +46,18 @@ export class ChatPipelineModule implements NovaPipelineModule {
     // 1. Contextual Entity & Reference Resolution
     const resolution = contextualEntityResolver.resolveTurn(rawText, context);
 
-    // 2. Synthesize prompt with preserved entity context
+    // 2. Adaptive Communication Policy (Gate 7)
+    const modality = event.type === 'INPUT_VOICE_NOTE' ? 'voice_note' : 'text';
+    const depthPolicy = classifyConversationDepth(rawText, { modality });
+
+    // 3. Synthesize prompt with preserved entity context and dynamic depth directive
     const isEnglish = context.userProfile?.language === 'en' || !/\b(hai|ho|kya|yaar|nahi)\b/i.test(rawText);
     const activeSubjectDesc = resolution.primarySubjectId !== 'user:self'
       ? `\nCurrent Conversation Subject: ${resolution.primarySubjectName} (${resolution.primarySubjectId})`
       : '';
 
     const systemPrompt = `You are Nova, an empathetic, warm personal AI companion.
-Text like a friend on WhatsApp: natural, concise, zero robotic formalities.
+${depthPolicy.systemDirective}
 ${activeSubjectDesc}
 Respond directly to what the user said.`;
 
@@ -61,7 +66,7 @@ Respond directly to what the user said.`;
       reply = await complete('USER_FAST', [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: rawText }
-      ], { maxTokens: 512, temperature: 0.75 });
+      ], { maxTokens: depthPolicy.recommendedMaxTokens, temperature: depthPolicy.temperature });
     } catch (err: any) {
       logger.warn('[ChatPipelineModule] LLM call fallback', { error: err.message });
       reply = isEnglish

@@ -25,6 +25,8 @@ import { logger } from '../lib/logger';
 import { supabaseAdmin } from '../lib/supabase';
 import { novaVoiceService } from './NovaVoiceService';
 import { geminiLivePool } from '../lib/geminiLivePool';
+import { novaPipelineOrchestrator } from '../pipeline/NovaPipelineOrchestrator';
+import { NovaEventFactory } from '../pipeline/NovaEvent';
 
 const GEMINI_LIVE_WS_URL =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -134,9 +136,30 @@ export async function handleVoiceWsProxy(
   let currentUserTurnText = '';
   let currentNovaTurnText = '';
 
+  // ── Heartbeat to prevent Cloudflare / Render 60s idle drop (WebSocket 1006) ──
+  const PING_INTERVAL_MS = 25000;
+  const pingInterval = setInterval(() => {
+    if (closed) return;
+    if (mobileWs.readyState === WebSocket.OPEN) {
+      try {
+        mobileWs.ping();
+      } catch (err: any) {
+        logger.warn('[VoiceProxy] Mobile ping failed', { error: err.message, userId });
+      }
+    }
+    if (geminiWs.readyState === WebSocket.OPEN) {
+      try {
+        geminiWs.ping();
+      } catch (err: any) {
+        logger.warn('[VoiceProxy] Gemini ping failed', { error: err.message, userId });
+      }
+    }
+  }, PING_INTERVAL_MS);
+
   const cleanup = async (reason: string) => {
     if (closed) return;
     closed = true;
+    clearInterval(pingInterval);
 
     // Flush any pending turn text
     if (currentUserTurnText.trim()) {
@@ -250,15 +273,32 @@ export async function handleVoiceWsProxy(
         }
       }
 
-      // Turn complete — flush turn buffer
+      // Turn complete — flush turn buffer & ingest into master cognitive pipeline
       if (msg.serverContent?.turnComplete) {
         if (currentUserTurnText.trim()) {
+          const userSpokenText = currentUserTurnText.trim();
           transcriptBuffer.push({
             role: 'user',
-            text: currentUserTurnText.trim(),
+            text: userSpokenText,
             timestamp: new Date().toISOString(),
           });
           currentUserTurnText = '';
+
+          // ── Continuous Cognitive Pipeline Ingress for Live Voice Turn ───
+          try {
+            const voiceEvent = NovaEventFactory.createLiveVoiceTurn({
+              userId,
+              sessionId,
+              turnType: 'transcript',
+              transcript: userSpokenText,
+              correlationId: sessionId,
+            });
+            novaPipelineOrchestrator.execute(voiceEvent).catch((pErr: any) => {
+              logger.warn('[VoiceProxy] Pipeline execution error on voice turn', { error: pErr?.message, userId });
+            });
+          } catch (voiceIngressErr: any) {
+            logger.warn('[VoiceProxy] Failed to ingest voice turn into pipeline', { error: voiceIngressErr?.message, userId });
+          }
         }
         if (currentNovaTurnText.trim()) {
           transcriptBuffer.push({
@@ -289,6 +329,21 @@ export async function handleVoiceWsProxy(
                 tool: fnCall.name,
                 result,
               });
+
+              // Also ingest tool execution into master cognitive pipeline
+              try {
+                const toolEvent = NovaEventFactory.createLiveVoiceTurn({
+                  userId,
+                  sessionId,
+                  turnType: 'tool_call',
+                  toolName: fnCall.name,
+                  toolArgs: fnCall.args,
+                  correlationId: sessionId,
+                });
+                novaPipelineOrchestrator.execute(toolEvent).catch((tErr: any) => {
+                  logger.warn('[VoiceProxy] Pipeline tool execution event error', { error: tErr?.message, userId });
+                });
+              } catch (_) {}
 
               if (geminiWs.readyState === WebSocket.OPEN) {
                 geminiWs.send(

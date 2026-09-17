@@ -35,6 +35,8 @@ import { entityRelationshipCorrectionService, EntityCorrection } from '../servic
 import { universalBranchRelocationService } from '../services/UniversalBranchRelocationService';
 import { DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { voiceResponseLifecycle, isInterimThinkingPhrase, stripThinkingPrefix } from '../services/VoiceResponseLifecycle';
+import { novaPipelineOrchestrator } from '../pipeline/NovaPipelineOrchestrator';
+import { NovaEventFactory } from '../pipeline/NovaEvent';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -921,6 +923,29 @@ chatRouter.post(
           });
           activeConversationId = crypto.randomUUID();
         }
+      }
+
+      // ── Master Cognitive Pipeline Ingress ─────────────────────────────────
+      // Ingest the user turn into the unified Nova cognitive pipeline.
+      // Updates conversational entity focus, resolves pronouns & anaphora,
+      // and reconciles continuous memory effects authoritatively.
+      try {
+        const pipelineEvent = NovaEventFactory.createInputText({
+          userId,
+          conversationId: activeConversationId,
+          rawText: primaryMessage,
+          clientMessageId: client_message_id || requestId,
+          replyToId: reply_to_id,
+          language,
+          isVoiceNote: hasVoiceMessage,
+          audioDurationSec: hasVoiceMessage ? (typeof audio_duration === 'number' ? audio_duration : undefined) : undefined,
+          correlationId: activeConversationId,
+        });
+        novaPipelineOrchestrator.execute(pipelineEvent).catch((pErr: any) => {
+          logger.warn('[Chat] Background pipeline execution non-fatal error', { error: pErr?.message, userId });
+        });
+      } catch (pipelineIngressErr: any) {
+        logger.warn('[Chat] Failed to ingest turn into cognitive pipeline', { error: pipelineIngressErr?.message, userId });
       }
 
       const isStreaming = req.headers.accept === 'text/event-stream';

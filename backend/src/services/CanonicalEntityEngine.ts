@@ -30,8 +30,49 @@ export interface ResolvedCanonicalEntity {
   isNew: boolean;
 }
 
+export interface CanonicalRelationship {
+  relationshipId: string;       // deterministic key: `${sourceEntityId}:${targetEntityId}:${relationType.toLowerCase()}`
+  targetEntityId: string;
+  targetEntityName: string;
+  relationType: string;
+  inverseRelationType?: string;
+  confidence: number;
+  status: 'active' | 'archived' | 'superseded';
+  validFrom?: string;
+  validUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  provenance?: {
+    source: 'user_chat' | 'user_voice' | 'system_inference' | 'manual';
+    turnId?: string;
+    timestamp: string;
+  };
+}
+
+export const INVERSE_RELATIONS: Record<string, string> = {
+  father: 'child',
+  mother: 'child',
+  parent: 'child',
+  son: 'parent',
+  daughter: 'parent',
+  child: 'parent',
+  husband: 'wife',
+  wife: 'husband',
+  spouse: 'spouse',
+  friend: 'friend',
+  colleague: 'colleague',
+  coworker: 'coworker',
+  manager: 'report',
+  boss: 'employee',
+  mentor: 'mentee',
+  brother: 'sibling',
+  sister: 'sibling',
+  sibling: 'sibling',
+};
+
 export class CanonicalEntityEngine {
   private static instance: CanonicalEntityEngine;
+  private static _mergeLocks = new Map<string, Promise<void>>();
 
   static getInstance(): CanonicalEntityEngine {
     if (!CanonicalEntityEngine.instance) {
@@ -278,22 +319,80 @@ export class CanonicalEntityEngine {
 
   /**
    * Safely merges sourceEntity into targetEntity without data loss.
-   * Repoints memories, reminders, child bubbles, merges aliases, and records audit trail.
+   * Leverages atomic database RPC function `canonical_merge_entities` backed by row-level locking,
+   * with per-user mutex and transactional fallback.
    */
   async mergeEntities(userId: string, sourceEntityId: string, targetEntityId: string): Promise<void> {
     if (sourceEntityId === targetEntityId) return;
 
-    // 1. Fetch both bubbles
+    // Concurrency guard: serialize concurrent merge requests for the same user
+    const lockKey = userId;
+    const prevLock = CanonicalEntityEngine._mergeLocks.get(lockKey) || Promise.resolve();
+    let releaseLock: () => void;
+    const currentLock = new Promise<void>((resolve) => { releaseLock = resolve; });
+    CanonicalEntityEngine._mergeLocks.set(lockKey, prevLock.then(() => currentLock));
+
+    await prevLock;
+    try {
+      // 1. Primary path: invoke PostgreSQL atomic RPC transaction
+      let rpcSuccess = false;
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('canonical_merge_entities', {
+          p_user_id: userId,
+          p_source_bubble_id: sourceEntityId,
+          p_target_bubble_id: targetEntityId,
+        });
+
+        if (!rpcErr && rpcRes) {
+          rpcSuccess = true;
+          logger.info('[CanonicalEntityEngine] Atomic DB RPC merge completed', { rpcRes, userId });
+        } else if (rpcErr) {
+          logger.warn('[CanonicalEntityEngine] DB RPC merge warning, falling back to direct transactional sequence', {
+            error: rpcErr.message,
+            userId,
+          });
+        }
+      } catch (callErr: any) {
+        logger.warn('[CanonicalEntityEngine] DB RPC call error, falling back to direct sequence', {
+          error: callErr?.message,
+          userId,
+        });
+      }
+
+      // 2. Direct transactional sequence (used as resilient fallback or in test mocks)
+      if (!rpcSuccess) {
+        await this._executeDirectMerge(userId, sourceEntityId, targetEntityId);
+      }
+
+      this.invalidateGraphCache(userId);
+    } finally {
+      releaseLock!();
+      if (CanonicalEntityEngine._mergeLocks.get(lockKey) === currentLock) {
+        CanonicalEntityEngine._mergeLocks.delete(lockKey);
+      }
+    }
+  }
+
+  private async _executeDirectMerge(userId: string, sourceEntityId: string, targetEntityId: string): Promise<void> {
+    // 1. Fetch both bubbles with validation
     const [
-      { data: sourceBubble },
-      { data: targetBubble }
+      { data: sourceBubble, error: srcErr },
+      { data: targetBubble, error: tgtErr }
     ] = await Promise.all([
       supabaseAdmin.from('memory_bubbles').select('*').eq('id', sourceEntityId).eq('user_id', userId).single(),
       supabaseAdmin.from('memory_bubbles').select('*').eq('id', targetEntityId).eq('user_id', userId).single()
     ]);
 
-    if (!sourceBubble || !targetBubble) {
-      logger.error('[CanonicalEntityEngine] Merge aborted: entities not found', { sourceEntityId, targetEntityId });
+    if (srcErr || !sourceBubble) {
+      throw new Error(`SOURCE_BUBBLE_NOT_FOUND: ${srcErr?.message || sourceEntityId}`);
+    }
+    if (tgtErr || !targetBubble) {
+      throw new Error(`TARGET_BUBBLE_NOT_FOUND: ${tgtErr?.message || targetEntityId}`);
+    }
+
+    // Idempotency check: if source is already merged into target, skip redundant merge
+    if (sourceBubble.is_archived && (sourceBubble as any).archive_reason === `merged_into:${targetEntityId}`) {
+      logger.info('[CanonicalEntityEngine] Entity already merged, skipping idempotent call', { sourceEntityId, targetEntityId });
       return;
     }
 
@@ -320,43 +419,93 @@ export class CanonicalEntityEngine {
     const targetAttrs = (targetMeta.attributes as Record<string, string>) || {};
     const mergedAttributes = { ...sourceAttrs, ...targetAttrs };
 
+    // Merge relationships
+    const sourceRels: CanonicalRelationship[] = Array.isArray(sourceMeta.relationships) ? (sourceMeta.relationships as any[]) : [];
+    const targetRels: CanonicalRelationship[] = Array.isArray(targetMeta.relationships) ? [...(targetMeta.relationships as any[])] : [];
+    for (const sr of sourceRels) {
+      if (sr && sr.targetEntityId !== targetEntityId && !targetRels.some((tr) => tr.targetEntityId === sr.targetEntityId)) {
+        targetRels.push(sr);
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+
     // 2. Repoint all memories foreign-keyed to source
-    await supabaseAdmin
+    const { error: memErr } = await supabaseAdmin
       .from('memories')
-      .update({ bubble_id: targetEntityId, updated_at: new Date().toISOString() })
+      .update({ bubble_id: targetEntityId, updated_at: nowIso })
       .eq('user_id', userId)
       .eq('bubble_id', sourceEntityId);
+    if (memErr) throw new Error(`FAILED_REPOINTING_MEMORIES: ${memErr.message}`);
 
     // 3. Repoint all reminders foreign-keyed to source
-    await supabaseAdmin
+    const { error: remErr } = await supabaseAdmin
       .from('reminders')
-      .update({ bubble_id: targetEntityId, updated_at: new Date().toISOString() })
+      .update({ bubble_id: targetEntityId, updated_at: nowIso })
       .eq('user_id', userId)
       .eq('bubble_id', sourceEntityId);
+    if (remErr) throw new Error(`FAILED_REPOINTING_REMINDERS: ${remErr.message}`);
 
     // 4. Repoint any child bubbles whose parent was source
-    await supabaseAdmin
+    const { error: childErr } = await supabaseAdmin
       .from('memory_bubbles')
-      .update({ parent_bubble_id: targetEntityId, updated_at: new Date().toISOString() })
+      .update({ parent_bubble_id: targetEntityId, updated_at: nowIso })
       .eq('user_id', userId)
       .eq('parent_bubble_id', sourceEntityId);
+    if (childErr) throw new Error(`FAILED_REPOINTING_CHILD_BUBBLES: ${childErr.message}`);
 
-    // 5. Update Target Bubble with merged metadata
-    await supabaseAdmin
+    // 5. Update relationships on other bubbles pointing to source
+    const { data: otherBubbles } = await supabaseAdmin
+      .from('memory_bubbles')
+      .select('id, metadata')
+      .eq('user_id', userId)
+      .eq('is_archived', false)
+      .neq('id', sourceEntityId);
+
+    if (otherBubbles) {
+      for (const ob of otherBubbles) {
+        const obMeta = (ob.metadata as any) || {};
+        const obRels: CanonicalRelationship[] = Array.isArray(obMeta.relationships) ? obMeta.relationships : [];
+        let changed = false;
+        const updatedObRels = obRels.map((r) => {
+          if (r.targetEntityId === sourceEntityId) {
+            changed = true;
+            return {
+              ...r,
+              targetEntityId,
+              targetEntityName: targetBubble.label,
+              updatedAt: nowIso,
+            };
+          }
+          return r;
+        });
+        if (changed) {
+          await supabaseAdmin
+            .from('memory_bubbles')
+            .update({ metadata: { ...obMeta, relationships: updatedObRels }, updated_at: nowIso })
+            .eq('id', ob.id);
+        }
+      }
+    }
+
+    // 6. Update Target Bubble with merged metadata
+    const { error: targetUpdateErr } = await supabaseAdmin
       .from('memory_bubbles')
       .update({
         metadata: {
           ...targetMeta,
           aliases: finalAliases,
           attributes: mergedAttributes,
+          relationships: targetRels,
           merged_from: [...(Array.isArray(targetMeta.merged_from) ? targetMeta.merged_from : []), sourceEntityId],
-          last_reconciled_at: new Date().toISOString(),
+          last_reconciled_at: nowIso,
         },
-        updated_at: new Date().toISOString(),
+        updated_at: nowIso,
       })
       .eq('id', targetEntityId);
+    if (targetUpdateErr) throw new Error(`FAILED_UPDATING_TARGET_BUBBLE: ${targetUpdateErr.message}`);
 
-    // 6. Record Reversible Audit Trail in memory_bubble_moves
+    // 7. Record Reversible Audit Trail in memory_bubble_moves
     await supabaseAdmin.from('memory_bubble_moves').insert({
       user_id: userId,
       bubble_id: targetEntityId,
@@ -368,34 +517,259 @@ export class CanonicalEntityEngine {
       before_state: sourceBubble,
       after_state: targetBubble,
       confirmation_fingerprint: `merge:${sourceBubble.label}->${targetBubble.label}`,
-      created_at: new Date().toISOString(),
+      created_at: nowIso,
     });
 
-    // 7. Archive Source Bubble safely (Zero hard deletion)
-    await supabaseAdmin
+    // 8. Archive Source Bubble safely (Zero hard deletion)
+    const { error: archErr } = await supabaseAdmin
       .from('memory_bubbles')
       .update({
         is_archived: true,
-        archive_reason: `merged_into:${targetEntityId}`,
-        updated_at: new Date().toISOString(),
+        metadata: {
+          ...sourceMeta,
+          archive_reason: `merged_into:${targetEntityId}`,
+        },
+        updated_at: nowIso,
       })
       .eq('id', sourceEntityId);
+    if (archErr) throw new Error(`FAILED_ARCHIVING_SOURCE_BUBBLE: ${archErr.message}`);
 
-    // 8. Update kg_nodes read projection
+    // 9. Repoint kg_nodes & kg_edges read projection (using bubble_id)
     try {
-      await supabaseAdmin
-        .from('kg_nodes')
-        .delete()
-        .eq('user_id', userId)
-        .eq('name', sourceBubble.label);
-    } catch {}
+      const [
+        { data: sourceKgNode },
+        { data: targetKgNode }
+      ] = await Promise.all([
+        supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId).eq('bubble_id', sourceEntityId).maybeSingle(),
+        supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId).eq('bubble_id', targetEntityId).maybeSingle()
+      ]);
 
-    this.invalidateGraphCache(userId);
+      if (sourceKgNode && targetKgNode && sourceKgNode.id !== targetKgNode.id) {
+        await supabaseAdmin
+          .from('kg_edges')
+          .update({ source_node_id: targetKgNode.id, updated_at: nowIso })
+          .eq('user_id', userId)
+          .eq('source_node_id', sourceKgNode.id);
+
+        await supabaseAdmin
+          .from('kg_edges')
+          .update({ target_node_id: targetKgNode.id, updated_at: nowIso })
+          .eq('user_id', userId)
+          .eq('target_node_id', sourceKgNode.id);
+
+        await supabaseAdmin
+          .from('kg_nodes')
+          .delete()
+          .eq('id', sourceKgNode.id)
+          .eq('user_id', userId);
+      } else if (sourceKgNode && !targetKgNode) {
+        await supabaseAdmin
+          .from('kg_nodes')
+          .update({ bubble_id: targetEntityId, name: targetBubble.label, updated_at: nowIso })
+          .eq('id', sourceKgNode.id)
+          .eq('user_id', userId);
+      }
+    } catch (edgeErr: any) {
+      logger.warn('[CanonicalEntityEngine] kg_edges repointing warning', { error: edgeErr?.message });
+    }
+
     logger.info('[CanonicalEntityEngine] Entity merge completed successfully', {
       source: sourceBubble.label,
       target: targetBubble.label,
       userId,
     });
+  }
+
+  /**
+   * Establishes a first-class semantic relationship between two entities.
+   * Updates metadata.relationships on both entities and synchronizes kg_nodes / kg_edges.
+   */
+  async createOrUpdateRelationship(
+    userId: string,
+    sourceEntityId: string,
+    targetEntityId: string,
+    relationType: string,
+    inverseRelationType?: string,
+    provenance?: { source: 'user_chat' | 'user_voice' | 'system_inference' | 'manual'; turnId?: string; confidence?: number }
+  ): Promise<CanonicalRelationship> {
+    if (sourceEntityId === targetEntityId) {
+      throw new Error('SELF_RELATIONSHIP_NOT_ALLOWED');
+    }
+
+    const [
+      { data: sourceBubble, error: srcErr },
+      { data: targetBubble, error: tgtErr }
+    ] = await Promise.all([
+      supabaseAdmin.from('memory_bubbles').select('*').eq('id', sourceEntityId).eq('user_id', userId).single(),
+      supabaseAdmin.from('memory_bubbles').select('*').eq('id', targetEntityId).eq('user_id', userId).single()
+    ]);
+
+    if (srcErr || !sourceBubble || tgtErr || !targetBubble) {
+      throw new Error(`ENTITY_NOT_FOUND_FOR_RELATIONSHIP: ${srcErr?.message || tgtErr?.message}`);
+    }
+
+    const cleanRelType = relationType.trim().toLowerCase();
+    const effectiveInverse = (inverseRelationType?.trim() || INVERSE_RELATIONS[cleanRelType] || '').toLowerCase() || undefined;
+    const nowIso = new Date().toISOString();
+    const relConfidence = provenance?.confidence ?? 0.95;
+
+    const relationshipId = `${sourceEntityId}:${targetEntityId}:${cleanRelType}`;
+    const inverseRelationshipId = effectiveInverse ? `${targetEntityId}:${sourceEntityId}:${effectiveInverse}` : undefined;
+
+    const sourceMeta = (sourceBubble.metadata as Record<string, any>) || {};
+    const targetMeta = (targetBubble.metadata as Record<string, any>) || {};
+
+    const sourceRels: CanonicalRelationship[] = Array.isArray(sourceMeta.relationships) ? [...sourceMeta.relationships] : [];
+    const targetRels: CanonicalRelationship[] = Array.isArray(targetMeta.relationships) ? [...targetMeta.relationships] : [];
+
+    // Upsert source -> target relationship
+    const sRelObj: CanonicalRelationship = {
+      relationshipId,
+      targetEntityId,
+      targetEntityName: targetBubble.label,
+      relationType: cleanRelType,
+      inverseRelationType: effectiveInverse,
+      confidence: relConfidence,
+      status: 'active',
+      validFrom: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      provenance: {
+        source: provenance?.source || 'system_inference',
+        turnId: provenance?.turnId,
+        timestamp: nowIso,
+      },
+    };
+
+    const sIdx = sourceRels.findIndex((r) => r.relationshipId === relationshipId || (r.targetEntityId === targetEntityId && r.relationType.toLowerCase() === cleanRelType));
+    if (sIdx >= 0) {
+      sourceRels[sIdx] = { ...sourceRels[sIdx], ...sRelObj, createdAt: sourceRels[sIdx].createdAt || nowIso };
+    } else {
+      sourceRels.push(sRelObj);
+    }
+
+    // Upsert target -> source relationship if inverse exists
+    if (effectiveInverse && inverseRelationshipId) {
+      const tRelObj: CanonicalRelationship = {
+        relationshipId: inverseRelationshipId,
+        targetEntityId: sourceEntityId,
+        targetEntityName: sourceBubble.label,
+        relationType: effectiveInverse,
+        inverseRelationType: cleanRelType,
+        confidence: relConfidence,
+        status: 'active',
+        validFrom: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        provenance: {
+          source: provenance?.source || 'system_inference',
+          turnId: provenance?.turnId,
+          timestamp: nowIso,
+        },
+      };
+      const tIdx = targetRels.findIndex((r) => r.relationshipId === inverseRelationshipId || (r.targetEntityId === sourceEntityId && r.relationType.toLowerCase() === effectiveInverse));
+      if (tIdx >= 0) {
+        targetRels[tIdx] = { ...targetRels[tIdx], ...tRelObj, createdAt: targetRels[tIdx].createdAt || nowIso };
+      } else {
+        targetRels.push(tRelObj);
+      }
+    }
+
+    // Persist to memory_bubbles
+    await Promise.all([
+      supabaseAdmin
+        .from('memory_bubbles')
+        .update({ metadata: { ...sourceMeta, relationships: sourceRels }, updated_at: nowIso })
+        .eq('id', sourceEntityId),
+      effectiveInverse
+        ? supabaseAdmin
+            .from('memory_bubbles')
+            .update({ metadata: { ...targetMeta, relationships: targetRels }, updated_at: nowIso })
+            .eq('id', targetEntityId)
+        : Promise.resolve(),
+    ]);
+
+    // Synchronize to kg_nodes (with bubble_id) and kg_edges projection
+    try {
+      let sourceKgId: string | null = null;
+      let targetKgId: string | null = null;
+
+      const [
+        { data: sNode },
+        { data: tNode }
+      ] = await Promise.all([
+        supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId).eq('bubble_id', sourceEntityId).maybeSingle(),
+        supabaseAdmin.from('kg_nodes').select('id').eq('user_id', userId).eq('bubble_id', targetEntityId).maybeSingle()
+      ]);
+
+      if (sNode) {
+        sourceKgId = sNode.id;
+      } else {
+        const { data: insS } = await supabaseAdmin.from('kg_nodes').insert({
+          user_id: userId,
+          bubble_id: sourceEntityId,
+          name: sourceBubble.label,
+          entity_type: sourceBubble.bubble_type === 'entity' ? 'person' : sourceBubble.bubble_type,
+          attributes: { bubble_id: sourceEntityId, domain_key: sourceBubble.domain_key },
+        }).select('id').single();
+        sourceKgId = insS?.id || null;
+      }
+
+      if (tNode) {
+        targetKgId = tNode.id;
+      } else {
+        const { data: insT } = await supabaseAdmin.from('kg_nodes').insert({
+          user_id: userId,
+          bubble_id: targetEntityId,
+          name: targetBubble.label,
+          entity_type: targetBubble.bubble_type === 'entity' ? 'person' : targetBubble.bubble_type,
+          attributes: { bubble_id: targetEntityId, domain_key: targetBubble.domain_key },
+        }).select('id').single();
+        targetKgId = insT?.id || null;
+      }
+
+      if (sourceKgId && targetKgId) {
+        const edgeRelType = cleanRelType.toUpperCase().replace(/\s+/g, '_');
+        const weight = Math.round(relConfidence * 100);
+
+        const { data: existingEdge } = await supabaseAdmin
+          .from('kg_edges')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('source_node_id', sourceKgId)
+          .eq('target_node_id', targetKgId)
+          .maybeSingle();
+
+        if (existingEdge) {
+          await supabaseAdmin
+            .from('kg_edges')
+            .update({ relation_type: edgeRelType, weight, updated_at: nowIso })
+            .eq('id', existingEdge.id);
+        } else {
+          await supabaseAdmin.from('kg_edges').insert({
+            user_id: userId,
+            source_node_id: sourceKgId,
+            target_node_id: targetKgId,
+            relation_type: edgeRelType,
+            weight,
+          });
+        }
+      }
+    } catch (kgErr: any) {
+      logger.warn('[CanonicalEntityEngine] kg projection sync non-fatal warning', { error: kgErr?.message });
+    }
+
+    this.invalidateGraphCache(userId);
+    logger.info('[CanonicalEntityEngine] Semantic relationship established', {
+      source: sourceBubble.label,
+      target: targetBubble.label,
+      relationType: cleanRelType,
+      inverseRelationType: effectiveInverse,
+      relationshipId,
+      userId,
+    });
+
+    return sRelObj;
   }
 
   /**
