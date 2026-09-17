@@ -1,65 +1,70 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-17 — Universal Memory & Neural Galaxy Semantic Quality Gate Upgrade (v0.3.34-beta)
+2026-09-17 — Phase 1: Unified Event / Pipeline Foundation (v0.3.35-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.34-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.35-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.34-beta)
-- **Update Group ID**: `26772f93-73bf-41fa-8105-4aa1caefff35`
-- **Android Update ID**: `01a0aee6-3783-7059-9d3f-793e7a90f085`
-- **iOS Update ID**: `01a0aee6-3783-7961-8d9b-719ca162a788`
+### EAS Production OTA Deployment (v0.3.35-beta)
+- **Update Group ID**: `bee63f3d-5918-474b-b8cc-eb64f3e1a850`
+- **Android Update ID**: `01a0b05d-8e6c-781c-ba99-b1f00be1db6b`
+- **iOS Update ID**: `01a0b05d-8e6c-7297-ab0f-c24b857493f3`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Critical Problems Solved & Core Invariants Enforced (v0.3.34-beta)
+### Core Architectural Advancements Delivered (Phase 1 Foundation)
 
-1. **Root Memory Extraction & Entity Pollution Bug**:
-   - **Problem**: Rogue bubble nodes like `"Kar"` and `"Ke"` were appearing as persistent memory nodes in Neural Galaxy. Corrupted rows like `son_name = "Kar"`, `son_nickname = "Ke"`, `friend_location = "Rehta hai"`, `friend_attribute = "friend"`, and phantom bubbles (`entity:kar`, `entity:office`) polluted both the database and the graph.
-   - **Root Cause Multi-Layer Forensics**:
-     - **Origin A (`CanonicalMemoryTreeService.ts`)**: `actionMatch` regex `/(?:call|meet|...)\s+([A-Za-z0-9_-]{1,30})/i` processed user utterances like *"call kar ke utha dena"*, capturing `"kar"` as a person name due to Hinglish compound light-verb grammar (`[noun] + [light verb 'kar']`), generating persistent `entity:kar` bubbles in `memory_bubbles`.
-     - **Origin B (`AutonomousMemoryGraphCuratorService.ts`)**: `applyUpdates()` and `applyAdditions()` wrote raw updates directly to Supabase `memories` table without attribute validation, causing LLM hallucinations to overwrite canonical truths (e.g. `son_name = "Kar"`).
-     - **Origin C (`WatchtowerMemoryAuditor.ts`)**: `applyMemoryUpdates()` executed direct DB writes without quality checks, writing `friend_location = "Rehta hai"`.
-     - **Origin D (`memoryDomains.ts` & `KgExplorerScreen.tsx`)**: `buildDynamicKnowledgeGraph` rendered the corrupted raw keys without semantic filtering or self-healing.
+1. **ONE BRAIN Event Pipeline (`NovaPipelineOrchestrator`)**:
+   - Built a master 10-stage cognitive cycle orchestrator:
+     `INPUT → CONTEXT HYDRATION → UNDERSTANDING & REFERENCE → MODULE SELECTION → ACTION/OUTPUT → EVENT EMISSION → MEMORY RECONCILIATION → CONTEXT PERSISTENCE → GUARDIAN SCAN → TELEMETRY`.
+   - Normalizes disparate ingress streams (`INPUT_TEXT`, `INPUT_VOICE_NOTE`, `INPUT_LIVE_VOICE_TURN`, `INPUT_VISION`, `SIGNAL_PRESENCE`, `TRIGGER_PROACTIVE`) into typed `NovaEvent` envelopes.
 
-2. **Universal Language-Aware Entity Semantic Validator (`backend/src/lib/entitySemanticValidator.ts`)**:
-   - Built comprehensive, language-aware semantic validation covering English, Hindi, and Hinglish.
-   - `isValidEntityName(name, entityType)`:
-     - Allows genuine short names (`Om`, `Al`, `Bo`, `Jo`, `Ty`, `Mo`, `Ed`, `Vu`, `Pi`).
-     - Strictly rejects Hindi/Hinglish grammatical particles/postpositions (`ka`, `ki`, `ke`, `ko`, `se`, `me`, `mein`, `par`, `pe`, `ne`, `re`, `wa`, `lie`, `liye`, `saath`, `wala`, `wali`, `wale`, `bhi`, `hi`, `toh`, `to`, `na`, `mat`, `bas`, etc.).
-     - Strictly rejects Hindi/Hinglish verbs, auxiliary verbs, and light verbs (`kar`, `karo`, `karein`, `karna`, `karke`, `kiya`, `raha`, `rahi`, `rahe`, `rehta`, `rehti`, `rehte`, `hai`, `hain`, `tha`, `thi`, `the`, `utha`, `dena`, `lena`, `bolna`, `de`, `do`, `lo`, etc.).
-     - Strictly rejects non-entity common nouns (`office`, `washroom`, `work`, `alarm`, `schedule`) and kinship role vocatives (`papa`, `mummy`, `son`, `beta`, `friend`, `dost`).
-   - `isValidMemoryAttributeValue(key, value)`:
-     - Validates name keys against verbs and grammatical particles.
-     - Validates location keys against verbs (`rehta hai`) and prepositional phrases (`mere society mein`).
-     - Rejects tautological relationship attributes (`friend_attribute: "friend"`).
+2. **ONE CANONICAL MEMORY MODEL**:
+   - Designated `memory_bubbles` as the single authoritative source of truth for semantic entities, hierarchy, and relationships.
+   - Designated `memories` as the single authoritative store for semantic attributes/facts, strictly foreign-keyed via `bubble_id`.
+   - Reconciled `kg_nodes` in lockstep as a backwards-compatible read projection, eradicating split-brain divergence.
 
-3. **Multi-Layer Quality Gate Enforcement**:
-   - **`CanonicalMemoryTreeService.ts`**:
-     - Upgraded `actionMatch` to exclude compound light verbs (`call kar`, `phone kar`, `remind kar`).
-     - Added semantic validation in `resolveOrCreateEntityBubble()` — invalid entity names are blocked from persistence.
-   - **`memoryRepository.ts` & `memoryFilters.ts`**:
-     - Added semantic attribute quality gate (`Layer 1d`) in `upsertMemory()`.
-     - Integrated `isValidMemoryAttributeValue` into `isGarbageMemoryValue()`.
-   - **`AutonomousMemoryGraphCuratorService.ts` & `WatchtowerMemoryAuditor.ts`**:
-     - All `applyUpdates()` and `applyAdditions()` must pass `isKnownCanonicalKey()`, `isValidMemoryAttributeValue()`, and `!isGarbageMemoryValue()`.
-   - **`memoryDomains.ts` & `KgExplorerScreen.tsx`**:
-     - Self-healing resilience: dynamically restores corrupted `son_name` to `"Shreshth"` and `son_nickname` to `"Tuku"`.
-     - Raw nodes filter in `KgExplorerScreen.tsx` drops rogue grammatical fragments (`kar`, `ke`, `ka`, `rehta hai`).
+3. **STRICT ENTITY OWNERSHIP**:
+   - Every semantic fact belongs to the entity it actually describes (`subjectEntityId: "entity:person_shreshth"`).
+   - Domains/categories (`family`, `work`, `lifestyle`, `goals`, `identity`) are strictly organizational namespaces/taxonomies and never owners of entity-specific facts.
 
-4. **Live Database Sanctuary Healing**:
-   - Restored `son_name` to `"Shreshth"` (`CURRENT`, `is_archived: false`).
-   - Restored `son_nickname` to `"Tuku"` (`CURRENT`, `is_archived: false`).
-   - Archived corrupted `friend_location: "Rehta hai"` and `friend_attribute: "friend"`.
-   - Unlinked reminders and memories from phantom bubbles, and archived `entity:kar` (2 rows) and `entity:office` (1 row).
-   - Validated live Knowledge Graph for user `62f9190b-1e1d-48d5-9667-12cd0bc3114b`: **52 nodes, 55 edges, 0 rogue nodes found**.
+4. **CONVERSATIONAL CONTEXT & PRONOUN CONTINUITY**:
+   - Preserves conversational subject across turns in `EntityFocusState` (`activeEntity`, `activeDomain`, `recentEntities`).
+   - Resolves antecedent references ("he", "his", "she", "her", "that place", "there", "Tiku", "my son") against conversational history before querying the database.
+
+5. **FACT / EVENT / ENTITY DISTINCTION**:
+   - Strongly-typed ontological classification:
+     - `ENTITY`: Subjects with discrete identity (Person, Pet, Organization, Place, Venture).
+     - `ATTRIBUTE`: Key-value state of an entity (e.g. birthdate, job, location).
+     - `RELATIONSHIP`: Directed semantic edge between entities (e.g. `son_of`, `works_at`).
+     - `EVENT`: Temporal occurrence (meeting, dinner, trip).
+     - `OBSERVATION`: Raw sensor or signal data (tone, image, latency).
+     - `INFERENCE`: Algorithmic/LLM hypothesis.
+     - `UNKNOWN`: Unclassified candidate.
+
+6. **PROVENANCE + CONFIDENCE**:
+   - Every event and memory effect retains: `source`, `sourceMessageId`, `timestamp`, `confidence` (0.0–1.0), and `acquisitionMode` (`user_stated`, `observed`, `derived`, `inferred`), plus raw evidence quote.
+
+7. **CONTINUOUS GRAPH RECONCILIATION**:
+   - `MemoryReconciliationModule` continuously reconciles declared memory effects into `memory_bubbles` and `memories` with linguistic validation.
+
+8. **BOUNDED INDEXED RETRIEVAL (NO FULL-DATABASE SCANS)**:
+   - Queries `memory_bubbles` using bounded indexed lookups (`slug`, `label`, `metadata->aliases`), strictly limited to top candidate matches.
+
+9. **PLATFORM-AWARE AUTONOMY**:
+   - Platform constraints (`isAppForeground`, `canSpeak`, `canPush`, `isScreenLocked`) are first-class inputs into decision making.
+
+10. **PREDICTABLE PIPELINE MODULE CONTRACT**:
+    - Every capability exposes:
+      `INPUT → PROCESSOR → OUTPUT → EVENTS EMITTED → MEMORY EFFECT → DEPENDENCIES → PERMISSIONS`.
+    - Implemented `ChatPipelineModule`, `VoicePipelineModule`, and `MemoryReconciliationModule`.
 
 ---
 
@@ -67,27 +72,31 @@ Branch: `main`
 
 | Suite / Check | Result |
 | :--- | :--- |
+| `NovaPipelineFoundation.test.ts` | **100% Passed (12/12 tests)** |
 | `MemoryEntityQualityGate.test.ts` | **100% Passed (14/14 tests)** |
-| Live Knowledge Graph Forensics | **Clean** (52 nodes, 55 edges, 0 rogue nodes, Shreshth + Tuku restored) |
-| Backend Pre-flight Build (`cd backend && npm run build`) | **Exit Code 0** |
+| `EntityResolutionService.test.ts` | **100% Passed (10/10 tests)** |
+| Backend Production Build (`cd backend && npm run build`) | **Exit Code 0** |
 | Mobile Pre-flight Typecheck (`cd mobile && npx tsc --noEmit`) | **Exit Code 0** |
-| EAS Production OTA Publish (`v0.3.34-beta`) | **Published** (Group: `26772f93-73bf-41fa-8105-4aa1caefff35`) |
-| Broadcast Push Notification (`v0.3.34-beta`) | **Dispatched** to registered devices |
+| EAS Production OTA Publish (`v0.3.35-beta`) | **Published** (Group: `bee63f3d-5918-474b-b8cc-eb64f3e1a850`) |
+| Broadcast Push Notification (`v0.3.35-beta`) | **Dispatched** to registered devices |
 
 ---
 
 ### Files Modified / Created
 
-- `backend/src/lib/entitySemanticValidator.ts` (NEW)
-- `backend/src/scripts/heal_user_memory_galaxy.ts` (NEW)
-- `backend/src/services/__tests__/MemoryEntityQualityGate.test.ts` (NEW)
-- `backend/src/lib/memoryDomains.ts`
-- `backend/src/lib/memoryFilters.ts`
-- `backend/src/services/CanonicalMemoryTreeService.ts`
-- `backend/src/services/AutonomousMemoryGraphCuratorService.ts`
-- `backend/src/services/WatchtowerMemoryAuditor.ts`
-- `backend/src/services/memoryRepository.ts`
-- `mobile/src/screens/analytics/KgExplorerScreen.tsx`
+- `backend/src/pipeline/NovaEvent.ts` (NEW)
+- `backend/src/pipeline/NovaContext.ts` (NEW)
+- `backend/src/pipeline/NovaPipelineModule.ts` (NEW)
+- `backend/src/pipeline/ContextualEntityResolver.ts` (NEW)
+- `backend/src/pipeline/NovaPipelineOrchestrator.ts` (NEW)
+- `backend/src/pipeline/modules/MemoryReconciliationModule.ts` (NEW)
+- `backend/src/pipeline/modules/ChatPipelineModule.ts` (NEW)
+- `backend/src/pipeline/modules/VoicePipelineModule.ts` (NEW)
+- `backend/src/pipeline/__tests__/NovaPipelineFoundation.test.ts` (NEW)
 - `mobile/src/config/updateHistory.json`
 - `.agent/CURRENT_HANDOFF.md`
 - `walkthrough.md`
+
+## NEXT ACTION
+Proceed to **PHASE 2 — CANONICAL MEMORY & GRAPH UNIFICATION**:
+Migrate `GET /analytics/kg` to read directly from `memory_bubbles` and `memories` with `bubble_id`, eliminating all synthetic regex and name fallbacks in `memoryDomains.ts` and `KgExplorerScreen.tsx`.

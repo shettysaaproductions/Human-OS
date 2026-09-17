@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.3.35-beta",
+    "date": "2026-09-17",
+    "title": "🧠 Unified Cognitive Pipeline & Canonical Brain Architecture (Phase 1)",
+    "message": [
+      "One Brain Event Pipeline: All inputs across chat, voice notes, live voice sessions, vision snaps, reminders, and proactive pulses now enter a standardized, event-driven cognitive pipeline (NovaPipelineOrchestrator).",
+      "Canonical Memory Topology: memory_bubbles serves as the single authoritative source of truth for entities and relationships, with memories strictly foreign-keyed via bubble_id and kg_nodes synchronized in lockstep.",
+      "Strict Entity Ownership: Semantic facts belong exclusively to the entities they describe, establishing domains as taxonomic namespaces rather than false fact owners.",
+      "Conversational Context & Pronoun Continuity: Multi-turn reference resolution preserves active conversational entities so 'he', 'his', 'Tiku', 'my son', and 'that place' resolve accurately across turns without amnesia.",
+      "Ontological Discrimination: Typed distinction between ENTITY, ATTRIBUTE, RELATIONSHIP, EVENT, OBSERVATION, and INFERENCE prevents rogue words or verbs from spawning phantom nodes.",
+      "Provenance & Confidence Tracking: Every memory fact retains verifiable source metadata, acquisition mode (user_stated vs observed vs inferred), timestamp, and confidence."
+    ]
+  },
+  {
     "version": "0.3.34-beta",
     "date": "2026-09-17",
     "title": "🌌 Universal Memory & Neural Galaxy Semantic Quality Gate Upgrade",
