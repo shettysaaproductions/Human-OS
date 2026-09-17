@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.38-beta",
+    "date": "2026-09-18",
+    "title": "🧬 Phase 3 Semantic Closure: Entity Typing, Multi-Script Convergence & Live Graph",
+    "message": [
+      "Dynamic Entity Typing: Deployed reusable semantic entity classification distinguishing people, pets, events, roles, concepts, and organizations without hardcoded defaults.",
+      "Multi-Script Convergence: Seamlessly resolve Devanagari and Latin script variations (e.g. साक्षी and Sakshi) to the same canonical identity with universal Unicode slug normalization.",
+      "Live Knowledge Graph Relationships: Populated authoritative semantic relationships backed by real user memories (Mother ↔ Son, Husband ↔ Wife, Grandparent ↔ Grandson) with deterministic inverse semantics and kg_edges projections.",
+      "Order-Independent Graph Determinism: Reconstructed Knowledge Galaxy parent-child hierarchy using two-pass registration, ensuring 100% deterministic layout regardless of database row retrieval order."
+    ]
+  },
+  {
     "version": "0.3.37-beta",
     "date": "2026-09-18",
     "title": "🎙️ Voice & Interaction Brain Unification, Transaction-Safe Merge & Graph Projections (Phase 3)",

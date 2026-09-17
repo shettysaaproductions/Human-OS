@@ -1,34 +1,37 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-18 — Phase 3 Closure: Production Integrity Hardening Before Phase 4 (v0.3.38)
+2026-09-18 — Phase 3 Semantic Closure: Surgical Final Pass & Live Graph Verification (v0.3.39)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: PHASE 3 OFFICIALLY CLOSED & PRODUCTION INTEGRITY HARDENED
+## Status: PHASE 3 GENUINELY & FULLY CLOSED
 
-All 10 production integrity hardening gates (Gate A through Gate J) have been implemented, verified on live Supabase, tested through end-to-end integration suites, and compiled without errors.
+Phase 3 is 100% closed. All four semantic areas of the surgical final pass have been implemented, tested, and verified on live Supabase:
+1. **Area A: Reusable Semantic Entity Typing**: Dynamic classifier (`inferSemanticEntityType`) replaces hardcoded person defaults across `CanonicalEntityEngine`, `CanonicalMemoryTreeService`, `CanonicalGraphService`, and `MemoryReconciliationModule`. Live misclassified rows surgically repaired from evidence (Rottweiler -> pet, Ganpati Celebrations -> event, etc.).
+2. **Area B: Multi-Script Entity Convergence**: Deterministic Indic transliteration (`transliterateIndic`) and universal canonical slug generation (`generateCanonicalSlug`) ensure Devanagari names never produce empty slugs and converge to matching canonical stems ("साक्षी" and "Sakshi" -> `entity:sakshi`). The live Devanagari duplicate "साक्षी" was merged into "Sakshi" via atomic PostgreSQL RPC `canonical_merge_entities` with alias and audit preservation.
+3. **Area C: Live Authoritative Relationships**: Established 4 bidirectional relationship pairs (8 directed relationships) supported by real user memories: Sakshi <-> Shreshth (Mother <-> Son), Suresh <-> Rajeshree (Husband <-> Wife), Suresh <-> Shreshth (Grandfather <-> Grandson), Rajeshree <-> Shreshth (Grandmother <-> Grandson). Projection rebuild verified 100% idempotent.
+4. **Area D: Graph Determinism**: Two-pass registration in `CanonicalGraphService.getCanonicalKnowledgeGraph` eliminates database-row-order dependency in parent-child hierarchy resolution.
 
 ---
 
-### Live Supabase State (Audited & Verified Before vs After)
+### Live Supabase State (Audited & Verified Before vs After Semantic Closure)
 
-| Metric | Before Phase 3 Closure | After Phase 3 Closure | Invariant Status |
+| Metric | Before Semantic Closure | After Semantic Closure | Invariant Status |
 | :--- | :--- | :--- | :--- |
-| **`memory_bubbles` (Active Entities)** | 16 | 16 | Verified canonical |
-| **`memory_bubbles` (Active Domains)** | 3 | 4 | Verified taxonomy |
-| **`memory_bubbles` (Archived)** | 18 | 18 | Preserved audit history |
+| **`memory_bubbles` (Active Entities)** | 16 | **15** | 1 Devanagari duplicate merged into canonical "Sakshi" |
+| **`memory_bubbles` (Active Domains)** | 4 | 4 | Verified taxonomy |
+| **Type Distribution (Entities)** | 16 person (defaulted) | **8 person, 3 role, 2 concept, 1 event, 1 pet** | Reusable evidence-backed classification |
+| **Empty / Invalid Slugs (`entity:`)** | **1 (`entity:`)** | **0 (ZERO)** | Universal Unicode slug normalization |
 | **Active `memories` Total** | 45 | 45 | Zero data loss |
 | **Active `memories` with `bubble_id`** | 27 | 27 | 100% entity-attached |
 | **Active `memories` without `bubble_id`** | 18 | 18 | Audited 100% legitimate user-level (`owner:user:self`) |
-| **`kg_nodes` Total** | 17 | 16 | Stale orphan reconciled |
-| **`kg_nodes` with `bubble_id`** | 16 | 16 | 100% mapped |
-| **`kg_nodes` without `bubble_id`** | **1 (stale orphan)** | **0 (ZERO)** | **100% mapped (Zero unmapped nodes)** |
-| **`kg_edges` Total** | 0 | 0 | Clean projection ready for live edges |
-| **`canonical_merge_entities` RPC** | Public/anon/auth execute | `service_role` ONLY | Hardened & verified |
-| **`reminders.bubble_id` column** | Missing | Exists (FK to `memory_bubbles`) | Migration applied |
+| **`kg_nodes` Total** | 16 | **15** | 100% mapped with semantic `entity_type` |
+| **`kg_nodes` without `bubble_id`** | 0 | 0 | Zero unmapped nodes |
+| **`kg_edges` Total** | 0 | **8** | 8 authoritative semantic edges with inverse semantics |
+| **Projection Rebuild Idempotency** | - | **Verified (Pass 1 == Pass 2)** | Deterministic projection |
 
 ---
 
@@ -115,9 +118,12 @@ All 10 production integrity hardening gates (Gate A through Gate J) have been im
 
 | Suite / Check | Result |
 | :--- | :--- |
+| `Phase3SemanticClosure.test.ts` (Areas A-D) | **100% Passed (10/10 tests)** |
+| `indicTransliteration.test.ts` | **100% Passed (3/3 tests)** |
+| `inferSemanticEntityType.test.ts` | **100% Passed (5/5 tests)** |
 | `Phase3Convergence.test.ts` | **100% Passed (9/9 tests)** |
 | `NovaPipelineFoundation.test.ts` | **100% Passed (12/12 tests)** |
-| Live Supabase Convergence Suite (`verify_phase3_production_convergence.ts`) | **100% Passed** |
+| Live Supabase Semantic Pass (`semantic_closure_pass.ts`) | **100% Verified (0 duplicates, 0 empty slugs, 8 kg_edges, idempotent)** |
 | Live Supabase State Audit (`audit_phase3_live_state.ts`) | **Verified: 0 unmapped kg_nodes, 0 dangling edges** |
 | Backend Production Build (`cd backend && npm run build`) | **Exit Code 0 (0 errors)** |
 | Mobile TypeScript Check (`cd mobile && npx tsc --noEmit`) | **Exit Code 0 (0 errors)** |

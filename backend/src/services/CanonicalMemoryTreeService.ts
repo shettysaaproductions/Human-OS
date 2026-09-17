@@ -11,7 +11,8 @@ import { supabaseAdmin } from '../lib/supabase';
 import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { universalBranchRelocationService, BranchRelocationProposal, RelocationExecutionResult } from './UniversalBranchRelocationService';
 import { logger } from '../lib/logger';
-import { isValidEntityName } from '../lib/entitySemanticValidator';
+import { isValidEntityName, inferSemanticEntityType, SemanticEntityType } from '../lib/entitySemanticValidator';
+import { generateCanonicalSlug } from '../lib/indicTransliteration';
 
 export type BubbleType = 'domain' | 'entity' | 'branch' | 'attribute';
 
@@ -77,7 +78,7 @@ export interface MemorySubtree {
 export interface EntityResolutionResult {
   entityId: string;
   entityName: string;
-  entityType: 'person' | 'pet' | 'character' | 'project' | 'concept' | 'object';
+  entityType: SemanticEntityType | 'character' | 'project' | 'object';
   domainKey: LifeDomainKey;
   relationType?: string;
   parentEntityId?: string;
@@ -94,11 +95,7 @@ export interface EntityResolutionResult {
 export type EntityResolutionGateResult = EntityResolutionResult;
 
 function normalizeSlug(str: string): string {
-  return (str || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  return generateCanonicalSlug(str);
 }
 
 function capitalizeWords(raw: string): string {
@@ -678,7 +675,7 @@ export class CanonicalMemoryTreeService {
     userId: string,
     params: {
       entityName: string;
-      entityType?: 'person' | 'pet' | 'character' | 'project' | 'concept' | 'object';
+      entityType?: SemanticEntityType | 'character' | 'project' | 'object';
       domainKey?: LifeDomainKey;
       relationType?: string;
       parentBubbleId?: string;
@@ -742,7 +739,7 @@ export class CanonicalMemoryTreeService {
         domain_key: domainKey,
         relation_type: params.relationType || null,
         metadata: {
-          entity_type: params.entityType || 'person',
+          entity_type: params.entityType || inferSemanticEntityType(params.entityName, domainKey, params.relationType),
           ...(params.metadata || {}),
         },
         is_archived: false,

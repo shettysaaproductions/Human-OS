@@ -89,7 +89,7 @@ export class MemoryReconciliationModule implements NovaPipelineModule {
           await supabaseAdmin.from('kg_nodes').upsert({
             user_id: userId,
             name: effect.subjectEntityName,
-            entity_type: effect.relationType || 'person',
+            entity_type: (bubbleRecord as any)?.metadata?.entity_type || effect.relationType || 'person',
             bubble_id: bubbleId,
             attributes: {
               bubble_id: bubbleId,

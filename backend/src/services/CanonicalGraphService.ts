@@ -124,42 +124,50 @@ export class CanonicalGraphService {
     const bubbleMap = new Map<string, any>();
     const bubbleNodeIdMap = new Map<string, string>(); // bubbleId -> nodeId
 
-    // ── 4. Build Level 2 Entity Branches ───────────────────────────────────────
+    // ── 4. Build Level 2 Entity Branches (Two-Pass Deterministic Registration) ──
     const validBubbles = bubbles || [];
+
+    // Pass 1: Index all bubbles into bubbleMap and bubbleNodeIdMap first
+    // Ensures parent_bubble_id resolution never depends on database return order!
     for (const b of validBubbles) {
       if (b.bubble_type === 'domain') continue; // Domains already created as trunks
       bubbleMap.set(b.id, b);
+      bubbleNodeIdMap.set(b.id, `bubble-${b.id}`);
+    }
+
+    // Pass 2: Build entity nodes and deterministic hierarchy edges
+    for (const b of validBubbles) {
+      if (b.bubble_type === 'domain') continue;
 
       const domain: LifeDomainKey = (b.domain_key && DEPT_KEYS.includes(b.domain_key as any))
         ? (b.domain_key as LifeDomainKey)
         : 'lifestyle';
       const meta = DOMAIN_TAXONOMY[domain];
 
-      // Node ID: stable bubble ID
-      const entityNodeId = `bubble-${b.id}`;
-      bubbleNodeIdMap.set(b.id, entityNodeId);
-
+      const entityNodeId = bubbleNodeIdMap.get(b.id)!;
       const relationLabel = b.relation_type ? ` · ${b.relation_type}` : '';
       const entityDisplayName = b.relation_type ? `${b.label} (${b.relation_type})` : b.label;
 
-      // Determine parent node
+      // Determine parent node deterministically from Pass 1 map
       let parentNodeId = `dept-${domain}`;
       if (b.parent_bubble_id && bubbleNodeIdMap.has(b.parent_bubble_id)) {
         parentNodeId = bubbleNodeIdMap.get(b.parent_bubble_id)!;
       }
 
+      const entityType = (b.metadata as any)?.entity_type || (b.bubble_type as any) || 'entity';
+
       const entityNode: DynamicKgNode = {
         id: entityNodeId,
         name: entityDisplayName,
-        entity_type: (b.bubble_type as any) || 'entity',
+        entity_type: entityType,
         department: domain,
         color: meta.color,
         radius: 20,
         value: `${b.label}${relationLabel}`,
         raw_key: b.slug,
-        emoji: this.getEntityEmoji(b.relation_type, domain),
+        emoji: this.getEntityEmoji(b.relation_type, domain, entityType),
         parentEntityId: parentNodeId,
-        hierarchyLevel: 2,
+        hierarchyLevel: parentNodeId.startsWith('dept-') ? 2 : 3,
         treePath: [cleanUserName, meta.title, b.label],
       };
 
@@ -336,7 +344,11 @@ export class CanonicalGraphService {
     return `${cleanPred}: ${value}`;
   }
 
-  private getEntityEmoji(relation?: string | null, domain?: LifeDomainKey): string {
+  private getEntityEmoji(relation?: string | null, domain?: LifeDomainKey, entityType?: string): string {
+    if (entityType === 'pet') return '🐾';
+    if (entityType === 'event') return '🎉';
+    if (entityType === 'role' || entityType === 'concept') return '💡';
+    if (entityType === 'organization') return '🏢';
     if (!relation) {
       return domain ? DOMAIN_TAXONOMY[domain]?.emoji || '🌱' : '🌱';
     }
@@ -405,12 +417,16 @@ export class CanonicalGraphService {
         ...((b.metadata as any)?.attributes || {}),
       };
 
+      const entityType = b.bubble_type === 'entity'
+        ? ((b.metadata as any)?.entity_type || 'person')
+        : b.bubble_type;
+
       if (existingNode) {
         await supabaseAdmin
           .from('kg_nodes')
           .update({
             name: b.label,
-            entity_type: b.bubble_type === 'entity' ? 'person' : b.bubble_type,
+            entity_type: entityType,
             attributes,
             updated_at: nowIso,
           })
@@ -424,7 +440,7 @@ export class CanonicalGraphService {
             user_id: userId,
             bubble_id: b.id,
             name: b.label,
-            entity_type: b.bubble_type === 'entity' ? 'person' : b.bubble_type,
+            entity_type: entityType,
             attributes,
           })
           .select('id')

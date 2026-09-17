@@ -255,3 +255,123 @@ export function isValidMemoryAttributeValue(key: string, value: string): { isVal
 
   return { isValid: true };
 }
+
+// ── 7. REUSABLE SEMANTIC ENTITY TYPING GATEWAY ──────────────────────────────
+export type SemanticEntityType =
+  | 'person'
+  | 'pet'
+  | 'event'
+  | 'role'
+  | 'concept'
+  | 'organization';
+
+const KNOWN_PET_BREEDS_AND_ANIMALS = new Set([
+  'dog', 'cat', 'puppy', 'kitten', 'kutta', 'billi', 'pet', 'pets',
+  'rottweiler', 'labrador', 'retriever', 'golden retriever', 'pug',
+  'german shepherd', 'beagle', 'bulldog', 'poodle', 'husky', 'chihuahua',
+  'boxer', 'dalmatian', 'doberman', 'shih tzu', 'persian cat', 'siamese cat',
+  'parrot', 'bird', 'fish', 'hamster', 'rabbit'
+]);
+
+const KNOWN_EVENT_WORDS = new Set([
+  'celebration', 'celebrations', 'festival', 'utsav', 'parv', 'puja', 'pooja',
+  'party', 'wedding', 'marriage', 'shaadi', 'shadi', 'anniversary', 'ceremony',
+  'trip', 'tour', 'concert', 'match', 'tournament', 'gathering',
+  'birthday', 'bday', 'ganpati', 'ganpati celebrations', 'ganesh chaturthi',
+  'diwali', 'deepavali', 'holi', 'navratri', 'eid', 'christmas', 'new year'
+]);
+
+const KNOWN_ROLE_AND_CONCEPT_WORDS = new Set([
+  'friend', 'friends', 'dost', 'colleague', 'coworker', 'partner', 'smoking partner',
+  'since college', 'college friend', 'school friend', 'childhood friend',
+  'name not specified', 'not specified', 'unspecified', 'unknown',
+  'hr', 'human resources', 'manager', 'boss', 'developer', 'designer',
+  'engineer', 'doctor', 'lawyer', 'tailor', 'mentor', 'mentee',
+  'habit', 'context', 'preference'
+]);
+
+const KNOWN_ORGANIZATION_WORDS = new Set([
+  'company', 'inc', 'corp', 'corporation', 'ltd', 'limited', 'pvt', 'llc',
+  'studio', 'studios', 'productions', 'films', 'entertainment',
+  'bank', 'hospital', 'clinic', 'school', 'college', 'university',
+  'institute', 'institution', 'agency', 'firm', 'club', 'foundation',
+  'startup', 'venture', 'office', 'workplace'
+]);
+
+/**
+ * Reusable semantic entity type classifier.
+ * Infers whether an entity candidate represents a real person, pet/animal,
+ * event/celebration, role/concept, or organization, based on evidence,
+ * domain, relation hints, and multi-script phonetic roots.
+ */
+export function inferSemanticEntityType(
+  name: string,
+  domainHint?: string,
+  relationHint?: string,
+  contextText?: string
+): SemanticEntityType {
+  if (!name || typeof name !== 'string') return 'person';
+  const lower = name.toLowerCase().trim();
+  const relLower = (relationHint || '').toLowerCase().trim();
+  const domainLower = (domainHint || '').toLowerCase().trim();
+  const ctxLower = (contextText || '').toLowerCase().trim();
+
+  // 1. Animals / Pets / Breeds (e.g. Rottweiler, Labrador, Bruno)
+  const isExplicitBreedOrAnimal =
+    KNOWN_PET_BREEDS_AND_ANIMALS.has(lower) ||
+    lower.split(/\s+/).some(w => KNOWN_PET_BREEDS_AND_ANIMALS.has(w));
+
+  if (
+    isExplicitBreedOrAnimal ||
+    relLower.includes('pet') || relLower.includes('dog') || relLower.includes('cat') ||
+    relLower.includes('kutta') || relLower.includes('billi') ||
+    ctxLower.includes('dog') || ctxLower.includes('cat') || ctxLower.includes('pet')
+  ) {
+    // Explicit animal/breed name always classifies as pet.
+    // General pet hints only defer to human kinship if not an explicit breed name.
+    if (isExplicitBreedOrAnimal || !/^(father|mother|wife|husband|son|daughter|brother|sister|friend|colleague)$/i.test(relLower)) {
+      return 'pet';
+    }
+  }
+
+  // 2. Events / Celebrations / Festivals (e.g. Ganpati Celebrations, Diwali)
+  if (
+    KNOWN_EVENT_WORDS.has(lower) ||
+    lower.split(/\s+/).some(w => KNOWN_EVENT_WORDS.has(w)) ||
+    lower.endsWith('celebration') || lower.endsWith('celebrations') ||
+    lower.endsWith('festival') || lower.endsWith('party') || lower.endsWith('puja') ||
+    lower.endsWith('wedding') || lower.endsWith('tour') || lower.endsWith('trip') ||
+    relLower.includes('event') || relLower.includes('celebration') || relLower.includes('festival')
+  ) {
+    return 'event';
+  }
+
+  // 3. Concepts / Attributes / Temporal Fragments (e.g. "Since College", "Name Not Specified")
+  if (
+    lower.startsWith('since ') ||
+    lower.includes('not specified') ||
+    lower === 'unknown'
+  ) {
+    return 'concept';
+  }
+
+  // 4. Roles / Relational Descriptors (e.g. "Smoking Partner", "Friend", "Hr")
+  if (
+    KNOWN_ROLE_AND_CONCEPT_WORDS.has(lower) ||
+    lower.includes('partner')
+  ) {
+    return 'role';
+  }
+
+  // 5. Organizations / Ventures / Studios (e.g. "Conviction HR", "Shetty Productions")
+  if (
+    KNOWN_ORGANIZATION_WORDS.has(lower) ||
+    /\b(inc|corp|ltd|llc|pvt|studio|productions|bank|hospital|clinic|university|startup)\b/i.test(lower) ||
+    (domainLower === 'work' && (relLower.includes('company') || relLower.includes('organization') || relLower.includes('startup')))
+  ) {
+    return 'organization';
+  }
+
+  // 6. Default: Real person
+  return 'person';
+}

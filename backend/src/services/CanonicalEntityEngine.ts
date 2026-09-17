@@ -11,7 +11,8 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { cache } from '../lib/cache';
-import { isValidEntityName, isValidMemoryAttributeValue } from '../lib/entitySemanticValidator';
+import { isValidEntityName, isValidMemoryAttributeValue, inferSemanticEntityType } from '../lib/entitySemanticValidator';
+import { generateCanonicalSlug, transliterateIndic } from '../lib/indicTransliteration';
 import { canonicalMemoryTreeService } from './CanonicalMemoryTreeService';
 import { memoryRepository } from './memoryRepository';
 import { NovaProvenance } from '../pipeline/NovaEvent';
@@ -83,18 +84,17 @@ export class CanonicalEntityEngine {
 
   /**
    * Normalizes an entity name to a canonical slug format.
+   * Multi-script aware: Devanagari "साक्षी" and Latin "Sakshi" normalize to "sakshi".
+   * Never produces an empty slug.
    */
   normalizeSlug(name: string): string {
-    return (name || '')
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
+    return generateCanonicalSlug(name);
   }
 
   /**
    * Resolves a name, nickname, alias, or kinship reference to an existing canonical entity.
    * Does NOT perform full database scans — uses indexed candidate retrieval.
+   * Multi-script aware: seamlessly connects across Devanagari and Latin forms.
    */
   async resolveEntity(
     userId: string,
@@ -103,8 +103,9 @@ export class CanonicalEntityEngine {
   ): Promise<ResolvedCanonicalEntity | null> {
     const raw = (nameOrAlias || '').trim();
     if (!raw) return null;
-    const clean = raw.toLowerCase().replace(/^(?:my|mera|meri|mere)\s+/i, '');
+    const clean = raw.toLowerCase().replace(/^(?:my|mera|meri|mere)\s+/i, '').trim();
     const cleanSlug = `entity:${this.normalizeSlug(clean)}`;
+    const transliteratedClean = transliterateIndic(clean).toLowerCase();
 
     // 1. Check conversational context focus (0 DB latency)
     if (context?.entityFocus) {
@@ -112,8 +113,12 @@ export class CanonicalEntityEngine {
       if (active) {
         if (
           active.name.toLowerCase() === clean ||
+          transliterateIndic(active.name).toLowerCase() === transliteratedClean ||
           active.relationToUser?.toLowerCase() === clean ||
-          active.aliases.some((a) => a.toLowerCase() === clean)
+          active.aliases.some((a) => {
+            const al = a.toLowerCase();
+            return al === clean || al === transliteratedClean || transliterateIndic(al).toLowerCase() === transliteratedClean;
+          })
         ) {
           return this.hydrateEntityFromBubbleId(userId, active.id);
         }
@@ -121,8 +126,12 @@ export class CanonicalEntityEngine {
       for (const recent of context.entityFocus.recentEntities) {
         if (
           recent.name.toLowerCase() === clean ||
+          transliterateIndic(recent.name).toLowerCase() === transliteratedClean ||
           recent.relationToUser?.toLowerCase() === clean ||
-          recent.aliases.some((a) => a.toLowerCase() === clean)
+          recent.aliases.some((a) => {
+            const al = a.toLowerCase();
+            return al === clean || al === transliteratedClean || transliterateIndic(al).toLowerCase() === transliteratedClean;
+          })
         ) {
           return this.hydrateEntityFromBubbleId(userId, recent.id);
         }
@@ -137,7 +146,7 @@ export class CanonicalEntityEngine {
         .eq('user_id', userId)
         .eq('is_archived', false)
         .eq('bubble_type', 'entity')
-        .or(`slug.eq.${cleanSlug},label.ilike.${clean}`)
+        .or(`slug.eq.${cleanSlug},label.ilike.${clean},label.ilike.${transliteratedClean}`)
         .limit(5);
 
       if (directMatches && directMatches.length > 0) {
@@ -158,7 +167,7 @@ export class CanonicalEntityEngine {
         return this.formatCanonicalEntity(aliasMatches[0], false);
       }
 
-      // 4. Case-insensitive alias scan across recent entities
+      // 4. Case-insensitive alias scan across recent entities with multi-script phonetic matching
       const { data: recentBubbles } = await supabaseAdmin
         .from('memory_bubbles')
         .select('*')
@@ -172,7 +181,15 @@ export class CanonicalEntityEngine {
         for (const b of recentBubbles) {
           const meta = (b.metadata as Record<string, unknown>) || {};
           const aliases: string[] = Array.isArray(meta.aliases) ? (meta.aliases as string[]) : [];
-          if (aliases.some((a) => a.toLowerCase() === clean)) {
+          if (aliases.some((a) => {
+            const lowerA = a.toLowerCase();
+            return (
+              lowerA === clean ||
+              lowerA === transliteratedClean ||
+              this.normalizeSlug(lowerA) === this.normalizeSlug(clean) ||
+              transliterateIndic(lowerA).toLowerCase() === transliteratedClean
+            );
+          })) {
             return this.formatCanonicalEntity(b, false);
           }
           if (b.relation_type && b.relation_type.toLowerCase() === clean) {
@@ -211,8 +228,11 @@ export class CanonicalEntityEngine {
       return existing;
     }
 
+    // Inferred semantic entity type (person, pet, event, role, concept, organization)
+    const inferredType = inferSemanticEntityType(entityName, domainKey, relationType);
+
     // Linguistic validation to prevent rogue verbs/particles
-    const check = isValidEntityName(entityName, 'person');
+    const check = isValidEntityName(entityName, inferredType);
     if (!check.isValid) {
       logger.warn('[CanonicalEntityEngine] Blocked entity creation for invalid name', {
         name: entityName,
@@ -227,7 +247,8 @@ export class CanonicalEntityEngine {
       userId,
       {
         entityName,
-        relationType: relationType || 'Associate',
+        entityType: inferredType,
+        relationType: relationType || (inferredType === 'person' ? 'Associate' : undefined),
         domainKey: domainKey as any,
       }
     );
@@ -268,15 +289,16 @@ export class CanonicalEntityEngine {
     const targetMeta = (targetBubble.metadata as Record<string, unknown>) || {};
     const targetAliases: string[] = Array.isArray(targetMeta.aliases) ? [...(targetMeta.aliases as string[])] : [];
 
-    // 2. Check if a provisional entity bubble already exists for this alias
+    // 2. Check if a provisional entity bubble already exists for this alias (multi-script aware)
     const aliasSlug = `entity:${this.normalizeSlug(cleanAlias)}`;
+    const transliteratedAlias = transliterateIndic(cleanAlias).toLowerCase();
     const { data: candidateSourceBubbles } = await supabaseAdmin
       .from('memory_bubbles')
       .select('*')
       .eq('user_id', userId)
       .eq('is_archived', false)
       .neq('id', canonicalEntityId)
-      .or(`slug.eq.${aliasSlug},label.ilike.${cleanAlias}`);
+      .or(`slug.eq.${aliasSlug},label.ilike.${cleanAlias},label.ilike.${transliteratedAlias}`);
 
     if (candidateSourceBubbles && candidateSourceBubbles.length > 0) {
       // ORDER-INDEPENDENCE RECONCILIATION: Merge the provisional alias entity into the canonical entity!
@@ -495,7 +517,7 @@ export class CanonicalEntityEngine {
           user_id: userId,
           bubble_id: sourceEntityId,
           name: sourceBubble.label,
-          entity_type: sourceBubble.bubble_type === 'entity' ? 'person' : sourceBubble.bubble_type,
+          entity_type: sourceBubble.bubble_type === 'entity' ? ((sourceBubble.metadata as any)?.entity_type || 'person') : sourceBubble.bubble_type,
           attributes: { bubble_id: sourceEntityId, domain_key: sourceBubble.domain_key },
         }).select('id').single();
         sourceKgId = insS?.id || null;
@@ -508,7 +530,7 @@ export class CanonicalEntityEngine {
           user_id: userId,
           bubble_id: targetEntityId,
           name: targetBubble.label,
-          entity_type: targetBubble.bubble_type === 'entity' ? 'person' : targetBubble.bubble_type,
+          entity_type: targetBubble.bubble_type === 'entity' ? ((targetBubble.metadata as any)?.entity_type || 'person') : targetBubble.bubble_type,
           attributes: { bubble_id: targetEntityId, domain_key: targetBubble.domain_key },
         }).select('id').single();
         targetKgId = insT?.id || null;
@@ -647,7 +669,7 @@ export class CanonicalEntityEngine {
       id: bubble.id,
       slug: bubble.slug,
       name: bubble.label,
-      entityType: bubble.bubble_type === 'entity' ? 'person' : (bubble.bubble_type as any),
+      entityType: (meta.entity_type as string) || (bubble.bubble_type === 'entity' ? 'person' : (bubble.bubble_type as any)),
       relationToUser: bubble.relation_type || undefined,
       domainKey: bubble.domain_key,
       parentBubbleId: bubble.parent_bubble_id,
