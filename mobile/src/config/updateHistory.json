@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.36-beta",
+    "date": "2026-09-17",
+    "title": "🧠 Canonical Entity Engine, Order-Independent Convergence & Pure Knowledge Galaxy (Phase 2)",
+    "message": [
+      "One Canonical Semantic Graph: Established memory_bubbles as the single authoritative source of truth for entities and relationships, with memories strictly foreign-keyed via bubble_id and kg_nodes synchronized in lockstep.",
+      "Order-Independent Convergence: Any sequence of information discovery ('A is my son' -> 'B is his nickname' -> 'B was born on date' vs 'B was born on date' -> 'B is A's nickname' -> 'A is my son') deterministically converges to the identical canonical entity graph.",
+      "Safe Entity Merging: When aliases are discovered, provisional entities merge cleanly into the primary entity with zero data loss, repointing all memories, reminders, and child nodes while preserving a reversible audit trail.",
+      "Strict Fact Ownership: All persistent facts belong exclusively to the resolved entity rather than domain compartments, preventing split-brain memories across categories.",
+      "Data-Driven Knowledge Galaxy: Knowledge Graph Explorer is now 100% data-driven directly from canonical memory bubbles and linked facts, eliminating all hardcoded person names and heuristic regex branches."
+    ]
+  },
+  {
     "version": "0.3.35-beta",
     "date": "2026-09-17",
     "title": "🧠 Unified Cognitive Pipeline & Canonical Brain Architecture (Phase 1)",

@@ -9,7 +9,6 @@ import {
   classifyDomain,
   synthesizeConnectedDots,
   clusterMemoriesIntoWardrobes,
-  buildDynamicKnowledgeGraph,
   DOMAIN_TAXONOMY,
   LifeDomainKey,
   isPlaceholderValue,
@@ -937,72 +936,18 @@ analyticsRouter.get('/kg', async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const now = new Date().toISOString();
+    // Fetch profile for core node display name
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('display_name, preferred_name')
+      .eq('id', userId)
+      .maybeSingle();
 
-    // Parallel fetch for active memories, working memory, and profile
-    const [
-      { data: activeMemories, error: activeErr },
-      { data: wmRows },
-      { data: profile }
-    ] = await Promise.all([
-      supabaseAdmin
-        .from('memories')
-        .select('id, memory_type, created_at, updated_at, key, value, importance, is_archived, source_authority, lifecycle_state')
-        .eq('user_id', userId)
-        .eq('is_archived', false)
-        .order('importance', { ascending: false })
-        .limit(500),
-      supabaseAdmin
-        .from('working_memory')
-        .select('id, key, value, created_at, promotion_status, expires_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(20),
-      supabaseAdmin
-        .from('profiles')
-        .select('display_name, preferred_name')
-        .eq('id', userId)
-        .maybeSingle()
-    ]);
+    const preferredName = profile?.preferred_name || profile?.display_name || 'You';
 
-    if (activeErr) throw activeErr;
-
-    // 2. Canonicalize + deduplicate
-    const canonicalMap = new Map<string, any>();
-    for (const mem of (activeMemories || [])) {
-      if (mem.lifecycle_state === 'SUPERSEDED' || mem.lifecycle_state === 'INVALIDATED') continue;
-      const { canonical } = canonicalizeKey(mem.key || '');
-      const domainMeta = classifyDomain(canonical, mem.memory_type);
-      canonicalMap.set(canonical, { ...mem, key: canonical, domain: domainMeta.domain, domainMeta });
-    }
-    const currentMemories = Array.from(canonicalMap.values());
-
-    const SYSTEM_WM_KEYS = new Set([
-      'nova_ignored_deferred_count', 'ignore_escalation_count', 'followup_suppressed_until',
-      'silent_visit_count', 'last_proactive_content', 'user_busy_until', 'last_curiosity_topic'
-    ]);
-
-    const workingContext = (wmRows || []).filter((wm: any) =>
-      wm.promotion_status !== 'SUPERSEDED' &&
-      wm.promotion_status !== 'INVALIDATED' &&
-      (!wm.expires_at || wm.expires_at > now) &&
-      !wm.key.startsWith('__sys_') &&
-      !wm.key.startsWith('_') &&
-      !SYSTEM_WM_KEYS.has(wm.key) &&
-      !wm.key.includes('counter') &&
-      !wm.key.includes('count') &&
-      wm.key !== 'birth_date' &&
-      !isPlaceholderValue(wm.value) &&
-      !isTransientSituationalItem(wm.key, wm.value)
-    ).filter((wm: any) => {
-      const { canonical } = canonicalizeKey(wm.key || '');
-      return !canonicalMap.has(canonical);
-    });
-
-    const preferredName = canonicalMap.get('preferred_name')?.value || profile?.preferred_name || profile?.display_name || 'You';
-
-    // 5. Build Dynamic Knowledge Graph
-    const graphData = buildDynamicKnowledgeGraph(currentMemories, workingContext, preferredName);
+    // Phase 2: Authoritative Canonical Knowledge Graph from memory_bubbles and memories
+    const { canonicalGraphService } = await import('../services/CanonicalGraphService');
+    const graphData = await canonicalGraphService.getCanonicalKnowledgeGraph(userId, preferredName);
 
     setCachedAnalytics(cacheKey, graphData, 15);
 

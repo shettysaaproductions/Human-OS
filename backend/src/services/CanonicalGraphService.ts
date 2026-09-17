@@ -1,0 +1,337 @@
+/**
+ * CanonicalGraphService.ts — Authoritative Knowledge Graph Service (Phase 2)
+ *
+ * ARCHITECTURAL INVARIANTS:
+ * 1. ONE CANONICAL GRAPH: Directly visualizes memory_bubbles (entities) and memories (attributes).
+ * 2. ZERO HARDCODED NAMES: No regexes or special cases for "Sakshi", "Shreshth", "Ijaz", etc.
+ * 3. GALAXY IS A VIEW: Provides clean graph data with typed edges and explicit hierarchy.
+ */
+
+import { supabaseAdmin } from '../lib/supabase';
+import { logger } from '../lib/logger';
+import {
+  LifeDomainKey,
+  DOMAIN_TAXONOMY,
+  DynamicKgNode,
+  DynamicKgEdge,
+  DynamicKgResult,
+} from '../lib/memoryDomains';
+
+export class CanonicalGraphService {
+  private static instance: CanonicalGraphService;
+
+  static getInstance(): CanonicalGraphService {
+    if (!CanonicalGraphService.instance) {
+      CanonicalGraphService.instance = new CanonicalGraphService();
+    }
+    return CanonicalGraphService.instance;
+  }
+
+  /**
+   * Builds the canonical Knowledge Graph strictly from memory_bubbles and memories.
+   */
+  async getCanonicalKnowledgeGraph(userId: string, preferredName?: string): Promise<DynamicKgResult> {
+    const nodes: DynamicKgNode[] = [];
+    const edges: DynamicKgEdge[] = [];
+    const nodeIds = new Set<string>();
+
+    const cleanUserName = (preferredName || 'You')
+      .replace(/^Prefers to be called\s+/i, '')
+      .replace(/\.$/, '')
+      .trim();
+
+    // ── 1. Central Self Node (Level 0) ─────────────────────────────────────────
+    const coreNodeId = 'user-core';
+    const coreNode: DynamicKgNode = {
+      id: coreNodeId,
+      name: cleanUserName,
+      entity_type: 'self',
+      department: 'identity',
+      color: '#8B5CF6',
+      radius: 30,
+      value: `Central Self & Consciousness: ${cleanUserName}`,
+      isHub: true,
+      emoji: '🧠',
+      hierarchyLevel: 1,
+      treePath: [cleanUserName],
+    };
+    nodes.push(coreNode);
+    nodeIds.add(coreNodeId);
+
+    // ── 2. Department Hub Nodes (Level 1 - Main Trunks) ────────────────────────
+    const DEPT_KEYS: LifeDomainKey[] = ['family', 'work', 'goals', 'lifestyle', 'identity'];
+    for (const d of DEPT_KEYS) {
+      const meta = DOMAIN_TAXONOMY[d];
+      const deptNodeId = `dept-${d}`;
+      const deptNode: DynamicKgNode = {
+        id: deptNodeId,
+        name: meta.title,
+        entity_type: 'department',
+        department: d,
+        color: meta.color,
+        radius: 24,
+        value: meta.description,
+        isDepartment: true,
+        emoji: meta.emoji,
+        parentEntityId: coreNodeId,
+        hierarchyLevel: 1,
+        treePath: [cleanUserName, meta.title],
+      };
+      nodes.push(deptNode);
+      nodeIds.add(deptNodeId);
+
+      // Edge from Core to Department Trunk
+      edges.push({
+        id: `edge-core-${d}`,
+        source: coreNodeId,
+        target: deptNodeId,
+        relation: 'HAS_DEPARTMENT',
+        color: 'rgba(255,255,255,0.25)',
+        weight: 3,
+        edgeType: 'DEPARTMENT_BRANCH',
+        explanation: `Main trunk connecting consciousness to ${meta.title}`,
+      });
+    }
+
+    // ── 3. Fetch Canonical Entity Bubbles & Memories in Parallel ───────────────
+    const [
+      { data: bubbles, error: bubbleErr },
+      { data: memories, error: memErr },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('memory_bubbles')
+        .select('id, label, slug, bubble_type, domain_key, relation_type, parent_bubble_id, metadata, updated_at')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+        .order('created_at', { ascending: true }),
+      supabaseAdmin
+        .from('memories')
+        .select('id, key, value, memory_type, bubble_id, confidence, updated_at, lifecycle_state')
+        .eq('user_id', userId)
+        .eq('is_archived', false)
+        .neq('lifecycle_state', 'SUPERSEDED')
+        .neq('lifecycle_state', 'INVALIDATED'),
+    ]);
+
+    if (bubbleErr) {
+      logger.error('[CanonicalGraphService] Error fetching memory_bubbles', { error: bubbleErr.message, userId });
+    }
+    if (memErr) {
+      logger.error('[CanonicalGraphService] Error fetching memories', { error: memErr.message, userId });
+    }
+
+    const bubbleMap = new Map<string, any>();
+    const bubbleNodeIdMap = new Map<string, string>(); // bubbleId -> nodeId
+
+    // ── 4. Build Level 2 Entity Branches ───────────────────────────────────────
+    const validBubbles = bubbles || [];
+    for (const b of validBubbles) {
+      if (b.bubble_type === 'domain') continue; // Domains already created as trunks
+      bubbleMap.set(b.id, b);
+
+      const domain: LifeDomainKey = (b.domain_key && DEPT_KEYS.includes(b.domain_key as any))
+        ? (b.domain_key as LifeDomainKey)
+        : 'lifestyle';
+      const meta = DOMAIN_TAXONOMY[domain];
+
+      // Node ID: stable bubble ID
+      const entityNodeId = `bubble-${b.id}`;
+      bubbleNodeIdMap.set(b.id, entityNodeId);
+
+      const relationLabel = b.relation_type ? ` · ${b.relation_type}` : '';
+      const entityDisplayName = b.relation_type ? `${b.label} (${b.relation_type})` : b.label;
+
+      // Determine parent node
+      let parentNodeId = `dept-${domain}`;
+      if (b.parent_bubble_id && bubbleNodeIdMap.has(b.parent_bubble_id)) {
+        parentNodeId = bubbleNodeIdMap.get(b.parent_bubble_id)!;
+      }
+
+      const entityNode: DynamicKgNode = {
+        id: entityNodeId,
+        name: entityDisplayName,
+        entity_type: (b.bubble_type as any) || 'entity',
+        department: domain,
+        color: meta.color,
+        radius: 20,
+        value: `${b.label}${relationLabel}`,
+        raw_key: b.slug,
+        emoji: this.getEntityEmoji(b.relation_type, domain),
+        parentEntityId: parentNodeId,
+        hierarchyLevel: 2,
+        treePath: [cleanUserName, meta.title, b.label],
+      };
+
+      nodes.push(entityNode);
+      nodeIds.add(entityNodeId);
+
+      // Edge from Trunk (or parent entity) to Entity
+      edges.push({
+        id: `edge-${parentNodeId}-${entityNodeId}`,
+        source: parentNodeId,
+        target: entityNodeId,
+        relation: b.relation_type ? `${b.relation_type.toUpperCase().replace(/\s+/g, '_')}_BRANCH` : 'ENTITY_BRANCH',
+        color: meta.color,
+        weight: 2,
+        edgeType: 'ENTITY_BRANCH',
+        explanation: `${b.label} in ${meta.title}`,
+      });
+    }
+
+    // ── 5. Build Level 3 Attribute Stems (Linked Memories) ──────────────────────
+    const validMemories = memories || [];
+    for (const m of validMemories) {
+      if (!m.value || !m.key) continue;
+
+      let parentNodeId: string;
+      let hierarchyLevel: 1 | 2 | 3;
+      let edgeType: DynamicKgEdge['edgeType'];
+      let domain: LifeDomainKey;
+
+      if (m.bubble_id && bubbleNodeIdMap.has(m.bubble_id)) {
+        // Linked to specific entity bubble
+        parentNodeId = bubbleNodeIdMap.get(m.bubble_id)!;
+        hierarchyLevel = 3;
+        edgeType = 'ATTRIBUTE_STEM';
+        const parentBubble = bubbleMap.get(m.bubble_id);
+        domain = (parentBubble?.domain_key as LifeDomainKey) || 'lifestyle';
+      } else {
+        // Direct user memory (attached to department trunk)
+        domain = (m.memory_type && DEPT_KEYS.includes(m.memory_type as any))
+          ? (m.memory_type as LifeDomainKey)
+          : 'identity';
+        parentNodeId = `dept-${domain}`;
+        hierarchyLevel = 2;
+        edgeType = 'ATTRIBUTE_STEM';
+      }
+
+      const meta = DOMAIN_TAXONOMY[domain] || DOMAIN_TAXONOMY.lifestyle;
+      const stemNodeId = `mem-${m.id}`;
+
+      // Clean attribute predicate for display
+      const predicate = this.extractPredicateName(m.key);
+      const stemDisplayName = this.formatStemName(predicate, m.value);
+
+      const stemNode: DynamicKgNode = {
+        id: stemNodeId,
+        name: stemDisplayName,
+        entity_type: 'attribute',
+        department: domain,
+        color: meta.color,
+        radius: 14,
+        value: m.value,
+        raw_key: m.key,
+        emoji: this.getAttributeEmoji(predicate, domain),
+        parentEntityId: parentNodeId,
+        hierarchyLevel,
+        treePath: [cleanUserName, meta.title, stemDisplayName],
+      };
+
+      nodes.push(stemNode);
+      nodeIds.add(stemNodeId);
+
+      edges.push({
+        id: `edge-${parentNodeId}-${stemNodeId}`,
+        source: parentNodeId,
+        target: stemNodeId,
+        relation: predicate.toUpperCase().replace(/\s+/g, '_'),
+        color: meta.color,
+        weight: 1,
+        edgeType,
+        explanation: `${predicate}: ${m.value}`,
+      });
+    }
+
+    // ── 6. Department Stats ───────────────────────────────────────────────────
+    const departments: Record<LifeDomainKey, { count: number; activeThreads: number; label: string; color: string; emoji: string }> = {
+      family: { count: 0, activeThreads: 0, label: DOMAIN_TAXONOMY.family.title, color: DOMAIN_TAXONOMY.family.color, emoji: DOMAIN_TAXONOMY.family.emoji },
+      work: { count: 0, activeThreads: 0, label: DOMAIN_TAXONOMY.work.title, color: DOMAIN_TAXONOMY.work.color, emoji: DOMAIN_TAXONOMY.work.emoji },
+      goals: { count: 0, activeThreads: 0, label: DOMAIN_TAXONOMY.goals.title, color: DOMAIN_TAXONOMY.goals.color, emoji: DOMAIN_TAXONOMY.goals.emoji },
+      lifestyle: { count: 0, activeThreads: 0, label: DOMAIN_TAXONOMY.lifestyle.title, color: DOMAIN_TAXONOMY.lifestyle.color, emoji: DOMAIN_TAXONOMY.lifestyle.emoji },
+      identity: { count: 0, activeThreads: 0, label: DOMAIN_TAXONOMY.identity.title, color: DOMAIN_TAXONOMY.identity.color, emoji: DOMAIN_TAXONOMY.identity.emoji },
+    };
+
+    for (const node of nodes) {
+      if (node.department && departments[node.department as LifeDomainKey]) {
+        departments[node.department as LifeDomainKey].count++;
+      }
+    }
+
+    logger.info('[CanonicalGraphService] Canonical knowledge graph constructed', {
+      userId,
+      totalNodes: nodes.length,
+      totalEdges: edges.length,
+      entityBubbles: validBubbles.length,
+      memoriesLinked: validMemories.filter((m) => m.bubble_id).length,
+    });
+
+    const deptList = (Object.entries(departments) as [LifeDomainKey, typeof departments[LifeDomainKey]][]).map(([id, d]) => ({
+      id,
+      name: d.label,
+      emoji: d.emoji,
+      color: d.color,
+      count: d.count,
+    }));
+
+    return {
+      nodes,
+      edges,
+      departments: deptList,
+      totalNodes: nodes.length,
+      totalEdges: edges.length,
+    };
+  }
+
+  private extractPredicateName(key: string): string {
+    if (key.startsWith('entity:')) {
+      const parts = key.split(':');
+      return parts.length >= 3 ? parts[2] : parts[parts.length - 1];
+    }
+    return key.replace(/^[a-z]+_/, '');
+  }
+
+  private formatStemName(predicate: string, value: string): string {
+    const cleanPred = predicate.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    if (cleanPred.toLowerCase() === 'birthday' || cleanPred.toLowerCase() === 'birth date') {
+      return `Birthday: ${value}`;
+    }
+    if (cleanPred.toLowerCase() === 'company name' || cleanPred.toLowerCase() === 'workplace') {
+      return `Works at ${value}`;
+    }
+    if (cleanPred.toLowerCase() === 'city' || cleanPred.toLowerCase() === 'location') {
+      return `Lives in ${value}`;
+    }
+    if (cleanPred.toLowerCase() === 'nickname') {
+      return `Nickname: ${value}`;
+    }
+    return `${cleanPred}: ${value}`;
+  }
+
+  private getEntityEmoji(relation?: string | null, domain?: LifeDomainKey): string {
+    if (!relation) {
+      return domain ? DOMAIN_TAXONOMY[domain]?.emoji || '🌱' : '🌱';
+    }
+    const r = relation.toLowerCase();
+    if (r.includes('son') || r.includes('daughter') || r.includes('child')) return '👶';
+    if (r.includes('wife') || r.includes('husband') || r.includes('partner') || r.includes('spouse')) return '❤️';
+    if (r.includes('father') || r.includes('mother') || r.includes('parent')) return '👨‍👩‍👦';
+    if (r.includes('brother') || r.includes('sister')) return '🧑‍🤝‍🧑';
+    if (r.includes('friend')) return '🤝';
+    if (r.includes('colleague') || r.includes('coworker')) return '💼';
+    if (r.includes('pet') || r.includes('dog') || r.includes('cat')) return '🐾';
+    return '👤';
+  }
+
+  private getAttributeEmoji(predicate: string, domain?: LifeDomainKey): string {
+    const p = predicate.toLowerCase();
+    if (p.includes('birth') || p.includes('dob') || p.includes('bday')) return '🎂';
+    if (p.includes('company') || p.includes('work') || p.includes('job') || p.includes('occupation')) return '💼';
+    if (p.includes('city') || p.includes('location') || p.includes('live')) return '📍';
+    if (p.includes('nick') || p.includes('alias')) return '🏷️';
+    if (p.includes('habit') || p.includes('smoke') || p.includes('drink')) return '☕';
+    if (p.includes('skill') || p.includes('art') || p.includes('hobby')) return '🎨';
+    return domain ? DOMAIN_TAXONOMY[domain]?.emoji || '•' : '•';
+  }
+}
+
+export const canonicalGraphService = CanonicalGraphService.getInstance();

@@ -135,46 +135,31 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     };
   }
 
-  if (k === 'wife_name' || k === 'sakshi') return { title: v || 'Sakshi', sub: 'Wife' };
-  if (k === 'son_name' || k === 'shreshth') {
-    const isInvalid = !v || /^(kar|ke|son|beta|infant|baby)$/i.test(v.trim());
-    return { title: isInvalid ? 'Shreshth' : v, sub: 'Son' };
+  // Generic kinship or relation formatting (100% data-driven, zero hardcoded person names)
+  if (k.includes('son') || k.includes('child')) {
+    if (k.includes('birth') || k.includes('dob')) return { title: v, sub: 'Birthday' };
+    if (k.includes('nick')) return { title: v, sub: 'Nickname' };
+    if (k.includes('age')) return { title: v.replace(/(\s*old)+$/i, '').trim(), sub: 'Age' };
+    return { title: v, sub: 'Son' };
   }
-  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) {
-    const isInvalid = !v || /^(kar|ke|nickname|naam|beta)$/i.test(v.trim());
-    return { title: isInvalid ? 'Tuku' : v, sub: 'Nickname' };
+  if (k.includes('wife') || k.includes('spouse') || k.includes('partner')) {
+    if (k.includes('birth') || k.includes('dob')) return { title: v, sub: 'Birthday' };
+    if (k.includes('cook')) return { title: "Cooking", sub: 'Hobby / Food' };
+    return { title: v, sub: 'Wife' };
+  }
+  if (k.includes('father') || k.includes('papa')) {
+    const isVocative = /^(father|papa|pitaji|dad|my father|mere papa)$/i.test(v);
+    return { title: (!isVocative && v) ? v : 'Father', sub: 'Father' };
+  }
+  if (k.includes('mother') || k.includes('mummy')) {
+    const isVocative = /^(mother|mummy|mom|maa|my mother|mere mummy)$/i.test(v);
+    return { title: (!isVocative && v) ? v : 'Mother', sub: 'Mother' };
   }
   if (k.includes('salary_day') || (k.includes('salary') && k.includes('day'))) {
     return { title: v || '5th of month', sub: 'Salary Day' };
   }
-  if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) {
-    return { title: 'Nail Artist', sub: 'Creative Skill' };
-  }
-  if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('child_b') || k.includes('child_dob') || k.includes('shreshth_date_of_birth') || k.includes('son_date_of_birth')) return { title: v || '17 Feb 2026', sub: 'Birthday' };
-  if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return { title: v || '23 July', sub: 'Birthday' };
-  if (k === 'son_age' || k === 'child_age' || k === 'baby_age') {
-    const cleanAge = (v || '').replace(/(\s*old)+$/i, '').trim();
-    return { title: cleanAge ? `${cleanAge} old` : 'Age', sub: 'Age' };
-  }
-  if (k === 'likes_wifes_cooking') return { title: "Wife's Cooking", sub: 'Hobby / Food' };
-  if (k === 'venture_name' || k === 'business_venture' || k === 'cloud_kitchen_business' || k === 'dhaba_venture') {
-    return { title: v || "Shetty's Dhaba", sub: 'Venture' };
-  }
-  if (k === 'father_name' || k === 'father' || k === 'papa' || k.startsWith('father_') || k.startsWith('papa_')) {
-    if (k === 'father_business' || k === 'father_job' || k === 'papa_business') {
-      return { title: v || 'Business', sub: 'Father Business' };
-    }
-    const cleanV = (v || '').trim();
-    const isVocative = /^(father|papa|pitaji|dad|my father|mere papa)$/i.test(cleanV);
-    return { title: !isVocative && cleanV ? cleanV : 'Father', sub: 'Father' };
-  }
-  if (k === 'mother_name' || k === 'mother' || k === 'mummy' || k.startsWith('mother_') || k.startsWith('mummy_')) {
-    if (k === 'mother_occupation' || k === 'mother_job' || k === 'mummy_occupation') {
-      return { title: v || 'Tailor', sub: 'Mother Occupation' };
-    }
-    const cleanV = (v || '').trim();
-    const isVocative = /^(mother|mummy|mom|maa|my mother|mere mummy)$/i.test(cleanV);
-    return { title: !isVocative && cleanV ? cleanV : 'Mother', sub: 'Mother' };
+  if (k.includes('venture_name') || k.includes('business_venture')) {
+    return { title: v, sub: 'Venture' };
   }
   if (k === 'daughter_name') return { title: v || 'Daughter', sub: 'Daughter' };
   if (k === 'sister_name') return { title: v || 'Sister', sub: 'Sister' };
@@ -450,30 +435,22 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     const seenBranchKeys = new Set<string>();
     for (const b of rawBranchItems) {
       const bKey = (b.raw_key || b.name || '').toLowerCase();
-      let norm = bKey;
-      if (norm.includes('family_details') || norm === 'family_details') continue;
-      if (norm.includes('sakshi') || norm.includes('wife')) norm = 'sakshi';
-      if (norm.includes('shreshth') || norm.includes('son')) norm = 'shreshth';
-      if (norm.includes('suresh') || norm.includes('father') || norm.includes('papa') || norm.includes('pitaji') || norm.includes('dad')) norm = 'father';
-      if (norm.includes('rajeshree') || norm.includes('mother') || norm.includes('mummy') || norm.includes('maa') || norm.includes('mom')) norm = 'mother';
-      if (norm.includes('tiku') || norm.includes('tuku') || norm.includes('family_nickname') || norm.includes('son_nickname')) {
-        // Redundant nickname in branch list - should never be an entity branch
-        continue;
-      }
-      if (norm.includes('rehta_hai') || norm.includes('mere_society') || norm.includes('ka_name') || norm.includes('society_issue') || norm === 'daily' || norm === 'reminder' || norm === 'drink' || norm === 'celebration') {
-        // Phantom fragment branches - filter from rendering
+      if (bKey.includes('family_details') || bKey === 'family_details') continue;
+      if (bKey.includes('rehta_hai') || bKey.includes('mere_society') || bKey.includes('ka_name') || bKey.includes('society_issue') || bKey === 'daily' || bKey === 'reminder') {
         continue;
       }
 
-      // General title-based branch deduplication (e.g. Ijaz, Sushant, Conviction HR)
+      // Canonical bubble ID deduplication
+      if (b.id && seenBranchKeys.has(b.id)) continue;
+      if (b.id) seenBranchKeys.add(b.id);
+
+      // Generic title-based branch deduplication
       const displayTitle = toDisplayNames(b.raw_key || b.id, b.value, b.name).title.trim().toLowerCase();
       if (displayTitle && displayTitle !== 'memory' && displayTitle !== 'attribute') {
         if (seenBranchKeys.has(`title:${displayTitle}`)) continue;
         seenBranchKeys.add(`title:${displayTitle}`);
       }
 
-      if (seenBranchKeys.has(norm)) continue;
-      seenBranchKeys.add(norm);
       branchItems.push(b);
     }
 

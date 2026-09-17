@@ -1,70 +1,55 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-17 — Phase 1: Unified Event / Pipeline Foundation (v0.3.35-beta)
+2026-09-17 — Phase 2: Canonical Memory / Entity Engine (v0.3.36-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.35-beta Published + Broadcasted)
+## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.36-beta Published + Broadcasted)
 
-### EAS Production OTA Deployment (v0.3.35-beta)
-- **Update Group ID**: `bee63f3d-5918-474b-b8cc-eb64f3e1a850`
-- **Android Update ID**: `01a0b05d-8e6c-781c-ba99-b1f00be1db6b`
-- **iOS Update ID**: `01a0b05d-8e6c-7297-ab0f-c24b857493f3`
+### EAS Production OTA Deployment (v0.3.36-beta)
+- **Update Group ID**: `fbaa6043-000a-4e6f-b5c3-9c771e3df88b`
+- **Android Update ID**: `01a0b071-2206-774c-be48-4851b744618d`
+- **iOS Update ID**: `01a0b071-2206-7d4f-9a8e-55909f8b1b37`
 - **Runtime Version**: `1.1.0`
 - **Branch**: `production`
 - **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
 
 ---
 
-### Core Architectural Advancements Delivered (Phase 1 Foundation)
+### Core Architectural Advancements Delivered (Phase 2 Canonical Memory & Entity Engine)
 
-1. **ONE BRAIN Event Pipeline (`NovaPipelineOrchestrator`)**:
-   - Built a master 10-stage cognitive cycle orchestrator:
-     `INPUT → CONTEXT HYDRATION → UNDERSTANDING & REFERENCE → MODULE SELECTION → ACTION/OUTPUT → EVENT EMISSION → MEMORY RECONCILIATION → CONTEXT PERSISTENCE → GUARDIAN SCAN → TELEMETRY`.
-   - Normalizes disparate ingress streams (`INPUT_TEXT`, `INPUT_VOICE_NOTE`, `INPUT_LIVE_VOICE_TURN`, `INPUT_VISION`, `SIGNAL_PRESENCE`, `TRIGGER_PROACTIVE`) into typed `NovaEvent` envelopes.
+1. **ONE CANONICAL SEMANTIC GRAPH**:
+   - `memory_bubbles` is the authoritative Source of Truth for semantic entities, taxonomy, and relationships.
+   - `memories` is the authoritative Source of Truth for entity facts/attributes, strictly foreign-keyed via `bubble_id`.
+   - `kg_nodes` / `kg_edges` serve strictly as synchronized read projections.
+   - All legacy regex parsing and flat key heuristics in Knowledge Graph API were replaced with direct queries to canonical bubbles and linked facts.
 
-2. **ONE CANONICAL MEMORY MODEL**:
-   - Designated `memory_bubbles` as the single authoritative source of truth for semantic entities, hierarchy, and relationships.
-   - Designated `memories` as the single authoritative store for semantic attributes/facts, strictly foreign-keyed via `bubble_id`.
-   - Reconciled `kg_nodes` in lockstep as a backwards-compatible read projection, eradicating split-brain divergence.
+2. **ORDER-INDEPENDENT CONVERGENCE (`CanonicalEntityEngine`)**:
+   - Information discovered in any permutation:
+     - *Permutation A*: "Shreshth is my son" → "Tiku is his nickname" → "Tiku born 17/02/2026"
+     - *Permutation B*: "Tiku born 17/02/2026" → "Tiku is Shreshth's nickname" → "Shreshth is my son"
+   - Deterministically converges to the identical canonical entity graph: exactly 1 active entity bubble (`Shreshth`), with aliases `['Tiku']` and the birthday fact attached to the canonical entity bubble ID.
 
-3. **STRICT ENTITY OWNERSHIP**:
-   - Every semantic fact belongs to the entity it actually describes (`subjectEntityId: "entity:person_shreshth"`).
-   - Domains/categories (`family`, `work`, `lifestyle`, `goals`, `identity`) are strictly organizational namespaces/taxonomies and never owners of entity-specific facts.
+3. **SAFE ENTITY MERGING & REVERSIBLE AUDIT TRAIL**:
+   - When an alias is registered that matches an existing provisional entity bubble, `mergeEntities` merges the provisional entity into the canonical entity with zero data loss.
+   - All `memories`, `reminders`, and child bubbles foreign-keyed to the provisional entity are repointed to the canonical entity.
+   - Provisional entity is safely archived (`is_archived: true`, `archive_reason: 'merged_into:<id>'`), never hard deleted.
+   - A complete audit record is recorded in `memory_bubble_moves` with before/after state snapshots.
 
-4. **CONVERSATIONAL CONTEXT & PRONOUN CONTINUITY**:
-   - Preserves conversational subject across turns in `EntityFocusState` (`activeEntity`, `activeDomain`, `recentEntities`).
-   - Resolves antecedent references ("he", "his", "she", "her", "that place", "there", "Tiku", "my son") against conversational history before querying the database.
+4. **STRICT FACT OWNERSHIP**:
+   - Enforced by `attachFactToEntity`: attributes (`birth_date`, `school_name`, etc.) are linked strictly to the entity bubble, never to domain compartments like `family` or `lifestyle`.
+   - Domains are strictly taxonomic namespaces for organization and visualization.
 
-5. **FACT / EVENT / ENTITY DISTINCTION**:
-   - Strongly-typed ontological classification:
-     - `ENTITY`: Subjects with discrete identity (Person, Pet, Organization, Place, Venture).
-     - `ATTRIBUTE`: Key-value state of an entity (e.g. birthdate, job, location).
-     - `RELATIONSHIP`: Directed semantic edge between entities (e.g. `son_of`, `works_at`).
-     - `EVENT`: Temporal occurrence (meeting, dinner, trip).
-     - `OBSERVATION`: Raw sensor or signal data (tone, image, latency).
-     - `INFERENCE`: Algorithmic/LLM hypothesis.
-     - `UNKNOWN`: Unclassified candidate.
+5. **SAFE EXISTING DATA RECONCILIATION (`SafeMemoryReconciler`)**:
+   - Reconciles legacy flat keys (`son_name`, `son_nickname`, `son_birth_date`, `wife_name`, etc.) into canonical entity bubbles.
+   - Safely archives corrupted phantom bubbles (e.g. `kar`, `ke`, verb phrases) with complete audit history and zero data loss.
 
-6. **PROVENANCE + CONFIDENCE**:
-   - Every event and memory effect retains: `source`, `sourceMessageId`, `timestamp`, `confidence` (0.0–1.0), and `acquisitionMode` (`user_stated`, `observed`, `derived`, `inferred`), plus raw evidence quote.
-
-7. **CONTINUOUS GRAPH RECONCILIATION**:
-   - `MemoryReconciliationModule` continuously reconciles declared memory effects into `memory_bubbles` and `memories` with linguistic validation.
-
-8. **BOUNDED INDEXED RETRIEVAL (NO FULL-DATABASE SCANS)**:
-   - Queries `memory_bubbles` using bounded indexed lookups (`slug`, `label`, `metadata->aliases`), strictly limited to top candidate matches.
-
-9. **PLATFORM-AWARE AUTONOMY**:
-   - Platform constraints (`isAppForeground`, `canSpeak`, `canPush`, `isScreenLocked`) are first-class inputs into decision making.
-
-10. **PREDICTABLE PIPELINE MODULE CONTRACT**:
-    - Every capability exposes:
-      `INPUT → PROCESSOR → OUTPUT → EVENTS EMITTED → MEMORY EFFECT → DEPENDENCIES → PERMISSIONS`.
-    - Implemented `ChatPipelineModule`, `VoicePipelineModule`, and `MemoryReconciliationModule`.
+6. **DATA-DRIVEN KNOWLEDGE GALAXY (`CanonicalGraphService` & `KgExplorerScreen`)**:
+   - Completely eradicated hardcoded person names (`Shreshth`, `Sakshi`, `Suresh`, `Rajeshree`, `Ijaz`, `Sushant`, `Tiku`, `Tuku`) from `KgExplorerScreen.tsx`.
+   - Backend `GET /analytics/kg` dynamically builds Level 1 (Trunk Departments), Level 2 (Entity Branches), and Level 3 (Attribute Stems) purely from canonical database records.
 
 ---
 
@@ -72,31 +57,29 @@ Branch: `main`
 
 | Suite / Check | Result |
 | :--- | :--- |
+| `CanonicalMemoryConvergence.test.ts` | **100% Passed (5/5 tests)** |
 | `NovaPipelineFoundation.test.ts` | **100% Passed (12/12 tests)** |
 | `MemoryEntityQualityGate.test.ts` | **100% Passed (14/14 tests)** |
 | `EntityResolutionService.test.ts` | **100% Passed (10/10 tests)** |
 | Backend Production Build (`cd backend && npm run build`) | **Exit Code 0** |
 | Mobile Pre-flight Typecheck (`cd mobile && npx tsc --noEmit`) | **Exit Code 0** |
-| EAS Production OTA Publish (`v0.3.35-beta`) | **Published** (Group: `bee63f3d-5918-474b-b8cc-eb64f3e1a850`) |
-| Broadcast Push Notification (`v0.3.35-beta`) | **Dispatched** to registered devices |
+| EAS Production OTA Publish (`v0.3.36-beta`) | **Published** (Group: `fbaa6043-000a-4e6f-b5c3-9c771e3df88b`) |
+| Broadcast Push Notification (`v0.3.36-beta`) | **Dispatched** to registered devices |
 
 ---
 
 ### Files Modified / Created
 
-- `backend/src/pipeline/NovaEvent.ts` (NEW)
-- `backend/src/pipeline/NovaContext.ts` (NEW)
-- `backend/src/pipeline/NovaPipelineModule.ts` (NEW)
-- `backend/src/pipeline/ContextualEntityResolver.ts` (NEW)
-- `backend/src/pipeline/NovaPipelineOrchestrator.ts` (NEW)
-- `backend/src/pipeline/modules/MemoryReconciliationModule.ts` (NEW)
-- `backend/src/pipeline/modules/ChatPipelineModule.ts` (NEW)
-- `backend/src/pipeline/modules/VoicePipelineModule.ts` (NEW)
-- `backend/src/pipeline/__tests__/NovaPipelineFoundation.test.ts` (NEW)
-- `mobile/src/config/updateHistory.json`
-- `.agent/CURRENT_HANDOFF.md`
-- `walkthrough.md`
+- `backend/src/services/CanonicalEntityEngine.ts` (NEW)
+- `backend/src/services/CanonicalGraphService.ts` (NEW)
+- `backend/src/services/SafeMemoryReconciler.ts` (NEW)
+- `backend/src/services/__tests__/CanonicalMemoryConvergence.test.ts` (NEW)
+- `backend/src/routes/analytics.ts` (MODIFIED: replaced `buildDynamicKnowledgeGraph` with `canonicalGraphService.getCanonicalKnowledgeGraph`)
+- `mobile/src/screens/analytics/KgExplorerScreen.tsx` (MODIFIED: eliminated hardcoded names, generic branch deduplication)
+- `mobile/src/config/updateHistory.json` (MODIFIED: added `v0.3.36-beta`)
+- `.agent/CURRENT_HANDOFF.md` (MODIFIED)
+- `.agent/CURRENT_TASK.md` (MODIFIED)
 
 ## NEXT ACTION
-Proceed to **PHASE 2 — CANONICAL MEMORY & GRAPH UNIFICATION**:
-Migrate `GET /analytics/kg` to read directly from `memory_bubbles` and `memories` with `bubble_id`, eliminating all synthetic regex and name fallbacks in `memoryDomains.ts` and `KgExplorerScreen.tsx`.
+Proceed to **PHASE 3 — VOICE & INTERACTION BRAIN UNIFICATION**:
+Unify Live Voice, audio notes, and background audio ingress through the canonical pipeline so that entities, reminders, goals, and conversational state are updated with identical fidelity regardless of input modality.
