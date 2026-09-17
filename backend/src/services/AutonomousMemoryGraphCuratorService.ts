@@ -22,8 +22,9 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import { cache } from '../lib/cache';
-import { canonicalizeKey } from '../lib/memoryKeySchema';
+import { canonicalizeKey, isKnownCanonicalKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
+import { isValidMemoryAttributeValue } from '../lib/entitySemanticValidator';
 import { isPlaceholderValue, isTransientSituationalItem, classifyDomain } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
 
@@ -1002,6 +1003,30 @@ Curate the memory tree and knowledge graph against the conversation proof and re
 
     for (const u of updates) {
       const canonical = canonicalizeKey(u.key).canonical;
+
+      // Quality Gate 1: Reject non-canonical keys
+      if (!isKnownCanonicalKey(canonical)) {
+        logger.warn('[MemoryGraphCurator] Blocked update for non-canonical key', { userId, key: canonical });
+        continue;
+      }
+
+      // Quality Gate 2: Semantic attribute value validation
+      const semanticCheck = isValidMemoryAttributeValue(canonical, u.newValue);
+      if (!semanticCheck.isValid) {
+        logger.warn('[MemoryGraphCurator] Blocked semantically invalid update', {
+          userId,
+          key: canonical,
+          newValue: u.newValue,
+          reason: semanticCheck.reason,
+        });
+        continue;
+      }
+
+      // Quality Gate 3: Shared garbage value filter
+      if (isGarbageMemoryValue(canonical, u.newValue, 'AutonomousMemoryCurator:applyUpdates')) {
+        continue;
+      }
+
       logger.info('[MemoryGraphCurator] Applying update', { userId, key: canonical, newValue: u.newValue, reason: u.provenChatTruth });
 
       const { data: existing } = await supabaseAdmin
@@ -1081,6 +1106,30 @@ Curate the memory tree and knowledge graph against the conversation proof and re
 
     for (const a of additions) {
       const canonical = canonicalizeKey(a.key).canonical;
+
+      // Quality Gate 1: Reject non-canonical keys
+      if (!isKnownCanonicalKey(canonical)) {
+        logger.warn('[MemoryGraphCurator] Blocked addition for non-canonical key', { userId, key: canonical });
+        continue;
+      }
+
+      // Quality Gate 2: Semantic attribute value validation
+      const semanticCheck = isValidMemoryAttributeValue(canonical, a.value);
+      if (!semanticCheck.isValid) {
+        logger.warn('[MemoryGraphCurator] Blocked semantically invalid addition', {
+          userId,
+          key: canonical,
+          value: a.value,
+          reason: semanticCheck.reason,
+        });
+        continue;
+      }
+
+      // Quality Gate 3: Shared garbage value filter
+      if (isGarbageMemoryValue(canonical, a.value, 'AutonomousMemoryCurator:applyAdditions')) {
+        continue;
+      }
+
       logger.info('[MemoryGraphCurator] Applying addition', { userId, key: canonical, value: a.value });
 
       const { data: existing } = await supabaseAdmin

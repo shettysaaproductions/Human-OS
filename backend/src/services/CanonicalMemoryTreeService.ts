@@ -10,6 +10,8 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { universalBranchRelocationService, BranchRelocationProposal, RelocationExecutionResult } from './UniversalBranchRelocationService';
+import { logger } from '../lib/logger';
+import { isValidEntityName } from '../lib/entitySemanticValidator';
 
 export type BubbleType = 'domain' | 'entity' | 'branch' | 'attribute';
 
@@ -32,13 +34,19 @@ export interface MemoryBubbleRecord {
   id: string;
   user_id: string;
   parent_bubble_id: string | null;
-  label: string;
   slug: string;
+  label: string;
   bubble_type: BubbleType;
   domain_key: LifeDomainKey;
+  authority: AuthorityLevel;
+  confidence: number;
+  temporal_state: 'ACTIVE' | 'ARCHIVED' | 'SCHEDULED' | 'HISTORICAL';
+  valid_from: string | null;
+  valid_until: string | null;
   relation_type: string | null;
   metadata: Record<string, any>;
   is_archived: boolean;
+  archive_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,7 +74,7 @@ export interface MemorySubtree {
   }>;
 }
 
-export interface EntityResolutionGateResult {
+export interface EntityResolutionResult {
   entityId: string;
   entityName: string;
   entityType: 'person' | 'pet' | 'character' | 'project' | 'concept' | 'object';
@@ -78,15 +86,17 @@ export interface EntityResolutionGateResult {
   isNew: boolean;
   confidence: number;
   authority: AuthorityLevel;
-  temporalState: 'CURRENT' | 'HISTORICAL' | 'FUTURE' | 'UNKNOWN';
+  temporalState: 'ACTIVE' | 'ARCHIVED' | 'SCHEDULED' | 'HISTORICAL' | 'CURRENT' | 'FUTURE' | 'UNKNOWN';
   isAmbiguous: boolean;
   clarificationQuestion?: string;
 }
 
-function normalizeSlug(raw: string): string {
-  return (raw || '')
-    .trim()
+export type EntityResolutionGateResult = EntityResolutionResult;
+
+function normalizeSlug(str: string): string {
+  return (str || '')
     .toLowerCase()
+    .trim()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
@@ -100,65 +110,9 @@ function capitalizeWords(raw: string): string {
     .join(' ');
 }
 
-function isInvalidEntityName(name: string): boolean {
+export function isInvalidEntityName(name: string): boolean {
   if (!name || name.trim().length < 2) return true;
-  const lower = name.toLowerCase().trim();
-
-  // Ban fragments with leading punctuation or overly long phrases
-  if (/^['".,;?!]/.test(lower) || lower.length > 35) return true;
-
-  // Banned kinship vocatives & generic relational roles (NOT entity names!)
-  const kinshipVocatives = new Set([
-    'father', 'papa', 'pitaji', 'dad', 'daddy', 'baap', 'bapu', 'abbu',
-    'mother', 'mummy', 'mom', 'maa', 'mataji', 'ammi', 'aai',
-    'my father', 'my mother', 'mere papa', 'mere mummy', 'meri mummy', 'mera baap',
-    'son', 'beta', 'child', 'children', 'bache', 'bacho', 'kid', 'kids', 'daughter', 'beti', 'gudiya',
-    'wife', 'biwi', 'patni', 'husband', 'pati', 'brother', 'bhai', 'bhaiya', 'sister', 'behen', 'didi',
-    'uncle', 'aunty', 'chacha', 'chachi', 'mama', 'mami', 'bua', 'fufa',
-    'friend', 'dost', 'close friend', 'childhood friend', 'family member', 'acquaintance',
-    'stranger', 'colleague', 'coworker', 'mentor', 'boss', 'manager', 'partner'
-  ]);
-  if (kinshipVocatives.has(lower)) return true;
-
-  // Banned Hinglish conversational fragments and phantom phrases
-  const bannedPhrases = [
-    'rehta hai', 'rehti hai', 'rehte hai', 'rehta', 'rehti', 'rehte',
-    'mere society mein', 'society mein', 'society me', 'society issue',
-    'ka name', 'ka naam', 'ki name', 'ki naam', 'unka name', 'unka naam', 'uska name', 'uska naam',
-    'chote bacho', 'bacho kapde', 'kapde bechte', 'bechte hai', 'bechta hai', 'sell karte',
-    'tailor ka shop', 'shop run', 'run karti', 'run karta', 'daily', 'reminder', 'drink',
-    'celebration', 'ganpati celebrations', 'place for', 'for the', 'society'
-  ];
-  for (const phrase of bannedPhrases) {
-    if (lower === phrase || lower.includes(phrase)) return true;
-  }
-
-  const stopwords = new Set([
-    'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
-    'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself',
-    'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom',
-    'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and',
-    'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with',
-    'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above',
-    'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
-    'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any',
-    'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
-    'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just',
-    'don', 'should', 'now', 'one', 'the one', 'talking', 'talking about', 'friend', 'dost',
-    'character', 'pet', 'person', 'insaan', 'human', 'someone', 'guy', 'dude', 'girl', 'boy',
-    'call', 'remind', 'meet', 'tell', 'ask', 'email', 'message', 'script', 'tomorrow', 'today',
-    'mera', 'meri', 'mere', 'apna', 'apni', 'apne', 'unka', 'unki', 'unke', 'uska', 'uski', 'uske',
-    'karna', 'karti', 'karta', 'karte', 'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'hoge',
-    'mein', 'me', 'se', 'ko', 'par', 'pe', 'bhi', 'toh', 'hi', 'kuch', 'bata'
-  ]);
-  if (stopwords.has(lower)) return true;
-  const words = lower.split(/\s+/).filter(Boolean);
-  if (words.every(w => stopwords.has(w))) return true;
-  if (words.length >= 2 && words.some(w => ['hai', 'tha', 'thi', 'the', 'karna', 'karti', 'karta', 'karte', 'rehta', 'rehti', 'mein', 'bechte', 'karte'].includes(w))) {
-    return true;
-  }
-  return false;
+  return !isValidEntityName(name).isValid;
 }
 
 export class CanonicalMemoryTreeService {
@@ -169,6 +123,10 @@ export class CanonicalMemoryTreeService {
       this.instance = new CanonicalMemoryTreeService();
     }
     return this.instance;
+  }
+
+  isInvalidEntityName(name: string): boolean {
+    return isInvalidEntityName(name);
   }
 
   // ── 1. DOMAIN BUBBLES ────────────────────────────────────────────────────────
@@ -731,6 +689,13 @@ export class CanonicalMemoryTreeService {
     const domainKey = params.domainKey || 'family';
     const domainBubble = await this.getOrCreateDomainBubble(userId, domainKey);
     const parentBubbleId = params.parentBubbleId || domainBubble.id;
+
+    // Quality gate: Refuse to persist invalid entity names
+    const check = isValidEntityName(params.entityName, params.entityType);
+    if (!check.isValid) {
+      logger.warn(`[CanonicalMemoryTree] Blocked invalid entity bubble creation for "${params.entityName}": ${check.reason}`);
+      return domainBubble;
+    }
 
     const baseSlug = normalizeSlug(params.entityName);
     const disambiguator = params.slugSuffix ? `_${normalizeSlug(params.slugSuffix)}` : '';

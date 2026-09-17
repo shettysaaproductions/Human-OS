@@ -5,6 +5,7 @@ import { qt } from '../lib/queryTracker';
 import { stopWords } from '../utils/nlp';
 import { canonicalizeKey, isKnownCanonicalKey } from '../lib/memoryKeySchema';
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
+import { isValidMemoryAttributeValue } from '../lib/entitySemanticValidator';
 import { deterministicGuardian } from './DeterministicGuardianService';
 import { sourceDependencyService } from './SourceDependencyService';
 import { memoryPolicyService } from './MemoryPolicyService';
@@ -143,6 +144,18 @@ export class MemoryRepository {
 
     // ── Layer 1b: Shared garbage admission guard ──────────────────────────────
     if (isGarbageMemoryValue(normalizedMemory.key, normalizedMemory.value, 'memoryRepository')) {
+      return;
+    }
+
+    // ── Layer 1d: Semantic Entity & Attribute Value Validation ────────────────
+    const semanticCheck = isValidMemoryAttributeValue(normalizedMemory.key, normalizedMemory.value);
+    if (!semanticCheck.isValid) {
+      logger.warn('[MemoryRepository] BLOCKED semantically invalid attribute value', {
+        userId,
+        canonicalKey: normalizedMemory.key,
+        value: normalizedMemory.value,
+        reason: semanticCheck.reason,
+      });
       return;
     }
 

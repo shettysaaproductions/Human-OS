@@ -9,6 +9,7 @@
  */
 
 import { logger } from './logger';
+import { isValidMemoryAttributeValue } from './entitySemanticValidator';
 
 // ── Value-level garbage patterns ────────────────────────────────────────────────
 // These match values (not keys) that are clearly prompt template artifacts,
@@ -114,6 +115,18 @@ export function isGarbageMemoryValue(key: string, value: string, source?: string
       logger.info('[MemoryFilter] BLOCKED kinship vocative as person name', { key, value: v, source });
       return true;
     }
+  }
+
+  // ── Universal Semantic Quality Gate ──────────────────────────────────────────
+  const semanticCheck = isValidMemoryAttributeValue(k, v);
+  if (!semanticCheck.isValid) {
+    logger.info('[MemoryFilter] BLOCKED semantically invalid attribute value', {
+      key: k,
+      value: v,
+      reason: semanticCheck.reason,
+      source
+    });
+    return true;
   }
 
   for (const pattern of GARBAGE_VALUE_PATTERNS) {

@@ -136,8 +136,17 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   }
 
   if (k === 'wife_name' || k === 'sakshi') return { title: v || 'Sakshi', sub: 'Wife' };
-  if (k === 'son_name' || k === 'shreshth') return { title: v || 'Shreshth', sub: 'Son' };
-  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) return { title: v || 'Tuku', sub: 'Nickname' };
+  if (k === 'son_name' || k === 'shreshth') {
+    const isInvalid = !v || /^(kar|ke|son|beta|infant|baby)$/i.test(v.trim());
+    return { title: isInvalid ? 'Shreshth' : v, sub: 'Son' };
+  }
+  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) {
+    const isInvalid = !v || /^(kar|ke|nickname|naam|beta)$/i.test(v.trim());
+    return { title: isInvalid ? 'Tuku' : v, sub: 'Nickname' };
+  }
+  if (k.includes('salary_day') || (k.includes('salary') && k.includes('day'))) {
+    return { title: v || '5th of month', sub: 'Salary Day' };
+  }
   if (k.includes('nail_art') || k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art')) {
     return { title: 'Nail Artist', sub: 'Creative Skill' };
   }
@@ -267,9 +276,13 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
     return /^(not\s+mentioned|not\s+available|none|null|undefined|unknown|n\/a|na|no\s+data|empty|to\s+be\s+decided|tbd|to\s+be\s+revised|not\s+specified|unspecified|not\s+provided|no\s+information|extra\s+with\s+no\s+data|since\s+the\s+son|as\s+an\s+infant)$/i.test(v);
   }
 
+  const INVALID_NODE_NAMES = new Set(['kar', 'ke', 'ka', 'ki', 'ko', 'se', 'me', 'mein', 'rehta hai', 'rehti hai']);
+
   for (const n of rawNodes) {
     if (!n || n.id === 'user-core' || n.isHub || n.isDepartment || n.id?.startsWith('dept-')) continue;
     if (isPlaceholderValue(n.value)) continue;
+    const nameClean = (n.name || '').trim().toLowerCase();
+    if (INVALID_NODE_NAMES.has(nameClean)) continue;
     const d = n.department || inferDomain(n.raw_key || n.id, n.entity_type);
     if (!deptBuckets[d]) deptBuckets[d] = [];
     deptBuckets[d].push(n);

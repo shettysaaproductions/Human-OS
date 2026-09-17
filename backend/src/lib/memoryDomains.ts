@@ -13,6 +13,7 @@
  */
 
 import { canonicalizeKey } from './memoryKeySchema';
+import { isValidEntityName, isValidMemoryAttributeValue } from './entitySemanticValidator';
 
 export type LifeDomainKey = 'family' | 'work' | 'goals' | 'lifestyle' | 'identity';
 
@@ -2004,8 +2005,14 @@ function toGraphLabel(key: string, value: string): string {
 
   // Family
   if (k === 'wife_name') return `${v} (Wife)`;
-  if (k === 'son_name') return `${v} (Son)`;
-  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) return `${v || 'Tuku'} (Nickname)`;
+  if (k === 'son_name') {
+    const validName = isValidEntityName(v, 'person').isValid ? v : 'Shreshth';
+    return `${validName} (Son)`;
+  }
+  if (k === 'son_nickname' || k === 'family_nickname' || k.includes('tiku') || k.includes('tuku')) {
+    const validNick = isValidEntityName(v, 'person').isValid ? v : 'Tuku';
+    return `${validNick} (Nickname)`;
+  }
   if (k === 'son_birth_date' || k === 'son_dob' || k.includes('son_bday') || k.includes('tuku_dob') || k.includes('tiku_dob') || k.includes('tuku_b') || k.includes('tiku_b') || k.includes('shreshth_b') || k.includes('shreshth_dob') || k.includes('shreshth_date_of_birth') || k.includes('son_date_of_birth')) return `${v || '17 Feb 2026'} (Birthday)`;
   if (k === 'wife_birth_date' || k === 'wife_birthday' || k.includes('sakshi_b') || k.includes('wife_dob')) return `${v || '23 July'} (Birthday)`;
   if (k === 'son_age' || k === 'child_age' || k === 'baby_age') {
@@ -2023,6 +2030,9 @@ function toGraphLabel(key: string, value: string): string {
   // Work & Ventures
   if (k === 'company_name' || k === 'current_company') return `${v} (Company)`;
   if (k === 'venture_name' || k === 'business_venture' || k === 'cloud_kitchen_business' || k === 'dhaba_venture') return `${v} (Venture)`;
+  if (k.includes('salary_day') || (k.includes('salary') && k.includes('day'))) {
+    return `${v} (Salary Day)`;
+  }
   if (k === 'work_schedule') {
     if (v.includes('11') && (v.includes('8') || v.includes('8 PM'))) return '11am - 8pm (Work Hours)';
     return `${v} (Hours)`;
@@ -2153,11 +2163,37 @@ export function buildDynamicKnowledgeGraph(
   const rawItems: Array<{ id: string; key: string; value: string; isContext?: boolean; memory_type?: string }> = [];
   for (const m of memories) {
     if (!m.key || !m.value || isPlaceholderValue(m.value) || isTransientSituationalItem(m.key, m.value)) continue;
-    rawItems.push({ id: `mem-${m.key}`, key: m.key, value: m.value, memory_type: m.memory_type });
+
+    let val = m.value;
+    // Self-healing for son_name & son_nickname if legacy corrupted
+    if (m.key.toLowerCase() === 'son_name' && !isValidEntityName(val, 'person').isValid) {
+      val = 'Shreshth';
+    }
+    if (m.key.toLowerCase() === 'son_nickname' && !isValidEntityName(val, 'person').isValid) {
+      val = 'Tuku';
+    }
+
+    // Quality gate: Reject semantically invalid attribute values (e.g. friend_location = "Rehta hai")
+    const validity = isValidMemoryAttributeValue(m.key, val);
+    if (!validity.isValid) continue;
+
+    rawItems.push({ id: `mem-${m.key}`, key: m.key, value: val, memory_type: m.memory_type });
   }
   for (const w of workingContext) {
     if (!w.key || !w.value || isPlaceholderValue(w.value) || isTransientSituationalItem(w.key, w.value)) continue;
-    rawItems.push({ id: `wm-${w.key}`, key: w.key, value: w.value, isContext: true });
+
+    let val = w.value;
+    if (w.key.toLowerCase() === 'son_name' && !isValidEntityName(val, 'person').isValid) {
+      val = 'Shreshth';
+    }
+    if (w.key.toLowerCase() === 'son_nickname' && !isValidEntityName(val, 'person').isValid) {
+      val = 'Tuku';
+    }
+
+    const validity = isValidMemoryAttributeValue(w.key, val);
+    if (!validity.isValid) continue;
+
+    rawItems.push({ id: `wm-${w.key}`, key: w.key, value: val, isContext: true });
   }
 
   // Deduplicate items so aliases or duplicate concepts don't generate twin nodes in Neural Galaxy
@@ -2867,9 +2903,13 @@ export function buildDynamicKnowledgeGraph(
         const entityKey = `${dynPrefix}_${dynEntity}`;
         const entityNodeId = `mem-${entityKey}`;
 
+        const entityNameClean = cleanStr(dynEntity);
+        if (!isValidEntityName(entityNameClean).isValid) {
+          continue;
+        }
+
         // Ensure the Level 2 entity branch exists
         if (!nodeIds.has(entityNodeId)) {
-          const entityNameClean = cleanStr(dynEntity);
           const entityRole = selectDynamicDrawerRole(entityNameClean, dynPrefix, 'lifestyle');
           const entityEmoji = selectDynamicDrawerEmoji(entityNameClean, dynPrefix, k, item.value);
 
@@ -2913,8 +2953,12 @@ export function buildDynamicKnowledgeGraph(
         const dynTrait = keyParts[1];
         const entityNodeId = `mem-${dynPrefix}`;
 
+        const entityNameClean = cleanStr(dynPrefix);
+        if (!isValidEntityName(entityNameClean).isValid) {
+          continue;
+        }
+
         if (!nodeIds.has(entityNodeId)) {
-          const entityNameClean = cleanStr(dynPrefix);
           const entityRole = selectDynamicDrawerRole(entityNameClean, dynPrefix, 'lifestyle');
           const entityEmoji = selectDynamicDrawerEmoji(entityNameClean, dynPrefix, k, item.value);
 

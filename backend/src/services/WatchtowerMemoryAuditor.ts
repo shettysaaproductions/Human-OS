@@ -19,6 +19,9 @@ import { logger } from '../lib/logger';
 import { complete } from '../lib/nvidia';
 import { cache } from '../lib/cache';
 import { autonomousMemoryGraphCurator } from './AutonomousMemoryGraphCuratorService';
+import { isGarbageMemoryValue } from '../lib/memoryFilters';
+import { isValidMemoryAttributeValue } from '../lib/entitySemanticValidator';
+import { isKnownCanonicalKey, canonicalizeKey } from '../lib/memoryKeySchema';
 
 export interface MemoryAuditFinding {
   entity: string;
@@ -593,9 +596,34 @@ If there are no contradictions, return empty array [].`;
     const now = new Date().toISOString();
 
     for (const u of updates) {
+      const canonical = canonicalizeKey(u.key).canonical;
+
+      // Quality Gate 1: Reject non-canonical keys
+      if (!isKnownCanonicalKey(canonical)) {
+        logger.warn('[WatchtowerMemoryAuditor] Blocked update for non-canonical key', { userId, key: canonical });
+        continue;
+      }
+
+      // Quality Gate 2: Semantic attribute value validation
+      const semanticCheck = isValidMemoryAttributeValue(canonical, u.value);
+      if (!semanticCheck.isValid) {
+        logger.warn('[WatchtowerMemoryAuditor] Blocked semantically invalid update', {
+          userId,
+          key: canonical,
+          value: u.value,
+          reason: semanticCheck.reason,
+        });
+        continue;
+      }
+
+      // Quality Gate 3: Shared garbage filter
+      if (isGarbageMemoryValue(canonical, u.value, 'WatchtowerMemoryAuditor')) {
+        continue;
+      }
+
       logger.info('[WatchtowerMemoryAuditor] Applying autonomous memory reconciliation', {
         userId,
-        key: u.key,
+        key: canonical,
         newValue: u.value,
         reason
       });
@@ -605,7 +633,7 @@ If there are no contradictions, return empty array [].`;
         .from('memories')
         .select('id, value, lifecycle_state')
         .eq('user_id', userId)
-        .eq('key', u.key)
+        .eq('key', canonical)
         .eq('is_archived', false)
         .order('updated_at', { ascending: false })
         .limit(1)
@@ -631,7 +659,7 @@ If there are no contradictions, return empty array [].`;
           .from('memories')
           .insert({
             user_id: userId,
-            key: u.key,
+            key: canonical,
             value: u.value,
             memory_type: u.memoryType || 'personal',
             confidence: 1.0,
@@ -649,18 +677,18 @@ If there are no contradictions, return empty array [].`;
         .from('working_memory')
         .delete()
         .eq('user_id', userId)
-        .eq('key', u.key);
+        .eq('key', canonical);
 
       await supabaseAdmin
         .from('working_memory')
         .insert({
           user_id: userId,
-          key: u.key,
+          key: canonical,
           value: u.value
         });
 
       // Autonomous Alias Cleanup & Stale State Eviction
-      if (u.key === 'birth_date') {
+      if (canonical === 'birth_date') {
         // Supersede user_birth_date / user_dob in memories table
         await supabaseAdmin
           .from('memories')

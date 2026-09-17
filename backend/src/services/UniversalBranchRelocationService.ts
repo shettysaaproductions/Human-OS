@@ -11,6 +11,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
+import { isValidEntityName } from '../lib/entitySemanticValidator';
 
 export interface BranchRelocationProposal {
   entityName: string;
@@ -96,26 +97,7 @@ export class UniversalBranchRelocationService {
 
   private isInvalidEntityName(name: string): boolean {
     if (!name || name.trim().length < 2) return true;
-    const lower = name.toLowerCase().trim();
-    const stopwords = new Set([
-      'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
-      'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself',
-      'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom',
-      'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-      'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and',
-      'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with',
-      'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above',
-      'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
-      'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any',
-      'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
-      'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just',
-      'don', 'should', 'now', 'one', 'the one', 'talking', 'talking about', 'friend', 'dost',
-      'character', 'pet', 'person', 'insaan', 'human', 'someone', 'guy', 'dude', 'girl', 'boy'
-    ]);
-    if (stopwords.has(lower)) return true;
-    const words = lower.split(/\s+/).filter(Boolean);
-    if (words.every(w => stopwords.has(w))) return true;
-    return false;
+    return !isValidEntityName(name).isValid;
   }
 
   private cleanEntity(raw: string): string {

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.34-beta",
+    "date": "2026-09-17",
+    "title": "🌌 Universal Memory & Neural Galaxy Semantic Quality Gate Upgrade",
+    "message": [
+      "Universal Multilingual Semantic Quality Gate: Deployed language-aware validation across English, Hindi, and Hinglish that strictly prevents grammatical postpositions/particles ('ka', 'ki', 'ke', 'ko', 'se', 'me', 'mein', 'pe'), auxiliary verbs/light verbs ('kar', 'karo', 'karna', 'karke', 'rehta', 'rehta hai'), and situational nouns ('office', 'washroom') from masquerading as named entities or polluting memory bubbles.",
+      "Compound Light-Verb Protection: Fixed Hinglish action regex ('call kar ke utha dena', 'phone kar dena') so light verbs ('kar', 'karke') are never miscaptured as person names.",
+      "Direct Database Quality Gate Enforcement: Wired semantic attribute validation into AutonomousMemoryGraphCuratorService, WatchtowerMemoryAuditor, and memoryRepository so LLM hallucinations and background auditors can never overwrite canonical memories or persist rogue fragments.",
+      "Neural Galaxy Self-Healing & Resilience: Knowledge graph rendering automatically heals legacy corrupted entities (e.g. restoring 'son_name' to Shreshth and 'son_nickname' to Tuku) and formats stem attributes cleanly under their parent domain or entity branch.",
+      "Live Database Sanctuary Healing: Cleansed corrupted records, unlinked phantom bubbles, restored canonical family identities, and refreshed graph caches across the live database."
+    ]
+  },
+  {
     "version": "0.3.33-beta",
     "date": "2026-09-17",
     "title": "🎯 Autonomous Goal Reconciliation, Persistent Intent Commitments & Smart Escalation",
