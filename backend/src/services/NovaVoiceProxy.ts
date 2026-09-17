@@ -27,6 +27,7 @@ import { novaVoiceService } from './NovaVoiceService';
 import { geminiLivePool } from '../lib/geminiLivePool';
 import { novaPipelineOrchestrator } from '../pipeline/NovaPipelineOrchestrator';
 import { NovaEventFactory } from '../pipeline/NovaEvent';
+import { novaSharedContext } from '../pipeline/NovaSharedContext';
 
 const GEMINI_LIVE_WS_URL =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -131,6 +132,38 @@ export async function handleVoiceWsProxy(
   let setupComplete = false;
   let closed = false;
 
+  // Gate J: Subscribe active live voice session to real-time entity focus shifts
+  const unsubscribeFocus = novaSharedContext.subscribeToFocus(userId, sessionId, (focusEvent) => {
+    logger.info('[VoiceProxy] Consuming real-time entity focus shift in live session', {
+      userId,
+      sessionId,
+      entity: focusEvent.newFocus.name,
+      source: focusEvent.source,
+    });
+    // Stream context update to Gemini Live upstream if live
+    if (geminiWs.readyState === WebSocket.OPEN && setupComplete) {
+      try {
+        geminiWs.send(JSON.stringify({
+          clientContent: {
+            turns: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: `[Context Update: Active entity focus is now ${focusEvent.newFocus.name}${focusEvent.newFocus.relationToUser ? ` (${focusEvent.newFocus.relationToUser})` : ''}]`,
+                  },
+                ],
+              },
+            ],
+            turnComplete: false,
+          },
+        }));
+      } catch (fErr: any) {
+        logger.debug('[VoiceProxy] Focus context streaming to Gemini Live non-fatal', { error: fErr?.message });
+      }
+    }
+  });
+
   // Server-side conversation transcript buffer
   const transcriptBuffer: { role: 'user' | 'nova'; text: string; timestamp: string }[] = [];
   let currentUserTurnText = '';
@@ -160,6 +193,7 @@ export async function handleVoiceWsProxy(
     if (closed) return;
     closed = true;
     clearInterval(pingInterval);
+    unsubscribeFocus();
 
     // Flush any pending turn text
     if (currentUserTurnText.trim()) {
@@ -329,6 +363,24 @@ export async function handleVoiceWsProxy(
                 tool: fnCall.name,
                 result,
               });
+
+              // Gate J: If tool resolved or manipulated an entity, update shared entity focus
+              if (result && (result.entity_id || result.bubble_id) && result.entity) {
+                novaSharedContext.shiftFocus(
+                  userId,
+                  {
+                    id: result.entity_id || result.bubble_id,
+                    name: result.entity,
+                    entityType: 'person',
+                    relationToUser: result.relation,
+                    aliases: [result.entity],
+                    lastMentionedAt: new Date().toISOString(),
+                    mentionCount: 1,
+                  },
+                  'tool_call',
+                  { sessionId }
+                ).catch((fErr: any) => logger.debug('[VoiceProxy] Shift focus error non-fatal', { error: fErr?.message }));
+              }
 
               // Also ingest tool execution into master cognitive pipeline
               try {

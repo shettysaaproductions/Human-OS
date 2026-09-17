@@ -22,9 +22,11 @@
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import { LifeDomainKey, DOMAIN_TAXONOMY, selectDynamicDrawerEmoji } from '../lib/memoryDomains';
+import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
 import { chatCompletionMemory } from '../lib/nvidia';
+import { memoryRepository } from './memoryRepository';
+import { canonicalGraphService } from './CanonicalGraphService';
 
 export interface EntityCorrection {
   entityName: string;
@@ -795,6 +797,13 @@ Output ONLY valid JSON.`;
         }
       }
 
+      // Re-synchronize canonical graph projection after cascading bubble delete
+      try {
+        await canonicalGraphService.rebuildProjections(userId);
+      } catch (projErr: any) {
+        logger.warn('[EntityRelationshipCorrection] Projection rebuild non-fatal', { error: projErr?.message });
+      }
+
       // 5. Record in nova_correction_ledger
       try {
         await supabaseAdmin.from('nova_correction_ledger').insert({
@@ -908,43 +917,16 @@ Output ONLY valid JSON.`;
           .in('id', memsToSupersede);
       }
 
-      // 2. Persist new authoritative memory under the new domain
-      const { data: existingTarget } = await supabaseAdmin
-        .from('memories')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('key', newMemoryKey)
-        .maybeSingle();
-
-      if (existingTarget) {
-        await supabaseAdmin
-          .from('memories')
-          .update({
-            value: newMemoryValue,
-            memory_type: newDomain,
-            lifecycle_state: 'CURRENT',
-            source_authority: 'explicit_user',
-            is_archived: false,
-            updated_at: now
-          })
-          .eq('id', existingTarget.id);
-      } else {
-        await supabaseAdmin
-          .from('memories')
-          .insert({
-            user_id: userId,
-            key: newMemoryKey,
-            value: newMemoryValue,
-            memory_type: newDomain,
-            importance: 85,
-            confidence: 1.0,
-            is_archived: false,
-            lifecycle_state: 'CURRENT',
-            source_authority: 'explicit_user',
-            created_at: now,
-            updated_at: now
-          });
-      }
+      // 2. Persist new authoritative memory under the new domain via canonical gateway
+      await memoryRepository.upsertMemory(userId, {
+        key: newMemoryKey,
+        value: newMemoryValue,
+        type: newDomain as any,
+        importance: 9,
+        confidence: 1.0,
+        shouldPersist: true,
+        source_authority: 'explicit_user',
+      }, rawText);
 
       // 3. Clear/update working_memory
       await supabaseAdmin
@@ -963,31 +945,12 @@ Output ONLY valid JSON.`;
           created_at: now
         });
 
-      // 4. Update Knowledge Graph nodes & edges
-      const parentDeptId = `dept-${newDomain}`;
-      const nodeId = `mem-${newMemoryKey}`;
-
-      await supabaseAdmin.from('kg_nodes').upsert({
-        id: nodeId,
-        user_id: userId,
-        name: `${newRelation} (${val})`,
-        department: newDomain,
-        entity_type: targetSlug,
-        raw_key: newMemoryKey,
-        color: DOMAIN_TAXONOMY[newDomain].color,
-        emoji: selectDynamicDrawerEmoji(newRelation, val, newMemoryKey, newMemoryValue),
-        updated_at: now
-      });
-
-      await supabaseAdmin.from('kg_edges').delete().eq('user_id', userId).eq('target_node_id', nodeId);
-      await supabaseAdmin.from('kg_edges').insert({
-        user_id: userId,
-        source_node_id: parentDeptId,
-        target_node_id: nodeId,
-        relation_type: `${targetSlug.toUpperCase()}_BRANCH`,
-        weight: 2,
-        created_at: now
-      });
+      // 4. Synchronize canonical knowledge graph projection
+      try {
+        await canonicalGraphService.rebuildProjections(userId);
+      } catch (projErr: any) {
+        logger.warn('[EntityRelationshipCorrection] Projection rebuild non-fatal', { error: projErr?.message });
+      }
 
       // 5. Record in nova_correction_ledger
       try {
@@ -1094,43 +1057,16 @@ Output ONLY valid JSON.`;
         });
       }
 
-      // 2. Persist new authoritative memory under the new domain
-      const { data: existingTarget } = await supabaseAdmin
-        .from('memories')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('key', newMemoryKey)
-        .maybeSingle();
-
-      if (existingTarget) {
-        await supabaseAdmin
-          .from('memories')
-          .update({
-            value: newMemoryValue,
-            memory_type: newDomain,
-            lifecycle_state: 'CURRENT',
-            source_authority: 'explicit_user',
-            is_archived: false,
-            updated_at: now
-          })
-          .eq('id', existingTarget.id);
-      } else {
-        await supabaseAdmin
-          .from('memories')
-          .insert({
-            user_id: userId,
-            key: newMemoryKey,
-            value: newMemoryValue,
-            memory_type: newDomain,
-            importance: 85,
-            confidence: 1.0,
-            is_archived: false,
-            lifecycle_state: 'CURRENT',
-            source_authority: 'explicit_user',
-            created_at: now,
-            updated_at: now
-          });
-      }
+      // 2. Persist new authoritative memory under the new domain via canonical gateway
+      await memoryRepository.upsertMemory(userId, {
+        key: newMemoryKey,
+        value: newMemoryValue,
+        type: newDomain as any,
+        importance: 9,
+        confidence: 1.0,
+        shouldPersist: true,
+        source_authority: 'explicit_user',
+      }, rawText);
 
       // 3. Clear/update working_memory
       await supabaseAdmin
@@ -1149,48 +1085,11 @@ Output ONLY valid JSON.`;
           created_at: now
         });
 
-      // 4. Update Knowledge Graph nodes & edges (if present in kg_nodes)
-      const { data: matchedKgNodes } = await supabaseAdmin
-        .from('kg_nodes')
-        .select('id, name, department')
-        .eq('user_id', userId)
-        .or(`name.ilike.%${entityName}%,raw_key.ilike.%${cleanEntitySlug}%`);
-
-      for (const kn of (matchedKgNodes || [])) {
-        // Sever old edges to old department or parents
-        await supabaseAdmin
-          .from('kg_edges')
-          .delete()
-          .eq('user_id', userId)
-          .or(`target_node_id.eq.${kn.id},source_node_id.eq.${kn.id}`);
-
-        const newEmoji = selectDynamicDrawerEmoji(entityName, newRelation, newMemoryKey, newMemoryValue);
-
-        // Update node department and metadata
-        await supabaseAdmin
-          .from('kg_nodes')
-          .update({
-            department: newDomain,
-            name: `${entityName} (${newRelation})`,
-            entity_type: newConceptSlug,
-            color: DOMAIN_TAXONOMY[newDomain].color,
-            emoji: newEmoji,
-            updated_at: now
-          })
-          .eq('id', kn.id);
-
-        // Add new edge from new department root
-        const parentDeptId = `dept-${newDomain}`;
-        await supabaseAdmin
-          .from('kg_edges')
-          .insert({
-            user_id: userId,
-            source_node_id: parentDeptId,
-            target_node_id: kn.id,
-            relation_type: `${newConceptSlug.toUpperCase()}_BRANCH`,
-            weight: 2,
-            created_at: now
-          });
+      // 4. Synchronize canonical knowledge graph projection
+      try {
+        await canonicalGraphService.rebuildProjections(userId);
+      } catch (projErr: any) {
+        logger.warn('[EntityRelationshipCorrection] Projection rebuild non-fatal', { error: projErr?.message });
       }
 
       // 5. Record in nova_correction_ledger

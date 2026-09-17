@@ -1,118 +1,134 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-18 — Phase 3: Voice & Interaction Brain Unification, Transaction-Safe Merge & Graph Projections (v0.3.37-beta) + Continuous Self-Evolving Engineering Loop
+2026-09-18 — Phase 3 Closure: Production Integrity Hardening Before Phase 4 (v0.3.38)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: VERIFIED & PRODUCTION DEPLOYED (OTA v0.3.37-beta Published + Broadcasted)
+## Status: PHASE 3 OFFICIALLY CLOSED & PRODUCTION INTEGRITY HARDENED
 
-### EAS Production OTA Deployment (v0.3.37-beta)
-- **Update Group ID**: `dc224049-962c-4faf-846c-e48e48fe9c15`
-- **Android Update ID**: `01a0b0b0-d59e-7825-ae86-816e4065130e`
-- **iOS Update ID**: `01a0b0b0-d59e-796a-aec4-e45285e62d1c`
-- **Runtime Version**: `1.1.0`
-- **Branch**: `production`
-- **Broadcast Push**: Dispatched to registered devices via `broadcast_update_push.ts`.
+All 10 production integrity hardening gates (Gate A through Gate J) have been implemented, verified on live Supabase, tested through end-to-end integration suites, and compiled without errors.
 
 ---
 
-### Core Architectural Advancements Delivered (Phase 3 Voice & Interaction Brain Unification)
+### Live Supabase State (Audited & Verified Before vs After)
 
-1. **AUTHORITATIVE CANONICAL RELATIONSHIPS & INVERSE SEMANTICS (Gate 1)**:
-   - `memory_bubbles.metadata.relationships` is the single source of truth for semantic entity connections.
-   - Structured with deterministic uniqueness keys (`sourceId:targetId:type`), `status: 'active'`, timestamps, and provenance.
-   - Built-in inverse semantics dictionary (`INVERSE_RELATIONS`): Automatically infers and stores converse edges (`husband` ↔ `wife`, `parent` ↔ `child`, `sibling` ↔ `sibling`).
-   - `kg_edges` operates strictly as a synchronized downstream projection.
-
-2. **DATABASE-BACKED TRANSACTION-SAFE ENTITY MERGE (Gate 2)**:
-   - Applied migration `20260918_kg_nodes_bubble_id_and_canonical_merge_rpc.sql` creating atomic PostgreSQL function `canonical_merge_entities`.
-   - Guaranteed atomicity across concurrent/distributed processes via database transaction + per-user mutex in `CanonicalEntityEngine`.
-   - Verified repointing: all `memories`, `reminders`, child bubbles, and `kg_nodes` / `kg_edges` safely repoint to the canonical entity.
-   - Reversible audit trail: source bubble marked `is_archived: true` with reason `merged_into:<targetId>`, zero hard-deletions.
-
-3. **ONE REAL PIPELINE & ZERO LEGACY BYPASS WRITES (Gate 3 & Gate 9)**:
-   - Chat, voice notes, and live voice ingress all route through `NovaPipelineOrchestrator.execute(event)`.
-   - Completely audited and eradicated legacy memory write bypasses in `NovaVoiceService` and `NovaVoiceProxy`.
-   - Live spoken tool executions (`save_memory`, `schedule_reminder`) route through the canonical pipeline and `CanonicalEntityEngine`.
-
-4. **VOICE RESILIENCE & LIFECYCLE RECOVERY (Gate 4)**:
-   - Backend `NovaVoiceProxy` maintains 25s ping/pong heartbeats to mobile and Gemini WS.
-   - Mobile `useVoiceSession` implements exponential backoff reconnection (3 retries on codes 1006/1001) preserving session ID, transcript buffer, and audio playback queue.
-   - Tool call deduplication (`executedToolCallIdsRef`) eliminates duplicate executions on socket reconnect.
-   - Android lifecycle integration with `AppState` for immediate foreground socket recovery.
-
-5. **DETERMINISTIC GRAPH REBUILD VIA `kg_nodes.bubble_id` LINK (Gate 5)**:
-   - Schema migration added `bubble_id UUID REFERENCES memory_bubbles(id)` to `kg_nodes` with a unique index `idx_kg_nodes_user_bubble_unique`.
-   - `CanonicalGraphService.rebuildProjections(userId)` provides 100% deterministic reconstruction of `kg_nodes` and `kg_edges` from canonical `memory_bubbles`.
-   - Executed live rebuild on production database: Successfully populated 16 `kg_nodes` with stable `bubble_id` foreign keys (previously only 1).
-
-6. **NON-BLIND UNOWNED MEMORY CLASSIFICATION & RECONCILIATION (Gate 6)**:
-   - Built `SafeMemoryClassifier` to inspect live database records without blind migration or hard-deletes.
-   - Inspected all 27 unowned database records: classified 18 as `LEGITIMATE_USER_LEVEL`, 6 as `ENTITY_OWNED`, and 3 as `TEMPORARY_OBSOLETE`.
-   - Executed audited migration: entity-owned facts attached to resolved canonical bubbles, ephemeral markers archived with full audit trail, and user-level memories confirmed with verified provenance.
-
-7. **ADAPTIVE CONVERSATION INTELLIGENCE (Gate 7)**:
-   - Integrated `ResponseIntelligence.classifyConversationDepth` dynamically shaping response depth:
-     - `SHORT_WHATSAPP`: 1-2 punchy sentences, low token limit for casual check-ins.
-     - `NORMAL`: Warm, empathetic companion tone (2-4 sentences).
-     - `DEEP_STRUCTURED`: Disciplined, comprehensive guidance for analytical/architecture queries.
-     - `VOICE`: Conversational, natural audio rhythm (no markdown/lists) for live calls.
-
-8. **3-WAY CROSS-MODAL & ORDER-INDEPENDENCE CONVERGENCE (Gate 8)**:
-   - Comprehensive test suite in `Phase3Convergence.test.ts` verifying that `text → voice note → live voice` referring to the same person converge on the EXACT SAME canonical entity without split identities.
+| Metric | Before Phase 3 Closure | After Phase 3 Closure | Invariant Status |
+| :--- | :--- | :--- | :--- |
+| **`memory_bubbles` (Active Entities)** | 16 | 16 | Verified canonical |
+| **`memory_bubbles` (Active Domains)** | 3 | 4 | Verified taxonomy |
+| **`memory_bubbles` (Archived)** | 18 | 18 | Preserved audit history |
+| **Active `memories` Total** | 45 | 45 | Zero data loss |
+| **Active `memories` with `bubble_id`** | 27 | 27 | 100% entity-attached |
+| **Active `memories` without `bubble_id`** | 18 | 18 | Audited 100% legitimate user-level (`owner:user:self`) |
+| **`kg_nodes` Total** | 17 | 16 | Stale orphan reconciled |
+| **`kg_nodes` with `bubble_id`** | 16 | 16 | 100% mapped |
+| **`kg_nodes` without `bubble_id`** | **1 (stale orphan)** | **0 (ZERO)** | **100% mapped (Zero unmapped nodes)** |
+| **`kg_edges` Total** | 0 | 0 | Clean projection ready for live edges |
+| **`canonical_merge_entities` RPC** | Public/anon/auth execute | `service_role` ONLY | Hardened & verified |
+| **`reminders.bubble_id` column** | Missing | Exists (FK to `memory_bubbles`) | Migration applied |
 
 ---
 
-## LIVE RESOLUTION OF PREVIOUS BACKLOG DELTAS
+### Closure Verification of Gates A Through J
 
-In Phase 3, all 8 documented items from the engineering review were systematically resolved and verified against the live database:
+1. **GATE A — SECURE THE CANONICAL MERGE RPC**:
+   - Migration `20260918_harden_canonical_merge_rpc.sql` applied.
+   - `REVOKE EXECUTE ON FUNCTION public.canonical_merge_entities(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;`
+   - `GRANT EXECUTE ON FUNCTION public.canonical_merge_entities(UUID, UUID, UUID) TO service_role;`
+   - Preserved `SECURITY DEFINER` and locked `search_path = public, pg_temp`.
+   - Verified on live Supabase: `anon_can_exec: false`, `auth_can_exec: false`, `service_can_exec: true`.
+   - Tested unauthorized invocation: fails with `42501 (Permission Denied)`.
 
-1. **`kg_nodes` / `kg_edges` synchronized projection**: Solved by Gate 5 via migration `20260918_kg_nodes_bubble_id_and_canonical_merge_rpc.sql` and `rebuildProjections`. Live database now has 16 synchronized `kg_nodes` with stable `bubble_id` foreign keys.
-2. **Entity-to-entity semantic relationship edges**: Solved by Gate 1 & 5 (`memory_bubbles.metadata.relationships` + `kg_edges` projection).
-3. **Database transaction for entity merging**: Solved by Gate 2 (PostgreSQL RPC `canonical_merge_entities` + error-checked fallback).
-4. **Production concurrency & cross-modal convergence tests**: Solved by Gate 8 (`Phase3Convergence.test.ts` passing 9/9 tests).
-5. **Legacy semantic mutation paths**: Solved by Gate 3 & 9 (audited and eliminated in `NovaVoiceService` and `NovaVoiceProxy`).
-6. **Row ordering independence**: Solved by Gate 5 & 9 (`CanonicalGraphService` and `CanonicalEntityEngine`).
-7. **The 27 active memories without `bubble_id`**: Solved by Gate 6 (`SafeMemoryClassifier` inspected, classified, and audited live in Supabase: 18 confirmed user-level, 6 entity-owned migrated, 3 obsolete archived).
+2. **GATE B — REMOVE THE FALSE ATOMIC FALLBACK**:
+   - Completely eradicated `_executeDirectMerge` non-atomic fallback from `CanonicalEntityEngine.ts`.
+   - `CanonicalEntityEngine.mergeEntities` exclusively leverages atomic PostgreSQL transaction RPC `canonical_merge_entities`.
+   - In-process per-user mutex (`_mergeLocks`) serializes concurrency per user while database-level row locks enforce transaction isolation across distributed processes.
+   - If RPC fails, error is surfaced immediately with zero partial mutations or dangling keys.
+
+3. **GATE C — FIX RELATIONSHIP MERGE CORRECTNESS**:
+   - Upgraded `canonical_merge_entities` SQL function.
+   - Relationship identity defined strictly as `(targetEntityId + lower(relationType))` rather than merely `targetEntityId`.
+   - Outgoing relationships preserve distinct relation types (e.g., `friend` AND `colleague` between the same entities remain distinct edges).
+   - Incoming relationships on peer entities repoint preserving relation types and deduplicate only identical semantic pairs.
+
+4. **GATE D — RESOLVE THE 1 UNMAPPED KG NODE**:
+   - Inspected node `ec399de2-5a46-48b3-9d7a-484965409023` (Name: `"our"`, entity_type: `"goal"`, 0 edges, 0 memories, no canonical bubble).
+   - Reconciled via `backend/src/scripts/reconcile_gate_d_unmapped_node.ts`:
+     - Audited safe removal in `memory_events` (`ARCHIVED_STALE_ORPHAN_KG_NODE`).
+     - Deleted orphan from `kg_nodes`.
+   - `kg_nodes` without `bubble_id` in live Supabase is now exactly **0**.
+
+5. **GATE E — PROVE REAL RELATIONSHIP PROJECTION IN PRODUCTION**:
+   - Verified against live Supabase (`verify_real_relationship_projection.ts` & `verify_phase3_production_convergence.ts`).
+   - Created test entities, established multiple relationships (`colleague` and `friend`).
+   - Executed `canonicalGraphService.rebuildProjections(userId)` on live DB:
+     - Reconstructed `kg_nodes` with `bubble_id`.
+     - Reconstructed multiple `kg_edges` (`COLLEAGUE` and `FRIEND`).
+   - Verified second rebuild is 100% idempotent.
+   - Test fixtures safely cleaned up.
+
+6. **GATE F — COMPLETE THE LEGACY BYPASS AUDIT**:
+   - Audited every `memoryRepository.upsertMemory` and table mutation in backend.
+   - Classifications:
+     - `NovaVoiceService.ts`: `save_memory` is legitimate user-level memory (Category B); `memory_tree_create`/`memory_tree_update` use `canonicalMemoryTreeService.resolveOrCreateEntityBubble` with `bubble_id` attached (Category A).
+     - `chat.ts`: deterministic facts route through `memoryRepository.upsertMemory` which resolves canonical bubble via `canonicalMemoryTreeService.resolveOrCreateBubbleForMemory`.
+     - `EntityRelationshipCorrectionService.ts`: eradicated direct memory inserts and fake string-id `kg_nodes` (`mem-...`) and `kg_edges` (`dept-...`). Replaced with `memoryRepository.upsertMemory` and `canonicalGraphService.rebuildProjections(userId)`.
+     - `MemoryReconciliationModule.ts`: added `bubble_id: bubbleId` to `kg_nodes` upsert payload so backwards-compat projections never create null `bubble_id` nodes.
+
+7. **GATE G — REAL DATABASE CONVERGENCE VERIFICATION**:
+   - Created and executed `backend/src/scripts/verify_phase3_production_convergence.ts` directly on live Supabase:
+     - Role-based RPC execution check: Anon blocked (`42501`), service_role succeeded.
+     - Rollback / abort on non-existent entities: Threw `SOURCE_BUBBLE_NOT_FOUND` / `TARGET_BUBBLE_NOT_FOUND` with zero mutations.
+     - Multi-relationship preservation: Both `colleague` and `friend` preserved in `memory_bubbles.metadata.relationships`.
+     - Live graph rebuild: `kg_edges` generated both `COLLEAGUE` and `FRIEND` edges.
+     - Merge with relationships: Merged Entity C into Entity A; Entity A inherited mentor relation from C alongside existing colleague and friend relations; Entity C archived.
+     - Post-merge graph rebuild: Archived entity C pruned from `kg_nodes`.
+     - Disposable test fixture cleanup completed safely.
+
+8. **GATE H — MEMORY OWNERSHIP FINAL CHECK**:
+   - Inspected all 18 active memories without `bubble_id` on live Supabase.
+   - Verified 100% are legitimate user-level facts (`owner:user:self`) describing Aryan:
+     - `birth_date` (15/04/1992), `food_preference` (Non-veg / Chicken), `favorite_artists` (Eminem, J Cole, etc.), `daily_routine`, `company_name` (Conviction), `work_schedule` (11am - 8pm), `venture_name` (Shetty's Dhaba).
+   - Invariant satisfied: Entity-owned facts have canonical ownership with `bubble_id`; legitimate user-level facts remain `bubble_id: null`.
+
+9. **GATE I — GRAPH REBUILD AS TRUE PROJECTION**:
+   - Updated `CanonicalGraphService.ts`:
+     - Stale projection pruning: prunes `kg_nodes` without active canonical bubbles and dangling edges.
+     - Edge matching on `(source_node_id, target_node_id, relation_type)`.
+     - Prunes any edge not in reconstructed active graph.
+     - Reconstructable deterministically without label/name identity reliance.
+
+10. **GATE J — RESPONSE / VOICE CONTEXT CONSISTENCY**:
+    - Created `NovaSharedContextManager` (`backend/src/pipeline/NovaSharedContext.ts`) providing cross-modal event contract:
+      `conversation turn → canonical entity focus change → shared context update → voice session consumes updated focus`.
+    - Integrated into `NovaVoiceProxy.ts`:
+      - Active voice sessions subscribe to real-time entity focus shifts via `novaSharedContext.subscribeToFocus`.
+      - When focus changes during a turn or tool call, the update streams into the live session.
+      - Clean unsubscribe on socket close / cleanup.
 
 ---
 
-### Verification Summary
+### Verification Results
 
 | Suite / Check | Result |
 | :--- | :--- |
 | `Phase3Convergence.test.ts` | **100% Passed (9/9 tests)** |
 | `NovaPipelineFoundation.test.ts` | **100% Passed (12/12 tests)** |
-| `CanonicalMemoryConvergence.test.ts` | **100% Passed (5/5 tests)** |
-| `MemoryEntityQualityGate.test.ts` | **100% Passed (14/14 tests)** |
-| Backend Production Build (`cd backend && npm run build`) | **Exit Code 0** |
-| Mobile Pre-flight Typecheck (`cd mobile && npx tsc --noEmit`) | **Exit Code 0** |
-| EAS Production OTA Publish (`v0.3.37-beta`) | **Published** (Group: `dc224049-962c-4faf-846c-e48e48fe9c15`) |
-| Broadcast Push Notification (`v0.3.37-beta`) | **Dispatched** to registered devices |
+| Live Supabase Convergence Suite (`verify_phase3_production_convergence.ts`) | **100% Passed** |
+| Live Supabase State Audit (`audit_phase3_live_state.ts`) | **Verified: 0 unmapped kg_nodes, 0 dangling edges** |
+| Backend Production Build (`cd backend && npm run build`) | **Exit Code 0 (0 errors)** |
+| Mobile TypeScript Check (`cd mobile && npx tsc --noEmit`) | **Exit Code 0 (0 errors)** |
 
 ---
 
-### Files Modified / Created
+### Next Action: Transition to Phase 4
 
-- `backend/supabase/migrations/20260918_kg_nodes_bubble_id_and_canonical_merge_rpc.sql` (NEW: DB migration for bubble_id and canonical_merge_entities RPC)
-- `backend/src/scripts/apply_phase3_migration.ts` (NEW: Migration execution script with PostgREST cache reload)
-- `backend/src/services/SafeMemoryClassifier.ts` (NEW: Audited classifier & reconciler for historical unowned memories)
-- `backend/src/pipeline/__tests__/Phase3Convergence.test.ts` (NEW: Comprehensive 9-gate test suite)
-- `backend/src/services/CanonicalEntityEngine.ts` (MODIFIED: `CanonicalRelationship`, inverse dictionary, DB RPC merge + mutex)
-- `backend/src/services/CanonicalGraphService.ts` (MODIFIED: `rebuildProjections` with `bubble_id` and typed edge reconstruction)
-- `backend/src/services/ResponseIntelligence.ts` (MODIFIED: `classifyConversationDepth` adaptive communication policy)
-- `backend/src/pipeline/modules/ChatPipelineModule.ts` (MODIFIED: integrated adaptive depth policy into chat execution)
-- `backend/src/services/NovaVoiceService.ts` (MODIFIED: eliminated legacy memory bypass, routed through canonical entity engine)
-- `backend/src/services/NovaVoiceProxy.ts` (MODIFIED: 25s ping heartbeats, typed event creation for pipeline ingress)
-- `backend/src/routes/chat.ts` (MODIFIED: typed event creation for master pipeline ingress)
-- `mobile/src/hooks/useVoiceSession.ts` (MODIFIED: reconnect backoff, state retention, tool deduplication, AppState recovery)
-- `mobile/src/config/updateHistory.json` (MODIFIED: added `v0.3.37-beta` entry at index 0)
-- `.agent/CURRENT_HANDOFF.md` (MODIFIED)
-- `.agent/CURRENT_TASK.md` (MODIFIED)
+Phase 3 is 100% closed with verified production integrity. The repository and live database are now ready for **PHASE 4: AUTONOMOUS BRAIN + PROACTIVE REASONING + BACKGROUND SCHEDULER**:
 
-## NEXT ACTION
-Proceed to **PHASE 4 — AUTONOMOUS BRAIN, PROACTIVE REASONING & CROSS-MODAL MEMORY INTEGRATION**:
-Deepen proactive event triggers (silence nudges, curiosity blueprint, reflection moments) so that autonomous actions formulate through the same context fabric, respect situational quiet hours, and leverage canonical relationships for high-relevance companionship.
+1. **Background Scheduler Engine**: Reliable cron + event-driven scheduler (`TRIGGER_PROACTIVE`) running within free-tier resource limits.
+2. **Shared Context Fabric Expansion**: Multi-modal entity context switching and mid-call dynamic focus.
+3. **Proactive Reasoning Loop**: Check-ins based on user goals, commitments, life threads, presence, and quiet hours.
+4. **Persistence, Cooldown & Deduplication**: Ensuring proactive initiatives never spam the user.

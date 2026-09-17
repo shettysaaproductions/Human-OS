@@ -25,7 +25,8 @@ export type CognitiveEventType =
   | 'worker_success'
   | 'worker_failure'
   | 'conversation_rescoped'
-  | 'session_end_queued';
+  | 'session_end_queued'
+  | 'entity_focus_changed';
 
 export interface CognitiveEvent {
   eventType: CognitiveEventType;

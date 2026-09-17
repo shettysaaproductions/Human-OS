@@ -436,7 +436,35 @@ export class CanonicalGraphService {
       }
     }
 
-    // 3. Synchronize kg_edges from metadata.relationships
+    // 3. Stale kg_nodes cleanup: prune any kg_node without a valid active canonical bubble
+    const activeBubbleIdSet = new Set(bubbles.map((b) => b.id));
+    const { data: currentKgNodes } = await supabaseAdmin
+      .from('kg_nodes')
+      .select('id, bubble_id')
+      .eq('user_id', userId);
+
+    if (currentKgNodes) {
+      for (const n of currentKgNodes) {
+        if (!n.bubble_id || !activeBubbleIdSet.has(n.bubble_id)) {
+          // Prune dangling edges first
+          await supabaseAdmin
+            .from('kg_edges')
+            .delete()
+            .eq('user_id', userId)
+            .or(`source_node_id.eq.${n.id},target_node_id.eq.${n.id}`);
+          // Prune stale node
+          await supabaseAdmin
+            .from('kg_nodes')
+            .delete()
+            .eq('id', n.id)
+            .eq('user_id', userId);
+        }
+      }
+    }
+
+    // 4. Synchronize kg_edges from metadata.relationships & hierarchy
+    const validEdgeIds = new Set<string>();
+
     for (const b of bubbles) {
       const sourceKgId = bubbleToKgNodeMap.get(b.id);
       if (!sourceKgId) continue;
@@ -452,26 +480,28 @@ export class CanonicalGraphService {
         const relType = (rel.relationType || 'RELATED_TO').toUpperCase().replace(/\s+/g, '_');
         const weight = Math.round((rel.confidence || 0.95) * 100);
 
+        // Gate C & I: Query by (source, target, relationType) to preserve multiple relation types
         const { data: existingEdge } = await supabaseAdmin
           .from('kg_edges')
           .select('id')
           .eq('user_id', userId)
           .eq('source_node_id', sourceKgId)
           .eq('target_node_id', targetKgId)
+          .eq('relation_type', relType)
           .maybeSingle();
 
         if (existingEdge) {
+          validEdgeIds.add(existingEdge.id);
           await supabaseAdmin
             .from('kg_edges')
             .update({
-              relation_type: relType,
               weight,
               updated_at: nowIso,
             })
             .eq('id', existingEdge.id);
           edgesCount++;
         } else {
-          const { error: insEdgeErr } = await supabaseAdmin
+          const { data: insEdge, error: insEdgeErr } = await supabaseAdmin
             .from('kg_edges')
             .insert({
               user_id: userId,
@@ -479,12 +509,17 @@ export class CanonicalGraphService {
               target_node_id: targetKgId,
               relation_type: relType,
               weight,
-            });
-          if (!insEdgeErr) edgesCount++;
+            })
+            .select('id')
+            .single();
+          if (!insEdgeErr && insEdge) {
+            validEdgeIds.add(insEdge.id);
+            edgesCount++;
+          }
         }
       }
 
-      // Hierarchy edge to parent entity if parent is also an entity bubble
+      // Hierarchy edge to parent entity if parent is also an active entity bubble
       if (b.parent_bubble_id && bubbleToKgNodeMap.has(b.parent_bubble_id)) {
         const parentKgId = bubbleToKgNodeMap.get(b.parent_bubble_id)!;
         const { data: existingHierarchyEdge } = await supabaseAdmin
@@ -493,17 +528,41 @@ export class CanonicalGraphService {
           .eq('user_id', userId)
           .eq('source_node_id', parentKgId)
           .eq('target_node_id', sourceKgId)
+          .eq('relation_type', 'HAS_CHILD')
           .maybeSingle();
 
-        if (!existingHierarchyEdge) {
-          await supabaseAdmin.from('kg_edges').insert({
-            user_id: userId,
-            source_node_id: parentKgId,
-            target_node_id: sourceKgId,
-            relation_type: 'HAS_CHILD',
-            weight: 1,
-          });
-          edgesCount++;
+        if (existingHierarchyEdge) {
+          validEdgeIds.add(existingHierarchyEdge.id);
+        } else {
+          const { data: insHierEdge, error: insHierErr } = await supabaseAdmin
+            .from('kg_edges')
+            .insert({
+              user_id: userId,
+              source_node_id: parentKgId,
+              target_node_id: sourceKgId,
+              relation_type: 'HAS_CHILD',
+              weight: 1,
+            })
+            .select('id')
+            .single();
+          if (!insHierErr && insHierEdge) {
+            validEdgeIds.add(insHierEdge.id);
+            edgesCount++;
+          }
+        }
+      }
+    }
+
+    // 5. Stale kg_edges cleanup: prune any edge not in validEdgeIds
+    const { data: allUserEdges } = await supabaseAdmin
+      .from('kg_edges')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (allUserEdges) {
+      for (const e of allUserEdges) {
+        if (!validEdgeIds.has(e.id)) {
+          await supabaseAdmin.from('kg_edges').delete().eq('id', e.id);
         }
       }
     }

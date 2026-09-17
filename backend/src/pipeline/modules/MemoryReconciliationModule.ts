@@ -90,6 +90,7 @@ export class MemoryReconciliationModule implements NovaPipelineModule {
             user_id: userId,
             name: effect.subjectEntityName,
             entity_type: effect.relationType || 'person',
+            bubble_id: bubbleId,
             attributes: {
               bubble_id: bubbleId,
               provenance: effect.provenance,
