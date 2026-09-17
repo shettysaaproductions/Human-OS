@@ -227,6 +227,33 @@ const NOVA_VOICE_TOOLS: VoiceTool[] = [
         },
       },
       {
+        name: 'modify_reminder',
+        description: 'Modify, reschedule, postpone, cancel, or change channel of an existing active reminder without creating duplicates (e.g. "Actually make that 9", "Cancel that reminder", "Call me instead", "Make it every day except Sunday").',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            task_query: { type: 'STRING', description: 'Task text or keywords of the reminder to modify' },
+            new_time_phrase: { type: 'STRING', description: 'New time if changing time (e.g. "9 PM", "tomorrow 8am")' },
+            new_channel: { type: 'STRING', description: 'Preferred communication mode: "call" or "message"' },
+            new_recurrence: { type: 'STRING', description: 'New recurrence pattern if changing: "daily", "weekdays", etc.' },
+            action: { type: 'STRING', description: 'Action: "update", "cancel", "postpone", "reschedule"' },
+          },
+        },
+      },
+      {
+        name: 'manage_goal',
+        description: 'Manage, complete, archive, or delete a life goal or ambition (e.g. "delete the hiring new office members goal", "complete my gym goal"). Reconciles across all stored goal tables.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            action: { type: 'STRING', description: 'Action to perform: "delete", "complete", "archive", or "update"' },
+            goal_name: { type: 'STRING', description: 'The title or topic of the goal' },
+            progress: { type: 'NUMBER', description: 'Optional progress percentage (0-100)' },
+          },
+          required: ['action', 'goal_name'],
+        },
+      },
+      {
         name: 'recall_memory',
         description: 'Search stored facts about the user. Call when user asks something you should know but don\'t have in context.',
         parameters: {
@@ -299,24 +326,51 @@ async function buildVoiceSystemPrompt(userId: string, preferredLanguage: 'en' | 
     logger.warn('[NovaVoiceService] Failed to fetch chat history for voice prompt', { error: err.message });
   }
 
-  // Fetch active reminders
+  // Fetch active reminders & goals
   let remindersBlock = '';
+  let goalsBlock = '';
   try {
-    const { data: reminders } = await supabaseAdmin
-      .from('reminders')
-      .select('title, scheduled_for, recurrence_unit')
-      .eq('user_id', userId)
-      .eq('status', 'pending')
-      .gte('scheduled_for', now.toISOString())
-      .order('scheduled_for', { ascending: true })
-      .limit(10);
+    const [
+      { data: reminders },
+      { data: kgGoals },
+      { data: lifeThreads }
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('reminders')
+        .select('id, text, trigger_at, recurrence_type, status, notes')
+        .eq('user_id', userId)
+        .in('status', ['active', 'scheduled'])
+        .order('trigger_at', { ascending: true })
+        .limit(10),
+      supabaseAdmin
+        .from('kg_nodes')
+        .select('name, attributes')
+        .eq('user_id', userId)
+        .eq('entity_type', 'goal')
+        .limit(10),
+      supabaseAdmin
+        .from('life_threads')
+        .select('topic, state, next_useful_step')
+        .eq('user_id', userId)
+        .eq('state', 'active')
+        .limit(10)
+    ]);
 
     if (reminders && reminders.length > 0) {
-      remindersBlock = '\n[USER\'S ACTIVE REMINDERS]\n' +
-        reminders.map(r => `- ${r.title} at ${new Date(r.scheduled_for).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`).join('\n');
+      remindersBlock = '\n[USER\'S ACTIVE REMINDERS & SCHEDULES]\n' +
+        reminders.map(r => `- ${r.text}${r.trigger_at ? ` at ${new Date(r.trigger_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : ''}`).join('\n');
+    }
+
+    const allGoalTitles: string[] = [];
+    (kgGoals || []).forEach((g: any) => { if (g.name) allGoalTitles.push(g.name); });
+    (lifeThreads || []).forEach((lt: any) => { if (lt.topic) allGoalTitles.push(lt.topic); });
+
+    if (allGoalTitles.length > 0) {
+      goalsBlock = '\n[USER\'S ACTIVE GOALS & AMBITIONS]\n' +
+        Array.from(new Set(allGoalTitles)).map(t => `- ${t}`).join('\n');
     }
   } catch (err: any) {
-    logger.warn('[NovaVoiceService] Failed to fetch reminders for voice prompt', { error: err.message });
+    logger.warn('[NovaVoiceService] Failed to fetch reminders/goals for voice prompt', { error: err.message });
   }
 
   // Fetch user profile
@@ -348,15 +402,8 @@ VOICE STYLE (CRITICAL):
 - Speak in SHORT sentences. This is a live voice call, not a lecture.
 - 1-3 sentences per turn maximum. Then LISTEN.
 - ${isEnglish
-    ? 'Use warm, casual conversational English like texting your closest friend. Natural contractions. Zero robotic formality.'
-    : `Use CASUAL HINGLISH — the way real friends talk:
-  ✅ "yaar", "bhai", "arre", "scene kya hai", "mast", "solid", "sahi hai", "chal"
-  ❌ NEVER: "dhanyavad", "kripaya", "aapka", "shubh din", "namaste", "bilkul sahi"  
-  ✅ Always "tu/tum/tera" — NEVER "aap/aapka"
-  ✅ Mix naturally: "Meeting khatam hua?" "College kaisa tha?"
-  ✅ Short questions at END: "Kya plan hai?" "Kaisa laga?"`
-  }
-- Show genuine warmth. React like a human friend would.
+    ? 'Talk naturally like a close modern friend. Casual, warm, concise.'
+    : 'Talk naturally in Hinglish — the effortless mix of Hindi and English people speak in Mumbai/Delhi. Warm, direct, concise.'}
 - Maximum 1 emoji per response.
 
 MEMORY RULES:
@@ -366,13 +413,16 @@ MEMORY RULES:
 
 TOOLS:
 - Use save_memory silently when user reveals important personal info.
-- Use schedule_reminder only when user explicitly asks for a reminder.
+- Use schedule_reminder when user wants a reminder scheduled.
+- Use modify_reminder when user modifies an existing reminder (e.g. "make it 9", "cancel that reminder", "call me instead").
+- Use manage_goal when user wants to delete, archive, or complete a goal. Never say "goal not found".
 - Use recall_memory when you don't have context you should have.
 - Use web_search for current events, weather, prices.
 
 CURRENT TIME: ${timeStr} (IST)
 ${memoriesBlock}
 ${recentContextBlock}
+${goalsBlock}
 ${remindersBlock}`;
 
   return voicePrompt;
@@ -812,6 +862,83 @@ class NovaVoiceService {
             error_code: 'REMINDER_FAILED',
             user_message: err.message,
           };
+        }
+      }
+
+      case 'modify_reminder': {
+        const { task_query, new_time_phrase, new_channel, new_recurrence, action } = toolArgs;
+        try {
+          const { goalProcessEngine } = await import('./GoalProcessEngine');
+          const { reminderIntentDetector } = await import('./ReminderIntentDetector');
+
+          if (action === 'cancel' || action === 'delete') {
+            const cancelRes = await reminderIntentDetector.detectAndCancelReminders(userId, task_query || 'all');
+            return {
+              success: true,
+              state: 'completed',
+              user_message: `Cancelled ${cancelRes.count} reminder(s).`,
+            };
+          }
+
+          let targetTrigger: Date | undefined = undefined;
+          if (new_time_phrase) {
+            const parsed = reminderIntentDetector.parseReminderDetails(new_time_phrase);
+            if (parsed.triggerAt) targetTrigger = parsed.triggerAt;
+          }
+
+          const channel = new_channel ? (new_channel.toLowerCase().includes('call') ? 'call' : 'message') : undefined;
+          const evalRes = await goalProcessEngine.evaluateExistingReminder(
+            userId,
+            task_query || new_time_phrase || 'reminder',
+            targetTrigger || null,
+            new_recurrence ? { type: new_recurrence } : undefined,
+            channel
+          );
+
+          return {
+            success: true,
+            state: 'completed',
+            action: evalRes.action,
+            user_message: evalRes.message || 'Reminder updated successfully.',
+          };
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] modify_reminder failed', { error: err.message });
+          return { success: false, error_code: 'MODIFY_FAILED', user_message: err.message };
+        }
+      }
+
+      case 'manage_goal': {
+        const { action, goal_name, progress } = toolArgs;
+        if (!goal_name) {
+          return { success: false, error_code: 'MISSING_PARAMETERS', user_message: 'Goal name is required.' };
+        }
+        try {
+          const { autonomousGoalResolverService } = await import('./AutonomousGoalResolverService');
+          if (action === 'delete' || action === 'archive') {
+            const res = await autonomousGoalResolverService.deleteOrArchiveGoal(userId, goal_name, goal_name);
+            return {
+              success: true,
+              state: 'completed',
+              user_message: `Goal "${res.targetTitle}" has been successfully removed.`,
+            };
+          } else if (action === 'complete') {
+            const res = await autonomousGoalResolverService.updateGoal(userId, goal_name, { status: 'completed', progress: 100 }, goal_name);
+            return {
+              success: true,
+              state: 'completed',
+              user_message: `Goal "${res.updatedGoal?.title || goal_name}" marked as completed!`,
+            };
+          } else {
+            const res = await autonomousGoalResolverService.updateGoal(userId, goal_name, { progress: typeof progress === 'number' ? progress : undefined }, goal_name);
+            return {
+              success: true,
+              state: 'completed',
+              user_message: `Goal "${res.updatedGoal?.title || goal_name}" updated.`,
+            };
+          }
+        } catch (err: any) {
+          logger.error('[NovaVoiceService] manage_goal failed', { error: err.message });
+          return { success: false, error_code: 'GOAL_FAILED', user_message: err.message };
         }
       }
 

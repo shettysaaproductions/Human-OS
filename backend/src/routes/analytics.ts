@@ -4,6 +4,7 @@ import { logger } from '../lib/logger';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { complete } from '../lib/nvidia';
 import { SourceAuthority } from '../types/memory';
+import { autonomousGoalResolverService } from '../services/AutonomousGoalResolverService';
 import {
   classifyDomain,
   synthesizeConnectedDots,
@@ -456,6 +457,9 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
 
       const goalObj = {
         id: g.id,
+        canonicalId: g.id,
+        rawId: g.id,
+        sourceTable: 'kg_nodes',
         name: title,
         title,
         description: desc,
@@ -520,6 +524,9 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
 
       const threadGoalObj = {
         id: `thread-${lt.id}`,
+        canonicalId: lt.id,
+        rawId: lt.id,
+        sourceTable: 'life_threads',
         name: topic,
         title: topic,
         entity_type: 'life_thread_goal',
@@ -576,6 +583,9 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
         const isComplete = m.is_archived || /completed|done|finished|achieved/i.test(norm);
         const goalObj = {
           id: `mem-goal-${m.id}-${seenTitles.size}`,
+          canonicalId: m.id,
+          rawId: m.id,
+          sourceTable: 'memories',
           name: item,
           title: item,
           description: item,
@@ -624,6 +634,9 @@ analyticsRouter.get('/goals', async (req: Request, res: Response, next: NextFunc
 
       const reminderGoalObj = {
         id: `reminder-${r.id}`,
+        canonicalId: r.id,
+        rawId: r.id,
+        sourceTable: 'reminders',
         name: taskTitle,
         title: taskTitle,
         entity_type: 'reminder_goal',
@@ -764,6 +777,7 @@ analyticsRouter.post('/goals', async (req: Request, res: Response, next: NextFun
 /**
  * PUT /analytics/goals/:id
  * Update an existing goal (title, description, category, deadline, progress, status).
+ * Powered by AutonomousGoalResolverService for universal reconciliation across all tables.
  */
 analyticsRouter.put('/goals/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -782,93 +796,21 @@ analyticsRouter.put('/goals/:id', async (req: Request, res: Response, next: Next
       else if (progress < 100 && newStatus === 'completed') newStatus = 'active';
     }
 
-    // Try finding in kg_nodes first
-    const { data: existingNode } = await supabaseAdmin
-      .from('kg_nodes')
-      .select('*')
-      .eq('id', goalId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    const result = await autonomousGoalResolverService.updateGoal(
+      userId,
+      goalId,
+      {
+        title,
+        description,
+        category,
+        target_date,
+        progress,
+        status: newStatus
+      },
+      title
+    );
 
-    if (existingNode) {
-      const updatedAttributes = {
-        ...(existingNode.attributes || {}),
-        ...(description !== undefined ? { description: description.trim() } : {}),
-        ...(category !== undefined ? { category: category.trim() } : {}),
-        ...(target_date !== undefined ? { deadline: target_date, target_date } : {}),
-        ...(progress !== undefined ? { progress } : {}),
-        ...(newStatus !== undefined ? { status: newStatus } : {}),
-        updated_at: new Date().toISOString()
-      };
-
-      const updatePayload: any = { attributes: updatedAttributes };
-      if (title && title.trim()) {
-        updatePayload.name = title.trim();
-      }
-
-      const { error: updateErr } = await supabaseAdmin
-        .from('kg_nodes')
-        .update(updatePayload)
-        .eq('id', goalId)
-        .eq('user_id', userId);
-
-      if (updateErr) throw updateErr;
-
-      res.status(200).json({ success: true, message: 'Goal updated successfully' });
-      return;
-    }
-
-    // Check life_threads
-    const { data: existingThread } = await supabaseAdmin
-      .from('life_threads')
-      .select('*')
-      .eq('id', goalId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (existingThread) {
-      const threadUpdate: any = {};
-      if (title && title.trim()) threadUpdate.title = title.trim();
-      if (description !== undefined) threadUpdate.description = description.trim();
-      if (newStatus) threadUpdate.status = newStatus === 'completed' ? 'completed' : 'active';
-
-      await supabaseAdmin
-        .from('life_threads')
-        .update(threadUpdate)
-        .eq('id', goalId)
-        .eq('user_id', userId);
-
-      res.status(200).json({ success: true, message: 'Goal updated successfully' });
-      return;
-    }
-
-    // Check memories
-    const { data: existingMem } = await supabaseAdmin
-      .from('memories')
-      .select('*')
-      .eq('id', goalId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (existingMem) {
-      const memUpdate: any = {};
-      if (title && title.trim()) {
-        memUpdate.value = description ? `${title.trim()}: ${description.trim()}` : title.trim();
-      }
-      if (newStatus === 'completed') {
-        memUpdate.is_archived = true;
-      }
-      await supabaseAdmin
-        .from('memories')
-        .update(memUpdate)
-        .eq('id', goalId)
-        .eq('user_id', userId);
-
-      res.status(200).json({ success: true, message: 'Goal updated successfully' });
-      return;
-    }
-
-    res.status(404).json({ error: 'Goal not found' });
+    res.status(200).json({ success: true, message: result.message, updatedGoal: result.updatedGoal });
   } catch (err) {
     logger.error('Failed to update goal', { error: err instanceof Error ? err.message : String(err) });
     next(err);
@@ -878,6 +820,10 @@ analyticsRouter.put('/goals/:id', async (req: Request, res: Response, next: Next
 /**
  * DELETE /analytics/goals/:id
  * Safely delete / archive a goal from the Goals tab.
+ * Powered by AutonomousGoalResolverService:
+ *  - Strips synthetic prefixes ('thread-', 'mem-goal-', 'reminder-')
+ *  - Reconciles across kg_nodes, life_threads, memories, reminders
+ *  - Reconciles stale/orphaned client records without returning 404 "Goal not found"
  */
 analyticsRouter.delete('/goals/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -888,65 +834,16 @@ analyticsRouter.delete('/goals/:id', async (req: Request, res: Response, next: N
     }
 
     const goalId = req.params.id;
+    const titleHint = (req.query.title as string) || req.body?.title;
 
-    // 1. Check kg_nodes
-    const { data: node } = await supabaseAdmin
-      .from('kg_nodes')
-      .select('id')
-      .eq('id', goalId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    const result = await autonomousGoalResolverService.deleteOrArchiveGoal(userId, goalId, titleHint);
 
-    if (node) {
-      await supabaseAdmin
-        .from('kg_nodes')
-        .delete()
-        .eq('id', goalId)
-        .eq('user_id', userId);
-
-      res.status(200).json({ success: true, message: 'Goal deleted successfully' });
-      return;
-    }
-
-    // 2. Check life_threads (mark archived/abandoned per safety)
-    const { data: thread } = await supabaseAdmin
-      .from('life_threads')
-      .select('id')
-      .eq('id', goalId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (thread) {
-      await supabaseAdmin
-        .from('life_threads')
-        .update({ status: 'archived' })
-        .eq('id', goalId)
-        .eq('user_id', userId);
-
-      res.status(200).json({ success: true, message: 'Goal archived successfully' });
-      return;
-    }
-
-    // 3. Check memories
-    const { data: mem } = await supabaseAdmin
-      .from('memories')
-      .select('id')
-      .eq('id', goalId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (mem) {
-      await supabaseAdmin
-        .from('memories')
-        .update({ is_archived: true })
-        .eq('id', goalId)
-        .eq('user_id', userId);
-
-      res.status(200).json({ success: true, message: 'Goal archived successfully' });
-      return;
-    }
-
-    res.status(404).json({ error: 'Goal not found' });
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      reconciled: result.reconciled,
+      targetTitle: result.targetTitle
+    });
   } catch (err) {
     logger.error('Failed to delete goal', { error: err instanceof Error ? err.message : String(err) });
     next(err);

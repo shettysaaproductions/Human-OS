@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.33-beta",
+    "date": "2026-09-17",
+    "title": "🎯 Autonomous Goal Reconciliation, Persistent Intent Commitments & Smart Escalation",
+    "message": [
+      "Autonomous Goal Reconciliation & Zero-Dead-End Resolution: Eradicated the 'Goal not found' error at the root across synthetic prefixes (thread-, mem-goal-, reminder-), ensuring any goal displayed or referenced in chat, voice, or Goals Hub resolves, updates, or deletes cleanly across all data tables.",
+      "Persistent Intent Commitments: Reminders are no longer treated as simple one-off notifications that die the moment they are sent. Nova maintains a persistent state machine (SCHEDULED → DUE → CONTACTING → AWAITING_ACKNOWLEDGEMENT → FOLLOW_UP → ESCALATED) until acknowledged, completed, cancelled, or postponed.",
+      "Intelligent Communication Channels: Autonomous urgency engine automatically selects between calls and text messages — high-urgency tasks (wake-up alarms, flights, urgent medication) trigger high-priority calls, while routine tasks default to text.",
+      "In-Place Semantic Deduplication & Natural Modification: Modifying reminders naturally ('Actually make that 9', 'Make it every day except Sunday', 'Call me instead', 'Postpone to 7') updates existing schedules in place without spawning duplicate rows.",
+      "Full Voice Mode Parity: Voice conversations now natively resolve, complete, archive, and modify goals and reminders using the same underlying autonomous engine."
+    ]
+  },
+  {
     "version": "0.3.32-beta",
     "date": "2026-09-17",
     "title": "🌳 Canonical Kinship Hierarchy, Identity Preservation & Universal Memory Relocation",

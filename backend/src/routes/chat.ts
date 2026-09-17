@@ -28,6 +28,7 @@ import { doubtEligibilityEngine } from '../services/DoubtEligibilityEngine';
 import { memoryPolicyService } from '../services/MemoryPolicyService';
 import { watchtowerReflectionService } from '../services/WatchtowerReflectionService';
 import { reminderIntentDetector } from '../services/ReminderIntentDetector';
+import { autonomousGoalResolverService } from '../services/AutonomousGoalResolverService';
 import { userLifeStageEngine } from '../services/UserLifeStageEngine';
 import { lifeBlueprintCuriosityEngine } from '../services/LifeBlueprintCuriosityEngine';
 import { entityRelationshipCorrectionService, EntityCorrection } from '../services/EntityRelationshipCorrectionService';
@@ -1832,6 +1833,28 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
       }
 
       // ── Phase 11: Deterministic state execution moved to SemanticTurnAgent ──
+      // -0.5. Conversational Goal Action Guard: Check if user asked to delete, archive, or complete a goal
+      if (!is_proactive) {
+        try {
+          const goalIntent = autonomousGoalResolverService.detectGoalActionIntent(effectiveMessage);
+          if (goalIntent.detected && goalIntent.titleHint) {
+            if (goalIntent.action === 'delete' || goalIntent.action === 'archive') {
+              const res = await autonomousGoalResolverService.deleteOrArchiveGoal(userId, goalIntent.titleHint, goalIntent.titleHint);
+              const goalDirective = `\n\n## 🎯 GOAL REMOVED / RESOLVED (TOP PRIORITY)\nThe user asked to ${goalIntent.action} their goal: "${effectiveMessage}".\nYou have ALREADY successfully removed/archived this goal in the database: "${res.targetTitle}".\nCRITICAL INSTRUCTIONS:\n1. Warmly and directly confirm to the user (in natural conversational Hinglish or English matching user) that their goal "${res.targetTitle}" has been removed/archived.\n2. Keep it concise (1-2 sentences). Do NOT debate or ask them to repeat. NEVER say "Goal not found".`;
+              turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + goalDirective;
+              logger.info('[Chat] Conversational goal deletion/archive executed', { userId, title: res.targetTitle, action: goalIntent.action });
+            } else if (goalIntent.action === 'complete') {
+              const res = await autonomousGoalResolverService.updateGoal(userId, goalIntent.titleHint, { status: 'completed', progress: 100 }, goalIntent.titleHint);
+              const goalDirective = `\n\n## 🏆 GOAL COMPLETED (TOP PRIORITY)\nThe user marked their goal as completed: "${effectiveMessage}".\nYou have ALREADY marked this goal as completed (100% progress): "${res.updatedGoal?.title || goalIntent.titleHint}".\nCRITICAL INSTRUCTIONS:\n1. Celebrate warmly with genuine personal enthusiasm ("Arre zabardast! Proud of you!", "Awesome work! That's a huge milestone!").\n2. Keep it concise (1-2 sentences).`;
+              turnAnalysisBlock = (turnAnalysisBlock ? `${turnAnalysisBlock}\n` : '') + goalDirective;
+              logger.info('[Chat] Conversational goal completion executed', { userId, title: goalIntent.titleHint });
+            }
+          }
+        } catch (gErr: any) {
+          logger.warn('[Chat] Goal action execution error', { error: gErr?.message });
+        }
+      }
+
       // 0. Conversational Reminder Cancellation Guard: Check if user asked to cancel/delete reminders
       if (!is_proactive) {
         try {

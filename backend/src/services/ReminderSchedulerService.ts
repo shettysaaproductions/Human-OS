@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { outboundDispatcherService } from './OutboundDispatcherService';
 import type { OutboundSource } from '../types/outbound';
+import { goalProcessEngine } from './GoalProcessEngine';
 
 
 export class ReminderSchedulerService {
@@ -271,16 +272,55 @@ export class ReminderSchedulerService {
       return;
     } else {
       logger.info('[Reminder] Delivered successfully', { reminderId, finalStatus, terminal: dispatchResult.terminal });
-      // Update accountability status to 'reminded'
+      
+      // Parse communication channel & advance persistent lifecycle
+      const metadata = goalProcessEngine.parseProcessMetadata(reminder.notes);
+      const isCallMode = metadata.communicationMode === 'call' || reminder.purpose === 'call_reminder';
+
+      if (isCallMode) {
+        await goalProcessEngine.advanceLifecycle(reminderId, 'DISPATCHED_CALL');
+        // Dispatch high-priority call push alert if token available
+        try {
+          const { data: userProfile } = await supabaseAdmin
+            .from('users')
+            .select('push_token')
+            .eq('id', reminder.user_id)
+            .maybeSingle();
+
+          if (userProfile?.push_token) {
+            const { sendPushNotification } = await import('../lib/pushNotifications');
+            await sendPushNotification([{
+              to: userProfile.push_token,
+              title: 'Nova Calling...',
+              body: `Hey, you asked me to call you about: "${reminder.text}". Tap to connect!`,
+              sound: 'default',
+              channelId: 'nova_calls',
+              priority: 'high',
+              ttl: 1800,
+              data: {
+                type: 'nova_call',
+                reminderId: reminder.id,
+                task: reminder.text,
+                urgency: 'high'
+              }
+            }]);
+          }
+        } catch (pushErr: any) {
+          logger.warn('[ReminderScheduler] Failed to dispatch call push alert', { error: pushErr?.message });
+        }
+      } else {
+        await goalProcessEngine.advanceLifecycle(reminderId, 'DISPATCHED_MESSAGE');
+      }
+
+      // Update accountability status to awaiting acknowledgement (reminder stays active until resolved)
       await supabaseAdmin.from('reminders').update({
-        accountability_status: 'reminded',
+        accountability_status: 'awaiting_acknowledgement',
         last_follow_up_at: now.toISOString(),
         updated_at: now.toISOString()
       }).eq('id', reminderId);
     }
 
-    // 3. Handle recurrence or mark completed
-    let completed = false;
+    // 3. Handle recurrence or maintain persistent active commitment
     if (reminder.recurrence_type && reminder.recurrence_interval) {
       const currentCount = (reminder.recurrence_count || 0) + 1;
 
@@ -304,7 +344,11 @@ export class ReminderSchedulerService {
       const hitEndAt = reminder.end_at && nextTrigger >= new Date(reminder.end_at);
 
       if (hitLimit || hitEndAt) {
-        completed = true;
+        await supabaseAdmin
+          .from('reminders')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .eq('id', reminderId);
+        logger.info('Recurring reminder completed recurrence limit', { reminderId });
       } else {
         await supabaseAdmin
           .from('reminders')
@@ -317,15 +361,9 @@ export class ReminderSchedulerService {
         logger.info('Recurring reminder rescheduled', { reminderId, nextTrigger, count: currentCount });
       }
     } else {
-      completed = true;
-    }
-
-    if (completed) {
-      await supabaseAdmin
-        .from('reminders')
-        .update({ status: 'completed', updated_at: new Date().toISOString() })
-        .eq('id', reminderId);
-      logger.info('Reminder fired and completed', { reminderId });
+      // One-time reminder: KEEP ACTIVE with accountability_status 'awaiting_acknowledgement'.
+      // DO NOT blindly mark completed! Nova owns the commitment until user acknowledgement or completion.
+      logger.info('One-time reminder dispatched — keeping active in AWAITING_ACKNOWLEDGEMENT state', { reminderId });
     }
 
     // 4. Nova Autonomous Accountability Check-In (For workout, health, bills, habits, general)

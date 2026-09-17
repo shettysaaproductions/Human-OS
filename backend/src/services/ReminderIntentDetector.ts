@@ -12,7 +12,7 @@
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
-import crypto from 'crypto';
+import { goalProcessEngine, type CommunicationChannel } from './GoalProcessEngine';
 
 export interface ReminderDetectionResult {
   detected: boolean;
@@ -81,7 +81,11 @@ export class ReminderIntentDetector {
     if (englishReminder) return true;
 
     const hindiReminder = /\b(yaad\s*(?:dilao|dilana|dila\s*dena|dila|kara|kar\s*dena|se\s*remind|dena|karna|rakhna)|remind\s*(?:me|karo|karna|kar|dena|karen)|reminder\s*(?:set|lagao|karo|banao|laga\s*dena|kar\s*dena)|alarm\s*(?:lagao|set|karo|laga\s*dena|kar\s*dena)|schedule\s*(?:karo|kar\s*dena|karna)|utha\s*(?:dena|diyo|denaa)|jaga\s*(?:dena|diyo|denaa))\b/i.test(lower);
-    return hindiReminder;
+    if (hindiReminder) return true;
+
+    // 5. In-place modification & channel change triggers ("Actually make that 9", "Make it every day except Sunday", "Call me instead", "Don't call, just message")
+    const modificationTrigger = /\b(?:actually\s+make\s+that|make\s+(?:that|it)\s+\d+|change\s+(?:it|that|the\s+time)\s+to|postpone\s+(?:to|till)|reschedule\s+to|call\s+me\s+instead|don'?t\s+call|just\s+message\s+me|make\s+it\s+every\s+day|call\s*karke\s*yaad)\b/i.test(lower);
+    return modificationTrigger;
   }
 
   /**
@@ -819,40 +823,78 @@ export class ReminderIntentDetector {
       };
     }
 
-    // ── Check for existing active reminder to prevent duplicates ──
+    // ── Autonomous Goal & Reminder Lifecycle Engine Integration ──
     try {
-      const tenMinutesMs = 10 * 60 * 1000;
-      const targetTimeMs = parsed.triggerAt.getTime();
-      const minIso = new Date(targetTimeMs - tenMinutesMs).toISOString();
-      const maxIso = new Date(targetTimeMs + tenMinutesMs).toISOString();
+      const channelDecision = goalProcessEngine.determineCommunicationChannel(message);
+      const commChannel: CommunicationChannel = channelDecision.channel;
+      
+      const evalResult = await goalProcessEngine.evaluateExistingReminder(
+        userId,
+        parsed.title || message,
+        parsed.triggerAt,
+        {
+          type: parsed.recurrenceType,
+          interval: parsed.recurrenceInterval,
+          activeDays: parsed.activeDays
+        },
+        commChannel
+      );
 
-      const { data: existingRows } = await supabaseAdmin
-        .from('reminders')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .gte('trigger_at', minIso)
-        .lte('trigger_at', maxIso);
-
-      if (existingRows && existingRows.length > 0) {
-        const existing = existingRows[0];
-        logger.info('[ReminderIntentDetector] Found existing equivalent reminder, reusing', {
+      if (evalResult.isModification && evalResult.reminder) {
+        logger.info('[ReminderIntentDetector] Existing reminder modified in place', {
           userId,
-          reminderId: existing.id
+          reminderId: evalResult.reminder.id,
+          action: evalResult.action
+        });
+
+        const trigDate = evalResult.reminder.trigger_at ? new Date(evalResult.reminder.trigger_at) : parsed.triggerAt;
+
+        return {
+          detected: true,
+          scheduled: true,
+          reminder: evalResult.reminder,
+          task: evalResult.reminder.text || parsed.title,
+          triggerAt: trigDate,
+          formattedTime: parsed.formattedTime,
+          isRecurring: parsed.isRecurring,
+          recurrenceType: parsed.recurrenceType,
+          activeDays: parsed.activeDays,
+          activeMonths: parsed.activeMonths,
+          note: `EXISTING_REMINDER_MODIFIED: ${evalResult.message}. Confirm warmly to the user: "${evalResult.message}".`
+        };
+      }
+
+      if (evalResult.isDuplicate && evalResult.reminder) {
+        logger.info('[ReminderIntentDetector] Existing equivalent reminder deduplicated', {
+          userId,
+          reminderId: evalResult.reminder.id
         });
 
         return {
           detected: true,
           scheduled: true,
-          reminder: existing,
-          task: parsed.title,
+          reminder: evalResult.reminder,
+          task: evalResult.reminder.text || parsed.title,
           triggerAt: parsed.triggerAt,
           formattedTime: parsed.formattedTime,
           isRecurring: parsed.isRecurring,
           recurrenceType: parsed.recurrenceType,
-          note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" is scheduled for ${parsed.formattedTime}. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi".`
+          note: `EXISTING_REMINDER_DEDUPLICATED: ${evalResult.message || 'Already scheduled'}. Confirm to the user that this reminder is already active.`
         };
       }
+
+      // Initialize persistent ProcessMetadata
+      const nowIso = new Date().toISOString();
+      const processMeta = {
+        lifecycleState: 'SCHEDULED',
+        communicationMode: commChannel,
+        followUpCount: 0,
+        maxEscalations: 3,
+        intentSource: 'chat_or_voice',
+        history: [
+          { state: 'SCHEDULED', timestamp: nowIso, note: `Created via autonomous intent (${commChannel})` }
+        ]
+      };
 
       // Insert new active reminder
       const { data: inserted, error } = await supabaseAdmin
@@ -867,8 +909,11 @@ export class ReminderIntentDetector {
           recurrence_interval: parsed.isRecurring ? (parsed.recurrenceInterval || 1) : null,
           active_days: parsed.activeDays || null,
           active_months: parsed.activeMonths || null,
+          urgency: commChannel === 'call' ? 'high' : 'medium',
+          purpose: commChannel === 'call' ? 'call_reminder' : 'message_reminder',
+          notes: JSON.stringify(processMeta),
           accountability_status: 'pending',
-          created_at: new Date().toISOString()
+          created_at: nowIso
         })
         .select('*')
         .single();
@@ -883,13 +928,15 @@ export class ReminderIntentDetector {
         };
       }
 
-      logger.info('[ReminderIntentDetector] Successfully scheduled reminder', {
+      logger.info('[ReminderIntentDetector] Successfully scheduled autonomous reminder', {
         userId,
         reminderId: inserted.id,
         triggerAt: parsed.triggerAt.toISOString(),
-        task: parsed.title
+        task: parsed.title,
+        communicationChannel: commChannel
       });
 
+      const channelNote = commChannel === 'call' ? ' (by call)' : '';
       return {
         detected: true,
         scheduled: true,
@@ -901,7 +948,7 @@ export class ReminderIntentDetector {
         recurrenceType: parsed.recurrenceType,
         activeDays: parsed.activeDays,
         activeMonths: parsed.activeMonths,
-        note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" has been successfully scheduled for ${parsed.formattedTime}. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi".`
+        note: `NEW_REMINDER_SCHEDULED_FOR_FUTURE: A reminder for "${parsed.title}" has been successfully scheduled for ${parsed.formattedTime}${channelNote}. Confirm to the user warmly: "Done! Main tumhe ${parsed.formattedTime} pe yaad dila dungi${commChannel === 'call' ? ' (call karke)' : ''}".`
       };
     } catch (err: any) {
       logger.error('[ReminderIntentDetector] Exception during reminder persistence', { error: err.message });

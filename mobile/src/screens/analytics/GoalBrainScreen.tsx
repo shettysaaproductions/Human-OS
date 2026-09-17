@@ -209,6 +209,7 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
 
     try {
       await api.put(`/analytics/goals/${selectedGoal.id}`, {
+        title: selectedGoal.name || selectedGoal.title,
         status: newStatus,
         progress: newProg
       });
@@ -226,9 +227,12 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
 
   const handleDeleteGoal = () => {
     if (!selectedGoal) return;
+    const targetTitle = selectedGoal.name || selectedGoal.title || '';
+    const goalId = selectedGoal.id;
+
     Alert.alert(
       'Delete Goal',
-      `Are you sure you want to delete "${selectedGoal.name || selectedGoal.title}"?`,
+      `Are you sure you want to delete "${targetTitle}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -236,11 +240,25 @@ export const GoalBrainScreen = React.memo(function GoalBrainScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.delete(`/analytics/goals/${selectedGoal.id}`);
+              // Optimistic UI update immediately so user never sees orphaned item
+              setData((prev: any) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  activeGoals: (prev.activeGoals || []).filter((g: any) => g.id !== goalId),
+                  completedGoals: (prev.completedGoals || []).filter((g: any) => g.id !== goalId)
+                };
+              });
               setSelectedGoal(null);
+
+              await api.delete(`/analytics/goals/${goalId}`, {
+                params: { title: targetTitle }
+              });
+
               fetchGoals();
             } catch (err: any) {
               Alert.alert('Delete Failed', err.response?.data?.error || 'Could not delete goal.');
+              fetchGoals();
             }
           }
         }
