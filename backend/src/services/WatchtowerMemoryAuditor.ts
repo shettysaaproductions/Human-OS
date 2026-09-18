@@ -621,6 +621,41 @@ If there are no contradictions, return empty array [].`;
         continue;
       }
 
+      // Quality Gate 4: Identity & Kinship Protection Gate
+      // Never allow preferred_name or working_preferred_name to be set to a relative's name or nickname!
+      if (canonical === 'preferred_name' || canonical === 'working_preferred_name') {
+        const lowerVal = u.value.toLowerCase().trim();
+
+        const { data: familyMems } = await supabaseAdmin
+          .from('memories')
+          .select('key, value')
+          .eq('user_id', userId)
+          .eq('is_archived', false)
+          .or('key.ilike.%_name,key.ilike.%_nickname');
+
+        const matchesFamilyMember = (familyMems || []).some(m =>
+          (m.value || '').toLowerCase().trim() === lowerVal
+        );
+
+        if (matchesFamilyMember) {
+          logger.warn('[WatchtowerMemoryAuditor] BLOCKED setting preferred_name to known family member name/nickname', {
+            userId,
+            attemptedValue: u.value,
+            reason
+          });
+          continue;
+        }
+
+        if (/\b(son|child|beta|bete|wife|biwi|patni|father|papa|mother|mummy|daughter|beti)\b/i.test(reason || '')) {
+          logger.warn('[WatchtowerMemoryAuditor] BLOCKED setting preferred_name from relative context', {
+            userId,
+            attemptedValue: u.value,
+            reason
+          });
+          continue;
+        }
+      }
+
       logger.info('[WatchtowerMemoryAuditor] Applying autonomous memory reconciliation', {
         userId,
         key: canonical,
@@ -738,6 +773,19 @@ If there are no contradictions, return empty array [].`;
           .eq('user_id', userId)
           .eq('key', 'son_birth_date')
           .eq('value', 'Not mentioned');
+      }
+
+      if (canonical === 'preferred_name' || canonical === 'user_name') {
+        try {
+          await supabaseAdmin
+            .from('profiles')
+            .update({ preferred_name: u.value, updated_at: now })
+            .eq('id', userId);
+          const { cache } = await import('../lib/cache');
+          cache.invalidate(`profile:${userId}`);
+        } catch (profErr: any) {
+          logger.warn('[WatchtowerMemoryAuditor] Failed to sync profile preferred_name', { error: profErr.message });
+        }
       }
     }
 

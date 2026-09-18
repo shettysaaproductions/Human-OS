@@ -128,6 +128,7 @@ export class PromptBuilder {
     turnAnalysisBlock?: string
   ): string {
     let finalPrompt = `${basePrompt}\n`;
+    const safeUserName = (preferredName || '').trim();
     
     // Inject Situation Brief at the very top (before mode/memory blocks)
     // This gives the LLM a pre-synthesized understanding of the user's current moment.
@@ -156,6 +157,17 @@ export class PromptBuilder {
      * Past chat history is ONLY for context, cross-checking, or error correction — NOT for fresh replies about factual knowledge.
      * NEVER confuse kinship roles/vocatives with personal names. "Papa", "Dad", "Pitaji" are roles; "Suresh" is his name. "Mummy", "Mom", "Maa" are roles; "Rajeshree" is her name. NEVER say "tumhare papa ka naam Papa hai" or "mummy ka naam Mummy hai"!
      * If a fact is NOT in memory, honestly admit you haven't saved it yet and ask casually to remember it: "Mujhe abhi tak tumhare papa ka naam nahi pata yaar, bata do main yaad rakhungi 😊". NEVER guess or invent.
+${safeUserName ? `5. 👤 VERIFIED USER IDENTITY & KINSHIP BOUNDARIES (HIGHEST PRIORITY):
+   - USER / SELF NAME: "${safeUserName}"
+   - You are chatting directly with "${safeUserName}". ALWAYS recognize and address the user as "${safeUserName}" (or natural peer friend terms like "yaar" / "bhai").
+   - ZERO IDENTITY LEAK: NEVER confuse "${safeUserName}" with their relatives, children, or friends!
+     * If the user mentions their son's nickname or name (e.g. "Tiku", "Shreshth"), that is their SON, NOT the user "${safeUserName}"!
+     * NEVER call "${safeUserName}" by their son's nickname "Tiku"!
+     * NEVER call "${safeUserName}" by their son's name "Shreshth"!
+     * NEVER call "${safeUserName}" by their spouse's, parent's, or friend's name!
+   - Kinship roles and nicknames belong strictly and exclusively to those distinct individuals in the knowledge graph. They are NOT the user's identity!` : `5. 👤 USER IDENTITY VS KINSHIP BOUNDARIES (HIGHEST PRIORITY):
+   - NEVER address the user by a family member's name or nickname (e.g. son's nickname Tiku, son's name Shreshth, wife's name Sakshi).
+   - If the user's personal name is not yet confirmed, address them warmly as a friend ("yaar", "bhai"). NEVER assume they are named after their child or relative!`}
 `;
 
     if (mode === 'HUMAN_CHAT') {
@@ -554,9 +566,33 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
           handledFamilyKeys.add(nickKey);
           const nameVal = (nameMem.value || '').trim();
           const nickVal = (nickMem.value || '').trim();
-          familyEntityLines.push(`- [FAMILY] User's ${rel}: name: ${nameVal}, nickname: ${nickVal} (both "${nameVal}" and "${nickVal}" refer to the user's ${rel}) (IMPORTANT)`);
+          familyEntityLines.push(`- [FAMILY] User's ${rel}: name: "${nameVal}", nickname: "${nickVal}" (both "${nameVal}" and "${nickVal}" refer exclusively to the user's ${rel}, NEVER to user ${safeUserName ? `"${safeUserName}"` : ''}) (IMPORTANT)`);
+        } else if (nickMem) {
+          handledFamilyKeys.add(nickKey);
+          const nickVal = (nickMem.value || '').trim();
+          familyEntityLines.push(`- [FAMILY] User's ${rel} nickname: "${nickVal}" (refers exclusively to user's ${rel}, NEVER to user ${safeUserName ? `"${safeUserName}"` : ''}) (IMPORTANT)`);
+        } else if (nameMem) {
+          handledFamilyKeys.add(nameKey);
+          const nameVal = (nameMem.value || '').trim();
+          familyEntityLines.push(`- [FAMILY] User's ${rel} name: "${nameVal}" (refers exclusively to user's ${rel}, NEVER to user ${safeUserName ? `"${safeUserName}"` : ''}) (IMPORTANT)`);
         }
       }
+
+      // Filter out any corrupted preferred_name that matches a known family nickname/name
+      const validMemories = memories.filter(m => {
+        if (m.key === 'preferred_name' || m.key === 'user_name') {
+          const val = (m.value || '').trim().toLowerCase();
+          const matchesRelative = memories.some(other =>
+            other.key !== m.key &&
+            (other.key.endsWith('_name') || other.key.endsWith('_nickname')) &&
+            (other.value || '').trim().toLowerCase() === val
+          );
+          if (matchesRelative) {
+            return false;
+          }
+        }
+        return true;
+      });
 
       const formatMemory = (mem: Memory) => {
         let text = (mem.value || (mem as any).content || '').trim();
@@ -590,7 +626,7 @@ ANTI-ROBOT RULE (NO FABRICATION): You currently have ZERO long-term memories abo
         identity: []
       };
 
-      for (const mem of memories) {
+      for (const mem of validMemories) {
         if (handledFamilyKeys.has(mem.key)) continue;
         const meta = classifyDomain(mem.key, mem.memory_type);
         domainBuckets[meta.domain].push(mem);

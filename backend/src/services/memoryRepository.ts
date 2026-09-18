@@ -574,6 +574,24 @@ export class MemoryRepository {
         }
       }
 
+      // User Profile Name Synchronization Gate:
+      // When preferred_name or user_name is upserted, sync directly to profiles table & invalidate profile cache
+      if (normalizedMemory.key === 'preferred_name' || normalizedMemory.key === 'user_name') {
+        try {
+          await supabaseAdmin
+            .from('profiles')
+            .update({ preferred_name: normalizedMemory.value, updated_at: new Date().toISOString() })
+            .eq('id', userId);
+          cache.invalidate(`profile:${userId}`);
+          logger.info('[MemoryRepository] Synchronized profile preferred_name from authoritative memory', {
+            userId,
+            preferredName: normalizedMemory.value
+          });
+        } catch (profErr: any) {
+          logger.warn('[MemoryRepository] Failed to sync profile preferred_name', { error: profErr.message });
+        }
+      }
+
       // Phase 2A: Non-blocking Guardian mutation observation trigger + Analytics Cache Invalidation + Autonomous Graph Curation
       setImmediate(() => {
         try {

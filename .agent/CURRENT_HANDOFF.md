@@ -1,13 +1,44 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-18 — Phase 3 Semantic Closure: Surgical Final Pass & Live Graph Verification (v0.3.39)
+2026-09-18 — Root-Cause Memory & Neural Galaxy Entity Semantic Quality Gate (v0.3.39-beta)
 
 ## Session / Agent
 Agent: MonkeyCode
 Branch: `main`
 
-## Status: PHASE 3 GENUINELY & FULLY CLOSED
+## Status: ONE-SHOT MEMORY INTEGRITY & NEURAL GALAXY QUALITY GATE COMPLETED
+
+### Mandatory OTA & Broadcast Notification Log:
+- **Version**: `v0.3.39-beta`
+- **Update Group ID**: `c76cbefd-974b-4011-8424-5a8245b0eca1`
+- **Android Update ID**: `01a0b357-df1d-7152-bcf2-165f6209c178`
+- **iOS Update ID**: `01a0b357-df1d-787a-9f3d-ac0a9a99650f`
+- **Broadcast Push Result**: Successfully broadcasted to 1 registered push token with FCM V1 delivery.
+
+### Root-Cause Fix Summary:
+1. **Root Cause Analysis & Forensic Tracing**:
+   - Tracked phantom bubbles (`Kar`, `Ke`, `Office`, `Rehta hai`) to `CanonicalMemoryTreeService.ts` compound light-verb regex matches (e.g. `call kar` matching `[call] + [kar]`), raw un-sanitized Supabase writes in `AutonomousMemoryGraphCuratorService.ts` and `WatchtowerMemoryAuditor.ts`, and fallback graph stem rendering in `memoryDomains.ts` & `KgExplorerScreen.tsx`.
+2. **Multi-Layer Semantic Quality Gate Deployed (`entitySemanticValidator.ts`)**:
+   - Integrated `isValidEntityName` and `isValidMemoryAttributeValue` across the entire pipeline:
+     - Hindi/Hinglish compound light verbs (`kar, karo, karein, karna, karke, kiya, do, dena...`)
+     - Postpositions & grammatical particles (`ka, ki, ke, ko, se, me, mein, par, pe, ne...`)
+     - Clausal fragments & temporal schedules (`6 months old`, `5th day of every month`, `mere society mein`)
+     - Tautological role labels (`friend` as `friend_attribute`)
+     - Preserved genuine short proper names (`Om`, `Al`, `Bo`, `Jo`, `Ty`, `Mo`, `Ed`, `Vu`).
+3. **Database Self-Healing (Zero Data Loss)**:
+   - Restored corrupted user memories in Supabase: `son_name: "Shreshth"`, `son_nickname: "Tuku"`.
+   - Safely archived phantom bubbles `entity:kar` and `entity:office` from `memory_bubbles` and cleared reminder references.
+   - Preserved all legitimate user memories, domains, and relational edges with an audit log.
+4. **Automated Verification**:
+   - `MemoryEntityQualityGate.test.ts`: 13/13 passed.
+   - `BackendChatCompanionHardening.test.ts`: 23/23 passed.
+   - Backend build (`cd backend && npm run build`): Exit Code 0.
+   - Mobile typecheck (`cd mobile && npx tsc --noEmit`): Exit Code 0.
+
+---
+
+## Historical Status: PHASE 3 GENUINELY & FULLY CLOSED
 
 Phase 3 is 100% closed. All four semantic areas of the surgical final pass have been implemented, tested, and verified on live Supabase:
 1. **Area A: Reusable Semantic Entity Typing**: Dynamic classifier (`inferSemanticEntityType`) replaces hardcoded person defaults across `CanonicalEntityEngine`, `CanonicalMemoryTreeService`, `CanonicalGraphService`, and `MemoryReconciliationModule`. Live misclassified rows surgically repaired from evidence (Rottweiler -> pet, Ganpati Celebrations -> event, etc.).

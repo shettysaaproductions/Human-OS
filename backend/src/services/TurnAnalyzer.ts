@@ -1157,15 +1157,41 @@ export class TurnAnalyzer {
         facts.push({ key: 'son_nickname', value: this.cleanValue(namedSonNickMatch[2]), text, isProtected: isExplicitRemember, factClass });
       } else {
         m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s+(?:hai\s+|is\s+|)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i) ||
-            lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)\s+ko\s+pyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulate|bulati|rakha|bolte|hai)\b/i);
+            lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)\s+ko\s+pyar\s+se\s+([a-zA-Z0-9][a-zA-Z0-9\s]*?)\s+(?:bulate|bulati|rakha|bolte|hai)\b/i) ||
+            lower.match(/\b([a-zA-Z0-9_-]+)\s+(?:mere|mera|my)\s+(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+)?(?:nick\s*name|nickname|pyar\s+ka\s+naam)\s*(?:hai|is)?/i);
         if (m) facts.push({ key: 'son_nickname', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
       }
     }
 
     // Son name (if not yet extracted)
     if (facts.every(f => f.key !== 'son_name' && f.key !== 'son_nickname')) {
-      m = lower.match(/\b(?:mera|mere|my)?\s*(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i);
-      if (m) facts.push({ key: 'son_name', value: this.cleanValue(m[1]), text, isProtected: isExplicitRemember, factClass });
+      m = lower.match(/\b(?:mera|mere|my)\s+(?:beta|bete|son|child)(?:'s)?\s+(?:ka\s+naam\s+(?:hai\s+)?|is\s+|nam\s+(?:hai\s+)?|name\s+is\s+|hai\s+|name\s+)([a-zA-Z0-9]+)(?:\s+hai|\s+is|[.,;!\n]|$)/i);
+      if (m) {
+        const candidate = this.cleanValue(m[1]);
+        if (!/^(mera|meri|mere|my|name|naam|toh|to|hai|is)$/i.test(candidate)) {
+          facts.push({ key: 'son_name', value: candidate, text, isProtected: isExplicitRemember, factClass });
+        }
+      }
+    }
+
+    // ── User Self-Identity (preferred_name / user_name) ──────────────────────
+    if (facts.every(f => f.key !== 'preferred_name' && f.key !== 'user_name')) {
+      const selfNameMatch = lower.match(/\b(?:mera|mara|my)\s+(?:naam|name|nam)\s+(?:toh\s+|to\s+|hai\s+|is\s+|)([a-zA-Z][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!\n]|$)/i) ||
+        lower.match(/\b(?:main|mein|i\s+am|im)\s+([a-zA-Z][a-zA-Z0-9\s]*?)\s+(?:hoon|hun|hai)\b/i) ||
+        lower.match(/\b(?:call\s+me|mujhko|mujhe)\s+([a-zA-Z][a-zA-Z0-9\s]*?)(?:\s+bulate|\s+bulati|\s+bolte|[.,;!\n]|$)/i);
+
+      if (selfNameMatch) {
+        const uName = this.cleanValue(selfNameMatch[1].replace(/\s+(?:hai|is|toh|to)$/i, ''));
+        if (uName && !this.isStopPronoun(uName) && !entityResolutionService.isNonNameWord(uName) && !/^(?:beta|bete|son|wife|biwi|papa|dad|father)$/i.test(uName)) {
+          facts.push({
+            key: 'preferred_name',
+            value: uName,
+            text,
+            isProtected: true,
+            factClass: 'PROTECTED_FACT'
+          });
+        }
+      }
     }
 
     // ── Birth Dates & Anniversaries ──────────────────────────────────────────

@@ -694,6 +694,59 @@ export class CanonicalMemoryTreeService {
       return domainBubble;
     }
 
+    // Identity Boundary Check: Never create a family bubble with the user's own name
+    if (domainKey === 'family' && params.relationType) {
+      try {
+        const { data: userProf } = await supabaseAdmin
+          .from('profiles')
+          .select('preferred_name')
+          .eq('id', userId)
+          .maybeSingle();
+        const userSelfName = (userProf?.preferred_name || '').trim().toLowerCase();
+        if (userSelfName && params.entityName.trim().toLowerCase() === userSelfName) {
+          logger.warn(`[CanonicalMemoryTree] Blocked creating family bubble "${params.entityName}" matching user's own identity.`);
+          return this.getOrCreateDomainBubble(userId, 'identity');
+        }
+      } catch (profErr: any) {
+        // Non-fatal
+      }
+
+      // Canonical Alias & Convergence Gate: Singular kinship roles (Son, Wife, Husband, Father, Mother)
+      // Must NOT create multiple separate bubbles for the same singular family member!
+      const singularRoles = ['son', 'wife', 'husband', 'father', 'mother', 'partner'];
+      if (singularRoles.includes(params.relationType.toLowerCase())) {
+        const { data: existingSameRel } = await supabaseAdmin
+          .from('memory_bubbles')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('domain_key', 'family')
+          .eq('relation_type', params.relationType)
+          .eq('is_archived', false);
+
+        if (existingSameRel && existingSameRel.length > 0) {
+          const cleanCand = params.entityName.trim().toLowerCase();
+          for (const ex of existingSameRel) {
+            const exLabel = ex.label.trim().toLowerCase();
+            const exAliases: string[] = Array.isArray(ex.metadata?.aliases) ? ex.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
+            if (exLabel === cleanCand || exAliases.includes(cleanCand)) {
+              return ex as MemoryBubbleRecord;
+            }
+          }
+
+          // Existing bubble found for this singular relation: register candidate as alias on the primary bubble
+          const primaryBubble = existingSameRel[0];
+          try {
+            const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
+            logger.info(`[CanonicalMemoryTree] Converging candidate "${params.entityName}" as alias on existing ${params.relationType} bubble "${primaryBubble.label}"`);
+            await canonicalEntityEngine.registerAlias(userId, primaryBubble.id, params.entityName);
+          } catch (aliasErr: any) {
+            logger.warn('[CanonicalMemoryTree] Alias registration non-fatal error', { error: aliasErr.message });
+          }
+          return primaryBubble as MemoryBubbleRecord;
+        }
+      }
+    }
+
     const baseSlug = normalizeSlug(params.entityName);
     const disambiguator = params.slugSuffix ? `_${normalizeSlug(params.slugSuffix)}` : '';
     const slug = `entity:${baseSlug}${disambiguator}`;
@@ -785,6 +838,11 @@ export class CanonicalMemoryTreeService {
     const val = String(memory.value || '').trim();
     const domainKey = (memory.type as LifeDomainKey) || 'lifestyle';
 
+    // Identity boundary: User's own name, preferred name, and full name belong strictly to identity domain
+    if (key === 'preferred_name' || key === 'user_name' || key === 'full_name' || key === 'name') {
+      return this.getOrCreateDomainBubble(userId, 'identity');
+    }
+
     // Check if the memory references an explicit entity
     // e.g. "friend_ramesh", "ramesh_location", "pet_bruno", "project_shortfilm"
     let entityNameCandidate: string | null = null;
@@ -806,8 +864,46 @@ export class CanonicalMemoryTreeService {
       const attr = familyMatch[1].toLowerCase();
       const relTitle = capitalizeWords(rel);
 
+      // Check if an existing entity bubble exists for this family relation
+      const { data: existingFamilyBubbles } = await supabaseAdmin
+        .from('memory_bubbles')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('domain_key', 'family')
+        .eq('relation_type', relTitle)
+        .eq('is_archived', false);
+
+      const targetBubble = existingFamilyBubbles?.find(b => !isInvalidEntityName(b.label));
+
+      if (attr === 'nickname' || attr === 'alias') {
+        if (!isInvalidEntityName(val)) {
+          if (targetBubble) {
+            try {
+              const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
+              await canonicalEntityEngine.registerAlias(userId, targetBubble.id, val);
+            } catch (err: any) {
+              logger.warn('[CanonicalMemoryTree] Failed to register alias on family bubble', { error: err.message });
+            }
+            return targetBubble as MemoryBubbleRecord;
+          }
+        }
+      }
+
       if (attr === 'name' || attr === 'real_name') {
         if (!isInvalidEntityName(val)) {
+          if (targetBubble) {
+            if (targetBubble.label.toLowerCase() === val.toLowerCase()) {
+              return targetBubble as MemoryBubbleRecord;
+            }
+            try {
+              const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
+              await canonicalEntityEngine.registerAlias(userId, targetBubble.id, val);
+            } catch (err: any) {
+              logger.warn('[CanonicalMemoryTree] Failed to register alias on family bubble', { error: err.message });
+            }
+            return targetBubble as MemoryBubbleRecord;
+          }
+
           return this.resolveOrCreateEntityBubble(userId, {
             entityName: val,
             entityType: 'person',
@@ -818,15 +914,6 @@ export class CanonicalMemoryTreeService {
       } else {
         // Attribute stem of family member (e.g. father_business, mother_occupation)
         // Attach directly to the existing entity bubble for this family relation!
-        const { data: existingFamilyBubbles } = await supabaseAdmin
-          .from('memory_bubbles')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('domain_key', 'family')
-          .eq('relation_type', relTitle)
-          .eq('is_archived', false);
-
-        const targetBubble = existingFamilyBubbles?.find(b => !isInvalidEntityName(b.label));
         if (targetBubble) {
           return targetBubble as MemoryBubbleRecord;
         }

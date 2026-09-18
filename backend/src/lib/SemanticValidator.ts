@@ -137,6 +137,27 @@ export function isConceptRelationshipSupported(
 ): boolean {
   const combined = (contextMessage ? `${contextMessage} ${sourceMessage}` : sourceMessage).toLowerCase();
 
+  // Guard: User self-identity vs Kinship attribution
+  // 1. If statement describes a relative (e.g. "Tiku mere bete ka nickname hai") and lacks self-naming, reject preferred_name / user_name
+  if (concept === 'preferred_name' || concept === 'user_name') {
+    const hasExplicitSelfMarker = /\b(?:mera|mara|my)\s+(?:naam|name|nam)\b|\b(?:main|mein|i\s+am|im)\b|\b(?:call\s+me|mujhko|mujhe)\s+[a-zA-Z]+\s+(?:bulate|bulati|bolte)\b/i.test(sourceMessage);
+    const hasThirdPartyRelationOnly = /\b(?:mere|mera|meri|my)\s+(?:beta|bete|son|child|wife|biwi|patni|husband|pati|papa|father|dad|mummy|mother|mom|bhai|brother|behen|sister|dost|friend)\b/i.test(sourceMessage);
+
+    if (hasThirdPartyRelationOnly && !hasExplicitSelfMarker) {
+      return false;
+    }
+  }
+
+  // 2. If statement describes user self-naming (e.g. "Mera name toh Sagar hai"), reject relative name/nickname attribution
+  if (concept.startsWith('son_') || concept.startsWith('wife_') || concept.startsWith('father_') || concept.startsWith('mother_')) {
+    if (_value) {
+      const isSelfStatement = new RegExp(`\\b(?:mera|mara|my)\\s+(?:naam|name|nam)\\s+(?:toh\\s+|to\\s+|hai\\s+|is\\s+)?${_value}\\b`, 'i').test(sourceMessage);
+      if (isSelfStatement) {
+        return false;
+      }
+    }
+  }
+
   // For corrections: a correction signal must be present in the source or context
   if (isCorrectionClaim) {
     const correctionSignals = [

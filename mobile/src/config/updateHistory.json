@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.39-beta",
+    "date": "2026-09-18",
+    "title": "🌌 Neural Galaxy & Memory Pipeline Semantic Quality Gate (Root-Cause Integrity Fix)",
+    "message": [
+      "Multi-Layer Semantic Quality Gate: Deployed entitySemanticValidator across conversation input, canonical memory trees, autonomous graph curation, and watchtower memory auditors.",
+      "Eliminated Phantom Bubbles: Completely blocks Hindi/Hinglish compound light-verbs ('kar', 'karke'), postpositions/particles ('ke', 'ka', 'ki'), prepositional fragments ('since college'), and placeholders ('name not specified') from ever becoming memory nodes or entity bubbles.",
+      "Identity & Kinship Boundary Shield: Hardened user profile identity against relative nicknames. Grounded user name 'Sagar' is protected from being superseded by family nicknames ('Tiku'/'Tuku'), and third-party entity relations remain strictly attached to their owners.",
+      "Zero-Data-Loss Database Self-Healing: Restored corrupted user memories in Supabase, cleanly archived invalid phantom nodes and fragmented attributes, and preserved all legitimate historical memories with an immutable audit trail.",
+      "Neural Galaxy Live Graph Hardening: Strengthened dynamic graph stem generation and mobile Knowledge Graph Explorer to filter out ungrounded particles and ensure pristine visual integrity."
+    ]
+  },
+  {
     "version": "0.3.38-beta",
     "date": "2026-09-18",
     "title": "🧬 Phase 3 Semantic Closure: Entity Typing, Multi-Script Convergence & Live Graph",

@@ -155,7 +155,7 @@ export function isValidEntityName(name: string, _entityType?: string): { isValid
     return { isValid: false, reason: `ALL_TOKENS_GRAMMATICAL: "${raw}"` };
   }
 
-  // 5. Verbal phrase or clausal fragment indicators (e.g. "rehta hai", "bechte hai", "run karti hai", "mein")
+  // 5. Verbal phrase, prepositional starter, or clausal fragment indicators
   const fragmentPatterns = [
     /\b(rehta|rehti|rehte|hota|hoti|hote)\s+hai\b/i,
     /\b(bechte|bechta|bechti)\s+hai\b/i,
@@ -165,7 +165,11 @@ export function isValidEntityName(name: string, _entityType?: string): { isValid
     /\b(utha|jaga)\s+(dena|do|diyo)\b/i,
     /\b(yaad|remind)\s+(dilana|dilao|kar)\b/i,
     /\b(ka|ki|ke)\s+(naam|name)\s+(hai)?\b/i,
-    /\b(chote|bade)\s+bacho\b/i
+    /\b\d+\s*(months?|years?|days?|weeks?|hours?|mins?|saal|mahine|yo)\b/i,
+    /\b(every|each)\s+(month|day|week|year|monday|sunday|saturday|hour)\b/i,
+    /\b\d+(st|nd|rd|th)?\s*(day|date)?\s*of\s*(every|each|the|this)\b/i,
+    /\b(not specified|unknown|unnamed|anonymous|not mentioned|unspecified|placeholder)\b/i,
+    /^(since|from|during|after|before|until|till|around|near|inside|outside)\s+/i
   ];
   for (const pat of fragmentPatterns) {
     if (pat.test(lower)) {
@@ -220,7 +224,7 @@ export function isValidMemoryAttributeValue(key: string, value: string): { isVal
   }
 
   // 2. Location keys cannot be verbs or prepositional clauses
-  if (k.endsWith('_location') || k.endsWith('_city') || k.endsWith('_residence') || k.endsWith('_place')) {
+  if (k.endsWith('_location') || k === 'location' || k.endsWith('_city') || k === 'city' || k.endsWith('_residence') || k === 'residence' || k.endsWith('_place') || k === 'place') {
     if (/\b(rehta|rehti|rehte|hai|hain|tha|thi|the|karta|karti)\b/i.test(lowerV)) {
       return { isValid: false, reason: `VERB_PHRASE_AS_LOCATION: "${v}"` };
     }

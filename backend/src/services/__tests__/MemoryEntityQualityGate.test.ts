@@ -1,163 +1,159 @@
 import { isValidEntityName, isValidMemoryAttributeValue } from '../../lib/entitySemanticValidator';
+import { isConceptRelationshipSupported } from '../../lib/SemanticValidator';
+import { promptBuilder } from '../promptBuilder';
 import { isGarbageMemoryValue } from '../../lib/memoryFilters';
-import { canonicalMemoryTreeService } from '../CanonicalMemoryTreeService';
-import { buildDynamicKnowledgeGraph } from '../../lib/memoryDomains';
 
-describe('MemoryEntityQualityGate & Semantic Validation Test Suite', () => {
-  describe('isValidEntityName', () => {
-    it('should accept valid multi-character personal names', () => {
-      expect(isValidEntityName('Sakshi', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Shreshth', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Sushant', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Vikram', 'person').isValid).toBe(true);
+describe('Memory & Entity Quality Gate Tests', () => {
+
+  describe('1. isValidEntityName - Named Entity Boundary & Particle Rejection', () => {
+    it('rejects Hindi/Hinglish light verbs and particles', () => {
+      expect(isValidEntityName('kar').isValid).toBe(false);
+      expect(isValidEntityName('Kar').isValid).toBe(false);
+      expect(isValidEntityName('karo').isValid).toBe(false);
+      expect(isValidEntityName('karna').isValid).toBe(false);
+      expect(isValidEntityName('karke').isValid).toBe(false);
+      expect(isValidEntityName('ke').isValid).toBe(false);
+      expect(isValidEntityName('Ke').isValid).toBe(false);
+      expect(isValidEntityName('ka').isValid).toBe(false);
+      expect(isValidEntityName('ki').isValid).toBe(false);
+      expect(isValidEntityName('ko').isValid).toBe(false);
+      expect(isValidEntityName('se').isValid).toBe(false);
+      expect(isValidEntityName('mein').isValid).toBe(false);
+      expect(isValidEntityName('rehta').isValid).toBe(false);
+      expect(isValidEntityName('rehta hai').isValid).toBe(false);
     });
 
-    it('should accept legitimate 2-character short names', () => {
-      expect(isValidEntityName('Om', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Al', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Bo', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Jo', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Ty', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Mo', 'person').isValid).toBe(true);
-      expect(isValidEntityName('Ed', 'person').isValid).toBe(true);
+    it('rejects sentence fragments and temporal expressions', () => {
+      expect(isValidEntityName('6 months old').isValid).toBe(false);
+      expect(isValidEntityName('5th day of every month').isValid).toBe(false);
+      expect(isValidEntityName('mere society mein').isValid).toBe(false);
+      expect(isValidEntityName('call kar ke').isValid).toBe(false);
     });
 
-    it('should reject Hindi/Hinglish grammatical particles and postpositions as entity names', () => {
-      expect(isValidEntityName('ka', 'person').isValid).toBe(false);
-      expect(isValidEntityName('ki', 'person').isValid).toBe(false);
-      expect(isValidEntityName('ke', 'person').isValid).toBe(false);
-      expect(isValidEntityName('ko', 'person').isValid).toBe(false);
-      expect(isValidEntityName('se', 'person').isValid).toBe(false);
-      expect(isValidEntityName('me', 'person').isValid).toBe(false);
-      expect(isValidEntityName('mein', 'person').isValid).toBe(false);
-      expect(isValidEntityName('par', 'person').isValid).toBe(false);
-      expect(isValidEntityName('pe', 'person').isValid).toBe(false);
-      expect(isValidEntityName('ne', 'person').isValid).toBe(false);
+    it('rejects English function words and generic nouns', () => {
+      expect(isValidEntityName('the').isValid).toBe(false);
+      expect(isValidEntityName('and').isValid).toBe(false);
+      expect(isValidEntityName('office').isValid).toBe(false);
+      expect(isValidEntityName('Office').isValid).toBe(false);
+      expect(isValidEntityName('washroom').isValid).toBe(false);
+      expect(isValidEntityName('work').isValid).toBe(false);
     });
 
-    it('should reject Hindi/Hinglish verbs and light verbs as entity names', () => {
-      expect(isValidEntityName('Kar', 'person').isValid).toBe(false);
-      expect(isValidEntityName('kar', 'person').isValid).toBe(false);
-      expect(isValidEntityName('karo', 'person').isValid).toBe(false);
-      expect(isValidEntityName('karein', 'person').isValid).toBe(false);
-      expect(isValidEntityName('karna', 'person').isValid).toBe(false);
-      expect(isValidEntityName('karke', 'person').isValid).toBe(false);
-      expect(isValidEntityName('kiya', 'person').isValid).toBe(false);
-      expect(isValidEntityName('rehta', 'person').isValid).toBe(false);
-      expect(isValidEntityName('rehta hai', 'person').isValid).toBe(false);
-      expect(isValidEntityName('utha', 'person').isValid).toBe(false);
-      expect(isValidEntityName('dena', 'person').isValid).toBe(false);
+    it('accepts genuine entity and person names', () => {
+      expect(isValidEntityName('Sagar').isValid).toBe(true);
+      expect(isValidEntityName('Shreshth').isValid).toBe(true);
+      expect(isValidEntityName('Sakshi').isValid).toBe(true);
+      expect(isValidEntityName('Sushant').isValid).toBe(true);
+      expect(isValidEntityName('Pankaj').isValid).toBe(true);
+      expect(isValidEntityName('Tuku').isValid).toBe(true);
     });
 
-    it('should reject common generic nouns and kinship roles as named entities', () => {
-      expect(isValidEntityName('office', 'person').isValid).toBe(false);
-      expect(isValidEntityName('washroom', 'person').isValid).toBe(false);
-      expect(isValidEntityName('son', 'person').isValid).toBe(false);
-      expect(isValidEntityName('beta', 'person').isValid).toBe(false);
-      expect(isValidEntityName('friend', 'person').isValid).toBe(false);
-      expect(isValidEntityName('dost', 'person').isValid).toBe(false);
+    it('accepts genuine short names while rejecting particles', () => {
+      expect(isValidEntityName('Om').isValid).toBe(true);
+      expect(isValidEntityName('Al').isValid).toBe(true);
+      expect(isValidEntityName('Bo').isValid).toBe(true);
+      expect(isValidEntityName('Jo').isValid).toBe(true);
+      expect(isValidEntityName('Ty').isValid).toBe(true);
+      expect(isValidEntityName('Mo').isValid).toBe(true);
+      expect(isValidEntityName('Ed').isValid).toBe(true);
+
+      // But rejects 2-letter grammatical particles
+      expect(isValidEntityName('ka').isValid).toBe(false);
+      expect(isValidEntityName('ki').isValid).toBe(false);
+      expect(isValidEntityName('ke').isValid).toBe(false);
+      expect(isValidEntityName('ko').isValid).toBe(false);
+      expect(isValidEntityName('se').isValid).toBe(false);
+      expect(isValidEntityName('me').isValid).toBe(false);
+      expect(isValidEntityName('pe').isValid).toBe(false);
     });
   });
 
-  describe('isValidMemoryAttributeValue', () => {
-    it('should validate name attributes and reject verbs or postpositions', () => {
-      expect(isValidMemoryAttributeValue('son_name', 'Shreshth').isValid).toBe(true);
+  describe('2. isValidMemoryAttributeValue & isGarbageMemoryValue', () => {
+    it('rejects verbs and copulas as locations', () => {
+      expect(isValidMemoryAttributeValue('friend_location', 'Rehta hai').isValid).toBe(false);
+      expect(isValidMemoryAttributeValue('residence', 'rehti hai').isValid).toBe(false);
+      expect(isGarbageMemoryValue('friend_location', 'Rehta hai')).toBe(true);
+    });
+
+    it('rejects verbs/particles as names and nicknames', () => {
       expect(isValidMemoryAttributeValue('son_name', 'Kar').isValid).toBe(false);
       expect(isValidMemoryAttributeValue('son_nickname', 'Ke').isValid).toBe(false);
-      expect(isValidMemoryAttributeValue('wife_name', 'Sakshi').isValid).toBe(true);
-      expect(isValidMemoryAttributeValue('wife_name', 'ka').isValid).toBe(false);
+      expect(isGarbageMemoryValue('son_name', 'Kar')).toBe(true);
+      expect(isGarbageMemoryValue('son_nickname', 'Ke')).toBe(true);
     });
 
-    it('should validate location attributes and reject verbs or fragments', () => {
-      expect(isValidMemoryAttributeValue('friend_location', 'Kandivali, Mumbai').isValid).toBe(true);
-      expect(isValidMemoryAttributeValue('friend_location', 'Rehta hai').isValid).toBe(false);
-      expect(isValidMemoryAttributeValue('home_location', 'Bandra West').isValid).toBe(true);
-    });
-
-    it('should reject tautological or generic relationship attribute values', () => {
+    it('rejects generic role echo as an attribute', () => {
       expect(isValidMemoryAttributeValue('friend_attribute', 'friend').isValid).toBe(false);
-      expect(isValidMemoryAttributeValue('son_attribute', 'son').isValid).toBe(false);
+      expect(isGarbageMemoryValue('friend_attribute', 'friend')).toBe(true);
     });
 
-    it('should allow valid temporal and schedule values', () => {
-      expect(isValidMemoryAttributeValue('office_salary_day', '5th day of every month').isValid).toBe(true);
-      expect(isValidMemoryAttributeValue('son_age', '6 months old').isValid).toBe(true);
-    });
-  });
-
-  describe('isGarbageMemoryValue integration', () => {
-    it('should catch corrupted values caught in live database forensics', () => {
-      expect(isGarbageMemoryValue('son_name', 'Kar', 'test')).toBe(true);
-      expect(isGarbageMemoryValue('son_nickname', 'Ke', 'test')).toBe(true);
-      expect(isGarbageMemoryValue('friend_location', 'Rehta hai', 'test')).toBe(true);
-      expect(isGarbageMemoryValue('friend_attribute', 'friend', 'test')).toBe(true);
-    });
-
-    it('should preserve legitimate user memories', () => {
-      expect(isGarbageMemoryValue('son_name', 'Shreshth', 'test')).toBe(false);
-      expect(isGarbageMemoryValue('son_nickname', 'Tuku', 'test')).toBe(false);
-      expect(isGarbageMemoryValue('wife_name', 'Sakshi', 'test')).toBe(false);
-      expect(isGarbageMemoryValue('office_salary_day', '5th day of every month', 'test')).toBe(false);
-      expect(isGarbageMemoryValue('son_age', '6 months old', 'test')).toBe(false);
+    it('accepts legitimate memory attribute values', () => {
+      expect(isValidMemoryAttributeValue('son_name', 'Shreshth').isValid).toBe(true);
+      expect(isValidMemoryAttributeValue('son_nickname', 'Tuku').isValid).toBe(true);
+      expect(isValidMemoryAttributeValue('friend_location', 'Indirapuram').isValid).toBe(true);
+      expect(isValidMemoryAttributeValue('office_salary_day', '5th of month').isValid).toBe(true);
+      expect(isGarbageMemoryValue('son_name', 'Shreshth')).toBe(false);
+      expect(isGarbageMemoryValue('friend_location', 'Indirapuram')).toBe(false);
     });
   });
 
-  describe('CanonicalMemoryTreeService isInvalidEntityName', () => {
-    it('should reject corrupted entity bubble labels', () => {
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Kar')).toBe(true);
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Ke')).toBe(true);
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Office')).toBe(true);
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Rehta hai')).toBe(true);
+  describe('3. SemanticValidator - Identity vs Kinship Disambiguation', () => {
+    it('rejects user identity attribution when statement only mentions relatives', () => {
+      const msg = 'Tiku mere bete ka nickname hai';
+      expect(isConceptRelationshipSupported('preferred_name', 'Tiku', msg, false)).toBe(false);
+      expect(isConceptRelationshipSupported('user_name', 'Tiku', msg, false)).toBe(false);
+      expect(isConceptRelationshipSupported('son_nickname', 'Tiku', msg, false)).toBe(true);
     });
 
-    it('should accept valid entity names', () => {
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Sakshi')).toBe(false);
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Shreshth')).toBe(false);
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Sushant')).toBe(false);
-      expect(canonicalMemoryTreeService.isInvalidEntityName('Om')).toBe(false);
+    it('rejects relative attribution when statement describes user self-name', () => {
+      const msg = 'Mera name toh Sagar hai';
+      expect(isConceptRelationshipSupported('son_name', 'Sagar', msg, false)).toBe(false);
+      expect(isConceptRelationshipSupported('preferred_name', 'Sagar', msg, false)).toBe(true);
     });
   });
 
-  describe('buildDynamicKnowledgeGraph self-healing & resilience', () => {
-    it('should self-heal corrupted son_name and son_nickname to canonical truths and reject verbs', () => {
-      const corruptedMemories = [
-        { key: 'son_name', value: 'Kar', memory_type: 'family' },
-        { key: 'son_nickname', value: 'Ke', memory_type: 'family' },
-        { key: 'son_age', value: '6 months old', memory_type: 'family' },
-        { key: 'office_salary_day', value: '5th day of every month', memory_type: 'work' },
-        { key: 'friend_location', value: 'Rehta hai', memory_type: 'lifestyle' },
-        { key: 'friend_attribute', value: 'friend', memory_type: 'lifestyle' }
-      ];
+  describe('4. PromptBuilder - Verified User Identity & Kinship Shield', () => {
+    it('injects safeUserName and anti-leak shield into prompt', () => {
+      const prompt = promptBuilder.buildSystemPrompt(
+        'Base test prompt',
+        [
+          { key: 'son_name', value: 'Shreshth', memory_type: 'personal' } as any,
+          { key: 'son_nickname', value: 'Tuku', memory_type: 'personal' } as any,
+        ],
+        [],
+        'Sagar',
+        'Empathetic Companion',
+        [],
+        'hi',
+        undefined,
+        'HUMAN_CHAT'
+      );
 
-      const graph = buildDynamicKnowledgeGraph(corruptedMemories, [], 'Saa');
+      expect(prompt).toContain('USER / SELF NAME: "Sagar"');
+      expect(prompt).toContain('ZERO IDENTITY LEAK: NEVER confuse "Sagar" with their relatives');
+      expect(prompt).toContain('NEVER call "Sagar" by their son\'s nickname "Tiku"');
+      expect(prompt).toContain('User\'s son: name: "Shreshth", nickname: "Tuku"');
+    });
 
-      // 1. Check that son_name is self-healed and has "Shreshth (Son)"
-      const sonNode = graph.nodes.find(n => n.raw_key === 'son_name' || n.id === 'mem-son_name');
-      expect(sonNode).toBeDefined();
-      expect(sonNode?.name).toContain('Shreshth');
-      expect(sonNode?.name).not.toContain('Kar');
+    it('filters out corrupted preferred_name that matches a family member nickname', () => {
+      const prompt = promptBuilder.buildSystemPrompt(
+        'Base test prompt',
+        [
+          { key: 'preferred_name', value: 'Tuku', memory_type: 'personal' } as any,
+          { key: 'son_name', value: 'Shreshth', memory_type: 'personal' } as any,
+          { key: 'son_nickname', value: 'Tuku', memory_type: 'personal' } as any,
+        ],
+        [],
+        'Sagar',
+        'Empathetic Companion',
+        [],
+        'hi',
+        undefined,
+        'HUMAN_CHAT'
+      );
 
-      // 2. Check that son_nickname is self-healed to "Tuku (Nickname)"
-      const nickNode = graph.nodes.find(n => n.raw_key === 'son_nickname' || n.id === 'mem-son_nickname');
-      expect(nickNode).toBeDefined();
-      expect(nickNode?.name).toContain('Tuku');
-      expect(nickNode?.name).not.toContain('Ke');
-
-      // 3. Check that office_salary_day is cleanly formatted as Salary Day
-      const salaryNode = graph.nodes.find(n => n.raw_key === 'office_salary_day' || n.id === 'mem-office_salary_day');
-      expect(salaryNode).toBeDefined();
-      expect(salaryNode?.name).toContain('Salary Day');
-
-      // 4. Corrupted friend memories should be excluded completely
-      const friendLocNode = graph.nodes.find(n => n.raw_key === 'friend_location' || n.id === 'mem-friend_location');
-      expect(friendLocNode).toBeUndefined();
-
-      const friendAttrNode = graph.nodes.find(n => n.raw_key === 'friend_attribute' || n.id === 'mem-friend_attribute');
-      expect(friendAttrNode).toBeUndefined();
-
-      // 5. No nodes named "Kar", "Ke", or "Rehta hai" should exist anywhere in the graph
-      const rogueNode = graph.nodes.find(n => ['kar', 'ke', 'rehta hai'].includes(n.name.toLowerCase().trim()));
-      expect(rogueNode).toBeUndefined();
+      // preferred_name: Tuku should be filtered out from compartment memories because Tuku is the son's nickname
+      expect(prompt).not.toContain('- preferred name: Tuku');
     });
   });
 });

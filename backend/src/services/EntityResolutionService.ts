@@ -97,16 +97,116 @@ export class EntityResolutionService {
     const entitiesById = new Map<string, ResolvedEntity>();
     entitiesById.set('user:self', result.entities[0]);
 
-    // ── 1. Check for Explicit Third-Party Possessive Structures ───────────────
-    // Examples:
-    // - "Ijaz's father was in the Navy" / "Ejaz's father was in the Navy"
-    // - "Ejaz ke papa Navy me the" / "Sushant ki biwi banking me hai"
-    // - "My friend's brother lives in Dubai"
-    // - "Ejaz told me his father retired"
+    // Split compound turns or multi-line messages by newlines or sentence delimiters
+    // e.g. "Tiku mere bete ka nickname hai\n\nMera name toh Sagar hai"
+    const clauses = cleanMsg.split(/\n+/).map(c => c.trim()).filter(Boolean);
 
-    // Pattern C: Nested friend relation: "my friend's brother", "mere dost ka bhai", "my friend's dog"
-    const nestedFriendPattern = /\b(?:my\s+friend's|mere\s+dost\s+ka|mere\s+dost\s+ki|mere\s+friend\s+ka|mere\s+friend\s+ki)\s+(father|mother|brother|bhai|sister|behen|wife|biwi|husband|pati|son|beta|daughter|beti|partner|girlfriend|gf|boyfriend|bf|fiance|fiancee|dog|cat|puppy|kitten|pet|kutta|billi|roommate|flatmate|colleague|boss|manager)\s+(.*)/i;
-    const nestedFriendMatch = cleanMsg.match(nestedFriendPattern);
+    if (clauses.length > 1) {
+      for (const clause of clauses) {
+        this.resolveSingleClause(clause, cleanMsg, context, entitiesById, result);
+      }
+    } else {
+      this.resolveSingleClause(cleanMsg, cleanMsg, context, entitiesById, result);
+    }
+
+    result.entities = Array.from(entitiesById.values());
+    return result;
+  }
+
+  /**
+   * Resolves a single sentence or clause within a turn.
+   */
+  private resolveSingleClause(
+    clause: string,
+    _fullMessage: string,
+    context: {
+      recentMessages?: Array<{ role: string; content: string }>;
+      activeEntities?: ResolvedEntity[];
+      userProfileName?: string;
+      sourceMessageId?: string;
+    } | undefined,
+    entitiesById: Map<string, ResolvedEntity>,
+    result: EntityResolutionResult
+  ): void {
+    const cleanMsg = clause.trim();
+    if (!cleanMsg) return;
+
+    // ── 0A. Direct User Self-Name Declarations (Identity Boundary: USER / SELF) ──
+    // e.g. "Mera name toh Sagar hai", "Mera naam Sagar hai", "My name is Sagar", "Main Sagar hoon"
+    // Invariant: Always binds to user:self, NEVER creates a Son or relative entity.
+    const selfNamePattern = /\b(?:mera|mara|my)\s+(?:naam|name|nam)\s+(?:toh\s+|to\s+|hai\s+|is\s+|)([a-zA-Z][a-zA-Z0-9\s]*?)(?:\s+hai|\s+is|[.,;!]|$)/i;
+    const selfImPattern = /\b(?:main|mein|i\s+am|im)\s+([a-zA-Z][a-zA-Z0-9\s]*?)\s+(?:hoon|hun|hai)\b/i;
+    const selfCallMePattern = /\b(?:call\s+me|mujhko|mujhe)\s+([a-zA-Z][a-zA-Z0-9\s]*?)(?:\s+bulate|\s+bulati|\s+bolte|[.,;!]|$)/i;
+
+    const selfMatch = cleanMsg.match(selfNamePattern) || cleanMsg.match(selfImPattern) || cleanMsg.match(selfCallMePattern);
+    if (selfMatch) {
+      const declaredName = this.capitalize(selfMatch[1].trim().replace(/\s+(?:hai|is|toh|to)$/i, ''));
+      if (declaredName && !this.isNonNameWord(declaredName) && !/^(?:beta|bete|son|wife|biwi|papa|dad|father)$/i.test(declaredName)) {
+        entitiesById.get('user:self')!.name = declaredName;
+        result.facts.push({
+          subjectEntityId: 'user:self',
+          subjectEntityName: declaredName,
+          predicate: 'preferred_name',
+          value: declaredName,
+          canonicalKey: 'preferred_name',
+          confidence: 0.99,
+          groundedInTurn: true,
+          rawQuote: cleanMsg,
+          sourceMessageId: context?.sourceMessageId,
+          isDirectUserFact: true,
+          temporalState: 'CURRENT',
+        });
+        result.primarySubjectId = 'user:self';
+        return;
+      }
+    }
+
+    // ── 0B. Inverted Relationship Alias / Nickname / Name Statements ───────────
+    // e.g. "Tiku mere bete ka nickname hai", "Tiku is my son's nickname"
+    // Invariant: Binds strictly to relationship entity (e.g. Son), NEVER to user:self!
+    const invertedRelPattern = /\b([a-zA-Z]+)\s+(?:mere|meri|mera|my)\s+(father|mother|dad|mom|papa|maa|wife|biwi|patni|husband|pati|brother|bhai|sister|behen|son|beta|daughter|beti|friend|dost|dog|cat|pet)\s*(?:ka|ki|ke|'s)?\s*(nickname|nick\s*name|pyar\s+ka\s+naam|naam|name)\s*(?:hai|is)?/i;
+    const invertedRelPatternEn = /\b([a-zA-Z]+)\s+(?:is|hai)\s+(?:my|mere|meri|mera)\s+(father|mother|dad|mom|papa|maa|wife|biwi|patni|husband|pati|brother|bhai|sister|behen|son|beta|daughter|beti|friend|dost|dog|cat|pet)(?:'s)?\s*(nickname|nick\s*name|pyar\s+ka\s+naam|naam|name)?/i;
+
+    const invertedMatch = cleanMsg.match(invertedRelPattern) || cleanMsg.match(invertedRelPatternEn);
+    if (invertedMatch) {
+      const entityValue = this.capitalize(invertedMatch[1].trim());
+      const rawRel = invertedMatch[2].toLowerCase();
+      const kind = (invertedMatch[3] || 'nickname').toLowerCase();
+      const relation = this.normalizeRelation(rawRel);
+      const isNickname = !kind || /nick/i.test(kind);
+
+      if (entityValue && !this.isNonNameWord(entityValue)) {
+        const userRelEntityId = `user:${relation}`;
+        const userRelEntityName = `User's ${relation}`;
+
+        if (!entitiesById.has(userRelEntityId)) {
+          entitiesById.set(userRelEntityId, {
+            id: userRelEntityId,
+            name: userRelEntityName,
+            entityType: this.isPetRelation(relation) ? 'pet' : 'person',
+            relationToUser: relation,
+            parentEntityId: 'user:self',
+            isDirectUserRelation: true,
+          });
+        }
+
+        result.facts.push({
+          subjectEntityId: userRelEntityId,
+          subjectEntityName: userRelEntityName,
+          predicate: isNickname ? 'nickname' : 'name',
+          value: entityValue,
+          canonicalKey: isNickname ? `${relation}_nickname` : `${relation}_name`,
+          confidence: 0.98,
+          groundedInTurn: true,
+          rawQuote: cleanMsg,
+          sourceMessageId: context?.sourceMessageId,
+          isDirectUserFact: true,
+          temporalState: 'CURRENT',
+        });
+        result.primarySubjectId = userRelEntityId;
+        return;
+      }
+    }
 
     // Pattern A: Third-party possessive English: [Name]'s [Relation] [Predicate/Verb/Attribute]
     // e.g. "Ijaz's father was in the Navy", "Sushant's wife works in banking", "Alex's dog is a Golden Retriever"
@@ -117,6 +217,10 @@ export class EntityResolutionService {
     // e.g. "Ejaz ke papa Navy me the", "Sushant ki wife banking me hai", "Rahul ka dog Bruno hai"
     const hinPossessivePattern = /\b([a-zA-Z]+)\s+(?:ke|ki|ka)\s+(papa|father|dad|pitaji|mummy|mother|mom|maa|mataji|biwi|wife|patni|husband|pati|bhai|brother|bhaiya|behen|sister|didi|beta|son|beti|daughter|dost|friend|partner|bandi|banda|girlfriend|gf|boyfriend|bf|fiance|fiancee|kutta|dog|billi|cat|pet|roommate|flatmate|colleague|coworker|boss|manager)\s+(.*)/i;
     const hinPossMatch = cleanMsg.match(hinPossessivePattern);
+
+    // Pattern 0: Nested friend relation: e.g. "my friend's father / wife / dog" or "mere dost ke papa"
+    const nestedFriendPattern = /\b(?:my|mere|mera|meri)\s+(?:friend|dost|colleague|flatmate|roommate)(?:'s|\s+ke|\s+ki|\s+ka)\s+(father|mother|dad|mom|papa|wife|husband|brother|sister|son|daughter|dog|cat|pet)\s+(.*)/i;
+    const nestedFriendMatch = cleanMsg.match(nestedFriendPattern);
 
     if (nestedFriendMatch) {
       const relation = this.normalizeRelation(nestedFriendMatch[1]);
@@ -437,7 +541,7 @@ export class EntityResolutionService {
     }
 
     result.entities = Array.from(entitiesById.values());
-    return result;
+    return;
   }
 
   /**
@@ -534,18 +638,18 @@ export class EntityResolutionService {
 
     // 10. Name assignment (e.g. "is Suresh", "ka naam Suresh hai", or rest = "Suresh", "Sakshi hai")
     if (predicate === 'attribute') {
-      const fullNameMatch = fullMessage.match(/\b(?:is|ka\s+naam|name\s+is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
+      const fullNameMatch = rest.match(/\b(?:is|ka\s+naam|name\s+is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
       if (fullNameMatch) {
         const cleanMatched = fullNameMatch[1].replace(/\s+(?:hai|is|tha|thi|hoon|hun)$/i, '').trim();
         const firstWord = cleanMatched.split(/\s+/)[0];
-        if (cleanMatched.length >= 2 && !this.isNonNameWord(firstWord)) {
+        if (cleanMatched.length >= 2 && !this.isNonNameWord(firstWord) && !/^(?:mera|meri|mere|my|toh|to)$/i.test(firstWord)) {
           predicate = 'name';
           value = cleanMatched.split(/\s+/).map(w => this.capitalize(w)).join(' ').trim();
         }
       } else if (/^[a-zA-Z]+(?:\s+[a-zA-Z]+)?(?:\s+hai)?$/i.test(rest.trim())) {
         const cleanName = rest.replace(/\s+(?:hai|is|tha|thi|hoon|hun)$/i, '').trim();
         const firstWord = cleanName.split(/\s+/)[0];
-        if (cleanName.length >= 2 && !this.isNonNameWord(firstWord)) {
+        if (cleanName.length >= 2 && !this.isNonNameWord(firstWord) && !/^(?:mera|meri|mere|my|toh|to)$/i.test(firstWord)) {
           predicate = 'name';
           value = cleanName.split(/\s+/).map(w => this.capitalize(w)).join(' ').trim();
         }
@@ -559,6 +663,8 @@ export class EntityResolutionService {
     if (isDirectUserRelation) {
       if (predicate === 'name') {
         canonicalKey = `${relation}_name`;
+      } else if (predicate === 'nickname') {
+        canonicalKey = `${relation}_nickname`;
       } else if (predicate === 'military_service' || predicate === 'occupation') {
         canonicalKey = `${relation}_occupation`;
       } else if (predicate === 'breed') {
