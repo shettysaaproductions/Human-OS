@@ -681,6 +681,186 @@ export class CanonicalMemoryTreeService {
   // ── 3. RESOLVE OR CREATE ENTITY BUBBLE ───────────────────────────────────────
 
   /**
+   * Retrieves the user's grounded self-identity name from profile, user record, or memories.
+   */
+  async getUserSelfName(userId: string): Promise<string | null> {
+    try {
+      const [{ data: userProf }, { data: userRec }, { data: prefMem }] = await Promise.all([
+        supabaseAdmin.from('profiles').select('preferred_name').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('users').select('name').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('memories').select('value').eq('user_id', userId).eq('key', 'preferred_name').eq('is_archived', false).maybeSingle()
+      ]);
+      const cand = (userProf?.preferred_name || userRec?.name || prefMem?.value || '').trim();
+      return cand || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Relationship-First Canonical Entity Resolver for Family / Kinship:
+   * 1. Eliminates arbitrary PostgreSQL row-order selection (never existingSameRel[0]).
+   * 2. Enforces SELF != relative entity invariant: archives any family bubble with user's verified identity name.
+   * 3. Ranks candidates by:
+   *    - Declared canonical name matching [rel]_name (+100)
+   *    - Established semantic relationships in metadata.relationships (+50)
+   *    - Memory count and confidence (+20)
+   * 4. Automatically converges duplicate bubbles via atomic PostgreSQL RPC `canonical_merge_entities`.
+   * 5. Sibling guard: if candidate is a distinct proper name with no alias/nickname proof (e.g. Rahul vs Amit), preserves them as separate entities.
+   */
+  async resolveCanonicalFamilyBubble(
+    userId: string,
+    relationType: string,
+    candidateName?: string
+  ): Promise<{ canonical: MemoryBubbleRecord | null; isNewCandidateAllowed: boolean }> {
+    const relClean = relationType.trim().toLowerCase();
+    const relTitle = capitalizeWords(relationType);
+    const userSelfName = await this.getUserSelfName(userId);
+
+    // 1. Fetch all active family bubbles for this relation
+    const { data: allSameRel, error: fetchErr } = await supabaseAdmin
+      .from('memory_bubbles')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('domain_key', 'family')
+      .eq('relation_type', relTitle)
+      .eq('is_archived', false);
+
+    if (fetchErr) {
+      logger.warn('[CanonicalMemoryTree] Error querying same-relation family bubbles', { error: fetchErr.message });
+      return { canonical: null, isNewCandidateAllowed: true };
+    }
+
+    let candidates = (allSameRel || []).filter(b => !isInvalidEntityName(b.label));
+
+    // 2. SELF != relative entity invariant (Gate 3):
+    if (userSelfName) {
+      const lowerSelf = userSelfName.toLowerCase();
+      const selfBubbles = candidates.filter(b => b.label.trim().toLowerCase() === lowerSelf);
+      for (const sb of selfBubbles) {
+        logger.warn(`[CanonicalMemoryTree] Enforcing SELF != relative invariant: archiving erroneous relative bubble "${sb.label}" (${sb.id})`);
+        try {
+          await supabaseAdmin
+            .from('memory_bubbles')
+            .update({
+              is_archived: true,
+              metadata: { ...(sb.metadata || {}), archive_reason: 'SELF_NOT_RELATIVE_ENTITY' },
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', sb.id);
+        } catch (archErr: any) {
+          logger.warn('[CanonicalMemoryTree] Failed to archive self-identity relative bubble', { error: archErr?.message });
+        }
+      }
+      candidates = candidates.filter(b => b.label.trim().toLowerCase() !== lowerSelf);
+    }
+
+    if (candidates.length === 0) {
+      return { canonical: null, isNewCandidateAllowed: true };
+    }
+
+    // 3. Fetch declared [rel]_name and [rel]_nickname from memories
+    const [{ data: nameMem }, { data: nickMem }] = await Promise.all([
+      supabaseAdmin.from('memories').select('value, bubble_id').eq('user_id', userId).eq('key', `${relClean}_name`).eq('is_archived', false).order('updated_at', { ascending: false }).limit(1).maybeSingle(),
+      supabaseAdmin.from('memories').select('value, bubble_id').eq('user_id', userId).eq('key', `${relClean}_nickname`).eq('is_archived', false).order('updated_at', { ascending: false }).limit(1).maybeSingle()
+    ]);
+
+    const declaredCanonicalName = (nameMem?.value && !isInvalidEntityName(nameMem.value)) ? nameMem.value.trim().toLowerCase() : null;
+    const declaredNickname = (nickMem?.value && !isInvalidEntityName(nickMem.value)) ? nickMem.value.trim().toLowerCase() : null;
+
+    // 4. Rank candidate bubbles based on evidence
+    const scored = candidates.map(b => {
+      let score = 0;
+      const labelLower = b.label.trim().toLowerCase();
+      const aliases: string[] = Array.isArray(b.metadata?.aliases) ? b.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
+
+      // Exact match to declared canonical name in memories
+      if (declaredCanonicalName && (labelLower === declaredCanonicalName || b.id === nameMem?.bubble_id)) {
+        score += 100;
+      }
+      // If label is declared nickname, penalize label as canonical compared to real name
+      if (declaredNickname && labelLower === declaredNickname) {
+        score -= 20;
+      }
+      // Relationships in metadata (e.g. mother, grandfather, grandmother)
+      if (Array.isArray(b.metadata?.relationships) && b.metadata.relationships.length > 0) {
+        score += 30 + b.metadata.relationships.length * 10;
+      }
+      // Has aliases
+      if (aliases.length > 0) {
+        score += 10;
+      }
+      // If candidateName matches label or alias
+      if (candidateName) {
+        const cLower = candidateName.trim().toLowerCase();
+        if (labelLower === cLower) score += 50;
+        else if (aliases.includes(cLower)) score += 40;
+      }
+      return { bubble: b, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    const canonical = scored[0].bubble as MemoryBubbleRecord;
+
+    // 5. Sibling Conflict Guard (Gate 6):
+    // Singular roles: wife, husband, father, mother, partner (strictly 1)
+    // Multiplicity-capable roles: son, daughter, child, brother, sister
+    const isStrictlySingular = ['wife', 'husband', 'father', 'mother', 'partner'].includes(relClean);
+    if (!isStrictlySingular && candidateName) {
+      const cLower = candidateName.trim().toLowerCase();
+      const canonLabelLower = canonical.label.trim().toLowerCase();
+      const canonAliases: string[] = Array.isArray(canonical.metadata?.aliases) ? canonical.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
+
+      // If candidateName is neither canonical's label nor an alias:
+      const matchesCanonical = cLower === canonLabelLower || canonAliases.includes(cLower);
+      const isKnownNickname = (declaredNickname && cLower === declaredNickname) || (declaredCanonicalName && cLower === declaredCanonicalName);
+      const canonicalIsProvisionalNickname = Boolean(declaredNickname && canonLabelLower === declaredNickname);
+
+      if (!matchesCanonical && !isKnownNickname) {
+        // If the canonical bubble is a provisional nickname bubble, AND there is no conflicting declared real name,
+        // then candidateName can be the real name for this person!
+        if (canonicalIsProvisionalNickname && !declaredCanonicalName) {
+          return { canonical, isNewCandidateAllowed: false };
+        }
+
+        // Distinct proper names without alias evidence (e.g. Son A = Rahul, Son B = Amit)
+        const isCandidateExistingBubble = candidates.some(b => b.label.trim().toLowerCase() === cLower);
+        if (!isCandidateExistingBubble) {
+          // This is a new distinct relative! Do NOT arbitrarily merge.
+          return { canonical: null, isNewCandidateAllowed: true };
+        }
+      }
+    }
+
+    // 6. Automatically merge any redundant duplicate bubbles for the same canonical person (Gate 4 & 8)
+    const duplicates = scored.slice(1).filter(s => {
+      const bLower = s.bubble.label.trim().toLowerCase();
+      const cLower = canonical.label.trim().toLowerCase();
+      const cAliases: string[] = Array.isArray(canonical.metadata?.aliases) ? canonical.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
+      return isStrictlySingular || bLower === declaredNickname || cAliases.includes(bLower) || bLower === cLower;
+    });
+
+    if (duplicates.length > 0) {
+      try {
+        const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
+        for (const dup of duplicates) {
+          if (dup.bubble.id !== canonical.id) {
+            logger.info(`[CanonicalMemoryTree] Merging duplicate ${relTitle} bubble "${dup.bubble.label}" (${dup.bubble.id}) into canonical "${canonical.label}" (${canonical.id})`);
+            await canonicalEntityEngine.mergeEntities(userId, dup.bubble.id, canonical.id);
+          }
+        }
+        // Refresh canonical
+        const { data: refreshed } = await supabaseAdmin.from('memory_bubbles').select('*').eq('id', canonical.id).single();
+        if (refreshed) return { canonical: refreshed as MemoryBubbleRecord, isNewCandidateAllowed: false };
+      } catch (mergeErr: any) {
+        logger.warn('[CanonicalMemoryTree] Duplicate bubble merge non-fatal error', { error: mergeErr?.message });
+      }
+    }
+
+    return { canonical, isNewCandidateAllowed: false };
+  }
+
+  /**
    * Resolves an entity bubble, or creates it safely with proper parent hierarchy.
    * Enforces:
    * - No duplicate active bubbles for same user + slug + parent.
@@ -709,56 +889,68 @@ export class CanonicalMemoryTreeService {
       return domainBubble;
     }
 
-    // Identity Boundary Check: Never create a family bubble with the user's own name
+    // Identity Boundary Check: Never create a family bubble with the user's own name (Gate 3)
     if (domainKey === 'family' && params.relationType) {
-      try {
-        const { data: userProf } = await supabaseAdmin
-          .from('profiles')
-          .select('preferred_name')
-          .eq('id', userId)
-          .maybeSingle();
-        const userSelfName = (userProf?.preferred_name || '').trim().toLowerCase();
-        if (userSelfName && params.entityName.trim().toLowerCase() === userSelfName) {
-          logger.warn(`[CanonicalMemoryTree] Blocked creating family bubble "${params.entityName}" matching user's own identity.`);
-          return this.getOrCreateDomainBubble(userId, 'identity');
-        }
-      } catch (profErr: any) {
-        // Non-fatal
+      const userSelfName = await this.getUserSelfName(userId);
+      if (userSelfName && params.entityName.trim().toLowerCase() === userSelfName.toLowerCase()) {
+        logger.warn(`[CanonicalMemoryTree] Blocked creating family relative bubble "${params.entityName}" matching user's own identity.`);
+        try {
+          await supabaseAdmin
+            .from('memory_bubbles')
+            .update({ is_archived: true, metadata: { archive_reason: 'SELF_NOT_RELATIVE_ENTITY' }, updated_at: new Date().toISOString() })
+            .eq('user_id', userId)
+            .eq('domain_key', 'family')
+            .ilike('label', params.entityName.trim())
+            .eq('is_archived', false);
+        } catch {}
+        return this.getOrCreateDomainBubble(userId, 'identity');
       }
 
-      // Canonical Alias & Convergence Gate: Singular kinship roles (Son, Wife, Husband, Father, Mother)
-      // Must NOT create multiple separate bubbles for the same singular family member!
-      const singularRoles = ['son', 'wife', 'husband', 'father', 'mother', 'partner'];
-      if (singularRoles.includes(params.relationType.toLowerCase())) {
-        const { data: existingSameRel } = await supabaseAdmin
-          .from('memory_bubbles')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('domain_key', 'family')
-          .eq('relation_type', params.relationType)
-          .eq('is_archived', false);
+      // Relationship-First Canonical Resolution & Convergence (Gate 2, 5, 6)
+      const { canonical, isNewCandidateAllowed } = await this.resolveCanonicalFamilyBubble(userId, params.relationType, params.entityName);
+      if (canonical && !isNewCandidateAllowed) {
+        const cleanCand = params.entityName.trim().toLowerCase();
+        const canonLabel = canonical.label.trim().toLowerCase();
+        const canonAliases: string[] = Array.isArray(canonical.metadata?.aliases) ? canonical.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
 
-        if (existingSameRel && existingSameRel.length > 0) {
-          const cleanCand = params.entityName.trim().toLowerCase();
-          for (const ex of existingSameRel) {
-            const exLabel = ex.label.trim().toLowerCase();
-            const exAliases: string[] = Array.isArray(ex.metadata?.aliases) ? ex.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
-            if (exLabel === cleanCand || exAliases.includes(cleanCand)) {
-              return ex as MemoryBubbleRecord;
-            }
-          }
-
-          // Existing bubble found for this singular relation: register candidate as alias on the primary bubble
-          const primaryBubble = existingSameRel[0];
-          try {
-            const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
-            logger.info(`[CanonicalMemoryTree] Converging candidate "${params.entityName}" as alias on existing ${params.relationType} bubble "${primaryBubble.label}"`);
-            await canonicalEntityEngine.registerAlias(userId, primaryBubble.id, params.entityName);
-          } catch (aliasErr: any) {
-            logger.warn('[CanonicalMemoryTree] Alias registration non-fatal error', { error: aliasErr.message });
-          }
-          return primaryBubble as MemoryBubbleRecord;
+        if (canonLabel === cleanCand || canonAliases.includes(cleanCand)) {
+          return canonical;
         }
+
+        // If candidate is declared real name and canonical bubble was a provisional nickname, promote label!
+        const { data: nameMem } = await supabaseAdmin.from('memories').select('value').eq('user_id', userId).eq('key', `${params.relationType.toLowerCase()}_name`).eq('is_archived', false).maybeSingle();
+        const isDeclaredRealName = nameMem?.value && nameMem.value.trim().toLowerCase() === cleanCand;
+
+        if (isDeclaredRealName && canonLabel !== cleanCand) {
+          logger.info(`[CanonicalMemoryTree] Promoting canonical label from "${canonical.label}" to real name "${params.entityName}" with old label as alias`);
+          const updatedAliases = Array.from(new Set([...canonAliases, canonical.label.trim()]));
+          const baseSlug = normalizeSlug(params.entityName);
+          const { data: promoted } = await supabaseAdmin
+            .from('memory_bubbles')
+            .update({
+              label: capitalizeWords(params.entityName),
+              slug: `entity:${baseSlug}`,
+              metadata: {
+                ...(canonical.metadata || {}),
+                aliases: updatedAliases,
+                promoted_at: new Date().toISOString()
+              },
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', canonical.id)
+            .select('*')
+            .single();
+          if (promoted) return promoted as MemoryBubbleRecord;
+        }
+
+        // Register candidate as alias on canonical bubble
+        try {
+          const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
+          await canonicalEntityEngine.registerAlias(userId, canonical.id, params.entityName);
+        } catch (aliasErr: any) {
+          logger.warn('[CanonicalMemoryTree] Alias registration non-fatal error', { error: aliasErr.message });
+        }
+        return canonical;
       }
     }
 
@@ -879,16 +1071,16 @@ export class CanonicalMemoryTreeService {
       const attr = familyMatch[1].toLowerCase();
       const relTitle = capitalizeWords(rel);
 
-      // Check if an existing entity bubble exists for this family relation
-      const { data: existingFamilyBubbles } = await supabaseAdmin
-        .from('memory_bubbles')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('domain_key', 'family')
-        .eq('relation_type', relTitle)
-        .eq('is_archived', false);
-
-      const targetBubble = existingFamilyBubbles?.find(b => !isInvalidEntityName(b.label));
+      // Relationship-first canonical bubble resolution (Gate 2, Gate 3, Gate 7)
+      // When attr is 'nickname', 'alias', or other attributes (age, dob, etc.),
+      // val is NOT an entity name candidate; it is the attribute value.
+      // Therefore, candidateName should only be passed if attr is 'name' or 'real_name'.
+      const isNameAttr = attr === 'name' || attr === 'real_name';
+      const { canonical: targetBubble } = await this.resolveCanonicalFamilyBubble(
+        userId,
+        relTitle,
+        isNameAttr ? val : undefined
+      );
 
       if (attr === 'nickname' || attr === 'alias') {
         if (!isInvalidEntityName(val)) {
@@ -899,24 +1091,58 @@ export class CanonicalMemoryTreeService {
             } catch (err: any) {
               logger.warn('[CanonicalMemoryTree] Failed to register alias on family bubble', { error: err.message });
             }
-            return targetBubble as MemoryBubbleRecord;
+            const { data: refreshed } = await supabaseAdmin
+              .from('memory_bubbles')
+              .select('*')
+              .eq('id', targetBubble.id)
+              .single();
+            return (refreshed || targetBubble) as MemoryBubbleRecord;
           }
+
+          // If no family bubble exists yet, create provisional entity bubble with this nickname
+          return this.resolveOrCreateEntityBubble(userId, {
+            entityName: val,
+            entityType: 'person',
+            domainKey: 'family',
+            relationType: relTitle,
+          });
         }
       }
 
       if (attr === 'name' || attr === 'real_name') {
         if (!isInvalidEntityName(val)) {
           if (targetBubble) {
-            if (targetBubble.label.toLowerCase() === val.toLowerCase()) {
+            const cleanVal = val.trim();
+            if (targetBubble.label.toLowerCase() === cleanVal.toLowerCase()) {
               return targetBubble as MemoryBubbleRecord;
             }
-            try {
-              const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
-              await canonicalEntityEngine.registerAlias(userId, targetBubble.id, val);
-            } catch (err: any) {
-              logger.warn('[CanonicalMemoryTree] Failed to register alias on family bubble', { error: err.message });
-            }
-            return targetBubble as MemoryBubbleRecord;
+
+            // Fact Ownership Correction (Gate 7):
+            // Target bubble exists, but its label differs from the real name (e.g. Target is "Tiku", val is "Shreshth")!
+            // PROMOTE target bubble label to the real name, and keep the previous label as an alias!
+            const oldLabel = targetBubble.label.trim();
+            const existingAliases: string[] = Array.isArray(targetBubble.metadata?.aliases) ? targetBubble.metadata.aliases : [];
+            const newAliases = Array.from(new Set([...existingAliases, oldLabel]));
+            const newSlug = `entity:${normalizeSlug(cleanVal)}`;
+
+            logger.info(`[CanonicalMemoryTree] Promoting family bubble ${targetBubble.id} label from "${oldLabel}" to real name "${cleanVal}" with "${oldLabel}" as alias`);
+            const { data: promoted } = await supabaseAdmin
+              .from('memory_bubbles')
+              .update({
+                label: capitalizeWords(cleanVal),
+                slug: newSlug,
+                metadata: {
+                  ...(targetBubble.metadata || {}),
+                  aliases: newAliases,
+                  canonical_name_promoted_at: new Date().toISOString()
+                },
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', targetBubble.id)
+              .select('*')
+              .single();
+
+            return (promoted || targetBubble) as MemoryBubbleRecord;
           }
 
           return this.resolveOrCreateEntityBubble(userId, {
@@ -927,8 +1153,8 @@ export class CanonicalMemoryTreeService {
           });
         }
       } else {
-        // Attribute stem of family member (e.g. father_business, mother_occupation)
-        // Attach directly to the existing entity bubble for this family relation!
+        // Attribute stem of family member (e.g. father_business, mother_occupation, son_birth_date, son_age)
+        // Attach directly to the canonical entity bubble for this family relation!
         if (targetBubble) {
           return targetBubble as MemoryBubbleRecord;
         }
@@ -977,6 +1203,17 @@ export class CanonicalMemoryTreeService {
 
     // Default: Assign to the domain bubble
     return this.getOrCreateDomainBubble(userId, domainKey);
+  }
+
+  /**
+   * Resolves or creates a canonical entity bubble for a specific extracted attribute/memory key.
+   */
+  async resolveEntityBubbleForAttribute(
+    userId: string,
+    key: string,
+    value: string
+  ): Promise<MemoryBubbleRecord> {
+    return this.resolveOrCreateBubbleForMemory(userId, { key, value });
   }
 
   // ── 5. SUBTREE RETRIEVAL ─────────────────────────────────────────────────────

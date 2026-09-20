@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Human OS Login & Token Refresh Flow",
+    "subtitle": "Supabase Auth, Axios 401 Interceptor, & Seamless Session Rotation",
+    "output": "auth-flow.sequence.html",
+    "viewBox": [1040, 860],
+    "column_fit": "spread",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "login-flow",
+        "label": "Initial User Login",
+        "focus": ["user", "mobile", "api", "supabase_auth", "secure_store"],
+        "note": "Follow the user through credential verification and token persistence."
+      },
+      {
+        "id": "token-expiry",
+        "label": "401 Expiry Intercept",
+        "focus": ["mobile", "api"],
+        "note": "Observe how the Axios interceptor catches 401s and halts outbound traffic."
+      },
+      {
+        "id": "silent-refresh",
+        "label": "Silent Refresh & Replay",
+        "focus": ["mobile", "secure_store", "api", "supabase_auth"],
+        "note": "See the automatic token exchange, store rotation, and seamless request replay."
+      }
+    ]
+  },
+  "participants": [
+    { "id": "user", "type": "external", "label": "User", "sublabel": "Mobile Session" },
+    { "id": "mobile", "type": "frontend", "label": "Mobile Client", "sublabel": "React Native / Axios", "brand": "react" },
+    { "id": "secure_store", "type": "security", "label": "SecureStore", "sublabel": "Keychain / Keystore" },
+    { "id": "api", "type": "backend", "label": "Express API", "sublabel": "authRouter :3000" },
+    { "id": "supabase_auth", "type": "cloud", "label": "Supabase Auth", "sublabel": "GoTrue JWT Issuer", "brand": "supabase" }
+  ],
+  "segments": [
+    { "from": 150, "to": 355, "label": "1. Primary Authentication" },
+    { "from": 365, "to": 445, "label": "2. Expired Token Intercept (401)" },
+    { "from": 455, "to": 775, "label": "3. Silent Refresh & Replay" }
+  ],
+  "messages": [
+    { "id": "msg-enter-creds", "from": "user", "to": "mobile", "y": 160, "label": "enter email & password", "variant": "default" },
+    { "id": "msg-post-login", "from": "mobile", "to": "api", "y": 195, "label": "POST /auth/login", "variant": "emphasis" },
+    { "id": "msg-supabase-signin", "from": "api", "to": "supabase_auth", "y": 230, "label": "signInWithPassword()", "variant": "security" },
+    { "id": "msg-supabase-session", "from": "supabase_auth", "to": "api", "y": 265, "label": "session (access + refresh token)", "variant": "return" },
+    { "id": "msg-login-response", "from": "api", "to": "mobile", "y": 300, "label": "200 { user, tokens }", "variant": "return" },
+    { "id": "msg-save-initial-tokens", "from": "mobile", "to": "secure_store", "y": 335, "label": "setItemAsync(tokens)", "variant": "default" },
+
+    { "id": "msg-post-chat-stale", "from": "mobile", "to": "api", "y": 385, "label": "POST /chat (expired Bearer)", "variant": "dashed" },
+    { "id": "msg-401-unauthorized", "from": "api", "to": "mobile", "y": 420, "label": "401 Unauthorized (JWT expired)", "variant": "return" },
+
+    { "id": "msg-read-refresh", "from": "mobile", "to": "secure_store", "y": 470, "label": "getItemAsync('refreshToken')", "variant": "default" },
+    { "id": "msg-return-refresh", "from": "secure_store", "to": "mobile", "y": 505, "label": "stored refreshToken", "variant": "return" },
+    { "id": "msg-post-refresh", "from": "mobile", "to": "api", "y": 540, "label": "POST /auth/refresh", "variant": "emphasis" },
+    { "id": "msg-supabase-refresh", "from": "api", "to": "supabase_auth", "y": 575, "label": "refreshSession({ refresh_token })", "variant": "security" },
+    { "id": "msg-supabase-rotated", "from": "supabase_auth", "to": "api", "y": 610, "label": "new rotated session", "variant": "return" },
+    { "id": "msg-refresh-response", "from": "api", "to": "mobile", "y": 645, "label": "200 { new tokens }", "variant": "return" },
+    { "id": "msg-save-rotated-tokens", "from": "mobile", "to": "secure_store", "y": 680, "label": "save rotated tokens", "variant": "default" },
+    { "id": "msg-replay-chat", "from": "mobile", "to": "api", "y": 715, "label": "replay POST /chat (new Bearer)", "variant": "emphasis" },
+    { "id": "msg-chat-success", "from": "api", "to": "mobile", "y": 750, "label": "200 OK Nova response", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "mobile", "from": 160, "to": 345, "type": "frontend" },
+    { "participant": "api", "from": 195, "to": 305, "type": "backend" },
+    { "participant": "supabase_auth", "from": 230, "to": 270, "type": "cloud" },
+    { "participant": "secure_store", "from": 335, "to": 345, "type": "security" },
+
+    { "participant": "mobile", "from": 380, "to": 430, "type": "frontend" },
+    { "participant": "api", "from": 385, "to": 425, "type": "backend" },
+
+    { "participant": "mobile", "from": 465, "to": 760, "type": "frontend" },
+    { "participant": "secure_store", "from": 470, "to": 510, "type": "security" },
+    { "participant": "api", "from": 540, "to": 650, "type": "backend" },
+    { "participant": "supabase_auth", "from": 575, "to": 615, "type": "cloud" },
+    { "participant": "secure_store", "from": 680, "to": 690, "type": "security" },
+    { "participant": "api", "from": 715, "to": 755, "type": "backend" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Initial Authentication",
+      "items": [
+        "Mobile transmits credentials via POST /auth/login to Express backend",
+        "Express delegates to Supabase Auth via signInWithPassword()",
+        "Tokens and user profile details are persisted securely into Expo SecureStore"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Axios 401 Interceptor",
+      "items": [
+        "When an access token expires, API Gateway returns a 401 Unauthorized",
+        "Axios response interceptor captures the 401 and sets isRefreshing = true",
+        "Concurrent in-flight requests are automatically queued into pendingQueue"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Silent Refresh & Replay",
+      "items": [
+        "Mobile reads stored refreshToken and hits POST /auth/refresh",
+        "Supabase Auth validates refresh token and issues a fresh rotated token pair",
+        "Tokens update in SecureStore and Zustand; queued requests replay seamlessly"
+      ]
+    }
+  ]
+}

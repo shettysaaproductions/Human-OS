@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Human OS Deployment Pipeline",
+    "subtitle": "Canonical Production Release & EAS Mobile OTA Runbook",
+    "output": "deployment-pipeline.workflow.html",
+    "animation": "trace",
+    "visual_preset": "blueprint",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "release-pipeline",
+        "label": "Production Release Flow",
+        "focus": ["merge_main", "verify_secret", "render_deploy", "eas_publish", "runtime_check", "ota_applied"],
+        "note": "Follow code from git merge through backend verification, EAS publishing, to physical device OTA."
+      },
+      {
+        "id": "security-gate",
+        "label": "Auth Stop Gate",
+        "focus": ["verify_secret", "token_failed"],
+        "note": "Examine the blocking security gate if EXPO_TOKEN secret is absent."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "dev", "label": "Version Control (GitHub)" },
+    { "id": "ci", "label": "Continuous Integration (Actions)" },
+    { "id": "backend", "label": "Render Backend Cloud" },
+    { "id": "ota", "label": "EAS Deployment (Expo)" },
+    { "id": "device", "label": "Android Production Client" },
+    { "id": "gate", "label": "Security Gate", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "Merge & Verify", "fromCol": 0, "toCol": 1 },
+    { "id": "deploy", "label": "Deploy & Publish", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "client", "label": "Client Sync", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "cloud_release", "label": "Cloud deployment", "lane": "backend", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "ota_release", "label": "Mobile OTA pipeline", "lane": "ota", "fromCol": 3, "toCol": 4, "variant": "security" }
+  ],
+  "mainPath": ["merge_main", "verify_secret", "render_deploy", "eas_publish", "runtime_check", "ota_applied"],
+  "nodes": [
+    { "id": "merge_main", "lane": "dev", "col": 0, "type": "frontend", "label": "Merge to main", "sublabel": "approved PR", "width": 132 },
+    { "id": "verify_secret", "lane": "ci", "col": 1, "type": "security", "label": "Auth Gate", "sublabel": "verify EXPO_TOKEN", "tag": "blocking", "width": 132 },
+    { "id": "token_failed", "lane": "gate", "col": 1, "type": "security", "label": "Stop Release", "sublabel": "missing secret", "width": 132 },
+    { "id": "render_deploy", "lane": "backend", "col": 2, "type": "cloud", "label": "Render Deploy", "sublabel": "npm build + /health", "tag": "zero-downtime", "width": 132 },
+    { "id": "eas_publish", "lane": "ota", "col": 3, "type": "cloud", "label": "EAS Publish", "sublabel": "channel: production", "tag": "SDK 55", "width": 132 },
+    { "id": "runtime_check", "lane": "device", "col": 4, "type": "frontend", "label": "Runtime Match", "sublabel": "appVersion 1.1.0", "width": 132 },
+    { "id": "ota_applied", "lane": "device", "col": 5, "type": "external", "label": "OTA Active", "sublabel": "close/reopen cycle", "width": 132 }
+  ],
+  "edges": [
+    { "from": "merge_main", "to": "verify_secret", "variant": "default" },
+    { "from": "verify_secret", "to": "token_failed", "label": "no token", "variant": "security", "role": "error" },
+    { "from": "verify_secret", "to": "render_deploy", "label": "valid", "variant": "emphasis" },
+    { "from": "render_deploy", "to": "eas_publish", "label": "healthy", "variant": "emphasis" },
+    { "from": "eas_publish", "to": "runtime_check", "label": "OTA published", "variant": "emphasis" },
+    { "from": "runtime_check", "to": "ota_applied", "label": "reopen", "variant": "default" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Ordered Release Strategy",
+      "items": [
+        "GitHub main is the single source of truth for all changes",
+        "Render backend builds and passes /health verification before OTA release",
+        "EAS publishes JavaScript assets strictly to the production channel"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Strict Security & Runtime Rules",
+      "items": [
+        "EXPO_TOKEN is consumed as a repository secret and never stored in code",
+        "Missing authentication immediately aborts the deployment",
+        "Runtime version must match appVersion 1.1.0 before client applies bundle"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Client Ingestion Lifecycle",
+      "items": [
+        "Installed Android native shell checks EAS update service on launch",
+        "Assets download in background and activate across close/reopen cycle",
+        "Preserves zero-downtime updates without full app reinstall"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Cognitive Memory Compaction Lifecycle",
+    "output": "memory-compaction.lifecycle.html",
+    "viewBox": [980, 680],
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "compaction-rail",
+        "label": "Compaction rail",
+        "focus": ["raw_intake", "compacting", "persisting", "verified", "pruned"],
+        "note": "Follow chat messages from hot transcript to episodic extraction and pruned storage."
+      },
+      {
+        "id": "resource-governance",
+        "label": "Resource backpressure",
+        "focus": ["persisting", "yielded", "quota_exhausted", "verified"],
+        "note": "Rate limits and BrainKeyRouter capacity pauses background compaction gracefully."
+      },
+      {
+        "id": "protection-outcomes",
+        "label": "Protection & deletion",
+        "focus": ["verified", "retrying", "failed_retry", "pruned", "protected", "retained"],
+        "note": "Explicitly protected memories are preserved; failed retries are safely aborted."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Compaction phases" },
+    { "id": "governance", "label": "Backpressure & protection" },
+    { "id": "recovery", "label": "Backoff & retry handler" },
+    { "id": "terminal", "label": "Terminal outcomes" }
+  ],
+  "states": [
+    { "id": "raw_intake", "type": "start", "label": "Raw Intake", "sublabel": "hot 30-day window", "lane": "main", "col": 0, "step": "01", "tag": "hot" },
+    { "id": "compacting", "type": "active", "label": "Compacting", "sublabel": "chunked summarizer", "lane": "main", "col": 1, "step": "02", "tag": "worker" },
+    { "id": "persisting", "type": "decision", "label": "Persisting", "sublabel": "idempotent upsert", "lane": "main", "col": 2, "step": "03", "tag": "pgvector" },
+    { "id": "verified", "type": "waiting", "label": "Verified", "sublabel": "integrity confirmed", "lane": "main", "col": 3, "step": "04", "tag": "checked" },
+    { "id": "pruned", "type": "success", "label": "Pruned", "sublabel": "raw storage freed", "lane": "main", "col": 4, "step": "05", "tag": "compacted" },
+
+    { "id": "yielded", "type": "waiting", "label": "Capacity Yielded", "sublabel": "NVIDIA RPM throttle", "lane": "governance", "col": 0, "tag": "backoff" },
+    { "id": "retrying", "type": "active", "label": "Retrying Job", "sublabel": "exponential backoff", "lane": "recovery", "col": 1, "tag": "retry" },
+    { "id": "protected", "type": "waiting", "label": "User Protected", "sublabel": "explicit preservation", "lane": "governance", "col": 2, "tag": "locked" },
+
+    { "id": "quota_exhausted", "type": "failure", "label": "Exhausted", "sublabel": "max retries exceeded", "lane": "terminal", "col": 0, "tag": "terminal" },
+    { "id": "failed_retry", "type": "failure", "label": "Job Aborted", "sublabel": "unrecoverable error", "lane": "terminal", "col": 1, "tag": "terminal" },
+    { "id": "retained", "type": "success", "label": "Durable Retained", "sublabel": "exempt from deletion", "lane": "terminal", "col": 2, "tag": "terminal" }
+  ],
+  "transitions": [
+    { "from": "persisting", "to": "yielded", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "yielded", "to": "quota_exhausted", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "verified", "to": "retrying", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "retrying", "to": "failed_retry", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "pruned", "to": "protected", "variant": "dashed", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "protected", "to": "retained", "variant": "emphasis", "route": "straight", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Compaction Rail",
+      "items": [
+        "Messages progress through five ordered stages from raw chat to pruned storage",
+        "Raw transcripts are kept in the hot window until episodic summaries are verified",
+        "Compaction is bounded to avoid exceeding LLM token and context boundaries"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Resource Governance",
+      "items": [
+        "Background workers consult BrainKeyRouter before consuming NVIDIA API quota",
+        "Jobs yield and apply exponential backoff when capacity is constrained",
+        "Interactive turn routing always takes strict priority over background compaction"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Protection & Outcomes",
+      "items": [
+        "User-protected memories are permanently exempted from compaction pruning",
+        "Explicit forget requests execute cryptographically isolated hard deletions",
+        "Failed compaction attempts preserve original raw messages with zero data loss"
+      ]
+    }
+  ]
+}

@@ -11,6 +11,7 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { canonicalEntityEngine } from './CanonicalEntityEngine';
+import { isInvalidEntityName } from './CanonicalMemoryTreeService';
 
 export interface ReconciliationSummary {
   userId: string;
@@ -60,67 +61,51 @@ export class SafeMemoryReconciler {
       memoryMap.set(m.key.toLowerCase(), m);
     }
 
-    // ── 2. Reconcile Family Entities (Son, Wife, Parents) ──────────────────────
-    // Son reconciliation: Shreshth / Tuku / Tiku
-    const sonNameMem = memoryMap.get('son_name');
-    const sonNickMem = memoryMap.get('son_nickname');
-    const sonDobMem = memoryMap.get('son_birth_date') || memoryMap.get('son_dob');
+    // ── 2. Reconcile Family Entities (Generic Relationship-First) ──────────────
+    const familyRelations = ['son', 'daughter', 'wife', 'husband', 'father', 'mother', 'partner'];
+    for (const rel of familyRelations) {
+      const relTitle = rel.charAt(0).toUpperCase() + rel.slice(1);
+      const nameMem = memoryMap.get(`${rel}_name`);
+      const nickMem = memoryMap.get(`${rel}_nickname`);
+      const dobMem = memoryMap.get(`${rel}_birth_date`) || memoryMap.get(`${rel}_dob`);
+      const otherRelMems = Array.from(memoryMap.values()).filter(m => m.key.toLowerCase().startsWith(`${rel}_`));
 
-    if (sonNameMem || sonNickMem) {
-      const canonicalSonName = (sonNameMem?.value && !/^(kar|ke|son|beta)$/i.test(sonNameMem.value.trim()))
-        ? sonNameMem.value.trim()
-        : 'Shreshth';
+      if (nameMem || nickMem || otherRelMems.length > 0) {
+        const entityName = (nameMem?.value && !isInvalidEntityName(nameMem.value))
+          ? nameMem.value.trim()
+          : (nickMem?.value && !isInvalidEntityName(nickMem.value))
+          ? nickMem.value.trim()
+          : relTitle;
 
-      const sonEntity = await canonicalEntityEngine.createOrResolveEntity(
-        userId,
-        canonicalSonName,
-        'Son',
-        'family'
-      );
-      entitiesResolved++;
+        if (!isInvalidEntityName(entityName)) {
+          const entity = await canonicalEntityEngine.createOrResolveEntity(
+            userId,
+            entityName,
+            relTitle,
+            'family'
+          );
+          entitiesResolved++;
 
-      // Register nicknames as aliases
-      if (sonNickMem?.value && !/^(kar|ke)$/i.test(sonNickMem.value.trim())) {
-        await canonicalEntityEngine.registerAlias(userId, sonEntity.id, sonNickMem.value.trim());
-        aliasesMerged++;
-      }
-      // Ensure 'Tuku' and 'Tiku' are recorded aliases
-      await canonicalEntityEngine.registerAlias(userId, sonEntity.id, 'Tuku');
-      await canonicalEntityEngine.registerAlias(userId, sonEntity.id, 'Tiku');
+          // Register nickname as alias if present and distinct
+          if (nickMem?.value && !isInvalidEntityName(nickMem.value)) {
+            const nickClean = nickMem.value.trim();
+            if (nickClean.toLowerCase() !== entity.name.toLowerCase()) {
+              await canonicalEntityEngine.registerAlias(userId, entity.id, nickClean);
+              aliasesMerged++;
+            }
+          }
 
-      // Link memory rows
-      const sonMemoriesToLink = [sonNameMem, sonNickMem, sonDobMem].filter(Boolean);
-      for (const sm of sonMemoriesToLink) {
-        if (!sm.bubble_id || sm.bubble_id !== sonEntity.id) {
-          await supabaseAdmin
-            .from('memories')
-            .update({ bubble_id: sonEntity.id, updated_at: new Date().toISOString() })
-            .eq('id', sm.id);
-          memoriesLinked++;
-        }
-      }
-    }
-
-    // Wife reconciliation: Sakshi
-    const wifeNameMem = memoryMap.get('wife_name');
-    const wifeDobMem = memoryMap.get('wife_birth_date') || memoryMap.get('wife_dob');
-    if (wifeNameMem) {
-      const wifeEntity = await canonicalEntityEngine.createOrResolveEntity(
-        userId,
-        wifeNameMem.value.trim(),
-        'Wife',
-        'family'
-      );
-      entitiesResolved++;
-
-      const wifeMems = [wifeNameMem, wifeDobMem].filter(Boolean);
-      for (const wm of wifeMems) {
-        if (!wm.bubble_id || wm.bubble_id !== wifeEntity.id) {
-          await supabaseAdmin
-            .from('memories')
-            .update({ bubble_id: wifeEntity.id, updated_at: new Date().toISOString() })
-            .eq('id', wm.id);
-          memoriesLinked++;
+          // Link all related memory rows to the canonical entity bubble
+          const memsToLink = [nameMem, nickMem, dobMem, ...otherRelMems].filter(Boolean);
+          for (const m of memsToLink) {
+            if (m && (!m.bubble_id || m.bubble_id !== entity.id)) {
+              await supabaseAdmin
+                .from('memories')
+                .update({ bubble_id: entity.id, updated_at: new Date().toISOString() })
+                .eq('id', m.id);
+              memoriesLinked++;
+            }
+          }
         }
       }
     }

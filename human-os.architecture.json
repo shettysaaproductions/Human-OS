@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Human OS Architecture",
+    "subtitle": "Cognitive OS, Autonomous Consciousness Engine, & Memory Graph",
+    "output": "human-os.architecture.html",
+    "visual_preset": "blueprint",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/shettysaaproductions/Human-OS",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "1596a8819ebd720fbbec68eff102d142b8b34299"
+    },
+    "views": [
+      {
+        "id": "core-turn-flow",
+        "label": "Conversational Turn Flow",
+        "focus": ["mobile_client", "api_gateway", "orchestrator", "cognitive_brain", "model_router"],
+        "note": "Follow user interaction from mobile input through the consciousness engine to model inference."
+      },
+      {
+        "id": "autonomous-consciousness",
+        "label": "Autonomous Consciousness",
+        "focus": ["orchestrator", "moment_engine", "memory_curator", "supabase_db", "async_workers"],
+        "note": "Observe NACE autonomous 15-minute proactive loops and life-thread curation."
+      },
+      {
+        "id": "safety-and-memory",
+        "label": "Safety & Memory Governance",
+        "focus": ["watchtower", "orchestrator", "memory_curator", "supabase_db"],
+        "note": "Examine Watchtower invariant auditing and canonical memory persistence in Supabase."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "mobile_client",
+      "type": "frontend",
+      "label": "Mobile Client",
+      "sublabel": "React Native / Expo",
+      "brand": "react",
+      "tag": "EAS OTA",
+      "pos": [40, 240],
+      "size": [130, 60],
+      "sources": [{ "path": "mobile/App.tsx", "line": 1, "label": "Client Root" }]
+    },
+    {
+      "id": "api_gateway",
+      "type": "security",
+      "label": "API Gateway",
+      "sublabel": "Express :3000 / Render",
+      "tag": "auth & ingress",
+      "pos": [220, 240],
+      "size": [130, 60],
+      "sources": [{ "path": "backend/src/app.ts", "line": 1, "label": "Express App" }]
+    },
+    {
+      "id": "orchestrator",
+      "type": "backend",
+      "label": "Nova Consciousness",
+      "sublabel": "NACE Orchestrator",
+      "tag": "15-min loop",
+      "pos": [400, 240],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/NovaConsciousnessEngine.ts", "line": 1, "label": "Consciousness Engine" }]
+    },
+    {
+      "id": "watchtower",
+      "type": "security",
+      "label": "Watchtower Guardian",
+      "sublabel": "Invariant Auditor",
+      "tag": "deterministic guard",
+      "pos": [400, 90],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/WatchtowerHeartbeatService.ts", "line": 1, "label": "Watchtower Heartbeat" }]
+    },
+    {
+      "id": "async_workers",
+      "type": "messagebus",
+      "label": "Queue & Reminders",
+      "sublabel": "Background Jobs",
+      "tag": "10s tick",
+      "pos": [400, 390],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/BackgroundActionService.ts", "line": 1, "label": "Background Action" }]
+    },
+    {
+      "id": "cognitive_brain",
+      "type": "backend",
+      "label": "Cognitive Brain",
+      "sublabel": "NovaBrain & TurnAnalyzer",
+      "tag": "awareness",
+      "pos": [600, 150],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/NovaBrainService.ts", "line": 1, "label": "Brain Service" }]
+    },
+    {
+      "id": "moment_engine",
+      "type": "backend",
+      "label": "Moment & Reflection",
+      "sublabel": "LifeThread Synthesis",
+      "tag": "time capsule",
+      "pos": [600, 330],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/MomentEngineService.ts", "line": 1, "label": "Moment Engine" }]
+    },
+    {
+      "id": "model_router",
+      "type": "cloud",
+      "label": "Model Router",
+      "sublabel": "Dual-Key LLM Routing",
+      "tag": "NVIDIA / Gemini",
+      "pos": [790, 150],
+      "size": [130, 60],
+      "sources": [{ "path": "backend/src/services/ModelRouterService.ts", "line": 1, "label": "Model Router" }]
+    },
+    {
+      "id": "memory_curator",
+      "type": "backend",
+      "label": "Memory Graph Curator",
+      "sublabel": "CanonicalGraphService",
+      "tag": "entity resolution",
+      "pos": [790, 330],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/CanonicalGraphService.ts", "line": 1, "label": "Graph Service" }]
+    },
+    {
+      "id": "supabase_db",
+      "type": "database",
+      "label": "Supabase Postgres",
+      "sublabel": "pgvector & GIN store",
+      "brand": "supabase",
+      "tag": "semantic memory",
+      "pos": [980, 240],
+      "size": [146, 60],
+      "sources": [{ "path": "backend/src/services/memoryRepository.ts", "line": 1, "label": "Memory Repository" }]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Render Cloud / Backend Services",
+      "wraps": ["api_gateway", "orchestrator", "watchtower", "async_workers", "cognitive_brain", "moment_engine"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Cognitive Intelligence & Memory",
+      "wraps": ["model_router", "memory_curator"]
+    },
+    {
+      "kind": "region",
+      "label": "Cloud Persistence / Supabase",
+      "wraps": ["supabase_db"]
+    }
+  ],
+  "connections": [
+    { "from": "mobile_client", "to": "api_gateway", "label": "HTTPS", "variant": "emphasis" },
+    { "from": "api_gateway", "to": "orchestrator", "label": "dispatch" },
+    { "from": "watchtower", "to": "orchestrator", "fromSide": "bottom", "toSide": "top", "label": "heartbeat", "variant": "security", "labelAt": [470, 175] },
+    { "from": "orchestrator", "to": "async_workers", "fromSide": "bottom", "toSide": "top", "label": "enqueue", "variant": "dashed", "labelAt": [470, 335] },
+    { "from": "orchestrator", "to": "cognitive_brain", "label": "turn context", "labelAt": [570, 224] },
+    { "from": "orchestrator", "to": "moment_engine", "label": "proactive pulse", "labelAt": [570, 314] },
+    { "from": "cognitive_brain", "to": "model_router", "label": "inference", "variant": "emphasis" },
+    { "from": "cognitive_brain", "to": "memory_curator", "fromSide": "right", "toSide": "top" },
+    { "from": "moment_engine", "to": "memory_curator" },
+    { "from": "memory_curator", "to": "supabase_db", "label": "SQL & vector", "variant": "emphasis", "labelAt": [955, 314] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Edge & Ingress",
+      "items": [
+        "React Native / Expo mobile client with OTA updates on the preview channel",
+        "Express API gateway hosted on Render with rate limiting and session routing",
+        "Low-latency communication with fallback recovery"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Consciousness & Cognition",
+      "items": [
+        "NACE Consciousness Engine executing autonomous proactive outreach pulses",
+        "NovaBrain and TurnAnalyzer managing situational awareness and emotional momentum",
+        "ModelRouter dynamically routing between dual NVIDIA NIM and Gemini API keys"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Memory & Safety Governance",
+      "items": [
+        "Canonical Graph and Entity Resolution maintaining relational truth",
+        "Supabase PostgreSQL with pgvector semantic search and GIN text indexing",
+        "Watchtower Heartbeat verifying system invariants and preventing hallucinations"
+      ]
+    }
+  ]
+}

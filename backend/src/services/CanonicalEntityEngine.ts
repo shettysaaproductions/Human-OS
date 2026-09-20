@@ -679,7 +679,7 @@ export class CanonicalEntityEngine {
     };
   }
 
-  private invalidateGraphCache(userId: string): void {
+  public invalidateGraphCache(userId: string): void {
     const cacheKey = `${userId}:kg`;
     cache.invalidate(cacheKey);
   }
