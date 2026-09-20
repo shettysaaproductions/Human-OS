@@ -117,12 +117,14 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   const k = (key || '').toLowerCase();
   const v = (value || '').trim();
 
-  // If fallbackName already has (Role) format e.g. "Sakshi (Wife)"
-  if (!k && fallbackName) {
-    const match = fallbackName.match(/^(.*?)\s*\((.*?)\)$/);
-    if (match) {
-      return { title: match[1].trim(), sub: match[2].trim() };
-    }
+  // 1. Check if value or fallbackName has "Name · Role" or "Name (Role)" format (e.g. "Suresh · Father", "Rajeshree (Mother)")
+  const dotMatch = v.match(/^(.*?)\s*·\s*(.*?)$/);
+  if (dotMatch) {
+    return { title: dotMatch[1].trim(), sub: dotMatch[2].trim() };
+  }
+  const parenMatch = (fallbackName || v).match(/^(.*?)\s*\((.*?)\)$/);
+  if (parenMatch) {
+    return { title: parenMatch[1].trim(), sub: parenMatch[2].trim() };
   }
 
   if (k.startsWith('entity:')) {
@@ -130,7 +132,7 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
     const entityScoped = (subParts[0] || '').replace(/^person_/, '').split('_').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
     const attr = (subParts[1] || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     return {
-      title: v || attr,
+      title: v || attr || entityScoped,
       sub: attr ? `${entityScoped} • ${attr}` : entityScoped
     };
   }
@@ -149,11 +151,13 @@ function toDisplayNames(key: string = '', value: string = '', fallbackName: stri
   }
   if (k.includes('father') || k.includes('papa')) {
     const isVocative = /^(father|papa|pitaji|dad|my father|mere papa)$/i.test(v);
-    return { title: (!isVocative && v) ? v : 'Father', sub: 'Father' };
+    const cleanTitle = (!isVocative && v) ? v : (fallbackName && !/^(father|papa|pitaji|dad)$/i.test(fallbackName) ? fallbackName : 'Father');
+    return { title: cleanTitle, sub: 'Father' };
   }
   if (k.includes('mother') || k.includes('mummy')) {
     const isVocative = /^(mother|mummy|mom|maa|my mother|mere mummy)$/i.test(v);
-    return { title: (!isVocative && v) ? v : 'Mother', sub: 'Mother' };
+    const cleanTitle = (!isVocative && v) ? v : (fallbackName && !/^(mother|mummy|mom|maa)$/i.test(fallbackName) ? fallbackName : 'Mother');
+    return { title: cleanTitle, sub: 'Mother' };
   }
   if (k.includes('salary_day') || (k.includes('salary') && k.includes('day'))) {
     return { title: v || '5th of month', sub: 'Salary Day' };
@@ -343,20 +347,36 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
       const cleanK = k.replace(/^mem-|^wm-/, '');
       const parts = cleanK.split('_');
 
+      // If backend already resolved a canonical parent entity bubble, preserve it!
+      const hasCanonicalParent = mem.parentEntityId && mem.parentEntityId !== hubId && mem.parentEntityId !== 'user-core';
+
       if (d === 'family') {
         if (cleanK === 'family_details' || cleanK.includes('family_details')) {
           // Composite summary - skip so individual family member entities are authoritative
           continue;
         }
+
+        if (hasCanonicalParent) {
+          mem.hierarchyLevel = 3;
+          rawStemItems.push(mem);
+          continue;
+        }
+
+        // Dynamic parent resolution fallback: find matching entity branch
+        const fatherBubble = members.find((m: any) => m.id?.startsWith('bubble-') && ((m.raw_key || '').includes('father') || (m.raw_key || '').includes('suresh') || (m.name || '').toLowerCase().includes('father')));
+        const motherBubble = members.find((m: any) => m.id?.startsWith('bubble-') && ((m.raw_key || '').includes('mother') || (m.raw_key || '').includes('rajeshree') || (m.name || '').toLowerCase().includes('mother')));
+        const sonBubble = members.find((m: any) => m.id?.startsWith('bubble-') && ((m.raw_key || '').includes('son') || (m.raw_key || '').includes('shreshth') || (m.name || '').toLowerCase().includes('son')));
+        const wifeBubble = members.find((m: any) => m.id?.startsWith('bubble-') && ((m.raw_key || '').includes('wife') || (m.raw_key || '').includes('sakshi') || (m.name || '').toLowerCase().includes('wife')));
+
         if (k === 'family_nickname' || k.includes('family_nick') || k.includes('tiku') || k.includes('tuku') || k.includes('son_nick') || k.includes('child_age') || k.includes('baby_age') || k.includes('son_age') || k.includes('son_birth') || k.includes('shreshth_date_of_birth') || k.includes('notes')) {
           mem.hierarchyLevel = 3;
-          mem.parentEntityId = 'mem-son_name';
+          mem.parentEntityId = sonBubble?.id || 'mem-son_name';
           rawStemItems.push(mem);
           continue;
         }
         if (k.includes('nail') || k.includes('self_taught') || k.includes('beautiful_art') || k.includes('cooking') || k.includes('wife_birth') || k.includes('wife_bday')) {
           mem.hierarchyLevel = 3;
-          mem.parentEntityId = 'mem-wife_name';
+          mem.parentEntityId = wifeBubble?.id || 'mem-wife_name';
           rawStemItems.push(mem);
           continue;
         }
@@ -368,13 +388,13 @@ function buildPlanetaryGalaxy(rawNodes: any[] = [], rawEdges: any[] = []) {
         }
         if (cleanK.startsWith('father_') && cleanK !== 'father_name') {
           mem.hierarchyLevel = 3;
-          mem.parentEntityId = 'mem-father_name';
+          mem.parentEntityId = fatherBubble?.id || 'mem-father_name';
           rawStemItems.push(mem);
           continue;
         }
         if (cleanK.startsWith('mother_') && cleanK !== 'mother_name') {
           mem.hierarchyLevel = 3;
-          mem.parentEntityId = 'mem-mother_name';
+          mem.parentEntityId = motherBubble?.id || 'mem-mother_name';
           rawStemItems.push(mem);
           continue;
         }

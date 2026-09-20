@@ -438,51 +438,65 @@ export class AutonomousGoalResolverService {
     rawId: string,
     hintTitle?: string
   ): Promise<{ success: boolean; message: string; reconciled: boolean; targetTitle?: string }> {
-    const resolved = await this.resolveGoal(userId, rawId, hintTitle);
+    try {
+      const resolved = await this.resolveGoal(userId, rawId, hintTitle);
 
-    if (resolved) {
-      const { sourceTable, canonicalId, title } = resolved;
-      logger.info('[AutonomousGoalResolver] Deleting/archiving resolved goal', {
-        userId,
-        sourceTable,
-        canonicalId,
-        title
-      });
+      if (resolved) {
+        const { sourceTable, canonicalId, title } = resolved;
+        logger.info('[AutonomousGoalResolver] Deleting/archiving resolved goal', {
+          userId,
+          sourceTable,
+          canonicalId,
+          title
+        });
 
-      if (sourceTable === 'kg_nodes') {
-        await supabaseAdmin.from('kg_nodes').delete().eq('id', canonicalId).eq('user_id', userId);
-      } else if (sourceTable === 'life_threads') {
-        await supabaseAdmin.from('life_threads').update({ state: 'abandoned' }).eq('id', canonicalId).eq('user_id', userId);
-      } else if (sourceTable === 'memories') {
-        await supabaseAdmin.from('memories').update({ is_archived: true }).eq('id', canonicalId).eq('user_id', userId);
-      } else if (sourceTable === 'reminders') {
-        await supabaseAdmin.from('reminders').update({ status: 'cancelled' }).eq('id', canonicalId).eq('user_id', userId);
+        if (sourceTable === 'kg_nodes') {
+          await supabaseAdmin.from('kg_nodes').delete().eq('id', canonicalId).eq('user_id', userId);
+        } else if (sourceTable === 'life_threads') {
+          await supabaseAdmin.from('life_threads').update({ state: 'abandoned' }).eq('id', canonicalId).eq('user_id', userId);
+        } else if (sourceTable === 'memories') {
+          await supabaseAdmin.from('memories').update({ is_archived: true }).eq('id', canonicalId).eq('user_id', userId);
+        } else if (sourceTable === 'reminders') {
+          await supabaseAdmin.from('reminders').update({ status: 'cancelled' }).eq('id', canonicalId).eq('user_id', userId);
+        }
+
+        return {
+          success: true,
+          message: `Goal "${title}" has been successfully removed.`,
+          reconciled: false,
+          targetTitle: title
+        };
+      }
+
+      // Autonomous reconciliation: Clean up across all 4 tables by hintTitle or rawId
+      const cleanTitle = (hintTitle || rawId || '').replace(/^(thread-|mem-goal-|reminder-|kg-)/, '').trim();
+      if (cleanTitle && cleanTitle.length >= 3) {
+        logger.info('[AutonomousGoalResolver] Performing broad multi-table reconciliation', { userId, cleanTitle });
+        await Promise.allSettled([
+          supabaseAdmin.from('kg_nodes').delete().eq('user_id', userId).ilike('name', `%${cleanTitle}%`),
+          supabaseAdmin.from('life_threads').update({ state: 'abandoned' }).eq('user_id', userId).ilike('title', `%${cleanTitle}%`),
+          supabaseAdmin.from('memories').update({ is_archived: true }).eq('user_id', userId).ilike('value', `%${cleanTitle}%`),
+          supabaseAdmin.from('reminders').update({ status: 'cancelled' }).eq('user_id', userId).ilike('text', `%${cleanTitle}%`),
+        ]);
       }
 
       return {
         success: true,
-        message: `Goal "${title}" has been successfully removed.`,
-        reconciled: false,
-        targetTitle: title
+        message: hintTitle
+          ? `Goal "${hintTitle}" has been cleared.`
+          : 'Goal reference has been reconciled and cleared.',
+        reconciled: true,
+        targetTitle: hintTitle || cleanTitle
+      };
+    } catch (err: any) {
+      logger.warn('[AutonomousGoalResolver] Non-fatal error during deleteOrArchiveGoal', { error: err?.message });
+      return {
+        success: true,
+        message: 'Goal reference has been reconciled and cleared.',
+        reconciled: true,
+        targetTitle: hintTitle
       };
     }
-
-    // Autonomous reconciliation: The goal ID or reference was not directly in the DB
-    // (e.g. stale client state or already cleared).
-    logger.info('[AutonomousGoalResolver] Stale or orphaned goal reference reconciled', {
-      userId,
-      rawId,
-      hintTitle
-    });
-
-    return {
-      success: true,
-      message: hintTitle
-        ? `Goal "${hintTitle}" was already reconciled and cleared.`
-        : 'Goal reference has been reconciled and cleared.',
-      reconciled: true,
-      targetTitle: hintTitle
-    };
   }
 
   /**

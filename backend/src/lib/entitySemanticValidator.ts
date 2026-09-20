@@ -165,6 +165,8 @@ export function isValidEntityName(name: string, _entityType?: string): { isValid
     /\b(utha|jaga)\s+(dena|do|diyo)\b/i,
     /\b(yaad|remind)\s+(dilana|dilao|kar)\b/i,
     /\b(ka|ki|ke)\s+(naam|name)\s+(hai)?\b/i,
+    /\b(one|guy|person|someone|character|banda|bandi)\s+(i|we|you|he|she|who|that|jisko|jiski|jisne)\s+(was|am|were|is|had|have|talked|talking|said|mentioned|ke baare|ki baat)\b/i,
+    /\b(talking|speaking)\s+about\b/i,
     /\b\d+\s*(months?|years?|days?|weeks?|hours?|mins?|saal|mahine|yo)\b/i,
     /\b(every|each)\s+(month|day|week|year|monday|sunday|saturday|hour)\b/i,
     /\b\d+(st|nd|rd|th)?\s*(day|date)?\s*of\s*(every|each|the|this)\b/i,

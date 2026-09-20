@@ -1201,14 +1201,18 @@ Curate the memory tree and knowledge graph against the conversation proof and re
       return { bubblesMerged, bubblesPruned };
     }
 
-    // 1. Check family domain bubbles
+    // 1. Check family domain bubbles & enforce singular kinship invariants
     const familyBubbles = bubbles.filter(b => b.domain_key === 'family' && b.bubble_type === 'entity');
-    const fatherBubble = familyBubbles.find(b => b.slug === 'entity:suresh' || (b.relation_type === 'Father' && !/^(papa|my father|father)$/i.test(b.label.trim())));
-    const motherBubble = familyBubbles.find(b => b.slug === 'entity:rajeshree' || (b.relation_type === 'Mother' && !/^(mummy|my mother|mother|mom)$/i.test(b.label.trim())));
+    const isVocativeLabel = (label: string) => /^(father|papa|pitaji|dad|my father|mere papa|mother|mummy|mom|maa|mataji|my mother|mere mummy)$/i.test((label || '').trim());
+
+    const fatherBubble = familyBubbles.find(b => b.relation_type === 'Father' && !isVocativeLabel(b.label)) ||
+      familyBubbles.find(b => b.slug === 'entity:suresh');
+    const motherBubble = familyBubbles.find(b => b.relation_type === 'Mother' && !isVocativeLabel(b.label)) ||
+      familyBubbles.find(b => b.slug === 'entity:rajeshree');
 
     // Merge Papa / My Father into Father bubble
     if (fatherBubble) {
-      const phantomFatherBubbles = familyBubbles.filter(b => b.id !== fatherBubble.id && (/^(papa|my father|father)$/i.test(b.label.trim()) || b.slug === 'entity:papa' || b.slug === 'entity:my_father'));
+      const phantomFatherBubbles = familyBubbles.filter(b => b.id !== fatherBubble.id && (isVocativeLabel(b.label) || b.slug === 'entity:papa' || b.slug === 'entity:my_father'));
       for (const ph of phantomFatherBubbles) {
         await supabaseAdmin.from('memories').update({ bubble_id: fatherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
         await supabaseAdmin.from('reminders').update({ bubble_id: fatherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
@@ -1218,9 +1222,9 @@ Curate the memory tree and knowledge graph against the conversation proof and re
       }
     }
 
-    // Merge Mummy into Mother bubble
+    // Merge Mummy / My Mother into Mother bubble
     if (motherBubble) {
-      const phantomMotherBubbles = familyBubbles.filter(b => b.id !== motherBubble.id && (/^(mummy|my mother|mother|mom)$/i.test(b.label.trim()) || b.slug === 'entity:mummy'));
+      const phantomMotherBubbles = familyBubbles.filter(b => b.id !== motherBubble.id && (isVocativeLabel(b.label) || b.slug === 'entity:mummy' || b.slug === 'entity:my_mother'));
       for (const ph of phantomMotherBubbles) {
         await supabaseAdmin.from('memories').update({ bubble_id: motherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);
         await supabaseAdmin.from('reminders').update({ bubble_id: motherBubble.id }).eq('user_id', userId).eq('bubble_id', ph.id);

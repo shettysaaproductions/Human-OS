@@ -303,13 +303,19 @@ export class CanonicalMemoryTreeService {
     }
 
     // Pattern 1.5: Direct User Family Member Kinship & Name Resolution
-    // Enforces the Limited Relations Law:
+    // Enforces the Limited Relations Law & Canonical Identity Invariant:
     // - "my father name is Suresh", "mere papa ka naam Suresh hai", "my mother name is Rajeshree"
     // - "mere papa bacho kapde bechte hai", "mere mummy tailor ka shop run karti hai", "papa ko call karna"
     // Always maps kinship vocatives (papa, mummy, dad, mom) to the canonical person entity (Suresh, Rajeshree)
-    const familyDeclarationMatch = text.match(/\b(?:my|mere|mera|meri)?\s*(father|papa|pitaji|dad|mother|mummy|mom|maa|mataji|wife|biwi|patni|husband|pati|son|beta|daughter|beti|sister|behen|brother|bhai)\s*(?:(?:'s)?\s*name\s+(?:is|hai)|(?:\s*ka|\s*ki|\s*ke)?\s*(?:name|naam)\s*(?:hai\s+)?|\s+is\s+|\s+hai\s+)\s*([A-Za-z][A-Za-z0-9_-]{1,30})\b/i);
+    const isVocativeOrRoleWord = (word?: string): boolean => {
+      if (!word || word.trim().length < 2) return true;
+      return /^(father|papa|pitaji|dad|baap|mother|mummy|mom|maa|mataji|wife|biwi|patni|husband|pati|son|beta|daughter|beti|sister|behen|brother|bhai|uncle|aunty|bacho|chote|kapde|bechte|tailor|shop|run|doctor|engineer|lawyer|teacher|driver|businessman|officer|clerk|worker)$/i.test(word.trim());
+    };
 
-    const isFamilyDeclaration = !!(familyDeclarationMatch && !isInvalidEntityName(familyDeclarationMatch[2]));
+    const familyDeclarationMatch = text.match(/\b(?:my|mere|mera|meri)?\s*(father|papa|pitaji|dad|mother|mummy|mom|maa|mataji|wife|biwi|patni|husband|pati|son|beta|daughter|beti|sister|behen|brother|bhai)\s*(?:(?:'s)?\s*name\s+(?:is|hai)|(?:\s*ka|\s*ki|\s*ke)?\s*(?:name|naam)\s*(?:hai\s+)?)\s*([A-Za-z][A-Za-z0-9_-]{1,30})\b/i) ||
+      text.match(/\b(?:my|mere|mera|meri)\s+(father|papa|pitaji|dad|mother|mummy|mom|maa|mataji|wife|biwi|patni|husband|pati|son|beta|daughter|beti|sister|behen|brother|bhai)\s+(?:is|hai)\s+([A-Z][a-z]{1,30})\b/);
+
+    const isFamilyDeclaration = !!(familyDeclarationMatch && !isInvalidEntityName(familyDeclarationMatch[2]) && !isVocativeOrRoleWord(familyDeclarationMatch[2]));
     const matchedFamilyRole = isFamilyDeclaration
       ? familyDeclarationMatch[1].toLowerCase()
       : (/\b(papa|pitaji|dad|baap|father)\b/i.test(lower) ? 'father'
@@ -357,7 +363,7 @@ export class CanonicalMemoryTreeService {
         .limit(1)
         .maybeSingle();
 
-      const knownNameFromMem = (nameMem?.value && !isInvalidEntityName(nameMem.value)) ? capitalizeWords(nameMem.value) : undefined;
+      const knownNameFromMem = (nameMem?.value && !isInvalidEntityName(nameMem.value) && !isVocativeOrRoleWord(nameMem.value)) ? capitalizeWords(nameMem.value) : undefined;
 
       if (!targetBubble && knownNameFromMem) {
         const { data: bubbleByName } = await supabaseAdmin
@@ -371,9 +377,10 @@ export class CanonicalMemoryTreeService {
         if (bubbleByName) targetBubble = bubbleByName as MemoryBubbleRecord;
       }
 
-      if (declaredName) {
+      if (declaredName && !isVocativeOrRoleWord(declaredName)) {
         if (targetBubble) {
-          if (targetBubble.label !== declaredName) {
+          const targetHasPersonalName = !isVocativeOrRoleWord(targetBubble.label);
+          if (!targetHasPersonalName && targetBubble.label !== declaredName) {
             const newSlug = `entity:${normalizeSlug(declaredName)}`;
             await supabaseAdmin
               .from('memory_bubbles')
@@ -381,10 +388,18 @@ export class CanonicalMemoryTreeService {
               .eq('id', targetBubble.id);
             targetBubble.label = declaredName;
             targetBubble.slug = newSlug;
+          } else if (targetHasPersonalName && targetBubble.label.toLowerCase() !== declaredName.toLowerCase()) {
+            // Register as alias on the existing proven personal entity bubble
+            try {
+              const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
+              await canonicalEntityEngine.registerAlias(userId, targetBubble.id, declaredName);
+            } catch (err: any) {
+              logger.warn('[CanonicalMemoryTree] Failed to register alias on family bubble', { error: err.message });
+            }
           }
           return {
             entityId: targetBubble.slug,
-            entityName: declaredName,
+            entityName: targetBubble.label,
             entityType: 'person',
             domainKey: 'family',
             relationType: canonicalRel,

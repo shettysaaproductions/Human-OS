@@ -369,21 +369,27 @@ export class ReminderSchedulerService {
     // 4. Nova Autonomous Accountability Check-In (For workout, health, bills, habits, general)
     try {
       const firedAt = now.toISOString();
-      const firstCheckAt = new Date(Date.now() + 25 * 60 * 1000); // 25 min follow-up
+      const meta = goalProcessEngine.parseProcessMetadata(reminder.notes);
+      const isCall = meta.communicationMode === 'call' || reminder.purpose === 'call_reminder';
+      const isUrgentOrCall = isCall || reminder.urgency === 'high' || /\b(wake\s+up|utha\s*dena|alarm|flight|interview|emergency)\b/i.test(reminder.text || '');
+      const escalationMinutes = isUrgentOrCall ? 2 : 25;
+      const firstCheckAt = new Date(Date.now() + escalationMinutes * 60 * 1000);
 
       await supabaseAdmin.from('nova_agenda').insert({
         user_id: reminder.user_id,
         event_description: reminder.text.substring(0, 500),
-        follow_up_question: `User was reminded about: "${reminder.text}". Check warmly and accountably if they did it.`,
+        follow_up_question: isUrgentOrCall
+          ? `High-priority reminder unacknowledged: "${reminder.text}". Proactively escalate via call or urgent follow-up!`
+          : `User was reminded about: "${reminder.text}". Check warmly and accountably if they did it.`,
         follow_up_after: firstCheckAt.toISOString(),
         source_message: `reminder_accountability_check:${reminder.id}:${firedAt}`,
         status: 'pending',
         next_retry_at: firstCheckAt.toISOString(),
-        urgency: reminder.urgency || 'medium',
+        urgency: isUrgentOrCall ? 'high' : (reminder.urgency || 'medium'),
         is_recurring: false,
-        max_retries: 2,
+        max_retries: isUrgentOrCall ? 4 : 2,
       });
-      logger.info('[Reminder] Autonomous accountability check-in queued', { reminderId });
+      logger.info('[Reminder] Autonomous accountability check-in queued', { reminderId, escalationMinutes });
     } catch (agendaErr) {
       logger.warn('[Reminder] Failed to queue check-in agenda', { error: agendaErr instanceof Error ? agendaErr.message : String(agendaErr) });
     }

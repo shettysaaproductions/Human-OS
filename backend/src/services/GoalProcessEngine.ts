@@ -97,7 +97,7 @@ export class GoalProcessEngine {
     const lower = (taskText || '').toLowerCase();
 
     // 1. Explicit user instruction for a call
-    const explicitCall = /\b(?:(?:please\s+)?(?:call|phone|ring)\s+(?:me|us)(?:\s+back)?|call\s+me\s+(?:at|in|on|tomorrow|kal)|mujhe\s*(?:ek\s*)?call\s*(?:karna|karo|kar\s*dena|lagana)|phone\s*(?:karna|karo|kar\s*dena)\s*mujhe|(?:call|phone)\s*karke\s*(?:yaad|bolna|batana|bol)?|calling\s*me)\b/i.test(lower);
+    const explicitCall = /\b(?:(?:please\s+)?(?:call|phone|ring)\s+(?:me|us)(?:\s+back)?|call\s+me\s+(?:at|in|on|tomorrow|kal)|mujhe\s*(?:ek\s*)?call\s*(?:karna|karo|kar\s*dena|lagana)|phone\s*(?:karna|karo|kar\s*dena)\s*mujhe|(?:call|phone)\s*karke\s*(?:yaad|bolna|batana|bol|remind)?|calling\s*me|remind\s+(?:me\s+)?by\s+calling(?:\s+me)?|remind\s+(?:me\s+)?via\s+call|call\s+pe\s+remind|call\s+reminder)\b/i.test(lower);
     if (explicitCall) {
       return {
         channel: 'call',
@@ -117,7 +117,7 @@ export class GoalProcessEngine {
     }
 
     // 3. Autonomous High-Urgency Tasks: Waking up, airport flights, emergency appointments
-    const wakeUpPattern = /\b(?:wake\s+(?:me|us)\s+up|uthna|uth\s*ke|utha\s*(?:dena|diyo|denaa)|jaga\s*(?:dena|diyo|denaa)|subah\s*\d{1,2}\s*baje\s*alarm|alarm)\b/i.test(lower);
+    const wakeUpPattern = /\b(?:wake\s+(?:me|us)?\s+up|uthna|uth\s*ke|utha\s*(?:dena|diyo|denaa)|jaga\s*(?:dena|diyo|denaa)|subah\s*\d{1,2}\s*baje\s*alarm|alarm)\b/i.test(lower);
     if (wakeUpPattern) {
       return {
         channel: 'call',

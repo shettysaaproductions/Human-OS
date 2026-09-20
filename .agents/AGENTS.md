@@ -57,6 +57,9 @@ For quota/session interruption:
 - Preserve Human-OS runtime OTA/update functionality and Nova runtime self-improvement/model-routing functionality; these are product behavior, not the retired coding-agent framework.
 - After a new database migration, reload the Supabase schema cache as required by the project documentation.
 
+## Living Archify Diagram Synchronization
+Whenever modifying core services (`backend/src/services/`, `auth.ts`, `DEPLOYMENT.md`, or memory workers), review the corresponding Archify `.json` diagram specification, update any changed relationships or stages, and run `archify deliver` to recompile the HTML artifact per [.agents/rules/archify_sync.md](file:///C:/Users/Laptop%206/Documents/Human%20Os/.agents/rules/archify_sync.md).
+
 ## Scope Discipline
 Do not modify production runtime code for a documentation/continuity task. Do not deploy, OTA, or push `main` unless explicitly requested. Prefer small, verifiable commits and independent review before production approval.
 

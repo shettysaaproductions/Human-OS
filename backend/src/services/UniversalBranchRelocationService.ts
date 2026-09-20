@@ -97,6 +97,9 @@ export class UniversalBranchRelocationService {
 
   private isInvalidEntityName(name: string): boolean {
     if (!name || name.trim().length < 2) return true;
+    const lower = name.trim().toLowerCase();
+    if (/\b(one|guy|person|someone|somebody|who|whom|talking|speaking|mentioned)\b/i.test(lower)) return true;
+    if (/^(the\s+)?(one|person|guy|friend|character|boy|girl)\s+(i|we|you)\b/i.test(lower)) return true;
     return !isValidEntityName(name).isValid;
   }
 
