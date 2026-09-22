@@ -38,6 +38,7 @@ import { voiceResponseLifecycle, isInterimThinkingPhrase, stripThinkingPrefix } 
 import { novaPipelineOrchestrator } from '../pipeline/NovaPipelineOrchestrator';
 import { NovaEventFactory } from '../pipeline/NovaEvent';
 import { hydrateUserContext } from '../services/UserContextSnapshot';
+import { buildContextPacket, summarizeContextPacket } from '../services/ContextPacket';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -2075,6 +2076,39 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
         logger.debug('[Chat] Doubt eligibility non-fatal error', { error: eligErr?.message });
       }
 
+      // ── Phase 3: Build ContextPacket — the bounded LLM-facing context boundary ──
+      // Uses the resolved snapshot + cogCtx (conflict-resolved durableFacts) to build
+      // a single, relevance-filtered packet. Passed into brainContext so NovaBrainService
+      // can route all promptBuilder calls through formatContextPacketForPrompt().
+      const snap = await snapshotPromise;
+      let contextPacket: ReturnType<typeof buildContextPacket> | undefined;
+      if (snap) {
+        try {
+          contextPacket = buildContextPacket(snap, {
+            operation: 'chat',
+            turnKeywords: keywords,
+            cogCtx: cogCtx ? {
+              memories: {
+                durableFacts: (cogCtx.memories?.durableFacts || []) as any,
+                goals: (cogCtx.memories?.goals || []) as any,
+              },
+              metadata: {
+                conflicts_detected: cogCtx.metadata?.conflicts_detected,
+                conflicts_resolved: cogCtx.metadata?.conflicts_resolved,
+              },
+            } : undefined,
+          });
+          logger.info('[Chat][Phase3] ContextPacket built', {
+            userId,
+            summary: summarizeContextPacket(contextPacket),
+          });
+        } catch (pktErr) {
+          logger.warn('[Chat][Phase3] ContextPacket build failed — NovaBrain will use legacy context arrays', {
+            userId, error: pktErr instanceof Error ? pktErr.message : String(pktErr)
+          });
+        }
+      }
+
       const brainContext = {
         memories: enrichedMemories,
         workingMemories,
@@ -2119,6 +2153,10 @@ The user explicitly corrected that "${entityCorrection.entityName}" is NOT "${ol
         language: language || (isEnglishUser ? 'en' : 'auto'),
         isEnglishUser,
         todayDayName: DAY_NAMES[dayIdx],
+        // Phase 3: ContextPacket — bounded, conflict-resolved, LLM-facing context source.
+        // When present, NovaBrainService routes through formatContextPacketForPrompt() instead
+        // of raw memories/workingMemories/shortTermMemories/recentMessages arrays.
+        contextPacket,
       };
 
 

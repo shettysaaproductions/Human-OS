@@ -4,6 +4,8 @@ import { logger } from '../lib/logger';
 import { promptBuilder } from './promptBuilder';
 import { backgroundActions } from './BackgroundActionService';
 import { watchtowerInspector } from './WatchtowerInspector';
+import { formatContextPacketForPrompt } from './ContextPacket';
+import type { ContextPacket } from './ContextPacket';
 
 
 
@@ -721,19 +723,57 @@ export class NovaBrainService {
     }
 
     // ── Conversation Prompt Assembly ──────────────────────────────────────────────────
+    // Phase 3: When context.contextPacket is available, route through formatContextPacketForPrompt()
+    // to get the bounded, conflict-resolved, relevance-filtered context arrays.
+    // This is the ONLY path from ContextPacket to the model prompt — the LLM-facing boundary.
+    let promptMemories = context.memories || [];
+    let promptWorkingMemories = context.workingMemories || [];
+    let promptShortTermMemories = context.shortTermMemories || [];
+    let promptPreferredName = context.profile?.preferred_name;
+    let promptCompanionPersonality = context.profile?.companion_personality;
+    let promptGrammaticalGender = context.profile?.grammatical_gender;
+    let promptLanguage: 'en' | 'hi' | 'auto' = context.language || 'auto';
+    let promptRecentMessages = context.recentMessages;
+
+    if (context.contextPacket) {
+      try {
+        const pkt = context.contextPacket as ContextPacket;
+        const pktShape = formatContextPacketForPrompt(pkt);
+        promptMemories = pktShape.memories;
+        promptWorkingMemories = pktShape.workingMemories;
+        promptShortTermMemories = pktShape.shortTermMemories;
+        promptPreferredName = pktShape.preferredName;
+        promptCompanionPersonality = pktShape.companionPersonality;
+        promptGrammaticalGender = pktShape.grammaticalGender;
+        promptLanguage = pktShape.preferredLanguage;
+        // Only replace recentMessages if packet has conversation data
+        if (pktShape.recentMessages && pktShape.recentMessages.length > 0) {
+          promptRecentMessages = pktShape.recentMessages;
+        }
+        logger.info('[NOVA BRAIN] Using ContextPacket as LLM context source', {
+          userId: _userId,
+          summary: pkt.metrics ? `mem=${pkt.metrics.memoriesIncluded} chat=${pkt.metrics.chatMessagesIncluded} tokens~${pkt.metrics.totalTokenEstimate} cogCtx=${pkt.metrics.usedCogCtxMemories}` : 'ok',
+        });
+      } catch (pktErr) {
+        logger.warn('[NOVA BRAIN] ContextPacket formatting failed — falling back to raw context arrays', {
+          userId: _userId, error: pktErr instanceof Error ? pktErr.message : String(pktErr)
+        });
+      }
+    }
+
     // The 49B model's ONLY job: be Nova. No tool JSON. No XML tags.
     const conversationSystemPrompt = promptBuilder.buildSystemPrompt(
       context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
-      context.memories || [],
-      context.workingMemories || [],
-      context.profile?.preferred_name,
-      context.profile?.companion_personality,
-      context.shortTermMemories || [],
-      context.language || 'auto',
+      promptMemories,
+      promptWorkingMemories,
+      promptPreferredName,
+      promptCompanionPersonality,
+      promptShortTermMemories,
+      promptLanguage,
       context.recentCrossSessionContext,
       'HUMAN_CHAT',
       context.situationBrief,
-      context.profile?.grammatical_gender,
+      promptGrammaticalGender,
       context.turnAnalysisBlock
     );
 
@@ -764,7 +804,7 @@ export class NovaBrainService {
       '\n\n[Output format: Plain conversational text only, exactly what you would text a friend on WhatsApp. Do not include XML tags, JSON, or prompt labels.]',
     ].filter(Boolean).join('\n');
 
-    const convoMessages = buildMessages(conversationFullPrompt, context.recentMessages, combinedUserMessage);
+    const convoMessages = buildMessages(conversationFullPrompt, promptRecentMessages, combinedUserMessage);
 
     const emptyReply = getNovaEmptyReply(isEnglishContext);
     let reply = emptyReply;
@@ -861,17 +901,53 @@ export class NovaBrainService {
     context: any
   ): AsyncGenerator<string, { subconscious_actions: any[] }, unknown> {
     
+    // Phase 3: streamInteraction also uses ContextPacket when available
+    let streamPromptMemories = context.memories || [];
+    let streamPromptWorkingMemories = context.workingMemories || [];
+    let streamPromptShortTermMemories = context.shortTermMemories || [];
+    let streamPromptPreferredName = context.profile?.preferred_name;
+    let streamPromptCompanionPersonality = context.profile?.companion_personality;
+    let streamPromptGrammaticalGender = context.profile?.grammatical_gender;
+    let streamPromptLanguage: 'en' | 'hi' | 'auto' = context.language || 'auto';
+    let streamPromptRecentMessages = context.recentMessages;
+
+    if (context.contextPacket) {
+      try {
+        const pkt = context.contextPacket as ContextPacket;
+        const pktShape = formatContextPacketForPrompt(pkt);
+        streamPromptMemories = pktShape.memories;
+        streamPromptWorkingMemories = pktShape.workingMemories;
+        streamPromptShortTermMemories = pktShape.shortTermMemories;
+        streamPromptPreferredName = pktShape.preferredName;
+        streamPromptCompanionPersonality = pktShape.companionPersonality;
+        streamPromptGrammaticalGender = pktShape.grammaticalGender;
+        streamPromptLanguage = pktShape.preferredLanguage;
+        if (pktShape.recentMessages && pktShape.recentMessages.length > 0) {
+          streamPromptRecentMessages = pktShape.recentMessages;
+        }
+        logger.info('[NOVA BRAIN][stream] Using ContextPacket as LLM context source', {
+          userId: _userId,
+          summary: pkt.metrics ? `mem=${pkt.metrics.memoriesIncluded} chat=${pkt.metrics.chatMessagesIncluded}` : 'ok',
+        });
+      } catch (pktErr) {
+        logger.warn('[NOVA BRAIN][stream] ContextPacket formatting failed — falling back to raw context', {
+          userId: _userId, error: pktErr instanceof Error ? pktErr.message : String(pktErr)
+        });
+      }
+    }
+
     const systemPrompt = promptBuilder.buildSystemPrompt(
       context.basePrompt || 'You are Nova — a virtual best friend, brilliant and deeply empathetic.',
-      context.memories || [],
-      context.workingMemories || [],
-      context.profile?.preferred_name,
-      context.profile?.companion_personality,
-      context.shortTermMemories || [],
-      context.language || 'auto',
+      streamPromptMemories,
+      streamPromptWorkingMemories,
+      streamPromptPreferredName,
+      streamPromptCompanionPersonality,
+      streamPromptShortTermMemories,
+      streamPromptLanguage,
       context.recentCrossSessionContext,
       'HUMAN_CHAT',
-      context.situationBrief
+      context.situationBrief,
+      streamPromptGrammaticalGender
     );
 
     const criticalActionSuccessContext = ''; // No more LLM-blocking critical action evaluation
@@ -900,7 +976,7 @@ export class NovaBrainService {
 
     const combinedUserMessage = messages.map((m, i) => messages.length > 1 ? `USER MESSAGE ${i + 1}:\n${m.message}` : m.message).join('\n\n');
 
-    const convoMessages = buildMessages(fullPrompt, context.recentMessages, combinedUserMessage);
+    const convoMessages = buildMessages(fullPrompt, streamPromptRecentMessages, combinedUserMessage);
 
     const profile = determineUserProfile(combinedUserMessage);
     // Phase 10.1: Route stream through CognitiveModelRouter (Gemini primary, NVIDIA fallback)
