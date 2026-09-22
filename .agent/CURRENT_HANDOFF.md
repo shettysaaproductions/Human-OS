@@ -1,80 +1,101 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-20 — Canonical Identity & Kinship Convergence (Gates 1-12 Completed)
+2026-09-22 — Final Canonical Identity Closure Pass (All 13 Gates Completed) — v0.3.40-beta
 
 ## Session / Agent
-Agent: Antigravity
-Branch: `main`
+Agent: Antigravity  
+Branch: `main`  
+Commit: `9358219` (pushed to `origin/main`)
 
-## Status: RELATIONSHIP-FIRST CANONICAL IDENTITY ENGINE FULLY ENFORCED (GATES 1-12)
+## Status: ✅ CANONICAL IDENTITY CLOSURE COMPLETE — ALL 13 GATES PASSED
 
-Phase 3 semantic-graph failure is 100% resolved. Canonical identity/kinship convergence is verified on live Supabase and through comprehensive regression suites.
-
----
-
-### Executive Summary:
-1. **Generic Relationship-First Canonical Identity Engine**:
-   - Eradicated database-row-order selection (`const primaryBubble = existingSameRel[0]`).
-   - Replaced with evidence-driven canonical ranking in `CanonicalMemoryTreeService.ts` (`resolveCanonicalFamilyBubble`):
-     - Ranks by declared canonical name matching `[rel]_name` (+100)
-     - Existing semantic relationships (+50)
-     - Provenance and memory count (+20)
-     - Sibling guard preserving distinct children (`Rahul` vs `Amit`) unless alias evidence connects them.
-     - Provisional nickname promotion: when a provisional nickname bubble exists (e.g. `Tiku`) and the user subsequently declares the real name (`Shreshth`), the bubble label is promoted to the real name and the provisional label is preserved as an alias.
-2. **Strict Identity Boundary (`SELF ≠ relative entity`)**:
-   - Invariant enforced in `CanonicalMemoryTreeService.ts` via `getUserSelfName(userId)`.
-   - Verified user identity names (`Sagar`) are blocked from becoming relative entities.
-   - Any legacy relative bubble sharing the user's self-identity is safely archived with `archive_reason: 'SELF_NOT_RELATIVE_ENTITY'`.
-3. **Fact Ownership Guarantee (Zero Inversion)**:
-   - In `resolveOrCreateBubbleForMemory`, attributes (`son_name`, `son_nickname`, `son_birth_date`, `son_age`) resolve strictly to the canonical entity.
-   - Fixed memory ownership inversion: both `son_name: Shreshth` and `son_nickname: Tiku` now point directly to the single canonical `Shreshth` bubble.
-4. **Order-Independent Generic Alias Convergence**:
-   - Sequence A ("Shreshth is my son" -> "Tiku is his nickname") and Sequence B ("Tiku is my son's nickname" -> "Shreshth is his real name") converge deterministically to the identical canonical entity (`label: "Shreshth"`, `aliases: ["Tiku"]`).
-   - Registering the same alias repeatedly is strictly idempotent.
-5. **Atomic PostgreSQL Merge Integration**:
-   - All duplicate entity merges use the atomic PostgreSQL RPC `canonical_merge_entities` with transaction isolation and in-process mutex serialization.
+The Final Canonical Identity Closure Pass is 100% complete. Nova's canonical entity resolution is now deterministic, relationship-first, order-independent, concurrency-safe, and proven against the real production Supabase database.
 
 ---
 
-### Live Supabase State (User `62f9190b-1e1d-48d5-9667-12cd0bc3114b`)
+### Executive Summary of Changes (This Session)
 
-| Metric | Before Gate 4 Reconciliation | After Gate 4 & 8 Reconciliation | Status |
-| :--- | :--- | :--- | :--- |
-| **Active Son Bubbles** | **3** (`Sagar`, `Tiku`, `Shreshth`) | **1** (`Shreshth`, `b87b8692-041f-4ca8-b35c-1253b84c4ea2`) | **Converged to 1** |
-| **Active Bubbles Labeled "Sagar"** | 1 (`rel: Son`) | **0 (ZERO)** | Archived with `SELF_NOT_RELATIVE_ENTITY` |
-| **Active Bubbles Labeled "Tiku"** | 2 (`rel: Son`) | **0 (ZERO)** | Merged into canonical `Shreshth` |
-| **Canonical Son Aliases** | `[]` | `["Tiku"]` | Verified alias convergence |
-| **`son_name` Memory Target** | `213cce3e` (Tiku bubble) | `b87b8692` (Shreshth bubble) | **Inversion Eradicated** |
-| **`son_nickname` Memory Target** | `b87b8692` (Shreshth bubble) | `b87b8692` (Shreshth bubble) | Correct canonical ownership |
-| **All Active Son Memories on Canonical** | False (split across 3 bubbles) | **100% True (6/6 memories)** | 100% Attached |
-| **`kg_nodes` for Son** | Mapped to `b87b8692` | Mapped to `b87b8692` (`da209aa9`) | Synchronized |
-| **`kg_edges` for Family** | 8 edges | 8 edges (Mother, Grandfather, Grandmother) | All valid & active |
-| **Reconciliation Idempotency** | - | **100% Idempotent (0 mutations on re-run)** | Verified |
+| Change | File | Description |
+|:---|:---|:---|
+| Conflict pre-filtering | `CanonicalEntityEngine.ts` | Incompatible candidates excluded before scoring (not merely penalized) |
+| Zero timestamp tie-breaking | `CanonicalEntityEngine.ts`, `CanonicalMemoryTreeService.ts` | Removed `updated_at`/`created_at` from ranking; pure `evidence → authority → UUID` order |
+| `RegisterAliasResult` discriminated union | `CanonicalEntityEngine.ts` | Exported union type with `status: 'conflict_detected'` |
+| Single-flight deduplication | `CanonicalMemoryTreeService.ts` | In-flight promise deduplication prevents concurrent double-create |
+| Inverted English pattern precedence | `EntityResolutionService.ts` | Correct handling of "X is my Y" vs "my Y is X" patterns |
+| Section 2B unowned memory reconciliation | `SafeMemoryReconciler.ts` | Links all memories with `bubble_id === null` to their canonical domain/entity bubbles |
+| Goal entity bubbles | `analytics.ts`, `AutonomousGoalResolverService.ts` | Goal `kg_nodes` map to dedicated `entity:*` bubbles under `domain:goals` |
+| kg_edges unique index migration | `20260922_kg_edges_canonical_unique_index.sql` | Unique index on `(user_id, source_node_id, target_node_id, relation_type)` |
+| Real DB concurrency test | `test_real_db_concurrency.ts` | Isolated Supabase auth user fixture, all `ISOLATED_TEST_USER` → `testUserId` + `deleteUser` cleanup |
+| Live verification script | `verify_canonical_closure_live.ts` | Gates 8, 9, 13 — 10 invariants verified against live Supabase |
+| 34-test closure suite | `CanonicalIdentityClosurePass.test.ts` | New comprehensive test suite covering all 13 gates |
+| updateHistory.json v0.3.40-beta | `mobile/src/config/updateHistory.json` | In-app update modal entry added at index 0 |
 
 ---
 
-### Regression Test Suite Verification
+### All Gate Results — Final State
 
-| Suite / Check | Results |
-| :--- | :--- |
-| `CanonicalIdentityKinshipConvergence.test.ts` (Gates 1-10) | **100% Passed (9/9 tests)** |
-| - Test A: Sequence A ("Shreshth is my son" -> "Tiku is his nickname") | Passed |
-| - Test B: Sequence B ("Tiku is son nickname" -> "Shreshth is son real name") | Passed |
-| - Test C: "Mera naam Sagar hai" then "Tiku mera beta hai" (Self != relative) | Passed |
-| - Test D: "Tiku mera beta hai" then user name declared as Sagar | Passed |
-| - Test E: "Sagar is my son" blocked without explicit evidence | Passed |
-| - Test F: Sibling Guard preserves Rahul & Amit as separate sons | Passed |
-| - Test G: Repeated alias mentions remain idempotent | Passed |
-| - Test H: Multilingual Hindi/Hinglish phrasing convergence | Passed |
-| - Test I: Fact Ownership Guarantee (Zero Inversion) | Passed |
-| `PersistentGoalAndReminderLifecycle.test.ts` | **100% Passed (9/9 tests)** |
-| `UniversalBranchRelocation.test.ts` | **100% Passed (12/12 tests)** |
-| Backend Production Build (`cd backend && npm run build`) | **Exit Code 0 (0 errors)** |
-| Mobile TypeScript Check (`cd mobile && npx tsc --noEmit`) | **Exit Code 0 (0 errors)** |
+| Gate | Check | Result |
+|:---|:---|:---|
+| **Gate 1** | Order-invariant candidate ranking | ✅ PASS |
+| **Gate 2** | Relationship-first identity (name alone insufficient) | ✅ PASS |
+| **Gate 3** | Alias convergence & compatibility guard | ✅ PASS |
+| **Gate 4** | Conflict safety (A–E sub-cases) | ✅ PASS |
+| **Gate 5** | End-to-end English + Hinglish extraction pipeline | ✅ PASS |
+| **Gate 6** | Fact ownership via production code (zero manual mock mutation) | ✅ PASS |
+| **Gate 7** | **Real database concurrency** — live Supabase isolated user | ✅ PASS (100%) |
+| **Gate 8** | `canonical_merge_entities` blocked to anon/public | ✅ VERIFIED (`permission denied for function`) |
+| **Gate 9** | 10/10 live database invariants | ✅ ALL PASS |
+| **Gate 10** | Deterministic ranking independent of insertion order | ✅ PASS |
+| **Gate 11** | 20-point regression matrix | ✅ 20/20 PASS |
+| **Gate 12** | Mobile TypeScript check | ✅ EXIT 0 |
+| **Gate 13** | Live production metrics post-closure | ✅ PASS |
+
+---
+
+### Live Supabase State (User `62f9190b-1e1d-48d5-9667-12cd0bc3114b`) — Post-Closure
+
+| Metric | Before Closure | After Closure |
+|:---|:---|:---|
+| Active entity bubbles | 13 | **13** |
+| Active memories | 41 | **41** |
+| Active memories without `bubble_id` | **20** | **0** ✅ |
+| Active `kg_nodes` | 15 | **15** |
+| Unmapped `kg_nodes` | 0 | **0** |
+| Active `kg_edges` | 8 | **8** |
+| Duplicate canonical candidates | 0 | **0** |
+| Archived provisional entities | 25 | **25** |
+| Reconciliation idempotent | - | **100% (0 mutations on re-run)** ✅ |
+
+---
+
+### Test Suites
+
+| Suite | Tests | Status |
+|:---|:---|:---|
+| `CanonicalIdentityClosurePass.test.ts` | 34/34 | ✅ PASS |
+| `CanonicalIdentityKinshipConvergence.test.ts` | 9/9 | ✅ PASS |
+| `CanonicalMemoryConvergence.test.ts` | 5/5 | ✅ PASS |
+| `backend npm run build` | — | ✅ EXIT 0 |
+| `mobile tsc --noEmit` | — | ✅ EXIT 0 |
+
+---
+
+### OTA & Deployment Record
+
+| Field | Value |
+|:---|:---|
+| Version | `v0.3.40-beta` |
+| Update Group ID | `15dc3a8e-c3e2-4b2d-8de9-c6b769538e3e` |
+| Android Update ID | `01a0c8c8-6743-7253-873f-19701013e90a` |
+| iOS Update ID | `01a0c8c8-6743-7278-bb7d-04632ed61e53` |
+| Branch | `production` |
+| Commit | `9358219` |
+| EAS Dashboard | https://expo.dev/accounts/shettysaa/projects/mobile/updates/15dc3a8e-c3e2-4b2d-8de9-c6b769538e3e |
 
 ---
 
 ### Mandatory Rule Before Phase 4
-Phase 4 must NOT be started until user review and authorization.
-All Gates 1-12 acceptance criteria have been satisfied.
+Phase 4 MUST NOT be started until user review and explicit authorization.  
+All 13 Gates of the Final Canonical Identity Closure Pass have been satisfied.  
+**NEXT ACTION**: Await user authorization for Phase 4.
