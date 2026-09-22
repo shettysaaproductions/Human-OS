@@ -1,14 +1,14 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-22 — Security Hardening + Context Snapshot + KG RPCs — Phases A-H
+2026-09-23 — Phase 1 (RLS Security Closure) + Phase 2 (Shared Context System) COMPLETE
 
 ## Session / Agent
-Agent: Antigravity  
-Branch: `main`  
-Commit: `dd0aeb0` (pushed to `origin/main`)
+Agent: Antigravity
+Branch: `main`
+Commit: `b7b4ff0` (pushed to `origin/main`)
 
-## Status: ✅ PHASES A-L COMPLETE — v0.3.43-beta OTA LIVE
+## Status: ✅ PHASES 1 + 2 COMPLETE — LIVE ON MAIN
 
 ---
 
@@ -180,39 +180,72 @@ Full prioritized plan at: `C:\Users\Laptop 6\.gemini\antigravity-ide\brain\c99bd
 
 ---
 
-### NEXT ACTION
+---
 
-All Phases A-L complete for this session. **No outstanding P0/P1 items.**
+### Phase 1 — RLS Security Closure ✅ LIVE
+Commit: `8de2149`
+- 17 tables that were missing RLS enabled: all 55 tables now have `rowsecurity = true`
+- Trust boundaries classified A-E for all 55 tables
+- 40-point security test suite run against live Supabase — all pass
+- Both anon and authenticated key tests: no unauthorized access
 
-Candidates for next session:
-- **Phase I** (P2): Feed `UserContextSnapshot` into `SemanticTurnAgent` / chat context builder to eliminate redundant profile+working_memory fetches when snapshot is already hydrated
-- **Phase J** (P2): Memory lifecycle — `is_archived` compaction migration + decay guard for canonical entities
-- **Archify sync** (P2): Update `memory-etl.dataflow.json`, `memory-compaction.lifecycle.json`, `auth-flow.sequence.json` to match current architecture
-- **GoalProcessEngine integration test** (P3): Verify `nova_agenda` integration with a real end-to-end test
+### Phase 2 — Shared Context System ✅ LIVE
+Commit: `b7b4ff0`
 
+#### New files
+- `backend/src/services/UserContextSnapshot.ts` (v2) — 9-parallel-fetch hydration foundation
+  - Covers: profiles, working_memory, chat_history, memories, life_threads, entity_bubbles,
+    nova_agenda, nova_outreach_log, + supplemental (STM, user_presence, emotion, episodic, reflection, nova_actions)
+  - Added `dayOfWeek` to `temporalContext`, `state` alias to `PresenceRecord` for NACE compatibility
+  - Fixed schema column names against production (removed display_name, updated_at from WM,
+    fixed nova_outreach_log to use actual columns: message, outreach_type, logical_key)
+- `backend/src/services/ContextPacket.ts` — bounded LLM-facing context builder
+  - Per-operation limits: chat (15 msg/12 mem/4 threads), nace (6/15/6), voice (8/10/3)
+  - Keyword-relevance filtering, token estimation, truncation flags
+
+#### Modified files
+- `backend/src/services/CognitiveContextService.ts`
+  - Added `snapshot?: UserContextSnapshot` to `ContextAssemblyOptions`
+  - When snapshot provided: skips 8 of 10 DB queries (profile, chat_history, WM, memories,
+    STM, user_presence, life_threads, nova_actions)
+  - Only reminders + unread_count still query DB (distinct shapes not in snapshot)
+  - Logs: `[CognitiveContext] Using pre-hydrated snapshot (skipping 8 DB queries)`
+- `backend/src/routes/chat.ts`
+  - Calls `hydrateUserContext(userId)` once per turn (snapshotPromise)
+  - cogCtxPromise chains off snapshotPromise, passes snapshot to assembleContext()
+  - profilePromise and wmPromise use snapshot data when available, fall back to cache/DB
+
+#### Performance
+- BEFORE: ~18 parallel DB round-trips (cogCtx 10 + chat route 19, heavily overlapping)
+- AFTER: 9 snapshot fetches + 2 (reminders/unread) + chat-specific queries = no duplicates
+- CogCtx with snapshot: 1456ms vs standalone: 1522ms (live test)
+
+#### Verification
+- 48/48 integration tests pass: `backend/src/scripts/phase2_integration_verify.ts`
+- `npm run build` exit 0 — zero TypeScript errors
+- Live test confirms: `[CognitiveContext] Using pre-hydrated snapshot (skipping 8 DB queries) {userId: ...}`
+
+---
 
 ### Pre-flight Results (This Session)
 
 | Check | Result |
 |:---|:---|
-| `backend npx tsc --noEmit` | ✅ EXIT 0 |
 | `backend npm run build` | ✅ EXIT 0 |
-| RLS 22/22 tables | ✅ LIVE |
-| kg_edges unique index | ✅ LIVE (code 23505 verified) |
-| canonical_merge_entities | ✅ LIVE |
-| rebuild_kg_projection smoke | ✅ LIVE (18 nodes, 8 edges) |
+| Phase 1: 40-point security suite | ✅ ALL PASS (live Supabase) |
+| Phase 2: 48-point integration suite | ✅ ALL PASS (live Supabase) |
+| RLS 55/55 tables | ✅ LIVE |
+| Snapshot path confirmed in CogCtx | ✅ LIVE LOG |
 
+---
 
-### P1 Completion Status
+### NEXT ACTION
 
-| P1 Item | Status |
-|:---|:---|
-| NACE scheduler verification | ✅ AdaptiveConsciousnessScheduler confirmed active |
-| Galaxy table routing | ✅ CanonicalGraphService reads canonical tables only |
-| MemoryDecayService stub check | ✅ Real implementation; canonical protection added |
-| ShortTermMemoryCleanupService stub check | ✅ Functional |
-| nova_outreach_log index | ✅ Index confirmed in migration 038 |
-| Voice WS heartbeat/reconnect | ✅ Already implemented (1s/2s/4s backoff, code 1006/1001) |
-| ProactiveFactGroundingGate wiring | ✅ **WIRED** into NACE Tier 2 output path |
-| MemoryDecayService canonical protection | ✅ **FIXED** — entity facts now immune to decay |
+All Phases 1 + 2 complete. **No outstanding P0/P1 items.**
+
+Candidates for next session:
+- **Phase 3** (P2): Feed `ContextPacket` into the chat prompt builder — replace manual context string assembly with `buildContextPacket(snapshot, { operation: 'chat', turnKeywords: keywords })`. This is the last mile to make the bounded LLM context the actual source for all prompts.
+- **Phase J** (P2): Memory lifecycle — `is_archived` compaction migration + decay guard for canonical entities
+- **Archify sync** (P2): Update `memory-etl.dataflow.json`, `memory-compaction.lifecycle.json` to reflect Phase 2 context pipeline
+- **GoalProcessEngine integration test** (P3): Verify `nova_agenda` end-to-end with real test
 
