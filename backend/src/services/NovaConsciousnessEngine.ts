@@ -62,8 +62,12 @@ export function deriveMissingMemoryCuriosities(
     }
   }
 
-  // 2. Wife check — NEVER ask "Sakshi kya karti hai" if skills/traits are known!
-  const wifeW = wardrobes.find((w: any) => (w.domain === 'family' || w.entityType === 'person') && (w.name.toLowerCase().includes('sakshi') || (w.roleTitle && w.roleTitle.toLowerCase().includes('wife'))));
+  // 2. Wife/Spouse check — NEVER ask about skills if they are already known
+  // NOTE: Find by role title ONLY — never by hardcoded personal names (privacy invariant)
+  const wifeW = wardrobes.find((w: any) =>
+    (w.domain === 'family' || w.entityType === 'person') &&
+    w.roleTitle && ['wife', 'spouse', 'partner', 'biwi', 'patni'].some((r: string) => w.roleTitle.toLowerCase().includes(r))
+  );
   const wifeTraits = wifeW ? wifeW.traits.map((t: any) => `${t.label} ${t.value}`).join(' ').toLowerCase() : '';
   const isWifeSkillsKnown = wifeTraits.includes('cook') || wifeTraits.includes('culinary') || wifeTraits.includes('nail') || wifeTraits.includes('art') || memMap.has('wife_profession') || memMap.has('wife_skills');
 
@@ -72,21 +76,29 @@ export function deriveMissingMemoryCuriosities(
     if (!isWifeSkillsKnown) {
       curiosities.push(`Wife: Name is "${wifeName}", but what she does or her interests are unknown. (e.g. ask casually: "Waise ${wifeName} kya karti hai?")`);
     } else if (wifeTraits.includes('cook')) {
-      // High-IQ strategic synergy: If user has food venture (Shetty's Dhaba) and wife is a cook:
-      const hasDhaba = wardrobes.some((w: any) => 
-        w.name.toLowerCase().includes('dhaba') || 
-        w.name.toLowerCase().includes('kitchen') || 
-        (w.summary && (w.summary.toLowerCase().includes('dhaba') || w.summary.toLowerCase().includes('cloud kitchen')))
-      ) || memories.some(m => /dhaba|kitchen/i.test(m.value) || /dhaba|kitchen/i.test(m.key));
+      // Generic venture-synergy curiosity: if user has a food-related business and spouse is a cook,
+      // explore how their culinary talent could anchor the venture menu.
+      // NEVER hardcode specific business names — find by memory key pattern.
+      const hasFoodVenture = wardrobes.some((w: any) =>
+        w.entityType === 'business' &&
+        (w.summary || w.name || '').toLowerCase().match(/food|restaurant|dhaba|kitchen|cloud.kitchen|cafe|catering|chef|cook/)
+      ) || memories.some(m =>
+        /food|restaurant|dhaba|kitchen|cloud.kitchen|cafe|catering/i.test(m.value) ||
+        /food|restaurant|dhaba|kitchen|cloud.kitchen|cafe|catering/i.test(m.key)
+      );
 
-      if (hasDhaba) {
-        curiosities.push(`Venture Synergy: ${wifeName} is a passionate cook, and user is launching Shetty's Dhaba cloud kitchen. Explore how ${wifeName}'s signature recipes will anchor the cloud kitchen menu.`);
+      if (hasFoodVenture) {
+        curiosities.push(`Venture Synergy: ${wifeName} is a passionate cook, and user appears to be launching a food business venture. Explore how ${wifeName}'s signature recipes or culinary skills could anchor their food venture's menu.`);
       }
     }
   }
 
   // 3. User Work / Profession
-  const hasWorkWardrobe = wardrobes.some((w: any) => (w.domain === 'work' || w.entityType === 'business') && (w.name.toLowerCase().includes('conviction') || (w.roleTitle && w.roleTitle.toLowerCase().includes('founder'))));
+  // Use role-based heuristics — NEVER hardcode specific company/project names
+  const hasWorkWardrobe = wardrobes.some((w: any) =>
+    (w.domain === 'work' || w.entityType === 'business') &&
+    (w.roleTitle && ['founder', 'co-founder', 'ceo', 'entrepreneur', 'director', 'owner', 'cto', 'coo'].some((r: string) => w.roleTitle.toLowerCase().includes(r)))
+  );
   if (!hasWorkWardrobe && !memMap.has('profession') && !memMap.has('job') && !memMap.has('company_name') && !memMap.has('occupation')) {
     curiosities.push(`User Work: Job, profession, or current project is unknown. (e.g. "Waise aap kya kaam karte ho?")`);
   }

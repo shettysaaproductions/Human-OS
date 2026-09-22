@@ -1163,58 +1163,121 @@ class NovaVoiceService {
           );
           if (memoryActions.length > 0) {
             const { canonicalEntityEngine } = await import('./CanonicalEntityEngine');
+            const { normalizeRelation } = await import('./CanonicalEntityEngine');
             const { memoryRepository } = await import('./memoryRepository');
+
+            // ── RELATION PREFIX MAP ────────────────────────────────────────────────────
+            // Maps a key prefix to a normalized relation type (via normalizeRelation).
+            // NO HARDCODED PERSONAL NAMES — relation types are resolved from canonical DB.
+            const RELATION_PREFIX_MAP: Array<{ prefix: string; relation: string; domain: string }> = [
+              { prefix: 'wife_',      relation: 'wife',      domain: 'family' },
+              { prefix: 'husband_',   relation: 'husband',   domain: 'family' },
+              { prefix: 'son_',       relation: 'son',       domain: 'family' },
+              { prefix: 'daughter_',  relation: 'daughter',  domain: 'family' },
+              { prefix: 'mother_',    relation: 'mother',    domain: 'family' },
+              { prefix: 'father_',    relation: 'father',    domain: 'family' },
+              { prefix: 'brother_',   relation: 'brother',   domain: 'family' },
+              { prefix: 'sister_',    relation: 'sister',    domain: 'family' },
+              { prefix: 'friend_',    relation: 'friend',    domain: 'social' },
+              { prefix: 'colleague_', relation: 'colleague', domain: 'work'   },
+              { prefix: 'dog_',       relation: 'dog',       domain: 'lifestyle' },
+              { prefix: 'pet_',       relation: 'pet',       domain: 'lifestyle' },
+              { prefix: 'partner_',   relation: 'partner',   domain: 'family' },
+            ];
+
+            // Cache of relation→bubble for this extraction run (avoids N+1 DB queries)
+            const resolvedEntityCache = new Map<string, { id: string; label: string } | null>();
+
+            const resolveEntityByRelation = async (
+              relation: string
+            ): Promise<{ id: string; label: string } | null> => {
+              const normRel = normalizeRelation(relation);
+              if (resolvedEntityCache.has(normRel)) return resolvedEntityCache.get(normRel)!;
+
+              // Look up the canonical bubble for this user with this relation_type
+              const { data: bubble } = await supabaseAdmin
+                .from('memory_bubbles')
+                .select('id, label')
+                .eq('user_id', userId)
+                .eq('bubble_type', 'entity')
+                .eq('is_archived', false)
+                .ilike('relation_type', normRel)
+                .maybeSingle();
+
+              const result = bubble ? { id: bubble.id, label: bubble.label } : null;
+              resolvedEntityCache.set(normRel, result);
+              return result;
+            };
+
             for (const a of memoryActions) {
               if (a.data?.key && a.data?.value) {
                 try {
-                  // Attempt entity resolution to enforce strict canonical ownership (Gate 3 & 9)
                   const keyStr = a.data.key.toLowerCase();
-                  let targetEntityName: string | null = null;
-                  let targetRelation: string | undefined = undefined;
 
-                  if (keyStr.includes('wife_') || keyStr.includes('sakshi_')) {
-                    targetEntityName = 'Sakshi';
-                    targetRelation = 'Wife';
-                  } else if (keyStr.includes('son_') || keyStr.includes('tiku_') || keyStr.includes('shreshth_')) {
-                    targetEntityName = 'Shreshth';
-                    targetRelation = 'Son';
-                  } else if (keyStr.includes('father_') || keyStr.includes('suresh_')) {
-                    targetEntityName = 'Suresh';
-                    targetRelation = 'Father';
-                  } else if (keyStr.includes('mother_') || keyStr.includes('rajeshree_')) {
-                    targetEntityName = 'Rajeshree';
-                    targetRelation = 'Mother';
-                  } else if (keyStr.includes('ijaz_') || keyStr.includes('colleague_')) {
-                    targetEntityName = 'Ijaz';
-                    targetRelation = 'Friend';
-                  }
+                  // Detect if key has a relation prefix
+                  const matchedPrefix = RELATION_PREFIX_MAP.find(({ prefix }) => keyStr.startsWith(prefix));
 
-                  if (targetEntityName) {
-                    const entity = await canonicalEntityEngine.createOrResolveEntity(
-                      userId,
-                      targetEntityName,
-                      targetRelation,
-                      'family'
-                    );
-                    await canonicalEntityEngine.attachFactToEntity(
-                      userId,
-                      entity.id,
-                      a.data.key,
-                      a.data.value,
-                      {
-                        source: 'live_voice',
-                        confidence: 0.9,
-                        acquisitionMode: 'user_stated',
-                        timestamp: new Date().toISOString(),
-                        evidenceText: pair.user,
-                      }
-                    );
+                  if (matchedPrefix) {
+                    // Try to find the canonical entity bubble by relation type (DB-driven)
+                    const existingEntity = await resolveEntityByRelation(matchedPrefix.relation);
+
+                    if (existingEntity) {
+                      // Entity exists — attach fact to its canonical bubble
+                      await canonicalEntityEngine.attachFactToEntity(
+                        userId,
+                        existingEntity.id,
+                        a.data.key,
+                        a.data.value,
+                        {
+                          source: 'live_voice',
+                          confidence: 0.9,
+                          acquisitionMode: 'user_stated',
+                          timestamp: new Date().toISOString(),
+                          evidenceText: pair.user,
+                        }
+                      );
+                      logger.info('[NovaVoiceService] Fact attached to canonical entity via relation lookup', {
+                        key: a.data.key,
+                        entityId: existingEntity.id,
+                        entityLabel: existingEntity.label,
+                        relation: matchedPrefix.relation,
+                      });
+                    } else {
+                      // Entity does NOT exist yet for this user with this relation.
+                      // Cannot auto-create without a name — save as user-level fact for now.
+                      // The next chat turn will canonicalize it via EntityResolutionService.
+                      logger.info('[NovaVoiceService] No canonical entity found for relation, saving as user-level fact for deferred canonicalization', {
+                        key: a.data.key,
+                        relation: matchedPrefix.relation,
+                      });
+                      // Map domain strings to valid MemoryType values
+                      const domainToMemType = (d: string): import('../types/memory').MemoryType => {
+                        if (d === 'work') return 'work';
+                        if (d === 'family') return 'family';
+                        if (d === 'goals') return 'goals';
+                        return 'personal'; // social, lifestyle → personal
+                      };
+                      await memoryRepository.upsertMemory(userId, {
+                        key: a.data.key,
+                        value: a.data.value,
+                        type: domainToMemType(matchedPrefix.domain),
+                        importance: 6,
+                        confidence: 0.85,
+                        shouldPersist: true,
+                        source_authority: 'deterministic',
+                      }, pair.user);
+                    }
                   } else {
-                    // Legitimate user-level memory
+                    // No relation prefix — legitimate user-level memory (lifestyle, goals, etc.)
+                    const validTypes = ['family','personal','work','goals','preferences','health','important_dates'];
+                    const rawType = a.data.domain || a.data.type || 'personal';
+                    const safeType = validTypes.includes(rawType)
+                      ? rawType as import('../types/memory').MemoryType
+                      : 'personal' as const;
                     await memoryRepository.upsertMemory(userId, {
                       key: a.data.key,
                       value: a.data.value,
-                      type: a.data.domain || a.data.type || 'lifestyle',
+                      type: safeType,
                       importance: 6,
                       confidence: 0.9,
                       shouldPersist: true,

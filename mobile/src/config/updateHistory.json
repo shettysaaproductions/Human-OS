@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.41-beta",
+    "date": "2026-09-22",
+    "title": "🔒 Master Engineering Pass: Privacy Hardening & Voice Memory Architecture Fix",
+    "message": [
+      "Voice Transcript Entity Resolution: Removed all hardcoded personal names from voice memory extraction pipeline. Voice entity facts are now resolved through canonical DB-driven relation lookup (relation_type → memory_bubbles), making the system fully user-agnostic.",
+      "NACE Curiosity Engine: Eliminated hardcoded personal names and business names from deriveMissingMemoryCuriosities. Wife/spouse wardrobe now resolved by role title only; venture synergy curiosity uses generic food-business pattern matching instead of hardcoded business names.",
+      "Phase 0B Deep Verification: Confirmed 0 entity-fact ownership violations, 0 duplicate kg_edges, 0 orphaned kg_nodes — all 41 active memories semantically bound to correct canonical entity bubbles.",
+      "Engineering Principle Compliance: Backend now fully satisfies the 'No Hardcoded Personal Identities' and 'One Canonical Identity Model' invariants across voice, NACE, and memory ETL pipeline.",
+      "TypeScript Integrity: Both backend (tsc --noEmit ✅) and mobile (tsc --noEmit ✅) typecheck clean with zero errors."
+    ]
+  },
+  {
     "version": "0.3.40-beta",
     "date": "2026-09-22",
     "title": "🧬 Authoritative Canonical Identity Closure Pass (Zero-Inversion, Relationship-First & Atomic Concurrency)",
