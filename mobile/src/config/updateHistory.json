@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.3.43-beta",
+    "date": "2026-09-22",
+    "title": "🔒 Security Hardening, 8× Faster Pulse & KG Entity Merge",
+    "message": [
+      "P0 Security: Row-Level Security (RLS) now enforced on all 22 user-data tables in Supabase. Every table is owner-locked (auth.uid() = user_id) with 45 active policies. Background job and telemetry tables fully revoked from public access.",
+      "Nova Pulse Performance: UserContextSnapshot replaces 30+ sequential database queries per consciousness pulse with 8 parallel fetches — dramatically reducing latency for proactive outreach evaluation.",
+      "KG Entity Merge: canonical_merge_entities and rebuild_kg_projection PostgreSQL RPCs now live. Entity merge operations are fully atomic with row-level locking and deadlock prevention. CanonicalEntityEngine.mergeEntities() is no longer silently failing.",
+      "Privacy: Removed last hardcoded personal identity from NACE curiosity engine. Son wardrobe detection now uses role-title matching only, never hardcoded names."
+    ]
+  },
+  {
     "version": "0.3.42-beta",
     "date": "2026-09-22",
     "title": "🛡️ Proactive Hallucination Gate & Canonical Memory Decay Protection",
