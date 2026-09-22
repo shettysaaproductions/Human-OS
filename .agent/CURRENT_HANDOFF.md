@@ -269,6 +269,21 @@ CHAT TURN → hydrateUserContext → UserContextSnapshot
 
 ---
 
+
+### Phase 3.1 — ContextPacket Closure 🔧 IMPLEMENTED
+
+Commits:
+- `c0b9ddf` — ContextPacket is now self-contained; prompt formatter is pure and no longer reads `_rawSnapshot`.
+- `0bdb2db` — verification expanded to assert CognitiveContext-resolved values survive into the final prompt shape and the raw-snapshot escape hatch is absent.
+
+Changes:
+- `ContextPacket.memories` now carries the metadata required by promptBuilder directly: id, importance, confidence, created_at.
+- Added bounded `ContextPacket.workingMemories` section; formatter consumes packet data instead of `UserContextSnapshot`.
+- `ContextPacket.shortTermMemories` now carries importance/timestamp needed by the prompt shape.
+- `formatContextPacketForPrompt()` is now a pure packet → prompt-shape adapter.
+- Added tests T17/T18 for final resolved-value preservation and raw-snapshot removal.
+
+Runtime verification status: GitHub confirms the commits are present on `main`. CI status checks are currently empty, so local TypeScript/build execution should still be run before declaring this sub-phase production-verified.
 ### NEXT ACTION
 
 All Phases 1 + 2 + 3 complete. **No outstanding P0/P1 items.**
