@@ -9,11 +9,11 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { novaBrain } from './NovaBrainService';
-import { temporalAwarenessService } from './TemporalAwarenessService';
 import { outboundDispatcherService } from './OutboundDispatcherService';
 import type { OutboundSource } from '../types/outbound';
 import { resolveUserTzOffsetHours } from './ReminderEngine';
 import { userLifeStageEngine } from './UserLifeStageEngine';
+import { hydrateUserContext, type UserContextSnapshot, type AgendaItem } from './UserContextSnapshot';
 
 // Minimum gap between outreach attempts - set to 1 for online "back-to-back" messaging
 // The effective minimum is dynamically calculated based on presence in getEffectiveMinGap()
@@ -48,8 +48,9 @@ export function deriveMissingMemoryCuriosities(
 
   const curiosities: string[] = [];
 
-  // 1. Son / Infant check
-  const sonW = wardrobes.find((w: any) => (w.domain === 'family' || w.entityType === 'person') && (w.name.toLowerCase().includes('shreshth') || (w.roleTitle && w.roleTitle.toLowerCase().includes('son'))));
+  // 1. Son / Infant check — NEVER use hardcoded personal names (Rule #20)
+  //    Find by roleTitle only: 'son', 'beta', 'child', 'infant', 'toddler'
+  const sonW = wardrobes.find((w: any) => (w.domain === 'family' || w.entityType === 'person') && w.roleTitle && ['son', 'beta', 'child', 'infant', 'toddler', 'bete'].some((r: string) => w.roleTitle.toLowerCase().includes(r)));
   const sonTraits = sonW ? sonW.traits.map((t: any) => `${t.label} ${t.value}`).join(' ').toLowerCase() : '';
   const isSonAgeKnown = sonTraits.includes('month') || sonTraits.includes('mahine') || sonTraits.includes('age') || sonTraits.includes('saal') || memMap.has('son_age');
 
@@ -288,140 +289,89 @@ export class NovaConsciousnessEngine {
       return;
     }
 
-    // 1. Fetch Profile & Temporal Context
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('push_token, preferred_name, timezone_offset, timezone, country')
-      .eq('id', userId)
-      .maybeSingle();
+    // ── PHASE F: Shared Context Snapshot ─────────────────────────────────────
+    // Replaces ~10 sequential DB calls with one parallel Promise.all hydration.
+    // All downstream code reads from the snapshot — no repeated DB queries.
+    const ctx: UserContextSnapshot = await hydrateUserContext(userId);
 
-    if (!profile) return; // No profile at all — can't proceed
+    const profile = ctx.profile;
+    if (!profile) return; // No profile — can't proceed
     const hasPushToken = !!profile.push_token;
     if (!hasPushToken) {
       logger.warn('[NACE] User has no push_token — will save to DB but skip push notification', { userId });
     }
 
-    // Sleep/busy lock respect: if the user said "good night" / is suppressed, stay
-    // silent — UNLESS a high-urgency agenda item (e.g. medical/exam reminder Nova
-    // was asked to track) is due right now and can break through.
-    const { data: suppression } = await supabaseAdmin
-      .from('working_memory')
-      .select('value')
-      .eq('user_id', userId)
-      .eq('key', 'followup_suppressed_until')
-      .maybeSingle();
-    if (suppression?.value && Date.now() < new Date(suppression.value).getTime()) {
-      const { data: urgentAgenda } = await supabaseAdmin
-        .from('nova_agenda')
-        .select('id')
-        .eq('user_id', userId)
-        .in('status', ['pending', 'active'])
-        .eq('urgency', 'high')
-        .lte('next_retry_at', new Date().toISOString())
-        .limit(1);
-      if (!urgentAgenda || urgentAgenda.length === 0) {
+    // ── Sleep/busy suppression ────────────────────────────────────────────────
+    // isSuppressed comes from snapshot (followup_suppressed_until in working_memory)
+    if (ctx.isSuppressed) {
+      // Check if any urgent agenda item can break through the suppression
+      const hasUrgentBreakthrough = ctx.pendingAgenda.some((a: AgendaItem) =>
+        a.urgency === 'high' && a.next_retry_at && new Date(a.next_retry_at) <= new Date()
+      );
+      if (!hasUrgentBreakthrough) {
         logger.info('[NACE] Skipping outreach — user is suppressed (sleep/busy lock)', { userId });
         return;
       }
     }
 
-    // Check if user is in a planned busy window
-    const { data: busyUntilWM } = await supabaseAdmin
-      .from('working_memory')
-      .select('value')
-      .eq('user_id', userId)
-      .eq('key', 'user_busy_until')
-      .maybeSingle();
-
+    // ── Busy window check ─────────────────────────────────────────────────────
     let busyWindowNote = '';
-    if (busyUntilWM?.value) {
-      const busyUntil = new Date(busyUntilWM.value).getTime();
+    const busyUntilVal = ctx.workingMemory.get('user_busy_until');
+    if (busyUntilVal) {
+      const busyUntil = new Date(busyUntilVal).getTime();
       if (Date.now() < busyUntil) {
-        // User is still in their busy window — but if they came online, ignore the busy check
-        const { data: currentPresence } = await supabaseAdmin
-          .from('user_presence')
-          .select('status')
-          .eq('user_id', userId)
-          .maybeSingle();
-          
-        if (currentPresence?.status !== 'online') {
+        const isOnlineNow = ctx.presence?.state === 'online';
+        if (!isOnlineNow) {
           logger.info('[NACE] User still in busy window, skipping outreach', { userId });
           return;
         }
-        // If they came online during busy time → they might be done! Let NACE proceed.
         busyWindowNote = `User said they'd be busy until ${new Date(busyUntil).toLocaleTimeString()} but just came online — they might be done! Check in naturally.`;
       } else {
-        // Busy window expired → clear it and proceed normally
-        await supabaseAdmin.from('working_memory')
+        // Busy window expired — clear it asynchronously (fire-and-forget)
+        void supabaseAdmin.from('working_memory')
           .upsert({ user_id: userId, key: 'user_busy_until', value: '', updated_at: new Date().toISOString() }, { onConflict: 'user_id, key' });
         busyWindowNote = `User was busy but their estimated free time has now passed. Check in naturally — "Free ho gaye?"`;
       }
     }
 
-    // Resolve user's timezone in fractional hours (e.g. 5.5 for IST)
-    const userTzHours = resolveUserTzOffsetHours(profile || undefined);
-    const tContext = await temporalAwarenessService.getContext(userId, userTzHours);
+    // ── Temporal context (from snapshot) ─────────────────────────────────────
+    // resolveUserTzOffsetHours is used in Tier-2 generation further below
+    const tContext = ctx.temporalContext;
 
-    // 2. Fetch Recent Outreach to enforce MIN_GAP
-    const { data: recentOutreach } = await supabaseAdmin
-      .from('nova_outreach_log')
-      .select('created_at')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (recentOutreach) {
-      const minutesSinceLast = (Date.now() - new Date(recentOutreach.created_at).getTime()) / 60000;
+    // ── Outreach gap enforcement (from snapshot) ──────────────────────────────
+    if (ctx.lastOutreachAt) {
+      const minutesSinceLast = (Date.now() - new Date(ctx.lastOutreachAt).getTime()) / 60000;
       if (minutesSinceLast < MIN_GAP_MINUTES) {
-        return; // Absolute floor — never outreach faster than 15 min
+        return; // Absolute floor — never outreach faster than MIN_GAP_MINUTES
       }
     }
 
-    // 2.5 Fetch Recent Assistant Chat (don't reach out if Nova just spoke)
-    const { data: recentAssistantChat } = await supabaseAdmin
-      .from('chat_history')
-      .select('created_at')
-      .eq('user_id', userId)
-      .eq('role', 'assistant')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // ── Recent chat gap checks (from snapshot) ────────────────────────────────
+    // recentChat is chronological (oldest first); find latest by role
+    const latestAssistantMsg = [...ctx.recentChat].reverse().find(m => m.role === 'assistant');
+    const latestUserMsg = [...ctx.recentChat].reverse().find(m => m.role === 'user');
 
-    if (recentAssistantChat) {
-      const minutesSinceLastReply = (Date.now() - new Date(recentAssistantChat.created_at).getTime()) / 60000;
+    if (latestAssistantMsg?.created_at) {
+      const minutesSinceLastReply = (Date.now() - new Date(latestAssistantMsg.created_at).getTime()) / 60000;
       if (minutesSinceLastReply < MIN_GAP_MINUTES) {
-        return; // Nova just spoke — absolute floor
+        return; // Nova just spoke
       }
     }
 
-    // 3. Last user message gap
-    const { data: lastUserMsg } = await supabaseAdmin
-      .from('chat_history')
-      .select('created_at, content')
-      .eq('user_id', userId)
-      .eq('role', 'user')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const gapMinutes = latestUserMsg?.created_at
+      ? (Date.now() - new Date(latestUserMsg.created_at as string).getTime()) / 60000
+      : 0;
+    const lastUserMsg = latestUserMsg?.created_at
+      ? { created_at: latestUserMsg.created_at as string, content: latestUserMsg.content }
+      : null;
 
-    const gapMinutes = lastUserMsg ? (Date.now() - new Date(lastUserMsg.created_at).getTime()) / 60000 : 0;
-    
-    // Fetch user presence to calculate dynamic gap
-    const { data: presenceData } = await supabaseAdmin
-      .from('user_presence')
-      .select('status, updated_at')
-      .eq('user_id', userId)
-      .maybeSingle();
-      
-    let userPresence = presenceData?.status || 'offline';
-    
-    // Presence Decay: If marked online but hasn't updated in 10 mins, downgrade to away
-    if (userPresence === 'online' && presenceData?.updated_at) {
-      const presenceAgeMinutes = (Date.now() - new Date(presenceData.updated_at).getTime()) / 60000;
-      if (presenceAgeMinutes > 10) {
-        userPresence = 'away';
-      }
+    // ── Presence (from snapshot) ──────────────────────────────────────────────
+    let userPresence = ctx.presence?.state || 'offline';
+    // Presence Decay: if snapshot presence is stale (>10 min), downgrade to away
+    const presenceUpdatedAt = ctx.workingMemory.get('presence_updated_at');
+    if (userPresence === 'online' && presenceUpdatedAt) {
+      const presenceAgeMinutes = (Date.now() - new Date(presenceUpdatedAt).getTime()) / 60000;
+      if (presenceAgeMinutes > 10) userPresence = 'away';
     }
 
     // ── ACTIVE USER GUARD (with stuck conversation rescue) ───────────────────
@@ -515,8 +465,9 @@ export class NovaConsciousnessEngine {
     // TIGHTENED: require BOTH fresh presence (< 5min) AND actual recent chat (< 10min)
     // This prevents stale presence from waking NACE during real sleep hours.
     if (tContext.isSleepWindow && userPresence === 'online') {
-      const presenceAge = presenceData?.updated_at 
-        ? (Date.now() - new Date(presenceData.updated_at).getTime()) / 60000 : 999;
+      // presenceUpdatedAt from snapshot working memory (set by presence tracker)
+      const presenceAge = presenceUpdatedAt
+        ? (Date.now() - new Date(presenceUpdatedAt).getTime()) / 60000 : 999;
       // User must be BOTH recently active on presence AND have sent a message recently
       if (presenceAge < 5 && gapMinutes < 10) {
         // User is actively chatting during sleep hours → they're awake
@@ -607,10 +558,10 @@ export class NovaConsciousnessEngine {
       timeOfDayLabel: tContext.timeOfDayLabel
     });
 
-    // Enforce dynamic gap against last outreach
-    if (recentOutreach) {
-      const minutesSinceLast = (Date.now() - new Date(recentOutreach.created_at).getTime()) / 60000;
-      if (minutesSinceLast < Math.max(dynamicGap, MIN_GAP_MINUTES)) {
+    // Enforce dynamic gap against last outreach (from snapshot)
+    if (ctx.lastOutreachAt) {
+      const minutesSinceLastDynamic = (Date.now() - new Date(ctx.lastOutreachAt).getTime()) / 60000;
+      if (minutesSinceLastDynamic < Math.max(dynamicGap, MIN_GAP_MINUTES)) {
         return; // Too soon based on situational gap
       }
     }
