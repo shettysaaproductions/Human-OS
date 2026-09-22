@@ -1,14 +1,54 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-22 — Master Engineering Pass Phase 0 + P1 Fixes — v0.3.42-beta
+2026-09-22 — Security Hardening + Context Snapshot + KG RPCs — Phases A-H
 
 ## Session / Agent
 Agent: Antigravity  
 Branch: `main`  
-Commit: `faba320` (pushed to `origin/main`)
+Commit: `4078311` (pushed to `origin/main`)
 
-## Status: ✅ PHASE 0 + P1 COMPLETE — Advancing to P2
+## Status: ✅ PHASES A-H COMPLETE
+
+---
+
+### This Session (Phases A–H)
+
+#### Phase A — Independent Live Supabase Audit ✅
+- 25 tables open to anonymous read (confirmed via anon key test)
+- kg_edges unique constraint NOT enforced in live DB
+- canonical_merge_entities existed; rebuild_kg_projection missing
+
+#### Phase B+C — P0 Security: RLS + kg_edges Constraint ✅ LIVE
+Commit: `dfaa6d1`
+- RLS enabled on 22 tables via direct pg connection
+- Owner-only policies: `auth.uid() = user_id` on all user-data tables
+- System tables (bg_jobs, failed_jobs, processed_jobs, telemetry): all grants revoked from anon/authenticated
+- kg_edges: `idx_kg_edges_canonical_unique` unique index deployed + verified (code 23505)
+- Post-migration: 22/22 `rowsecurity = true`, 45 RLS policies
+
+#### Phase D — Verifier Hardening ✅
+- Fixed false-positive null-count detection in `phase_a_live_verification.ts`
+
+#### Phase F — UserContextSnapshot (N+1 Elimination) ✅ LIVE
+Commit: `1013c23`
+- New: `backend/src/services/UserContextSnapshot.ts`
+- NACE `processUser()`: ~30 sequential DB calls → 8 parallel `Promise.allSettled()`
+- Bounds: RECENT_CHAT=20, MEMORIES=30, LIFE_THREADS=10, AGENDA=20, OUTREACH=5, ENTITIES=25
+- Integrated into `NovaConsciousnessEngine.processUser()` at entry point
+- `npx tsc --noEmit` exit 0, `npm run build` exit 0
+
+#### Privacy Fix (bundled Phase F) ✅
+- Removed hardcoded `'shreshth'` from son wardrobe lookup in `deriveMissingMemoryCuriosities()`
+- Now uses roleTitle matching only per Rule #20
+
+#### Phase H — KG RPC Functions ✅ LIVE
+Commit: `4078311`
+- `canonical_merge_entities(uuid, uuid, uuid)`: atomic bubble merge with row-level locks
+- `rebuild_kg_projection(uuid, boolean)`: upserts kg_nodes from active memory_bubbles
+- Both SECURITY DEFINER, revoked from anon/authenticated, granted to service_role
+- Smoke test: `rebuild_kg_projection` → `{ success: true, nodes_upserted: 18, edges_preserved: 8 }`
+
 
 ---
 
@@ -121,12 +161,26 @@ Full prioritized plan at: `C:\Users\Laptop 6\.gemini\antigravity-ide\brain\c99bd
 
 ---
 
-### NEXT ACTION (P2 Items)
+### NEXT ACTION (Remaining: Phases I–L)
 
-1. **NACE processUser N+1 profile caching** — `NovaConsciousnessEngine.ts` L280: each user pulse does individual profile query; batch for multi-user scaling
-2. **GoalProcessEngine lifecycle integration test** — verify `GoalProcessEngine` integrates with `nova_agenda` correctly; write integration test
-3. **Update 4 Archify JSON artifacts** — `human-os.architecture.json`, `memory-etl.dataflow.json`, `memory-compaction.lifecycle.json`, `auth-flow.sequence.json` to reflect voice canonical pipeline and grounding gate
-4. **Full production verification pass** — re-run `verify_canonical_closure_live.ts` after all P1 fixes
+| Phase | Priority | Status | Description |
+|:------|:---------|:-------|:-----------|
+| I | P2 | TODO | Feed UserContextSnapshot into SemanticTurnAgent / chat context builder — eliminating the profile+working_memory fetch that overlaps with snapshot |
+| J | P2 | TODO | Memory lifecycle — `is_archived` compaction migration + decay guard for canonical entities |
+| K | P2 | TODO | Archify diagram sync: update 4 JSON artifacts + `archify deliver` |
+| L | P3 | TODO | OTA: version bump, updateHistory.json entry, EAS publish, broadcast push |
+
+### Pre-flight Results (This Session)
+
+| Check | Result |
+|:---|:---|
+| `backend npx tsc --noEmit` | ✅ EXIT 0 |
+| `backend npm run build` | ✅ EXIT 0 |
+| RLS 22/22 tables | ✅ LIVE |
+| kg_edges unique index | ✅ LIVE (code 23505 verified) |
+| canonical_merge_entities | ✅ LIVE |
+| rebuild_kg_projection smoke | ✅ LIVE (18 nodes, 8 edges) |
+
 
 ### P1 Completion Status
 
