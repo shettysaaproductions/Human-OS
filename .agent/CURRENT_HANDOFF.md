@@ -1,14 +1,14 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-22 — Master Engineering Pass Phase 0 — v0.3.41-beta
+2026-09-22 — Master Engineering Pass Phase 0 + P1 Fixes — v0.3.42-beta
 
 ## Session / Agent
 Agent: Antigravity  
 Branch: `main`  
 Commit: `faba320` (pushed to `origin/main`)
 
-## Status: ✅ MASTER ENGINEERING PHASE 0 COMPLETE — ADVANCING TO PHASE P1
+## Status: ✅ PHASE 0 + P1 COMPLETE — Advancing to P2
 
 ---
 
@@ -70,20 +70,20 @@ Script: `backend/src/scripts/verify_entity_fact_ownership.ts`
 
 ---
 
-### OTA Deployment Record
+### OTA Deployment Record (Latest)
 
 | Field | Value |
 |:---|:---|
-| Version | `v0.3.41-beta` |
+| Version | `v0.3.42-beta` |
 | Branch | `production` |
-| Commit | `faba320` |
-| Update Group ID | `2a7d7ea0-235e-4d04-89cd-d829aa315f95` |
-| Android Update ID | `01a0c918-5170-7e26-9850-2b7b3f97dddb` |
-| iOS Update ID | `01a0c918-5170-7947-aaf5-2f76ed423c7f` |
-| EAS Dashboard | https://expo.dev/accounts/shettysaa/projects/mobile/updates/2a7d7ea0-235e-4d04-89cd-d829aa315f95 |
+| Commit | `09ac867` |
+| Update Group ID | `2cd6860f-b9e5-47fc-9744-34a12113f7e6` |
+| Android Update ID | `01a0c92d-4b26-7c0e-a339-6b5ec04cf0dc` |
+| iOS Update ID | `01a0c92d-4b26-796d-bdbb-2d7a2d2f18a9` |
+| EAS Dashboard | https://expo.dev/accounts/shettysaa/projects/mobile/updates/2cd6860f-b9e5-47fc-9744-34a12113f7e6 |
 | Status | ✅ Published |
 
-Previous: `v0.3.40-beta` Group: `15dc3a8e-c3e2-4b2d-8de9-c6b769538e3e`
+Previous: `v0.3.41-beta` Group: `2a7d7ea0-235e-4d04-89cd-d829aa315f95`
 
 ---
 
@@ -100,13 +100,23 @@ Full prioritized plan at: `C:\Users\Laptop 6\.gemini\antigravity-ide\brain\c99bd
 
 ---
 
-### NEXT ACTION
+### NEXT ACTION (P2 Items)
 
-P1 priorities (per implementation plan):
-1. Verify NACE scheduler is active on Render (check `src/index.ts` cron setup)
-2. Verify Neural Galaxy reads `kg_nodes` (not legacy `knowledge_nodes`)
-3. Inspect `MemoryDecayService.ts` and `ShortTermMemoryCleanupService.ts` (suspected stubs)
-4. Voice WebSocket heartbeat / reconnect lifecycle hardening
+1. **NACE processUser N+1 profile caching** — `NovaConsciousnessEngine.ts` L280: each user pulse does individual profile query; batch for multi-user scaling
+2. **GoalProcessEngine lifecycle integration test** — verify `GoalProcessEngine` integrates with `nova_agenda` correctly; write integration test
+3. **Update 4 Archify JSON artifacts** — `human-os.architecture.json`, `memory-etl.dataflow.json`, `memory-compaction.lifecycle.json`, `auth-flow.sequence.json` to reflect voice canonical pipeline and grounding gate
+4. **Full production verification pass** — re-run `verify_canonical_closure_live.ts` after all P1 fixes
 
-Authorization for Phase 4 (originally required) is now superseded by the standing auto-proceed mandate from the master engineering pass directive. Proceed to P1 items above.
+### P1 Completion Status
+
+| P1 Item | Status |
+|:---|:---|
+| NACE scheduler verification | ✅ AdaptiveConsciousnessScheduler confirmed active |
+| Galaxy table routing | ✅ CanonicalGraphService reads canonical tables only |
+| MemoryDecayService stub check | ✅ Real implementation; canonical protection added |
+| ShortTermMemoryCleanupService stub check | ✅ Functional |
+| nova_outreach_log index | ✅ Index confirmed in migration 038 |
+| Voice WS heartbeat/reconnect | ✅ Already implemented (1s/2s/4s backoff, code 1006/1001) |
+| ProactiveFactGroundingGate wiring | ✅ **WIRED** into NACE Tier 2 output path |
+| MemoryDecayService canonical protection | ✅ **FIXED** — entity facts now immune to decay |
 
