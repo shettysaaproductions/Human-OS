@@ -37,6 +37,7 @@ import { DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { voiceResponseLifecycle, isInterimThinkingPhrase, stripThinkingPrefix } from '../services/VoiceResponseLifecycle';
 import { novaPipelineOrchestrator } from '../pipeline/NovaPipelineOrchestrator';
 import { NovaEventFactory } from '../pipeline/NovaEvent';
+import { hydrateUserContext } from '../services/UserContextSnapshot';
 import crypto from 'crypto';
 
 export const MAX_OUTPUT_TOKENS = 2048;
@@ -1392,35 +1393,55 @@ chatRouter.post(
       const dbStartTime = Date.now();
       context_started_ms = dbStartTime;
 
-      // ── Phase 10: CognitiveContextService — Unified Cognitive Context Fabric ──
-      // Assembles provenance-aware, conflict-resolved, bounded context in parallel.
-      // Runs alongside the existing fetches; never blocks the critical path.
-      const cogCtxPromise = cognitiveContextService.assembleContext(userId, {
-        message: effectiveMessage,
-        messages: normalizedMessages.map(m => ({ message: m.message, reply_to_content: m.reply_to_content, role: (m as any).role })),
-        conversationId: activeConversationId,
-        isProactive: is_proactive,
-        skipMemory,
-      }).catch(err => {
+      // ── Phase 2: Shared UserContextSnapshot — hydrate once, pass to all consumers ──
+      // The snapshot runs in parallel with the cogCtxPromise (both fire-and-resolve).
+      // When the snapshot resolves before cogCtx assembles, cogCtx receives it via options.snapshot
+      // and skips 8 redundant DB queries (profile, chat_history, WM, memories, STM,
+      // user_presence, life_threads, nova_actions).
+      const snapshotPromise = hydrateUserContext(userId).catch(err => {
+        logger.warn('[Chat][Snapshot] UserContextSnapshot hydration failed — cogCtx will self-fetch', {
+          userId, error: err instanceof Error ? err.message : String(err)
+        });
+        return null;
+      });
+
+      // ── Phase 10: CognitiveContextService — pass snapshot when available ──
+      const cogCtxPromise = snapshotPromise.then(snap =>
+        cognitiveContextService.assembleContext(userId, {
+          message: effectiveMessage,
+          messages: normalizedMessages.map(m => ({ message: m.message, reply_to_content: m.reply_to_content, role: (m as any).role })),
+          conversationId: activeConversationId,
+          isProactive: is_proactive,
+          skipMemory,
+          snapshot: snap || undefined,
+        })
+      ).catch(err => {
         logger.warn('[Chat][Phase10] CognitiveContext assembly failed — continuing with legacy context', {
           userId, error: err instanceof Error ? err.message : String(err)
         });
         return null;
       });
 
-      const profilePromise = (cachedProfile && cachedProfile.push_token)
-        ? Promise.resolve({ data: cachedProfile, error: null })
-        : qt.track('get_profile', 'profiles', () => supabaseAdmin.from('profiles').select('preferred_name, companion_personality, country, push_token, current_visual_context, timezone_offset, grammatical_gender').eq('id', userId).maybeSingle());
+      // Profile: use snapshot if available (avoids a cache-miss DB hit)
+      const profilePromise: Promise<any> = snapshotPromise.then(async (snap): Promise<any> => {
+        if (snap?.profile) return { data: snap.profile, error: null };
+        if (cachedProfile && cachedProfile.push_token) return { data: cachedProfile, error: null };
+        return qt.track('get_profile', 'profiles', () => supabaseAdmin.from('profiles').select('preferred_name, companion_personality, country, push_token, current_visual_context, timezone_offset, grammatical_gender').eq('id', userId).maybeSingle());
+      });
 
       const historyPromise = qt.track('get_chat_history', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content, reply_to_content').eq('user_id', userId).eq('conversation_id', activeConversationId).order('created_at', { ascending: false }).limit(100));
 
       const crossSessionPromise = qt.track('get_cross_session_context', 'chat_history', () => supabaseAdmin.from('chat_history').select('role, content').eq('user_id', userId).neq('conversation_id', activeConversationId).order('created_at', { ascending: false }).limit(6)).then(res => res).catch(() => ({ data: null, error: null }));
 
-      const wmPromise = cachedWm
-        ? Promise.resolve({ data: cachedWm.map(w => ({ key: w.key, value: w.value })), error: null })
-        : skipMemory
-        ? Promise.resolve({ data: [], error: null })
-        : qt.track('get_working_memory', 'working_memory', () => supabaseAdmin.from('working_memory').select('key, value').eq('user_id', userId).gt('expires_at', new Date().toISOString()).limit(10));
+      const wmPromise: Promise<any> = snapshotPromise.then(async (snap): Promise<any> => {
+        if (snap?.workingMemoryRows && snap.workingMemoryRows.length >= 0) {
+          return { data: snap.workingMemoryRows.map(w => ({ key: w.key, value: w.value })), error: null };
+        }
+        if (cachedWm) return { data: cachedWm.map(w => ({ key: w.key, value: w.value })), error: null };
+        if (skipMemory) return { data: [], error: null };
+        return qt.track('get_working_memory', 'working_memory', () => supabaseAdmin.from('working_memory').select('key, value').eq('user_id', userId).gt('expires_at', new Date().toISOString()).limit(10));
+      });
+
 
       const memoriesPromise = skipMemory ? Promise.resolve([]) : memoryRepository.searchMemories(userId, keywords).catch(() => []);
 

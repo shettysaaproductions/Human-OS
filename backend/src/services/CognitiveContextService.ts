@@ -27,6 +27,7 @@ import { TurnAnalyzer, TurnAnalysisResult } from './TurnAnalyzer';
 import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { memoryPolicyService } from './MemoryPolicyService';
 import { resolveUserTzOffsetHours } from './ReminderEngine';
+import type { UserContextSnapshot } from './UserContextSnapshot';
 
 export interface ContextItemProvenance {
   source: 'current_turn' | 'chat_history' | 'working_memory' | 'short_term_memory' | 'episodic_memory' | 'long_term_memory' | 'life_thread' | 'nova_action' | 'reminder' | 'user_profile' | 'presence';
@@ -152,6 +153,14 @@ export interface ContextAssemblyOptions {
   maxWorkingMemories?: number;
   maxLifeThreads?: number;
   maxActions?: number;
+  /**
+   * Pre-hydrated UserContextSnapshot.
+   * When provided, the 8 overlapping DB queries (profile, chat_history,
+   * working_memory, memories, stm, user_presence, life_threads, nova_actions)
+   * are skipped — snapshot data is mapped directly to internal variables.
+   * Reduces duplicate DB round-trips from ~18 to ~3 per chat turn.
+   */
+  snapshot?: UserContextSnapshot;
 }
 
 export class CognitiveContextService {
@@ -215,123 +224,172 @@ export class CognitiveContextService {
       logger.info('[CognitiveContext] Memory paused — skipping persistent memory enrichment', { userId });
     }
 
-    // ── Parallel Safe Queries ───────────────────────────────────────────────
-    const profilePromise = qt.track('get_user_profile', 'profiles', () =>
-      supabaseAdmin.from('profiles').select('id, preferred_name, companion_personality, grammatical_gender, country, timezone_offset, current_visual_context').eq('id', userId).maybeSingle()
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Profile fetch failed', { error: err.message });
-      degradedSources.push('profiles');
-      return { data: null };
-    });
+    // ── Parallel Safe Queries (or snapshot short-circuit) ─────────────────────
+    // When a pre-hydrated snapshot is provided, skip the 8 overlapping queries.
+    // Only reminders (different shape from nova_agenda) and unread count still run.
+    const snap = options.snapshot;
 
-    const historyPromise = qt.track('get_recent_chat_history', 'chat_history', () =>
-      supabaseAdmin.from('chat_history').select('id, role, content, reply_to_content, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Chat history fetch failed', { error: err.message });
-      degradedSources.push('chat_history');
-      return { data: [] };
-    });
+    let profileRes: any;
+    let historyRes: any;
+    let wmRes: any;
+    let memoriesRes: any;
+    let stmRes: any;
+    let presenceRes: any;
+    let unreadRes: any;
+    let lifeThreadsRes: any;
+    let actionsRes: any;
+    let remindersRes: any;
 
-    const wmPromise = memoryEnabled
-      ? qt.track('get_working_memory', 'working_memory', () =>
-          supabaseAdmin.from('working_memory').select('key, value, created_at, promotion_status, expires_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
-        ).then((res: any) => {
-          if (res && Array.isArray(res.data)) {
-            const now = new Date().toISOString();
-            res.data = res.data.filter((wm: any) =>
-              wm.promotion_status !== 'SUPERSEDED' &&
-              wm.promotion_status !== 'INVALIDATED' &&
-              (!wm.expires_at || wm.expires_at > now)
-            );
-          }
-          return res;
-        }).catch(err => {
-          logger.warn('[CognitiveContext] Working memory fetch failed', { error: err.message });
-          degradedSources.push('working_memory');
+    if (snap) {
+      // ── SNAPSHOT PATH: map snapshot data directly ────────────────────────
+      logger.debug('[CognitiveContext] Using pre-hydrated snapshot (skipping 8 DB queries)', { userId });
+
+      profileRes = { data: snap.profile || {} };
+      historyRes = { data: snap.recentChat.map(m => ({ role: m.role, content: m.content, reply_to_content: m.reply_to_content, created_at: m.created_at })) };
+      wmRes = { data: snap.workingMemoryRows };
+      memoriesRes = { data: snap.memories };
+      stmRes = { data: snap.shortTermMemories };
+      presenceRes = { data: snap.presence ? {
+        status: snap.presence.status || (snap.isOnline ? 'online' : 'offline'),
+        last_active_at: snap.presence.last_active_at,
+        last_typing_at: snap.presence.last_typing_at,
+      } : null };
+      lifeThreadsRes = { data: snap.lifeThreads };
+      actionsRes = { data: snap.novaActions };
+
+      // Still run unread count + reminders — they have shapes not in snapshot
+      [unreadRes, remindersRes] = await Promise.all([
+        qt.track('get_unread', 'chat_history', () =>
+          supabaseAdmin.from('chat_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('role', 'assistant').eq('is_read', false)
+        ).catch(_err => { degradedSources.push('unread_count'); return { count: 0 }; }),
+
+        qt.track('get_upcoming_reminders', 'reminders', () =>
+          supabaseAdmin.from('reminders').select('id, text, trigger_at, event_trigger').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(5)
+        ).catch(err => {
+          logger.warn('[CognitiveContext] Reminders fetch failed', { error: err.message });
+          degradedSources.push('reminders');
           return { data: [] };
-        })
-      : Promise.resolve({ data: [] } as any);
+        }),
+      ]);
 
-    const memoriesPromise = memoryEnabled
-      ? qt.track('get_all_memories', 'memories', () =>
-          supabaseAdmin
-            .from('memories')
-            .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status, lifecycle_state, superseded_by')
-            .eq('user_id', userId)
-            .eq('is_archived', false)
-            .order('importance', { ascending: false })
-            .limit(150)
-        ).then((res: any) => {
-          // Defensive in-memory trust boundary & supersession filter
-          if (res && Array.isArray(res.data)) {
-            res.data = res.data.filter((m: any) =>
-              !m.is_archived &&
-              m.lifecycle_state !== 'SUPERSEDED' &&
-              m.lifecycle_state !== 'INVALIDATED' &&
-              !m.superseded_by &&
-              (m.compression_status === null || m.compression_status === undefined || m.compression_status === 'trusted')
-            );
-          }
-          return res;
-        }).catch(err => {
-          logger.warn('[CognitiveContext] Memories fetch failed', { error: err.message });
-          degradedSources.push('memories');
-          return { data: [] };
-        })
-      : Promise.resolve({ data: [] } as any);
+    } else {
+      // ── DB PATH: fetch all 10 queries independently (legacy / standalone) ──
+      const profilePromise = qt.track('get_user_profile', 'profiles', () =>
+        supabaseAdmin.from('profiles').select('id, preferred_name, companion_personality, grammatical_gender, country, timezone_offset, current_visual_context').eq('id', userId).maybeSingle()
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Profile fetch failed', { error: err.message });
+        degradedSources.push('profiles');
+        return { data: null };
+      });
 
-    const stmPromise = qt.track('get_stm', 'short_term_memories', () =>
-      supabaseAdmin.from('short_term_memories').select('id, memory, emotion, importance, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10)
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Short term memory fetch failed', { error: err.message });
-      degradedSources.push('short_term_memories');
-      return { data: [] };
-    });
+      const historyPromise = qt.track('get_recent_chat_history', 'chat_history', () =>
+        supabaseAdmin.from('chat_history').select('id, role, content, reply_to_content, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Chat history fetch failed', { error: err.message });
+        degradedSources.push('chat_history');
+        return { data: [] };
+      });
 
-    const presencePromise = qt.track('get_presence', 'user_presence', () =>
-      supabaseAdmin.from('user_presence').select('status, last_active_at, last_typing_at').eq('user_id', userId).maybeSingle()
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Presence fetch failed', { error: err.message });
-      degradedSources.push('user_presence');
-      return { data: null };
-    });
+      const wmPromise = memoryEnabled
+        ? qt.track('get_working_memory', 'working_memory', () =>
+            supabaseAdmin.from('working_memory').select('key, value, created_at, promotion_status, expires_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
+          ).then((res: any) => {
+            if (res && Array.isArray(res.data)) {
+              const now = new Date().toISOString();
+              res.data = res.data.filter((wm: any) =>
+                wm.promotion_status !== 'SUPERSEDED' &&
+                wm.promotion_status !== 'INVALIDATED' &&
+                (!wm.expires_at || wm.expires_at > now)
+              );
+            }
+            return res;
+          }).catch(err => {
+            logger.warn('[CognitiveContext] Working memory fetch failed', { error: err.message });
+            degradedSources.push('working_memory');
+            return { data: [] };
+          })
+        : Promise.resolve({ data: [] } as any);
 
-    const unreadPromise = qt.track('get_unread', 'chat_history', () =>
-      supabaseAdmin.from('chat_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('role', 'assistant').eq('is_read', false)
-    ).catch(_err => {
-      degradedSources.push('unread_count');
-      return { count: 0 };
-    });
+      const memoriesPromise = memoryEnabled
+        ? qt.track('get_all_memories', 'memories', () =>
+            supabaseAdmin
+              .from('memories')
+              .select('id, key, value, memory_type, importance, confidence, frequency, emotional_weight, created_at, updated_at, is_archived, protection_source, protected_at, compression_status, lifecycle_state, superseded_by')
+              .eq('user_id', userId)
+              .eq('is_archived', false)
+              .order('importance', { ascending: false })
+              .limit(150)
+          ).then((res: any) => {
+            if (res && Array.isArray(res.data)) {
+              res.data = res.data.filter((m: any) =>
+                !m.is_archived &&
+                m.lifecycle_state !== 'SUPERSEDED' &&
+                m.lifecycle_state !== 'INVALIDATED' &&
+                !m.superseded_by &&
+                (m.compression_status === null || m.compression_status === undefined || m.compression_status === 'trusted')
+              );
+            }
+            return res;
+          }).catch(err => {
+            logger.warn('[CognitiveContext] Memories fetch failed', { error: err.message });
+            degradedSources.push('memories');
+            return { data: [] };
+          })
+        : Promise.resolve({ data: [] } as any);
 
-    const lifeThreadsPromise = qt.track('get_life_threads', 'life_threads', () =>
-      supabaseAdmin.from('life_threads').select('id, topic, state, priority, provenance, last_relevant_at').eq('user_id', userId).in('state', ['active', 'waiting', 'blocked']).order('last_relevant_at', { ascending: false }).limit(10)
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Life threads fetch failed', { error: err.message });
-      degradedSources.push('life_threads');
-      return { data: [] };
-    });
+      const stmPromise = qt.track('get_stm', 'short_term_memories', () =>
+        supabaseAdmin.from('short_term_memories').select('id, memory, emotion, importance, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10)
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Short term memory fetch failed', { error: err.message });
+        degradedSources.push('short_term_memories');
+        return { data: [] };
+      });
 
-    const actionsPromise = qt.track('get_nova_actions', 'nova_actions', () =>
-      supabaseAdmin.from('nova_actions').select('id, logical_key, title, state, priority, execution_class, source_thread_id, due_at, dependency_ids').eq('user_id', userId).in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']).order('created_at', { ascending: false }).limit(15)
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Nova actions fetch failed', { error: err.message });
-      degradedSources.push('nova_actions');
-      return { data: [] };
-    });
+      const presencePromise = qt.track('get_presence', 'user_presence', () =>
+        supabaseAdmin.from('user_presence').select('status, last_active_at, last_typing_at').eq('user_id', userId).maybeSingle()
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Presence fetch failed', { error: err.message });
+        degradedSources.push('user_presence');
+        return { data: null };
+      });
 
-    const remindersPromise = qt.track('get_upcoming_reminders', 'reminders', () =>
-      supabaseAdmin.from('reminders').select('id, text, trigger_at, event_trigger').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(5)
-    ).catch(err => {
-      logger.warn('[CognitiveContext] Reminders fetch failed', { error: err.message });
-      degradedSources.push('reminders');
-      return { data: [] };
-    });
+      const unreadPromise = qt.track('get_unread', 'chat_history', () =>
+        supabaseAdmin.from('chat_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('role', 'assistant').eq('is_read', false)
+      ).catch(_err => {
+        degradedSources.push('unread_count');
+        return { count: 0 };
+      });
 
-    const [
-      profileRes, historyRes, wmRes, memoriesRes, stmRes, presenceRes, unreadRes, lifeThreadsRes, actionsRes, remindersRes
-    ] = await Promise.all([
-      profilePromise, historyPromise, wmPromise, memoriesPromise, stmPromise, presencePromise, unreadPromise, lifeThreadsPromise, actionsPromise, remindersPromise
-    ]);
+      const lifeThreadsPromise = qt.track('get_life_threads', 'life_threads', () =>
+        supabaseAdmin.from('life_threads').select('id, topic, state, priority, provenance, last_relevant_at').eq('user_id', userId).in('state', ['active', 'waiting', 'blocked']).order('last_relevant_at', { ascending: false }).limit(10)
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Life threads fetch failed', { error: err.message });
+        degradedSources.push('life_threads');
+        return { data: [] };
+      });
+
+      const actionsPromise = qt.track('get_nova_actions', 'nova_actions', () =>
+        supabaseAdmin.from('nova_actions').select('id, logical_key, title, state, priority, execution_class, source_thread_id, due_at, dependency_ids').eq('user_id', userId).in('state', ['suggested', 'pending_confirmation', 'scheduled', 'in_progress', 'blocked']).order('created_at', { ascending: false }).limit(15)
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Nova actions fetch failed', { error: err.message });
+        degradedSources.push('nova_actions');
+        return { data: [] };
+      });
+
+      const remindersPromise = qt.track('get_upcoming_reminders', 'reminders', () =>
+        supabaseAdmin.from('reminders').select('id, text, trigger_at, event_trigger').eq('user_id', userId).eq('status', 'active').or(`trigger_at.is.null,trigger_at.gte.${new Date().toISOString()}`).order('trigger_at', { ascending: true }).limit(5)
+      ).catch(err => {
+        logger.warn('[CognitiveContext] Reminders fetch failed', { error: err.message });
+        degradedSources.push('reminders');
+        return { data: [] };
+      });
+
+      [
+        profileRes, historyRes, wmRes, memoriesRes, stmRes, presenceRes, unreadRes, lifeThreadsRes, actionsRes, remindersRes
+      ] = await Promise.all([
+        profilePromise, historyPromise, wmPromise, memoriesPromise, stmPromise, presencePromise, unreadPromise, lifeThreadsPromise, actionsPromise, remindersPromise
+      ]);
+    }
 
     if (degradedSources.length > 0) {
       this.metrics.context_retrieval_failures += degradedSources.length;
