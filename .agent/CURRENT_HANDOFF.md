@@ -1,14 +1,14 @@
 # CURRENT HANDOFF
 
 ## Last Updated
-2026-09-23 — Phase 1 (RLS Security Closure) + Phase 2 (Shared Context System) COMPLETE
+2026-09-23 — Phase 1 (RLS Security Closure) + Phase 2 (Shared Context) + Phase 3 (ContextPacket LLM Integration) ALL COMPLETE
 
 ## Session / Agent
 Agent: Antigravity
 Branch: `main`
-Commit: `b7b4ff0` (pushed to `origin/main`)
+Commit: `fcb4ab1` (pushed to `origin/main`)
 
-## Status: ✅ PHASES 1 + 2 COMPLETE — LIVE ON MAIN
+## Status: ✅ PHASES 1 + 2 + 3 COMPLETE — LIVE ON MAIN
 
 ---
 
@@ -234,18 +234,47 @@ Commit: `b7b4ff0`
 | `backend npm run build` | ✅ EXIT 0 |
 | Phase 1: 40-point security suite | ✅ ALL PASS (live Supabase) |
 | Phase 2: 48-point integration suite | ✅ ALL PASS (live Supabase) |
+| Phase 3: 16-point integration suite | ✅ ALL PASS (ts-node) |
 | RLS 55/55 tables | ✅ LIVE |
 | Snapshot path confirmed in CogCtx | ✅ LIVE LOG |
+| ContextPacket → NovaBrain prompt path | ✅ LIVE |
+
+---
+
+#### Phase 3 — ContextPacket as Canonical LLM Context ✅ LIVE
+Commit: `fcb4ab1`
+
+**Target achieved:**
+```
+CHAT TURN → hydrateUserContext → UserContextSnapshot
+         → CognitiveContextService (conflict resolution)
+         → buildContextPacket(snap, { cogCtx, turnKeywords })
+         → ContextPacket
+         → formatContextPacketForPrompt()
+         → promptBuilder.buildSystemPrompt()
+         → MODEL
+```
+
+**Changes:**
+- `ContextPacket.ts`: Added `cogCtx` option to `buildContextPacket()` so conflict-resolved `durableFacts` replace raw snapshot memories before the bounded packet is built. Added `ContextPacketPromptShape` type and `formatContextPacketForPrompt()` — the ONLY translation function from ContextPacket to promptBuilder's parameter shape. `metrics.usedCogCtxMemories` and `metrics.conflictsResolved` now tracked per packet.
+- `NovaBrainService.ts`: Both `processInteraction()` and `streamInteraction()` now detect `context.contextPacket` and route all prompt context through `formatContextPacketForPrompt()`. Falls back gracefully to raw context arrays if packet is unavailable.
+- `chat.ts`: Added `buildContextPacket` import; after cogCtx resolves, builds the ContextPacket from snapshot + cogCtx (with turnKeywords and conflict metadata) and attaches as `brainContext.contextPacket`.
+- `phase3_integration_verify.ts`: 16/16 integration tests covering cogCtx merge, keyword promotion, HIDDEN_CONTEXT filtering, conflict propagation, prompt shape fidelity, working memory binding, and snapshot error passthrough.
+
+**Architecture invariants preserved:**
+- Raw `UserContextSnapshot` never reaches the model
+- No new parallel context object created alongside ContextPacket
+- `temporalContextBlock`, `remindersContext`, `turnAnalysisBlock`, `situationBrief` remain as prompt-appendix injections (deterministic, not in packet — correct)
+- Graceful degradation: if packet build fails, NovaBrain falls back to legacy raw context arrays (no outage)
 
 ---
 
 ### NEXT ACTION
 
-All Phases 1 + 2 complete. **No outstanding P0/P1 items.**
+All Phases 1 + 2 + 3 complete. **No outstanding P0/P1 items.**
 
 Candidates for next session:
-- **Phase 3** (P2): Feed `ContextPacket` into the chat prompt builder — replace manual context string assembly with `buildContextPacket(snapshot, { operation: 'chat', turnKeywords: keywords })`. This is the last mile to make the bounded LLM context the actual source for all prompts.
 - **Phase J** (P2): Memory lifecycle — `is_archived` compaction migration + decay guard for canonical entities
-- **Archify sync** (P2): Update `memory-etl.dataflow.json`, `memory-compaction.lifecycle.json` to reflect Phase 2 context pipeline
+- **Archify sync** (P2): Update `memory-etl.dataflow.json`, `memory-compaction.lifecycle.json` to reflect Phase 2+3 context pipeline. Run `archify deliver`.
 - **GoalProcessEngine integration test** (P3): Verify `nova_agenda` end-to-end with real test
-
+- **OTA push** if mobile-visible changes accumulate in a batch
