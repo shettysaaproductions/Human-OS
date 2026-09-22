@@ -87,6 +87,27 @@ Previous: `v0.3.41-beta` Group: `2a7d7ea0-235e-4d04-89cd-d829aa315f95`
 
 ---
 
+### Post-Fix Production Verification (v0.3.42-beta) — Live Supabase ✅
+
+| Metric | Value | Status |
+|:---|:---|:---|
+| Active entity bubbles | 13 | ✅ |
+| Active memories | 41 | ✅ |
+| Active memories without `bubble_id` | **0** | ✅ |
+| Active `kg_nodes` | 13 | ✅ |
+| Unmapped `kg_nodes` | 0 | ✅ |
+| Active `kg_edges` | 8 | ✅ |
+| Duplicate canonical candidates | 0 | ✅ |
+| Archived provisional entities | 25 | ✅ |
+| Reconciliation idempotency (run1 vs run2) | 0 mutations | ✅ |
+| KG projection rebuild | 13 nodes, 8 edges | ✅ |
+| Gate 13 (live production metrics) | PASS | ✅ |
+| Entity-fact ownership violations | 0 | ✅ |
+| Duplicate `kg_edges` | 0 | ✅ |
+| Orphaned `kg_nodes` | 0 | ✅ |
+
+---
+
 ### Prior Gate Results (Carried Forward)
 
 All 13 Canonical Identity Closure Gates from `v0.3.40-beta` continue to pass:
