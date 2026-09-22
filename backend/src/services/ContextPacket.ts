@@ -77,8 +77,17 @@ export interface ContextPacket {
   temporal: ContextPacketScalar<{ localIso: string; timeOfDay: string; isSleepWindow: boolean; tzLabel: string }>;
   presence: ContextPacketScalar<{ isOnline: boolean; voiceActive: boolean; isSuppressed: boolean; effectiveMinGapMinutes: number; status?: string }>;
   conversation: ContextPacketSection<{ role: string; content: string }>;
-  memories: ContextPacketSection<{ key: string; value: string; type?: string }>;
-  shortTermMemories: ContextPacketSection<{ memory: string; emotion?: string }>;
+  memories: ContextPacketSection<{
+    id: string;
+    key: string;
+    value: string;
+    type?: string;
+    importance?: number;
+    confidence?: number;
+    created_at?: string;
+  }>;
+  workingMemories: ContextPacketSection<{ key: string; value: string }>;
+  shortTermMemories: ContextPacketSection<{ memory: string; emotion?: string; importance?: number; timestamp?: string | null }>;
   entities: ContextPacketSection<{ name: string; relation?: string; summary?: string }>;
   lifeThreads: ContextPacketSection<{ topic: string; state: string; nextStep?: string }>;
   agenda: ContextPacketSection<{ description: string; time?: string; urgency?: string; overdue: boolean }>;
@@ -97,8 +106,6 @@ export interface ContextPacket {
     /** Phase 3: conflicts resolved before model sees memories */
     conflictsResolved: number;
   };
-  /** @internal raw snapshot ref for formatContextPacketForPrompt only */
-  _rawSnapshot: UserContextSnapshot;
 }
 
 function roughTokens(text: string): number { return Math.ceil(text.length / 4); }
@@ -199,11 +206,28 @@ export function buildContextPacket(snapshot: UserContextSnapshot, opts: ContextP
     filteredRawMems = rawMemorySource.slice(0, maxMem);
   }
 
-  const memoryItems = filteredRawMems.map(m => ({ key: m.key, value: m.value, type: m.memory_type }));
+  const memoryItems = filteredRawMems.map((m, idx) => ({
+    id: m.id || `pkt_mem_${idx}`,
+    key: m.key,
+    value: m.value,
+    type: m.memory_type,
+    importance: m.importance,
+    confidence: m.confidence,
+    created_at: m.created_at,
+  }));
   const memTokenEstimate = tokenizeSection(memoryItems, m => `${m.key}: ${m.value}`);
 
+  const workingMemoriesRaw = snapshot.workingMemoryRows.map(w => ({ key: w.key, value: w.value }));
+  const workingMemoriesItems = workingMemoriesRaw.slice(0, 20);
+  const workingMemoryTokenEstimate = tokenizeSection(workingMemoriesItems, m => `${m.key}: ${m.value}`);
+
   const maxStm = opts.maxStm ?? defaults.maxStm;
-  const stmItems = snapshot.shortTermMemories.slice(0, maxStm).map(m => ({ memory: m.memory, emotion: m.emotion }));
+  const stmItems = snapshot.shortTermMemories.slice(0, maxStm).map(m => ({
+    memory: m.memory,
+    emotion: m.emotion,
+    importance: m.importance,
+    timestamp: m.created_at ? timeAgo(m.created_at) : null,
+  }));
   const stmTokenEstimate = tokenizeSection(stmItems, m => m.memory);
 
   const entityItems = snapshot.entityBubbles.slice(0, 15).map(e => ({ name: e.name, relation: e.relation_type, summary: e.summary }));
@@ -224,7 +248,7 @@ export function buildContextPacket(snapshot: UserContextSnapshot, opts: ContextP
   const outreachData = { lastAt: snapshot.lastOutreachAt, hasOverdueAgenda: snapshot.hasOverdueAgenda };
 
   const totalTokenEstimate =
-    chatTokenEstimate + memTokenEstimate + stmTokenEstimate +
+    chatTokenEstimate + memTokenEstimate + workingMemoryTokenEstimate + stmTokenEstimate +
     tokenizeSection(entityItems, e => `${e.name}: ${e.summary || ''}`) +
     tokenizeSection(threadItems, t => t.topic) +
     tokenizeSection(agendaItems, a => a.description) +
@@ -241,6 +265,7 @@ export function buildContextPacket(snapshot: UserContextSnapshot, opts: ContextP
     presence: { data: presenceData },
     conversation: { data: chatFiltered, truncated: chatConsidered > maxChat, tokenEstimate: chatTokenEstimate },
     memories: { data: memoryItems, truncated: memoriesConsidered > maxMem, tokenEstimate: memTokenEstimate },
+    workingMemories: { data: workingMemoriesItems, truncated: workingMemoriesRaw.length > workingMemoriesItems.length, tokenEstimate: workingMemoryTokenEstimate },
     shortTermMemories: { data: stmItems, truncated: snapshot.shortTermMemories.length > maxStm, tokenEstimate: stmTokenEstimate },
     entities: { data: entityItems, truncated: snapshot.entityBubbles.length > 15, tokenEstimate: tokenizeSection(entityItems, e => `${e.name}: ${e.summary || ''}`) },
     lifeThreads: { data: threadItems, truncated: snapshot.lifeThreads.length > maxThreads, tokenEstimate: tokenizeSection(threadItems, t => t.topic) },
@@ -249,7 +274,6 @@ export function buildContextPacket(snapshot: UserContextSnapshot, opts: ContextP
     reflection: { data: reflectionData },
     outreach: { data: outreachData },
     metrics: { totalTokenEstimate, memoriesConsidered, memoriesIncluded: filteredRawMems.length, chatMessagesConsidered: chatConsidered, chatMessagesIncluded: chatFiltered.length, snapshotErrors: snapshot.errors.length, usedCogCtxMemories, conflictsResolved },
-    _rawSnapshot: snapshot,
   };
 }
 
@@ -257,49 +281,51 @@ export function buildContextPacket(snapshot: UserContextSnapshot, opts: ContextP
  * formatContextPacketForPrompt() — Phase 3 canonical translation layer.
  *
  * THE only function that converts a bounded ContextPacket into the shape consumed by
- * promptBuilder.buildSystemPrompt() and NovaBrainService context. Call this instead of
- * reading raw snapshot fields or raw cogCtx in the prompt assembly path.
+ * promptBuilder.buildSystemPrompt() and NovaBrainService context. This function is pure:
+ * it MUST NOT read raw snapshot state, database state, or CognitiveContext directly.
  */
 export function formatContextPacketForPrompt(packet: ContextPacket): ContextPacketPromptShape {
-  const snap = packet._rawSnapshot;
+  // Pure adapter: every model-facing field comes from the bounded packet itself.
+  // No raw snapshot, database state, or CognitiveContext is consulted here.
+  const memories = packet.memories.data.map(m => ({
+    id: m.id,
+    key: m.key,
+    value: m.value,
+    memory_type: m.type,
+    importance: m.importance,
+    confidence: m.confidence,
+    created_at: m.created_at,
+  }));
 
-  // Reconstruct full Memory objects needed by promptBuilder (domain classification, dynamic age)
-  const snapMemMap = new Map<string, any>();
-  for (const sm of snap.memories) { snapMemMap.set(sm.key, sm); }
-
-  const memories = packet.memories.data.map((m, idx) => {
-    const orig = snapMemMap.get(m.key);
-    return {
-      id: orig?.id ?? `pkt_${idx}`,
-      key: m.key,
-      value: m.value,
-      memory_type: m.type,
-      importance: orig?.importance || orig?.importance_score,
-      confidence: orig?.confidence,
-      created_at: orig?.created_at,
-    };
-  });
-
-  const workingMemories = snap.workingMemoryRows.map(w => ({ key: w.key, value: w.value }));
-  const profile = snap.profile ?? null;
-  const preferredName = profile?.preferred_name;
-  const companionPersonality = profile?.companion_personality;
-  const grammaticalGender = profile?.grammatical_gender;
-  const rawLang = profile?.preferred_language || 'auto';
+  const workingMemories = packet.workingMemories.data.map(w => ({ key: w.key, value: w.value }));
+  const profileData = packet.profile.data;
+  const preferredName = profileData?.preferredName;
+  const companionPersonality = profileData?.personalityStyle;
+  const grammaticalGender = profileData?.grammaticalGender;
+  const rawLang = profileData?.preferredLanguage || 'auto';
   const preferredLanguage: 'en' | 'hi' | 'auto' = rawLang === 'en' ? 'en' : rawLang === 'hi' ? 'hi' : 'auto';
 
-  const stmRaw = snap.shortTermMemories.slice(0, packet.shortTermMemories.data.length);
-  const shortTermMemories = packet.shortTermMemories.data.map((s, idx) => ({
+  const shortTermMemories = packet.shortTermMemories.data.map(s => ({
     memory: s.memory,
     emotion: s.emotion,
-    importance: stmRaw[idx]?.importance,
-    timestamp: stmRaw[idx]?.created_at ? timeAgo(stmRaw[idx].created_at!) : null,
+    importance: s.importance,
+    timestamp: s.timestamp,
   }));
 
   const recentMessages = packet.conversation.data.map(m => ({
     role: m.role as 'user' | 'assistant' | 'system',
     content: m.content,
   }));
+
+  const profile = profileData ? {
+    preferred_name: profileData.preferredName,
+    companion_personality: profileData.personalityStyle,
+    grammatical_gender: profileData.grammaticalGender,
+    country: profileData.country,
+    timezone_offset: profileData.tzOffset,
+    nova_mode: profileData.novaMode,
+    preferred_language: preferredLanguage,
+  } : null;
 
   return {
     memories,
@@ -315,7 +341,6 @@ export function formatContextPacketForPrompt(packet: ContextPacket): ContextPack
     totalTokenEstimate: packet.metrics.totalTokenEstimate,
   };
 }
-
 /**
  * Serialize a ContextPacket to a compact string for logging/metrics only.
  * Do NOT use this output in LLM prompts. Use formatContextPacketForPrompt() instead.
