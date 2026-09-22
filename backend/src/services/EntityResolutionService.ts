@@ -164,10 +164,10 @@ export class EntityResolutionService {
     // ── 0B. Inverted Relationship Alias / Nickname / Name Statements ───────────
     // e.g. "Tiku mere bete ka nickname hai", "Tiku is my son's nickname"
     // Invariant: Binds strictly to relationship entity (e.g. Son), NEVER to user:self!
-    const invertedRelPattern = /\b([a-zA-Z]+)\s+(?:mere|meri|mera|my)\s+(father|mother|dad|mom|papa|maa|wife|biwi|patni|husband|pati|brother|bhai|sister|behen|son|beta|daughter|beti|friend|dost|dog|cat|pet)\s*(?:ka|ki|ke|'s)?\s*(nickname|nick\s*name|pyar\s+ka\s+naam|naam|name)\s*(?:hai|is)?/i;
     const invertedRelPatternEn = /\b([a-zA-Z]+)\s+(?:is|hai)\s+(?:my|mere|meri|mera)\s+(father|mother|dad|mom|papa|maa|wife|biwi|patni|husband|pati|brother|bhai|sister|behen|son|beta|daughter|beti|friend|dost|dog|cat|pet)(?:'s)?\s*(nickname|nick\s*name|pyar\s+ka\s+naam|naam|name)?/i;
+    const invertedRelPattern = /\b([a-zA-Z]+)\s+(?:mere|meri|mera)\s+(father|mother|dad|mom|papa|maa|wife|biwi|patni|husband|pati|brother|bhai|sister|behen|son|beta|daughter|beti|friend|dost|dog|cat|pet)\s*(?:ka|ki|ke|'s)?\s*(nickname|nick\s*name|pyar\s+ka\s+naam|naam|name)\s*(?:hai|is)?/i;
 
-    const invertedMatch = cleanMsg.match(invertedRelPattern) || cleanMsg.match(invertedRelPatternEn);
+    const invertedMatch = cleanMsg.match(invertedRelPatternEn) || cleanMsg.match(invertedRelPattern);
     if (invertedMatch) {
       const entityValue = this.capitalize(invertedMatch[1].trim());
       const rawRel = invertedMatch[2].toLowerCase();

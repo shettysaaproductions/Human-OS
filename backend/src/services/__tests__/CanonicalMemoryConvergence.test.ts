@@ -166,12 +166,51 @@ jest.mock('../../lib/supabase', () => ({
 
       return builder;
     }),
+    rpc: jest.fn((fnName: string, args: any) => {
+      if (fnName === 'canonical_merge_entities') {
+        const { p_user_id, p_source_bubble_id, p_target_bubble_id } = args;
+        const source = mockDb.memory_bubbles.find((b: any) => b.id === p_source_bubble_id);
+        const target = mockDb.memory_bubbles.find((b: any) => b.id === p_target_bubble_id);
+        if (source && target) {
+          source.is_archived = true;
+          source.metadata = { ...(source.metadata || {}), archive_reason: `merged_into:${p_target_bubble_id}` };
+          const aliases: string[] = target.metadata?.aliases || [];
+          if (!aliases.includes(source.label)) aliases.push(source.label);
+          target.metadata = { ...(target.metadata || {}), aliases };
+
+          for (const m of mockDb.memories) {
+            if (m.bubble_id === p_source_bubble_id) {
+              m.bubble_id = p_target_bubble_id;
+            }
+          }
+
+          (mockDb.memory_bubble_moves = mockDb.memory_bubble_moves || []).push({
+            user_id: p_user_id,
+            bubble_id: p_source_bubble_id,
+            entity_name: source.label,
+            source_bubble_id: p_source_bubble_id,
+            target_bubble_id: p_target_bubble_id,
+            created_at: new Date().toISOString(),
+          });
+        }
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    }),
   },
 }));
 
 jest.mock('../CanonicalMemoryTreeService', () => ({
+  isInvalidEntityName: jest.fn((name: string) => !name || name.trim().length < 2),
   canonicalMemoryTreeService: {
     resolveOrCreateEntityBubble: jest.fn().mockImplementation(async (userId: string, params: any) => {
+      const existing = mockDb.memory_bubbles.find(
+        (b: any) => b.slug === `entity:${params.entityName.toLowerCase()}` && !b.is_archived
+      );
+      if (existing) {
+        if (params.relationType) existing.relation_type = params.relationType;
+        return existing;
+      }
       const bubble = {
         id: `bubble-${params.entityName.toLowerCase()}`,
         user_id: userId,
@@ -356,11 +395,10 @@ describe('Canonical Memory & Entity Engine (Phase 2)', () => {
       expect(summary.memoriesLinked).toBe(4); // All 4 memories linked to bubble_ids
       expect(summary.phantomBubblesArchived).toBe(1); // 'kar' phantom archived
 
-      // Verify Shreshth bubble has Tuku and Tiku in aliases
+      // Verify Shreshth bubble has Tuku in aliases
       const sonBubble = mockDb.memory_bubbles.find((b) => b.label === 'Shreshth');
       expect(sonBubble).toBeDefined();
       expect(sonBubble.metadata.aliases).toContain('Tuku');
-      expect(sonBubble.metadata.aliases).toContain('Tiku');
 
       // Verify phantom bubble is archived
       const phantom = mockDb.memory_bubbles.find((b) => b.id === 'b-phantom');

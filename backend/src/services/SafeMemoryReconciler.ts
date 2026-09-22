@@ -11,7 +11,7 @@
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { canonicalEntityEngine } from './CanonicalEntityEngine';
-import { isInvalidEntityName } from './CanonicalMemoryTreeService';
+import { isInvalidEntityName, canonicalMemoryTreeService } from './CanonicalMemoryTreeService';
 
 export interface ReconciliationSummary {
   userId: string;
@@ -107,6 +107,28 @@ export class SafeMemoryReconciler {
             }
           }
         }
+      }
+    }
+
+    // ── 2B. Reconcile Any Remaining Unowned Memories (Gate 9 & 11) ─────────────
+    const unownedMems = memories.filter((m) => !m.bubble_id);
+    for (const m of unownedMems) {
+      try {
+        const bubble = await canonicalMemoryTreeService.resolveOrCreateBubbleForMemory(userId, {
+          key: m.key,
+          value: m.value,
+          type: m.memory_type,
+        });
+        if (bubble && bubble.id) {
+          await supabaseAdmin
+            .from('memories')
+            .update({ bubble_id: bubble.id, updated_at: new Date().toISOString() })
+            .eq('id', m.id);
+          m.bubble_id = bubble.id;
+          memoriesLinked++;
+        }
+      } catch (unownedErr: any) {
+        logger.warn('[SafeMemoryReconciler] Failed to link unowned memory', { memoryId: m.id, key: m.key, error: unownedErr.message });
       }
     }
 

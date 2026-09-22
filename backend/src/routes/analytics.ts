@@ -5,6 +5,8 @@ import { canonicalizeKey } from '../lib/memoryKeySchema';
 import { complete } from '../lib/nvidia';
 import { SourceAuthority } from '../types/memory';
 import { autonomousGoalResolverService } from '../services/AutonomousGoalResolverService';
+import { canonicalMemoryTreeService } from '../services/CanonicalMemoryTreeService';
+import { memoryRepository } from '../services/memoryRepository';
 import {
   classifyDomain,
   synthesizeConnectedDots,
@@ -715,11 +717,19 @@ analyticsRouter.post('/goals', async (req: Request, res: Response, next: NextFun
     const isCompleted = progVal >= 100;
     const status = isCompleted ? 'completed' : 'active';
 
-    // 1. Insert into kg_nodes
+    // 1. Resolve or create a canonical goal entity bubble under the goals domain (1:1 projection identity)
+    const goalBubble = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(userId, {
+      entityName: cleanTitle,
+      entityType: 'project',
+      domainKey: 'goals',
+    });
+
+    // 2. Insert into kg_nodes
     const { data: node, error: kgError } = await supabaseAdmin
       .from('kg_nodes')
       .insert({
         user_id: userId,
+        bubble_id: goalBubble.id,
         name: cleanTitle,
         entity_type: 'goal',
         attributes: {
@@ -741,23 +751,17 @@ analyticsRouter.post('/goals', async (req: Request, res: Response, next: NextFun
       throw kgError;
     }
 
-    // 2. Also register in memories for LLM knowledge
+    // 3. Also register in memories via canonical memoryRepository for LLM knowledge
     try {
-      await supabaseAdmin
-        .from('memories')
-        .insert({
-          user_id: userId,
-          memory_type: 'goals',
-          key: `goal_${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 30)}`,
-          value: cleanDesc ? `${cleanTitle}: ${cleanDesc}` : cleanTitle,
-          source_authority: 'user_explicit',
-          metadata: {
-            category: cleanCategory,
-            target_date: target_date || null,
-            progress: progVal,
-            status
-          }
-        });
+      await memoryRepository.upsertMemory(userId, {
+        shouldPersist: true,
+        type: 'goals',
+        key: `goal_${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 30)}`,
+        value: cleanDesc ? `${cleanTitle}: ${cleanDesc}` : cleanTitle,
+        importance: 85,
+        confidence: 1.0,
+        source_authority: 'explicit_user',
+      }, 'analytics_goal_create');
     } catch (memErr) {
       logger.warn('[Analytics/goals] Memory insert warning (non-fatal):', { error: String(memErr) });
     }
@@ -1166,26 +1170,18 @@ Return ONLY valid JSON:
           .eq('id', existingWm.id);
       }
 
-      // Also persist authoritative memory row
-      const { data: insertedMem } = await supabaseAdmin
-        .from('memories')
-        .insert({
-          user_id: userId,
-          key: effectiveKey,
-          value: finalValue,
-          memory_type: department || 'personal',
-          importance: 85,
-          confidence: 1.0,
-          is_archived: false,
-          lifecycle_state: 'CURRENT',
-          source_authority: 'explicit_user',
-          created_at: now,
-          updated_at: now
-        })
-        .select('id')
-        .single();
+      // Also persist authoritative memory row via canonical repository
+      await memoryRepository.upsertMemory(userId, {
+        shouldPersist: true,
+        key: effectiveKey,
+        value: finalValue,
+        type: (department as any) || 'personal',
+        importance: 85,
+        confidence: 1.0,
+        source_authority: 'explicit_user',
+      }, 'analytics_memory_update');
 
-      updatedId = insertedMem?.id || existingWm?.id || nodeId;
+      updatedId = existingWm?.id || nodeId;
     }
 
     // Update kg_nodes attributes if present

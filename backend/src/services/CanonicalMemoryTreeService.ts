@@ -11,7 +11,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { LifeDomainKey, DOMAIN_TAXONOMY } from '../lib/memoryDomains';
 import { universalBranchRelocationService, BranchRelocationProposal, RelocationExecutionResult } from './UniversalBranchRelocationService';
 import { logger } from '../lib/logger';
-import { isValidEntityName, inferSemanticEntityType, SemanticEntityType } from '../lib/entitySemanticValidator';
+import { isValidEntityName, inferSemanticEntityType, SemanticEntityType, normalizeRelation } from '../lib/entitySemanticValidator';
 import { generateCanonicalSlug } from '../lib/indicTransliteration';
 
 export type BubbleType = 'domain' | 'entity' | 'branch' | 'attribute';
@@ -114,6 +114,7 @@ export function isInvalidEntityName(name: string): boolean {
 
 export class CanonicalMemoryTreeService {
   private static instance: CanonicalMemoryTreeService;
+  private inFlightEntityCreations = new Map<string, Promise<MemoryBubbleRecord>>();
 
   static getInstance(): CanonicalMemoryTreeService {
     if (!this.instance) {
@@ -618,24 +619,36 @@ export class CanonicalMemoryTreeService {
       .eq('is_archived', false);
 
     if (userBubbles && userBubbles.length > 0) {
+      const matches: Array<{ bubble: typeof userBubbles[0]; score: number }> = [];
       for (const b of userBubbles) {
         const labelPattern = new RegExp(`\\b${b.label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
         if (labelPattern.test(text)) {
-          return {
-            entityId: b.slug,
-            entityName: b.label,
-            entityType: (b.metadata?.entity_type as any) || 'person',
-            domainKey: b.domain_key,
-            relationType: b.relation_type || undefined,
-            parentBubbleId: b.parent_bubble_id || undefined,
-            bubbleId: b.id,
-            isNew: false,
-            confidence: 0.98,
-            authority: 'EXPLICIT_USER',
-            temporalState,
-            isAmbiguous: false,
-          };
+          let score = b.label.length;
+          if (context?.domainHint && b.domain_key === context.domainHint) score += 20;
+          matches.push({ bubble: b, score });
         }
+      }
+      if (matches.length > 0) {
+        // Deterministic evidence sort with immutable UUID tie-breaker (Gate 1 & Gate 10)
+        matches.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return a.bubble.id.localeCompare(b.bubble.id);
+        });
+        const best = matches[0].bubble;
+        return {
+          entityId: best.slug,
+          entityName: best.label,
+          entityType: (best.metadata?.entity_type as any) || 'person',
+          domainKey: best.domain_key,
+          relationType: best.relation_type || undefined,
+          parentBubbleId: best.parent_bubble_id || undefined,
+          bubbleId: best.id,
+          isNew: false,
+          confidence: 0.98,
+          authority: 'EXPLICIT_USER',
+          temporalState,
+          isAmbiguous: false,
+        };
       }
     }
 
@@ -799,7 +812,13 @@ export class CanonicalMemoryTreeService {
       return { bubble: b, score };
     });
 
-    scored.sort((a, b) => b.score - a.score);
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const authRankA = AUTHORITY_RANK[a.bubble.authority as AuthorityLevel] || 0;
+      const authRankB = AUTHORITY_RANK[b.bubble.authority as AuthorityLevel] || 0;
+      if (authRankB !== authRankA) return authRankB - authRankA;
+      return a.bubble.id.localeCompare(b.bubble.id);
+    });
     const canonical = scored[0].bubble as MemoryBubbleRecord;
 
     // 5. Sibling Conflict Guard (Gate 6):
@@ -879,37 +898,86 @@ export class CanonicalMemoryTreeService {
     }
   ): Promise<MemoryBubbleRecord> {
     const domainKey = params.domainKey || 'family';
+    let entityName = (params.entityName || '').trim();
+
+    // Gate 4 (Case E) & Gate 11 (Test 2): Unnamed or role-based family relation entity
+    // e.g. "My brother likes coffee" or "My uncle" (name is empty/unspecified or equal to relation)
+    const isUnnamedRelation = !entityName || (params.relationType && entityName.toLowerCase() === params.relationType.toLowerCase());
+    if (isUnnamedRelation && params.relationType) {
+      entityName = capitalizeWords(params.relationType);
+    } else {
+      // Quality gate: Refuse to persist invalid entity names
+      const check = isValidEntityName(entityName, params.entityType);
+      if (!check.isValid) {
+        logger.warn(`[CanonicalMemoryTree] Blocked invalid entity bubble creation for "${entityName}": ${check.reason}`);
+        return this.getOrCreateDomainBubble(userId, domainKey);
+      }
+    }
+
     const domainBubble = await this.getOrCreateDomainBubble(userId, domainKey);
     const parentBubbleId = params.parentBubbleId || domainBubble.id;
+    const baseSlug = normalizeSlug(entityName);
+    const disambiguator = params.slugSuffix ? `_${normalizeSlug(params.slugSuffix)}` : '';
+    const slug = `entity:${baseSlug}${disambiguator}`;
 
-    // Quality gate: Refuse to persist invalid entity names
-    const check = isValidEntityName(params.entityName, params.entityType);
-    if (!check.isValid) {
-      logger.warn(`[CanonicalMemoryTree] Blocked invalid entity bubble creation for "${params.entityName}": ${check.reason}`);
-      return domainBubble;
+    // Gate 7 & Gate 11 (Test 14): Concurrency single-flight deduplication
+    const inFlightKey = `${userId}:${parentBubbleId}:${slug}`;
+    const existingInFlight = this.inFlightEntityCreations.get(inFlightKey);
+    if (existingInFlight) {
+      return existingInFlight;
     }
+
+    const task = this._executeResolveOrCreateEntityBubble(userId, {
+      ...params,
+      entityName,
+      domainKey,
+      parentBubbleId,
+      slug,
+    });
+    this.inFlightEntityCreations.set(inFlightKey, task);
+    try {
+      return await task;
+    } finally {
+      this.inFlightEntityCreations.delete(inFlightKey);
+    }
+  }
+
+  private async _executeResolveOrCreateEntityBubble(
+    userId: string,
+    params: {
+      entityName: string;
+      entityType?: SemanticEntityType | 'character' | 'project' | 'object';
+      domainKey: LifeDomainKey;
+      relationType?: string;
+      parentBubbleId: string;
+      slug: string;
+      slugSuffix?: string;
+      metadata?: Record<string, any>;
+    }
+  ): Promise<MemoryBubbleRecord> {
+    const { domainKey, parentBubbleId, slug, entityName } = params;
 
     // Identity Boundary Check: Never create a family bubble with the user's own name (Gate 3)
     if (domainKey === 'family' && params.relationType) {
       const userSelfName = await this.getUserSelfName(userId);
-      if (userSelfName && params.entityName.trim().toLowerCase() === userSelfName.toLowerCase()) {
-        logger.warn(`[CanonicalMemoryTree] Blocked creating family relative bubble "${params.entityName}" matching user's own identity.`);
+      if (userSelfName && entityName.toLowerCase() === userSelfName.toLowerCase()) {
+        logger.warn(`[CanonicalMemoryTree] Blocked creating family relative bubble "${entityName}" matching user's own identity.`);
         try {
           await supabaseAdmin
             .from('memory_bubbles')
             .update({ is_archived: true, metadata: { archive_reason: 'SELF_NOT_RELATIVE_ENTITY' }, updated_at: new Date().toISOString() })
             .eq('user_id', userId)
             .eq('domain_key', 'family')
-            .ilike('label', params.entityName.trim())
+            .ilike('label', entityName)
             .eq('is_archived', false);
         } catch {}
         return this.getOrCreateDomainBubble(userId, 'identity');
       }
 
       // Relationship-First Canonical Resolution & Convergence (Gate 2, 5, 6)
-      const { canonical, isNewCandidateAllowed } = await this.resolveCanonicalFamilyBubble(userId, params.relationType, params.entityName);
+      const { canonical, isNewCandidateAllowed } = await this.resolveCanonicalFamilyBubble(userId, params.relationType, entityName);
       if (canonical && !isNewCandidateAllowed) {
-        const cleanCand = params.entityName.trim().toLowerCase();
+        const cleanCand = entityName.toLowerCase();
         const canonLabel = canonical.label.trim().toLowerCase();
         const canonAliases: string[] = Array.isArray(canonical.metadata?.aliases) ? canonical.metadata.aliases.map((a: string) => a.toLowerCase()) : [];
 
@@ -922,13 +990,13 @@ export class CanonicalMemoryTreeService {
         const isDeclaredRealName = nameMem?.value && nameMem.value.trim().toLowerCase() === cleanCand;
 
         if (isDeclaredRealName && canonLabel !== cleanCand) {
-          logger.info(`[CanonicalMemoryTree] Promoting canonical label from "${canonical.label}" to real name "${params.entityName}" with old label as alias`);
+          logger.info(`[CanonicalMemoryTree] Promoting canonical label from "${canonical.label}" to real name "${entityName}" with old label as alias`);
           const updatedAliases = Array.from(new Set([...canonAliases, canonical.label.trim()]));
-          const baseSlug = normalizeSlug(params.entityName);
+          const baseSlug = normalizeSlug(entityName);
           const { data: promoted } = await supabaseAdmin
             .from('memory_bubbles')
             .update({
-              label: capitalizeWords(params.entityName),
+              label: capitalizeWords(entityName),
               slug: `entity:${baseSlug}`,
               metadata: {
                 ...(canonical.metadata || {}),
@@ -946,17 +1014,13 @@ export class CanonicalMemoryTreeService {
         // Register candidate as alias on canonical bubble
         try {
           const canonicalEntityEngine = (await import('./CanonicalEntityEngine')).CanonicalEntityEngine.getInstance();
-          await canonicalEntityEngine.registerAlias(userId, canonical.id, params.entityName);
+          await canonicalEntityEngine.registerAlias(userId, canonical.id, entityName);
         } catch (aliasErr: any) {
           logger.warn('[CanonicalMemoryTree] Alias registration non-fatal error', { error: aliasErr.message });
         }
         return canonical;
       }
     }
-
-    const baseSlug = normalizeSlug(params.entityName);
-    const disambiguator = params.slugSuffix ? `_${normalizeSlug(params.slugSuffix)}` : '';
-    const slug = `entity:${baseSlug}${disambiguator}`;
 
     // 1. Check existing active bubble
     const { data: existing, error: fetchErr } = await supabaseAdmin
@@ -970,8 +1034,24 @@ export class CanonicalMemoryTreeService {
 
     if (fetchErr) throw fetchErr;
     if (existing) {
-      // Update relationType if more specific relation provided
-      if (params.relationType && existing.relation_type !== params.relationType) {
+      // Conflict Guard (Gate 4): Check if existing entity's relationship conflicts with requested relationType
+      if (params.relationType && existing.relation_type) {
+        const existingRelNorm = normalizeRelation(existing.relation_type);
+        const newRelNorm = normalizeRelation(params.relationType);
+        if (existingRelNorm && newRelNorm && existingRelNorm !== newRelNorm) {
+          // Two different people with the same name or different relationships (e.g. Rahul son vs Rahul friend).
+          // Do NOT overwrite existing entity relation!
+          // Disambiguate by appending relation slug suffix and creating/resolving a distinct entity!
+          logger.info(`[CanonicalMemoryTree] Disambiguating distinct entity for "${entityName}": existing has relation "${existing.relation_type}", new has "${params.relationType}"`);
+          return this.resolveOrCreateEntityBubble(userId, {
+            ...params,
+            slugSuffix: newRelNorm,
+          });
+        }
+      }
+
+      // Update relationType if more specific relation provided and previously unset
+      if (params.relationType && !existing.relation_type) {
         const { data: updated } = await supabaseAdmin
           .from('memory_bubbles')
           .update({
@@ -993,13 +1073,13 @@ export class CanonicalMemoryTreeService {
       .insert({
         user_id: userId,
         parent_bubble_id: parentBubbleId,
-        label: capitalizeWords(params.entityName),
+        label: capitalizeWords(entityName),
         slug,
         bubble_type: 'entity',
         domain_key: domainKey,
         relation_type: params.relationType || null,
         metadata: {
-          entity_type: params.entityType || inferSemanticEntityType(params.entityName, domainKey, params.relationType),
+          entity_type: params.entityType || inferSemanticEntityType(entityName, domainKey, params.relationType),
           ...(params.metadata || {}),
         },
         is_archived: false,

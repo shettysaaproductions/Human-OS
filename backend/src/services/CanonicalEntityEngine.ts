@@ -13,10 +13,34 @@ import { logger } from '../lib/logger';
 import { cache } from '../lib/cache';
 import { isValidEntityName, isValidMemoryAttributeValue, inferSemanticEntityType } from '../lib/entitySemanticValidator';
 import { generateCanonicalSlug, transliterateIndic } from '../lib/indicTransliteration';
-import { canonicalMemoryTreeService } from './CanonicalMemoryTreeService';
+import { canonicalMemoryTreeService, MemoryBubbleRecord, AUTHORITY_RANK, AuthorityLevel } from './CanonicalMemoryTreeService';
 import { memoryRepository } from './memoryRepository';
 import { NovaProvenance } from '../pipeline/NovaEvent';
 import { NovaPipelineContext } from '../pipeline/NovaContext';
+
+export function normalizeRelation(raw?: string | null): string {
+  const lower = (raw || '').toLowerCase().trim();
+  if (['father', 'dad', 'papa', 'pitaji', 'baap'].includes(lower)) return 'father';
+  if (['mother', 'mom', 'mummy', 'maa', 'mataji'].includes(lower)) return 'mother';
+  if (['wife', 'biwi', 'patni'].includes(lower)) return 'wife';
+  if (['husband', 'pati', 'shauhar'].includes(lower)) return 'husband';
+  if (['brother', 'bhai', 'bhaiya'].includes(lower)) return 'brother';
+  if (['sister', 'behen', 'didi'].includes(lower)) return 'sister';
+  if (['son', 'beta', 'bachha'].includes(lower)) return 'son';
+  if (['daughter', 'beti'].includes(lower)) return 'daughter';
+  if (['friend', 'dost', 'yaar'].includes(lower)) return 'friend';
+  if (['girlfriend', 'gf', 'bandi'].includes(lower)) return 'girlfriend';
+  if (['boyfriend', 'bf', 'banda'].includes(lower)) return 'boyfriend';
+  if (['partner', 'fiance', 'fiancee'].includes(lower)) return 'partner';
+  if (['dog', 'puppy', 'doggo', 'kutta', 'kutti'].includes(lower)) return 'dog';
+  if (['cat', 'kitten', 'kitty', 'billi'].includes(lower)) return 'cat';
+  if (['pet'].includes(lower)) return 'pet';
+  if (['roommate', 'flatmate', 'roomie'].includes(lower)) return 'roommate';
+  if (['colleague', 'coworker', 'teammate'].includes(lower)) return 'colleague';
+  if (['boss', 'manager', 'lead', 'supervisor'].includes(lower)) return 'manager';
+  if (['mentor', 'coach', 'guru'].includes(lower)) return 'mentor';
+  return lower;
+}
 
 export interface ResolvedCanonicalEntity {
   id: string;               // UUID of memory_bubbles row
@@ -30,6 +54,12 @@ export interface ResolvedCanonicalEntity {
   attributes: Record<string, string>;
   isNew: boolean;
 }
+
+export type RegisterAliasResult =
+  | { status: 'already_exists'; targetEntity: ResolvedCanonicalEntity }
+  | { status: 'alias_added'; targetEntity: ResolvedCanonicalEntity }
+  | { status: 'entities_merged'; targetEntity: ResolvedCanonicalEntity }
+  | { status: 'conflict_detected'; targetEntity: ResolvedCanonicalEntity; conflictReason: string };
 
 export interface CanonicalRelationship {
   relationshipId: string;       // deterministic key: `${sourceEntityId}:${targetEntityId}:${relationType.toLowerCase()}`
@@ -99,11 +129,16 @@ export class CanonicalEntityEngine {
   async resolveEntity(
     userId: string,
     nameOrAlias: string,
-    context?: NovaPipelineContext
+    context?: NovaPipelineContext | { relationHint?: string; domainHint?: string; [key: string]: any },
+    relationHint?: string,
+    domainHint?: string
   ): Promise<ResolvedCanonicalEntity | null> {
     const raw = (nameOrAlias || '').trim();
-    if (!raw) return null;
-    const clean = raw.toLowerCase().replace(/^(?:my|mera|meri|mere)\s+/i, '').trim();
+    const effectiveRelHint = relationHint || (context as any)?.relationHint || '';
+    const effectiveDomainHint = domainHint || (context as any)?.domainHint || '';
+    const cleanRel = effectiveRelHint ? normalizeRelation(effectiveRelHint) : '';
+    if (!raw && !cleanRel) return null;
+    const clean = raw ? raw.toLowerCase().replace(/^(?:my|mera|meri|mere)\s+/i, '').trim() : cleanRel;
     const cleanSlug = `entity:${this.normalizeSlug(clean)}`;
     const transliteratedClean = transliterateIndic(clean).toLowerCase();
 
@@ -115,7 +150,7 @@ export class CanonicalEntityEngine {
           active.name.toLowerCase() === clean ||
           transliterateIndic(active.name).toLowerCase() === transliteratedClean ||
           active.relationToUser?.toLowerCase() === clean ||
-          active.aliases.some((a) => {
+          active.aliases.some((a: string) => {
             const al = a.toLowerCase();
             return al === clean || al === transliteratedClean || transliterateIndic(al).toLowerCase() === transliteratedClean;
           })
@@ -128,7 +163,7 @@ export class CanonicalEntityEngine {
           recent.name.toLowerCase() === clean ||
           transliterateIndic(recent.name).toLowerCase() === transliteratedClean ||
           recent.relationToUser?.toLowerCase() === clean ||
-          recent.aliases.some((a) => {
+          recent.aliases.some((a: string) => {
             const al = a.toLowerCase();
             return al === clean || al === transliteratedClean || transliterateIndic(al).toLowerCase() === transliteratedClean;
           })
@@ -138,8 +173,11 @@ export class CanonicalEntityEngine {
       }
     }
 
-    // 2. Query memory_bubbles by slug or label (indexed)
+    // 2. Query candidates from database deterministically (replacing arbitrary [0] and find())
     try {
+      const candidateMap = new Map<string, MemoryBubbleRecord>();
+
+      // A. Query memory_bubbles by slug or label (indexed)
       const { data: directMatches } = await supabaseAdmin
         .from('memory_bubbles')
         .select('*')
@@ -147,13 +185,13 @@ export class CanonicalEntityEngine {
         .eq('is_archived', false)
         .eq('bubble_type', 'entity')
         .or(`slug.eq.${cleanSlug},label.ilike.${clean},label.ilike.${transliteratedClean}`)
-        .limit(5);
+        .limit(10);
 
-      if (directMatches && directMatches.length > 0) {
-        return this.formatCanonicalEntity(directMatches[0], false);
+      if (directMatches) {
+        for (const m of directMatches) candidateMap.set(m.id, m);
       }
 
-      // 3. Search inside metadata.aliases JSON array (indexed candidate retrieval)
+      // B. Search inside metadata.aliases JSON array
       const { data: aliasMatches } = await supabaseAdmin
         .from('memory_bubbles')
         .select('*')
@@ -161,41 +199,61 @@ export class CanonicalEntityEngine {
         .eq('is_archived', false)
         .eq('bubble_type', 'entity')
         .contains('metadata', { aliases: [clean] })
-        .limit(5);
+        .limit(10);
 
-      if (aliasMatches && aliasMatches.length > 0) {
-        return this.formatCanonicalEntity(aliasMatches[0], false);
+      if (aliasMatches) {
+        for (const m of aliasMatches) candidateMap.set(m.id, m);
       }
 
-      // 4. Case-insensitive alias scan across recent entities with multi-script phonetic matching
-      const { data: recentBubbles } = await supabaseAdmin
-        .from('memory_bubbles')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_archived', false)
-        .eq('bubble_type', 'entity')
-        .order('updated_at', { ascending: false })
-        .limit(30);
+      // C. Scan recent entities with multi-script phonetic matching if candidates are sparse
+      if (candidateMap.size === 0) {
+        const { data: recentBubbles } = await supabaseAdmin
+          .from('memory_bubbles')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('is_archived', false)
+          .eq('bubble_type', 'entity')
+          .order('updated_at', { ascending: false })
+          .limit(30);
 
-      if (recentBubbles) {
-        for (const b of recentBubbles) {
-          const meta = (b.metadata as Record<string, unknown>) || {};
-          const aliases: string[] = Array.isArray(meta.aliases) ? (meta.aliases as string[]) : [];
-          if (aliases.some((a) => {
-            const lowerA = a.toLowerCase();
-            return (
-              lowerA === clean ||
-              lowerA === transliteratedClean ||
-              this.normalizeSlug(lowerA) === this.normalizeSlug(clean) ||
-              transliterateIndic(lowerA).toLowerCase() === transliteratedClean
-            );
-          })) {
-            return this.formatCanonicalEntity(b, false);
-          }
-          if (b.relation_type && b.relation_type.toLowerCase() === clean) {
-            return this.formatCanonicalEntity(b, false);
+        if (recentBubbles) {
+          for (const b of recentBubbles) {
+            const meta = (b.metadata as Record<string, unknown>) || {};
+            const aliases: string[] = Array.isArray(meta.aliases) ? (meta.aliases as string[]) : [];
+            if (aliases.some((a) => {
+              const lowerA = a.toLowerCase();
+              return (
+                lowerA === clean ||
+                lowerA === transliteratedClean ||
+                this.normalizeSlug(lowerA) === this.normalizeSlug(clean) ||
+                transliterateIndic(lowerA).toLowerCase() === transliteratedClean
+              );
+            })) {
+              candidateMap.set(b.id, b);
+            }
+            if (b.relation_type && normalizeRelation(b.relation_type) === clean) {
+              candidateMap.set(b.id, b);
+            }
           }
         }
+      }
+
+      const allCandidates = Array.from(candidateMap.values());
+      if (allCandidates.length === 0) return null;
+
+      // Deterministic evidence ranking with immutable UUID tie-breaker
+      const ranked = this.rankCandidateEntities(allCandidates, clean, effectiveRelHint, effectiveDomainHint);
+      if (ranked.length > 0) {
+        // If an explicit effectiveRelHint is given, and the top candidate has an explicit conflicting relation, do not return it!
+        if (effectiveRelHint) {
+          const topRel = ranked[0].relation_type ? normalizeRelation(ranked[0].relation_type) : '';
+          const targetRel = normalizeRelation(effectiveRelHint);
+          if (topRel && topRel !== targetRel) {
+            // Incompatible relation! Distinct entity required.
+            return null;
+          }
+        }
+        return this.formatCanonicalEntity(ranked[0], false);
       }
 
       return null;
@@ -203,6 +261,112 @@ export class CanonicalEntityEngine {
       logger.warn('[CanonicalEntityEngine] Resolution error (non-fatal)', { error: err.message, userId });
       return null;
     }
+  }
+
+  /**
+   * Deterministically ranks candidate entity bubbles based on evidence,
+   * with immutable UUID tie-breaking ensuring strict database order-independence (Gate 1 & Gate 10).
+   */
+  rankCandidateEntities(
+    candidates: MemoryBubbleRecord[],
+    queryName: string,
+    relationHint?: string,
+    domainHint?: string
+  ): MemoryBubbleRecord[] {
+    if (!candidates || candidates.length === 0) return [];
+    if (candidates.length === 1) return candidates;
+
+    const cleanQuery = (queryName || '').trim().toLowerCase();
+    const transliteratedQuery = transliterateIndic(cleanQuery).toLowerCase();
+    const cleanRelHint = relationHint ? normalizeRelation(relationHint) : '';
+    const cleanDomainHint = (domainHint || '').trim().toLowerCase();
+
+    // 1. Conflict Pre-Filtering (Gate 1 & Gate 4):
+    // Incompatible candidates are STRICTLY EXCLUDED before scoring, not merely penalized!
+    // A matching name on a different/conflicting relationship must never defeat a compatible candidate.
+    let eligibleCandidates = candidates;
+    if (cleanRelHint) {
+      eligibleCandidates = candidates.filter((bubble) => {
+        const bubbleRel = bubble.relation_type ? normalizeRelation(bubble.relation_type) : '';
+        if (bubbleRel && bubbleRel !== cleanRelHint) {
+          return false;
+        }
+        return true;
+      });
+      if (eligibleCandidates.length === 0) return [];
+    }
+
+    const scored = eligibleCandidates.map((bubble) => {
+      let score = 0;
+      const labelLower = (bubble.label || '').trim().toLowerCase();
+      const slugClean = (bubble.slug || '').replace(/^entity:/, '').toLowerCase();
+      const meta = (bubble.metadata as Record<string, any>) || {};
+      const aliases: string[] = Array.isArray(meta.aliases)
+        ? meta.aliases.map((a: string) => String(a).toLowerCase().trim())
+        : [];
+      const relationships = Array.isArray(meta.relationships) ? meta.relationships : [];
+      const bubbleRel = bubble.relation_type ? normalizeRelation(bubble.relation_type) : '';
+      const bubbleDomain = (bubble.domain_key || '').trim().toLowerCase();
+
+      // 1. Exact Canonical Label Match (+100)
+      if (labelLower === cleanQuery || slugClean === cleanQuery) {
+        score += 100;
+      } else if (labelLower === transliteratedQuery || transliterateIndic(labelLower).toLowerCase() === transliteratedQuery) {
+        score += 85;
+      }
+
+      // 2. Explicit Relationship Match (+60)
+      if (cleanRelHint && bubbleRel === cleanRelHint) {
+        score += 60;
+      }
+
+      // 3. Metadata Aliases Match (+40)
+      if (aliases.includes(cleanQuery)) {
+        score += 40;
+      } else if (aliases.some((a) => a === transliteratedQuery || transliterateIndic(a).toLowerCase() === transliteratedQuery)) {
+        score += 35;
+      }
+
+      // 4. Semantic Domain Match (+20)
+      if (cleanDomainHint && bubbleDomain === cleanDomainHint) {
+        score += 20;
+      }
+
+      // 5. Existing Established Relationships Count (+5 per rel, max +30)
+      if (relationships.length > 0) {
+        score += Math.min(30, relationships.length * 5);
+      }
+
+      // 6. Explicit User Authority / Provenance (+15)
+      if (meta.authority === 'EXPLICIT_USER' || meta.source === 'user_chat') {
+        score += 15;
+      }
+
+      // 7. Promoted Canonical Entity Bonus (+10)
+      if (meta.canonical_name_promoted_at) {
+        score += 10;
+      }
+
+      return { bubble, score };
+    });
+
+    // Deterministic Order (ZERO arrival-order / timestamp dependence):
+    // Primary: Evidence score descending
+    // Secondary: Explicit authority rank descending
+    // FINAL IMMUTABLE TIE-BREAKER: Lexical comparison of bubble UUID (independent of DB query order!)
+    scored.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      const authRankA = AUTHORITY_RANK[a.bubble.authority as AuthorityLevel] || 0;
+      const authRankB = AUTHORITY_RANK[b.bubble.authority as AuthorityLevel] || 0;
+      if (authRankB !== authRankA) {
+        return authRankB - authRankA;
+      }
+      return a.bubble.id.localeCompare(b.bubble.id);
+    });
+
+    return scored.map((s) => s.bubble);
   }
 
   /**
@@ -215,8 +379,31 @@ export class CanonicalEntityEngine {
     domainKey: string = 'family',
     context?: NovaPipelineContext
   ): Promise<ResolvedCanonicalEntity> {
-    const existing = await this.resolveEntity(userId, entityName, context);
+    const existing = await this.resolveEntity(userId, entityName, context, relationType, domainKey);
     if (existing) {
+      // Conflict Guard (Gate 4): Check if existing entity's relationship conflicts with requested relationType
+      const existingRel = existing.relationToUser ? normalizeRelation(existing.relationToUser) : '';
+      const requestedRel = relationType ? normalizeRelation(relationType) : '';
+
+      if (existingRel && requestedRel && existingRel !== requestedRel) {
+        // Different relationship with same name (e.g. Rahul Friend vs Rahul Son)
+        // Disambiguate and create distinct entity!
+        logger.info(`[CanonicalEntityEngine] Disambiguating distinct entity for "${entityName}": existing has relation "${existing.relationToUser}", requested is "${relationType}"`);
+        const bubbleRecord = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(
+          userId,
+          {
+            entityName,
+            entityType: 'person',
+            relationType,
+            domainKey: (domainKey || 'lifestyle') as any,
+            slugSuffix: requestedRel,
+          }
+        );
+        const formatted = this.formatCanonicalEntity(bubbleRecord, true);
+        this.invalidateGraphCache(userId);
+        return formatted;
+      }
+
       // Update relation if more specific
       if (relationType && !existing.relationToUser) {
         await supabaseAdmin
@@ -259,22 +446,21 @@ export class CanonicalEntityEngine {
   }
 
   /**
-   * Registers an alias or nickname for an entity.
-   * If a provisional entity bubble already exists for the alias, triggers safe entity merging!
+   * Registers an alias for an existing canonical entity (Gate 3).
+   * If a separate provisional bubble exists for this alias, merges it into the canonical entity
+   * only after verifying semantic compatibility.
    */
   async registerAlias(
     userId: string,
     canonicalEntityId: string,
-    aliasName: string
-  ): Promise<{ status: 'alias_added' | 'entities_merged' | 'already_exists'; targetEntity: ResolvedCanonicalEntity }> {
-    const cleanAlias = (aliasName || '').trim();
+    alias: string
+  ): Promise<RegisterAliasResult> {
+    const cleanAlias = alias.trim();
     if (!cleanAlias) {
-      const target = await this.hydrateEntityFromBubbleId(userId, canonicalEntityId);
-      if (!target) throw new Error('TARGET_ENTITY_NOT_FOUND');
-      return { status: 'already_exists', targetEntity: target };
+      throw new Error('ALIAS_EMPTY');
     }
 
-    // 1. Fetch Target Canonical Entity Bubble
+    // 1. Fetch canonical target bubble
     const { data: targetBubble, error: targetErr } = await supabaseAdmin
       .from('memory_bubbles')
       .select('*')
@@ -301,15 +487,54 @@ export class CanonicalEntityEngine {
       .or(`slug.eq.${aliasSlug},label.ilike.${cleanAlias},label.ilike.${transliteratedAlias}`);
 
     if (candidateSourceBubbles && candidateSourceBubbles.length > 0) {
-      // ORDER-INDEPENDENCE RECONCILIATION: Merge the provisional alias entity into the canonical entity!
-      const sourceBubble = candidateSourceBubbles[0];
-      logger.info('[CanonicalEntityEngine] Merging provisional entity into canonical entity', {
-        sourceEntity: sourceBubble.label,
+      // Deterministically rank candidate source bubbles (Gate 1 & Gate 3)
+      const rankedCandidates = this.rankCandidateEntities(
+        candidateSourceBubbles,
+        cleanAlias,
+        targetBubble.relation_type || undefined,
+        targetBubble.domain_key
+      );
+
+      // Compatibility Guard (Gate 3): Verify that candidate source is compatible with target!
+      const targetRel = targetBubble.relation_type ? normalizeRelation(targetBubble.relation_type) : '';
+      const compatibleSource = rankedCandidates.find((src) => {
+        const srcRel = src.relation_type ? normalizeRelation(src.relation_type) : '';
+        // If both have relations, they MUST match or be compatible
+        if (targetRel && srcRel && targetRel !== srcRel) {
+          logger.warn(`[CanonicalEntityEngine] Incompatible relation types for alias merge: source "${src.label}" (${src.relation_type}) vs target "${targetBubble.label}" (${targetBubble.relation_type})`);
+          return false;
+        }
+        // If domain is family and relations conflict, incompatible
+        if (src.domain_key === 'family' && targetBubble.domain_key === 'family' && srcRel && targetRel && srcRel !== targetRel) {
+          return false;
+        }
+        return true;
+      });
+
+      if (!compatibleSource) {
+        logger.warn(`[CanonicalEntityEngine] Alias registration skipped merge due to relation conflict`, {
+          alias: cleanAlias,
+          target: targetBubble.label,
+          targetRel,
+        });
+        const refreshedTarget = await this.hydrateEntityFromBubbleId(userId, canonicalEntityId);
+        return {
+          status: 'conflict_detected',
+          targetEntity: refreshedTarget!,
+          conflictReason: 'INCOMPATIBLE_RELATION_TYPES',
+        };
+      }
+
+      // ORDER-INDEPENDENCE RECONCILIATION: Merge the verified compatible provisional alias entity into the canonical entity!
+      logger.info('[CanonicalEntityEngine] Merging compatible provisional entity into canonical entity', {
+        sourceEntity: compatibleSource.label,
+        sourceId: compatibleSource.id,
         targetEntity: targetBubble.label,
+        targetId: targetBubble.id,
         userId,
       });
 
-      await this.mergeEntities(userId, sourceBubble.id, targetBubble.id);
+      await this.mergeEntities(userId, compatibleSource.id, targetBubble.id);
       const refreshedTarget = await this.hydrateEntityFromBubbleId(userId, targetBubble.id);
       return { status: 'entities_merged', targetEntity: refreshedTarget! };
     }

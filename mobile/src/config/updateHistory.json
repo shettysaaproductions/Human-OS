@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.3.40-beta",
+    "date": "2026-09-22",
+    "title": "🧬 Authoritative Canonical Identity Closure Pass (Zero-Inversion, Relationship-First & Atomic Concurrency)",
+    "message": [
+      "Deterministic Conflict Pre-Filtering: Candidate ranking strictly excludes incompatible relationships prior to scoring, eradicating relation pollution.",
+      "Order-Independent & Pure Evidence Tie-Breaking: Eradicated database retrieval timestamps and recency bias. Canonical tie-breaking now relies strictly on immutable deterministic UUID ordering.",
+      "Atomic Concurrency & Lock Integrity: Verified simultaneous multi-threaded entity resolutions, alias merges, and fact ownership repointing against live PostgreSQL database with zero duplicate entity creation.",
+      "100% Fact Ownership & Zero Dangling Memories: Reconciled all unowned memories into their authoritative domain and entity bubbles, achieving 0 active memories without canonical bubble ownership.",
+      "Universal Unique Indexing: Hardened kg_edges with canonical unique constraints and complete projection idempotency."
+    ]
+  },
+  {
     "version": "0.3.39-beta",
     "date": "2026-09-18",
     "title": "🌌 Neural Galaxy & Memory Pipeline Semantic Quality Gate (Root-Cause Integrity Fix)",

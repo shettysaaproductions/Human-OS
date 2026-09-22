@@ -22,6 +22,7 @@ import { autonomousMemoryGraphCurator } from './AutonomousMemoryGraphCuratorServ
 import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { isValidMemoryAttributeValue } from '../lib/entitySemanticValidator';
 import { isKnownCanonicalKey, canonicalizeKey } from '../lib/memoryKeySchema';
+import { memoryRepository } from './memoryRepository';
 
 export interface MemoryAuditFinding {
   entity: string;
@@ -689,22 +690,16 @@ If there are no contradictions, return empty array [].`;
             .eq('id', existing.id);
         }
       } else {
-        // Insert new authoritative row
-        await supabaseAdmin
-          .from('memories')
-          .insert({
-            user_id: userId,
-            key: canonical,
-            value: u.value,
-            memory_type: u.memoryType || 'personal',
-            confidence: 1.0,
-            importance: 100,
-            is_archived: false,
-            lifecycle_state: 'CURRENT',
-            source_message: `[WatchtowerMemoryAuditor] Autonomous chat truth recovery: ${reason}`,
-            created_at: now,
-            updated_at: now
-          });
+        // Insert new authoritative row via canonical memoryRepository (resolves bubble_id)
+        await memoryRepository.upsertMemory(userId, {
+          shouldPersist: true,
+          key: canonical,
+          value: u.value,
+          type: (u.memoryType as any) || 'personal',
+          confidence: 1.0,
+          importance: 100,
+          source_authority: 'deterministic',
+        }, `[WatchtowerMemoryAuditor] Autonomous chat truth recovery: ${reason}`);
       }
 
       // Also sync working_memory cleanly

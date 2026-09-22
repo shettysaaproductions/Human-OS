@@ -422,11 +422,8 @@ describe('Relationship-First Canonical Identity & Kinship Convergence (Gates 1-1
 
     // Both point to the promoted real name entity
     expect(nameBubble.label).toBe('Shreshth');
+    expect(nameBubble.id).toBe(nickBubble.id);
     expect(mockDb.memories.find((m) => m.key === 'son_name').bubble_id).toBe(nameBubble.id);
-    // Repoint check
-    for (const m of mockDb.memories) {
-      if (m.key === 'son_nickname') m.bubble_id = nameBubble.id;
-    }
     expect(mockDb.memories.find((m) => m.key === 'son_nickname').bubble_id).toBe(nameBubble.id);
   });
 });

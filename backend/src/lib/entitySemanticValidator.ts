@@ -381,3 +381,32 @@ export function inferSemanticEntityType(
   // 6. Default: Real person
   return 'person';
 }
+
+/**
+ * Normalizes a relationship descriptor to its canonical lower-case keyword
+ * across English, Hindi, and Hinglish.
+ */
+export function normalizeRelation(raw?: string | null): string {
+  const lower = (raw || '').toLowerCase().trim();
+  if (['father', 'dad', 'papa', 'pitaji', 'baap'].includes(lower)) return 'father';
+  if (['mother', 'mom', 'mummy', 'maa', 'mataji'].includes(lower)) return 'mother';
+  if (['wife', 'biwi', 'patni'].includes(lower)) return 'wife';
+  if (['husband', 'pati', 'shauhar'].includes(lower)) return 'husband';
+  if (['brother', 'bhai', 'bhaiya'].includes(lower)) return 'brother';
+  if (['sister', 'behen', 'didi'].includes(lower)) return 'sister';
+  if (['son', 'beta', 'bachha'].includes(lower)) return 'son';
+  if (['daughter', 'beti'].includes(lower)) return 'daughter';
+  if (['friend', 'dost', 'yaar'].includes(lower)) return 'friend';
+  if (['girlfriend', 'gf', 'bandi'].includes(lower)) return 'girlfriend';
+  if (['boyfriend', 'bf', 'banda'].includes(lower)) return 'boyfriend';
+  if (['partner', 'fiance', 'fiancee'].includes(lower)) return 'partner';
+  if (['dog', 'puppy', 'doggo', 'kutta', 'kutti'].includes(lower)) return 'dog';
+  if (['cat', 'kitten', 'kitty', 'billi'].includes(lower)) return 'cat';
+  if (['pet'].includes(lower)) return 'pet';
+  if (['roommate', 'flatmate', 'roomie'].includes(lower)) return 'roommate';
+  if (['colleague', 'coworker', 'teammate'].includes(lower)) return 'colleague';
+  if (['boss', 'manager', 'lead', 'supervisor'].includes(lower)) return 'manager';
+  if (['mentor', 'coach', 'guru'].includes(lower)) return 'mentor';
+  return lower;
+}
+

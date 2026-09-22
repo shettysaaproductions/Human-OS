@@ -22,6 +22,7 @@
 
 import { supabaseAdmin } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { canonicalMemoryTreeService } from './CanonicalMemoryTreeService';
 
 export type GoalSourceTable = 'kg_nodes' | 'life_threads' | 'memories' | 'reminders';
 
@@ -520,10 +521,16 @@ export class AutonomousGoalResolverService {
     if (!resolved) {
       // If updating a non-existent goal, autonomously create it!
       const newTitle = updates.title || hintTitle || 'New Goal';
+      const goalBubble = await canonicalMemoryTreeService.resolveOrCreateEntityBubble(userId, {
+        entityName: newTitle,
+        entityType: 'project',
+        domainKey: 'goals',
+      });
       const { data: createdNode, error: createErr } = await supabaseAdmin
         .from('kg_nodes')
         .insert({
           user_id: userId,
+          bubble_id: goalBubble.id,
           name: newTitle,
           entity_type: 'goal',
           attributes: {

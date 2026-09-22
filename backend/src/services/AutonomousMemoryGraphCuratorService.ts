@@ -27,6 +27,7 @@ import { isGarbageMemoryValue } from '../lib/memoryFilters';
 import { isValidMemoryAttributeValue } from '../lib/entitySemanticValidator';
 import { isPlaceholderValue, isTransientSituationalItem, classifyDomain } from '../lib/memoryDomains';
 import { invalidateAnalyticsCache } from '../routes/analytics';
+import { memoryRepository } from './memoryRepository';
 
 export interface CurationRemoval {
   key: string;
@@ -943,21 +944,15 @@ Curate the memory tree and knowledge graph against the conversation proof and re
             .eq('id', targetMem.id);
         }
       } else {
-        await supabaseAdmin
-          .from('memories')
-          .insert({
-            user_id: userId,
-            key: canonical,
-            value: m.provenValue,
-            memory_type: classifyDomain(canonical).domain || 'personal',
-            confidence: 1.0,
-            importance: 90,
-            is_archived: false,
-            lifecycle_state: 'CURRENT',
-            source_message: `[Autonomous Memory Curator] Created canonical from merged alias ${m.sourceKey}`,
-            created_at: now,
-            updated_at: now
-          });
+        await memoryRepository.upsertMemory(userId, {
+          shouldPersist: true,
+          key: canonical,
+          value: m.provenValue,
+          type: (classifyDomain(canonical).domain as any) || 'personal',
+          confidence: 1.0,
+          importance: 90,
+          source_authority: 'deterministic',
+        }, `[Autonomous Memory Curator] Created canonical from merged alias ${m.sourceKey}`);
       }
 
       // 2. Soft-tombstone the source alias memory
@@ -1051,21 +1046,15 @@ Curate the memory tree and knowledge graph against the conversation proof and re
             .eq('id', existing.id);
         }
       } else {
-        await supabaseAdmin
-          .from('memories')
-          .insert({
-            user_id: userId,
-            key: canonical,
-            value: u.newValue,
-            memory_type: u.memoryType || 'personal',
-            confidence: 1.0,
-            importance: 95,
-            is_archived: false,
-            lifecycle_state: 'CURRENT',
-            source_message: `[Autonomous Memory Curator] Grounded with chat truth: ${u.provenChatTruth}`,
-            created_at: now,
-            updated_at: now
-          });
+        await memoryRepository.upsertMemory(userId, {
+          shouldPersist: true,
+          key: canonical,
+          value: u.newValue,
+          type: (u.memoryType as any) || 'personal',
+          confidence: 1.0,
+          importance: 95,
+          source_authority: 'deterministic',
+        }, `[Autonomous Memory Curator] Grounded with chat truth: ${u.provenChatTruth}`);
       }
 
       // Sync working memory
@@ -1141,21 +1130,15 @@ Curate the memory tree and knowledge graph against the conversation proof and re
         .maybeSingle();
 
       if (!existing) {
-        await supabaseAdmin
-          .from('memories')
-          .insert({
-            user_id: userId,
-            key: canonical,
-            value: a.value,
-            memory_type: a.memoryType || 'personal',
-            confidence: 1.0,
-            importance: 85,
-            is_archived: false,
-            lifecycle_state: 'CURRENT',
-            source_message: `[Autonomous Memory Curator] Added from concrete chat proof: ${a.provenChatTruth}`,
-            created_at: now,
-            updated_at: now
-          });
+        await memoryRepository.upsertMemory(userId, {
+          shouldPersist: true,
+          key: canonical,
+          value: a.value,
+          type: (a.memoryType as any) || 'personal',
+          confidence: 1.0,
+          importance: 85,
+          source_authority: 'deterministic',
+        }, `[Autonomous Memory Curator] Added from concrete chat proof: ${a.provenChatTruth}`);
 
         await supabaseAdmin
           .from('working_memory')
