@@ -926,7 +926,44 @@ PURPOSE-DRIVEN COMPANION DIRECTIVE:
         return;
       }
 
-      const message = generated.message;
+      const rawMessage = generated.message;
+
+      // ── PROACTIVE FACT GROUNDING GATE ─────────────────────────────────────────
+      // Deterministic post-LLM gate: blocks hallucinated third-party action assertions
+      // and ungrounded event claims. Zero LLM calls — pure pattern matching against
+      // authoritative context already loaded above.
+      const { ProactiveFactGroundingGate } = await import('./ProactiveFactGroundingGate');
+      const groundingGate = new ProactiveFactGroundingGate();
+      const groundingResult = groundingGate.validate(rawMessage, {
+        memories: recentMemories,
+        workingMemories: workingMemories,
+        lifeThreads: lifeThreads || [],
+        conversationSnippet: lastConvSnippet,
+        agendaItem,
+        negatedClaims: [],
+      });
+
+      if (!groundingResult.allowed || !groundingResult.transformedMessage) {
+        logger.warn('[NACE] ProactiveFactGroundingGate BLOCKED message before dispatch', {
+          userId,
+          claimClass: groundingResult.claimClass,
+          claimsBlocked: groundingResult.claimsBlocked,
+          reason: groundingResult.reason,
+          preview: rawMessage.substring(0, 80),
+        });
+        if (_result) _result.suppressed += 1;
+        return;
+      }
+
+      if (groundingResult.claimsBlocked.length > 0) {
+        logger.info('[NACE] ProactiveFactGroundingGate transformed message (assertion → question)', {
+          userId,
+          claimClass: groundingResult.claimClass,
+          claimsBlocked: groundingResult.claimsBlocked,
+        });
+      }
+
+      const message = groundingResult.transformedMessage;
 
       // ── AUTHORITATIVE PROACTIVE GATE ─────────────────────────────────────────
       // Single DB-backed gate that enforces dedup, cooldown, logical-key idempotency

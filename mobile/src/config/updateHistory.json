@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.3.42-beta",
+    "date": "2026-09-22",
+    "title": "🛡️ Proactive Hallucination Gate & Canonical Memory Decay Protection",
+    "message": [
+      "Proactive Fact Grounding Gate: Wired ProactiveFactGroundingGate into NACE Tier 2 output path. Now blocks hallucinated third-party action assertions and ungrounded event claims before dispatch — purely deterministic, zero LLM calls.",
+      "Memory Decay Canonical Protection: Fixed critical bug where weekly decay scoring could archive canonically-owned entity facts (son_name, wife_name, etc.). Canonical facts (bubble_id != null), protected facts, and deterministic facts are now immune to time-based decay.",
+      "Architecture Verified: Confirmed NACE scheduler uses AdaptiveConsciousnessScheduler (90s/3m/15m dynamic pacing), Neural Galaxy reads canonical kg_nodes/kg_edges (not legacy tables), nova_outreach_log has (user_id, created_at DESC) index."
+    ]
+  },
+  {
     "version": "0.3.41-beta",
     "date": "2026-09-22",
     "title": "🔒 Master Engineering Pass: Privacy Hardening & Voice Memory Architecture Fix",
