@@ -12,7 +12,7 @@
       "url": "https://github.com/shettysaaproductions/Human-OS",
       "provider": "github",
       "link_mode": "local-only",
-      "revision": "1596a8819ebd720fbbec68eff102d142b8b34299"
+      "revision": "b23ea035ecd8b81573e61e6487c528df8d19b855"
     },
     "views": [
       {
@@ -128,10 +128,30 @@
       "sources": [{ "path": "backend/src/services/CanonicalGraphService.ts", "line": 1, "label": "Graph Service" }]
     },
     {
+      "id": "context_snapshot",
+      "type": "backend",
+      "label": "Context Snapshot",
+      "sublabel": "UserContextSnapshot",
+      "tag": "8 parallel fetches",
+      "pos": [600, 240],
+      "size": [140, 60],
+      "sources": [{ "path": "backend/src/services/UserContextSnapshot.ts", "line": 1, "label": "Context Hydration" }]
+    },
+    {
+      "id": "kg_rpc",
+      "type": "backend",
+      "label": "KG RPC Layer",
+      "sublabel": "canonical_merge / rebuild_kg",
+      "tag": "SECURITY DEFINER",
+      "pos": [980, 390],
+      "size": [146, 60],
+      "sources": [{ "path": "backend/supabase/migrations/20260922_kg_rpc_functions.sql", "line": 1, "label": "KG RPCs" }]
+    },
+    {
       "id": "supabase_db",
       "type": "database",
       "label": "Supabase Postgres",
-      "sublabel": "pgvector & GIN store",
+      "sublabel": "pgvector · RLS · 45 policies",
       "brand": "supabase",
       "tag": "semantic memory",
       "pos": [980, 240],
@@ -143,12 +163,12 @@
     {
       "kind": "region",
       "label": "Render Cloud / Backend Services",
-      "wraps": ["api_gateway", "orchestrator", "watchtower", "async_workers", "cognitive_brain", "moment_engine"]
+      "wraps": ["api_gateway", "orchestrator", "watchtower", "async_workers", "cognitive_brain", "moment_engine", "context_snapshot"]
     },
     {
       "kind": "security-group",
       "label": "Cognitive Intelligence & Memory",
-      "wraps": ["model_router", "memory_curator"]
+      "wraps": ["model_router", "memory_curator", "kg_rpc"]
     },
     {
       "kind": "region",
@@ -162,18 +182,22 @@
     { "from": "watchtower", "to": "orchestrator", "fromSide": "bottom", "toSide": "top", "label": "heartbeat", "variant": "security", "labelAt": [470, 175] },
     { "from": "orchestrator", "to": "async_workers", "fromSide": "bottom", "toSide": "top", "label": "enqueue", "variant": "dashed", "labelAt": [470, 335] },
     { "from": "orchestrator", "to": "cognitive_brain", "label": "turn context", "labelAt": [570, 224] },
+    { "from": "orchestrator", "to": "context_snapshot", "label": "hydrate", "variant": "emphasis", "labelAt": [540, 236] },
     { "from": "orchestrator", "to": "moment_engine", "label": "proactive pulse", "labelAt": [570, 314] },
     { "from": "cognitive_brain", "to": "model_router", "label": "inference", "variant": "emphasis" },
     { "from": "cognitive_brain", "to": "memory_curator", "fromSide": "right", "toSide": "top" },
+    { "from": "context_snapshot", "to": "memory_curator", "fromSide": "right", "toSide": "left", "variant": "dashed" },
     { "from": "moment_engine", "to": "memory_curator" },
-    { "from": "memory_curator", "to": "supabase_db", "label": "SQL & vector", "variant": "emphasis", "labelAt": [955, 314] }
+    { "from": "memory_curator", "to": "supabase_db", "label": "SQL & vector", "variant": "emphasis", "labelAt": [955, 314] },
+    { "from": "memory_curator", "to": "kg_rpc", "label": "merge / rebuild", "variant": "dashed", "labelAt": [955, 464] },
+    { "from": "kg_rpc", "to": "supabase_db", "fromSide": "top", "toSide": "bottom", "label": "atomic txn" }
   ],
   "cards": [
     {
       "dot": "cyan",
       "title": "Edge & Ingress",
       "items": [
-        "React Native / Expo mobile client with OTA updates on the preview channel",
+        "React Native / Expo mobile client with EAS OTA updates",
         "Express API gateway hosted on Render with rate limiting and session routing",
         "Low-latency communication with fallback recovery"
       ]
@@ -182,17 +206,19 @@
       "dot": "violet",
       "title": "Consciousness & Cognition",
       "items": [
-        "NACE Consciousness Engine executing autonomous proactive outreach pulses",
+        "NACE Consciousness Engine: autonomous 15-min proactive outreach pulses",
+        "UserContextSnapshot: 8 parallel DB fetches replace 30+ sequential queries per pulse",
         "NovaBrain and TurnAnalyzer managing situational awareness and emotional momentum",
         "ModelRouter dynamically routing between dual NVIDIA NIM and Gemini API keys"
       ]
     },
     {
       "dot": "emerald",
-      "title": "Memory & Safety Governance",
+      "title": "Memory, Safety & KG Governance",
       "items": [
         "Canonical Graph and Entity Resolution maintaining relational truth",
-        "Supabase PostgreSQL with pgvector semantic search and GIN text indexing",
+        "Supabase PostgreSQL with pgvector semantic search, RLS on 22 tables, 45 policies",
+        "KG RPC layer: canonical_merge_entities + rebuild_kg_projection (SECURITY DEFINER, service_role only)",
         "Watchtower Heartbeat verifying system invariants and preventing hallucinations"
       ]
     }
