@@ -101,7 +101,7 @@ function assert(id: string, condition: boolean, detail = '') {
 }
 
 async function runTests() {
-  console.log('\n[Phase3 Integration Verify] Running 16 tests...\n');
+  console.log('\n[Phase3 Integration Verify] Running 18 tests...\n');
 
   const snap = makeSnapshot();
 
@@ -144,14 +144,24 @@ async function runTests() {
     typeof shape.preferredName !== 'undefined' && typeof shape.preferredLanguage !== 'undefined',
     `name=${shape.preferredName} lang=${shape.preferredLanguage}`);
 
-  // T06: formatContextPacketForPrompt memories include importance/confidence from snapshot
+  // T06: formatted memories preserve bounded metadata
   const shapeMem = shape.memories.find(m => m.key === 'name');
   assert('T06', shapeMem !== undefined && shapeMem.importance !== undefined && shapeMem.confidence !== undefined,
     `importance=${shapeMem?.importance} confidence=${shapeMem?.confidence}`);
 
-  // T07: workingMemories from workingMemoryRows
+  // T07: workingMemories are bounded packet data (not raw snapshot access)
   assert('T07', shape.workingMemories.length === 2 && shape.workingMemories[0].key === 'wake_time',
     `wm_count=${shape.workingMemories.length}`);
+
+  // T17: CognitiveContext's conflict-resolved value survives all the way to prompt shape
+  const cogShape = formatContextPacketForPrompt(pktCog);
+  const cogName = cogShape.memories.find(m => m.key === 'name');
+  assert('T17', cogName?.value === 'Rahul (verified)',
+    `final_name=${cogName?.value}`);
+
+  // T18: ContextPacket is self-contained and no longer exposes a raw snapshot
+  assert('T18', !Object.prototype.hasOwnProperty.call(pkt, '_rawSnapshot'),
+    'raw snapshot escape hatch removed');
 
   // T08: recentMessages bounded and HIDDEN_CONTEXT filtered
   // snap has 4 msgs, 1 is HIDDEN_CONTEXT → 3 remain; default maxChatMessages=15 so all pass
@@ -203,7 +213,7 @@ async function runTests() {
     console.error(`\n❌ ${failed} test(s) FAILED`);
     process.exit(1);
   } else {
-    console.log('\n✅ All 16 Phase 3 tests passed. ContextPacket is the canonical LLM-facing context source.');
+    console.log('\n✅ All 18 Phase 3.1 tests passed. ContextPacket is the canonical LLM-facing context source.');
     process.exit(0);
   }
 }
