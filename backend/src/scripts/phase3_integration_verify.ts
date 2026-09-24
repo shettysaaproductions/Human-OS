@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Phase 3 Integration Verification
  * Validates that ContextPacket is the canonical LLM-facing context source.
  *
@@ -18,7 +18,9 @@
  *  T13 - HIDDEN_CONTEXT messages filtered from conversation section
  *  T14 - keyword matching promotes relevant memories before non-relevant
  *  T15 - snapshotErrors propagated from snapshot.errors.length
- *  T16 - ContextPacket._rawSnapshot is accessible (needed by formatContextPacketForPrompt)
+ *  T16 - ContextPacket.profile carries preferredLanguage cleanly
+ *  T17 - CognitiveContext's conflict-resolved value survives all the way to prompt shape
+ *  T18 - ContextPacket is self-contained and no longer exposes a raw snapshot
  */
 
 import { buildContextPacket, formatContextPacketForPrompt, summarizeContextPacket } from '../services/ContextPacket';
@@ -201,9 +203,9 @@ async function runTests() {
   const pktErr = buildContextPacket(snapWithErr, { operation: 'chat' });
   assert('T15', pktErr.metrics.snapshotErrors === 2, `errors=${pktErr.metrics.snapshotErrors}`);
 
-  // T16: _rawSnapshot accessible
-  assert('T16', pkt._rawSnapshot !== undefined && pkt._rawSnapshot.userId === 'test-user-123',
-    `rawSnap.userId=${pkt._rawSnapshot?.userId}`);
+  // T16: profile carries preferredLanguage cleanly
+  assert('T16', pkt.profile.data?.preferredLanguage === 'hi',
+    `preferredLanguage=${pkt.profile.data?.preferredLanguage}`);
 
   // Results
   console.log(results.join('\n'));

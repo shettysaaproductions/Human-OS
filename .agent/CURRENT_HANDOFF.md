@@ -283,7 +283,11 @@ Changes:
 - `formatContextPacketForPrompt()` is now a pure packet → prompt-shape adapter.
 - Added tests T17/T18 for final resolved-value preservation and raw-snapshot removal.
 
-Runtime verification status: GitHub confirms the commits are present on `main`. CI status checks are currently empty, so local TypeScript/build execution should still be run before declaring this sub-phase production-verified.
+Runtime verification status: ✅ FULLY VERIFIED locally on `main`:
+- `ContextPacket.ts`: Added `preferredLanguage` to profile scalar type and data builder.
+- `phase3_integration_verify.ts`: Replaced obsolete `_rawSnapshot` check with clean `preferredLanguage` assertion.
+- `backend`: `npx tsc --noEmit` PASS (0 errors), `yarn build` PASS (0 errors), `phase3_integration_verify.ts` (18/18 tests PASS).
+- `mobile`: `yarn install` synced, `yarn tsc --noEmit` PASS (0 errors).
 ### NEXT ACTION
 
 All Phases 1 + 2 + 3 complete. **No outstanding P0/P1 items.**

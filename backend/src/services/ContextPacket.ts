@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ContextPacket - Bounded LLM-Facing Context Builder (Phase 3)
  *
  * Architecture:
@@ -73,7 +73,7 @@ export interface ContextPacket {
   operation: ContextOperation;
   builtAt: string;
   snapshotAge: number;
-  profile: ContextPacketScalar<{ preferredName?: string; timezone?: string; tzOffset?: number; country?: string; grammaticalGender?: string; personalityStyle?: string; novaMode?: string }>;
+  profile: ContextPacketScalar<{ preferredName?: string; timezone?: string; tzOffset?: number; country?: string; grammaticalGender?: string; personalityStyle?: string; novaMode?: string; preferredLanguage?: string }>;
   temporal: ContextPacketScalar<{ localIso: string; timeOfDay: string; isSleepWindow: boolean; tzLabel: string }>;
   presence: ContextPacketScalar<{ isOnline: boolean; voiceActive: boolean; isSuppressed: boolean; effectiveMinGapMinutes: number; status?: string }>;
   conversation: ContextPacketSection<{ role: string; content: string }>;
@@ -143,6 +143,7 @@ export function buildContextPacket(snapshot: UserContextSnapshot, opts: ContextP
     grammaticalGender: snapshot.profile.grammatical_gender,
     personalityStyle: snapshot.profile.companion_personality,
     novaMode: snapshot.profile.nova_mode,
+    preferredLanguage: snapshot.profile.preferred_language,
   } : null;
 
   const temporalData = {
