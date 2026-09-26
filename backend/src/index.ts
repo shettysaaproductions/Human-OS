@@ -23,6 +23,7 @@ import { selfImprovementService } from './services/NovaSelfImprovementService';
 import { promptBuilder } from './services/promptBuilder';
 import { WebSocketServer } from 'ws';
 import { handleVoiceWsProxy } from './services/NovaVoiceProxy';
+import { novaLoopScheduler } from './services/nova-loop';
 
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -322,6 +323,9 @@ async function main(): Promise<void> {
       chatTest: `POST http://localhost:${config.server.port}/chat/test`,
       voiceWs: `WSS  http://localhost:${config.server.port}/voice/ws`,
     });
+
+    // Start Nova Loop offline engineering audit scheduler (runs out-of-band)
+    novaLoopScheduler.start();
   });
 
   // ── Voice WebSocket Proxy ─────────────────────────────────────────────────────────────
@@ -342,6 +346,12 @@ async function main(): Promise<void> {
   // in-flight requests before closing.
   const shutdown = (signal: string) => {
     logger.info(`${signal} received — shutting down gracefully`);
+
+    // Stop Nova Loop scheduler on shutdown
+    try {
+      novaLoopScheduler.stop();
+    } catch { /* Best effort */ }
+
     server.close(() => {
       logger.info('HTTP server closed');
       process.exit(0);

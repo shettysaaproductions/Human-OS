@@ -72,6 +72,36 @@ export interface RouterOptions {
   timeoutMs?: number;
 }
 
+// ── Nova Loop Capability Negotiation ──────────────────────────────────────────
+
+export type NovaLoopCapability =
+  | 'SURFACE_AUDIT'
+  | 'DEEP_SEMANTIC_REASONING'
+  | 'ROOT_CAUSE_DIAGNOSIS';
+
+export interface CapabilityRequirement {
+  capability: NovaLoopCapability;
+  minReasoningScore: number; // 1 = Surface/11B, 2 = Deep/Flash, 3 = Expert/Pro
+  timeoutMs?: number;
+  jsonMode?: boolean;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export class CapabilityUnavailableError extends Error {
+  readonly capability: NovaLoopCapability;
+  readonly requiredScore: number;
+  readonly availableScore: number;
+
+  constructor(capability: NovaLoopCapability, requiredScore: number, availableScore: number, message: string) {
+    super(message);
+    this.name = 'CapabilityUnavailableError';
+    this.capability = capability;
+    this.requiredScore = requiredScore;
+    this.availableScore = availableScore;
+  }
+}
+
 // ── Routing Decision ──────────────────────────────────────────────────────────
 
 interface RoutingResult {
@@ -356,6 +386,84 @@ class CognitiveModelRouter {
       }
       throw nvidiaErr;
     }
+  }
+
+  // ── Capability Negotiation (Nova Loop) ───────────────────────────────────
+
+  /**
+   * Capability-based execution for Nova Loop and engineering workflows.
+   * Negotiates capability against currently available providers.
+   * If the requested capability is unavailable, stops safely and throws CapabilityUnavailableError.
+   */
+  async completeWithCapability(
+    requirement: CapabilityRequirement,
+    messages: RouterMessage[]
+  ): Promise<string> {
+    const minScore = requirement.minReasoningScore;
+    const geminiStatus = getGeminiStatus();
+    const hasGemini = Boolean(config.gemini.apiKey1 && geminiStatus.keyCount > 0);
+    const hasNvidia = Boolean(config.nvidia.apiKey);
+
+    // Calculate maximum available reasoning score across configured active providers
+    let maxAvailableScore = 0;
+    if (hasNvidia) maxAvailableScore = Math.max(maxAvailableScore, 1);
+    if (hasGemini) {
+      const isProConfigured = Boolean(process.env.GEMINI_PRO_MODEL || config.gemini.chatModel?.includes('pro'));
+      maxAvailableScore = Math.max(maxAvailableScore, isProConfigured ? 3 : 2);
+    }
+
+    if (minScore > maxAvailableScore) {
+      throw new CapabilityUnavailableError(
+        requirement.capability,
+        minScore,
+        maxAvailableScore,
+        `Required capability '${requirement.capability}' (score ${minScore}) exceeds maximum available capacity (score ${maxAvailableScore}). Safe halt: refusing to guess with an inadequate model.`
+      );
+    }
+
+    // Provider selection based on required capability score
+    if (minScore >= 3) {
+      const proModel = process.env.GEMINI_PRO_MODEL || 'gemini-2.5-pro';
+      return geminiComplete(messages, {
+        model: proModel,
+        maxTokens: requirement.maxTokens ?? 1024,
+        temperature: requirement.temperature ?? 0.1,
+        jsonMode: requirement.jsonMode ?? true,
+        timeoutMs: requirement.timeoutMs ?? 45_000,
+      });
+    }
+
+    if (minScore === 2) {
+      if (hasGemini) {
+        return geminiComplete(messages, {
+          maxTokens: requirement.maxTokens ?? 1024,
+          temperature: requirement.temperature ?? 0.1,
+          jsonMode: requirement.jsonMode ?? true,
+          timeoutMs: requirement.timeoutMs ?? 30_000,
+        });
+      }
+      return nvidiaComplete('USER_DEEP', messages, {
+        maxTokens: requirement.maxTokens ?? 1024,
+        temperature: requirement.temperature ?? 0.1,
+        ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
+      });
+    }
+
+    // minScore <= 1 (Surface audit)
+    if (hasNvidia) {
+      return nvidiaComplete('PROACTIVE', messages, {
+        maxTokens: requirement.maxTokens ?? 512,
+        temperature: requirement.temperature ?? 0.1,
+        ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
+      });
+    }
+
+    return geminiComplete(messages, {
+      maxTokens: requirement.maxTokens ?? 512,
+      temperature: requirement.temperature ?? 0.1,
+      jsonMode: requirement.jsonMode ?? true,
+      timeoutMs: requirement.timeoutMs ?? 20_000,
+    });
   }
 
   // ── Observability ─────────────────────────────────────────────────────────
