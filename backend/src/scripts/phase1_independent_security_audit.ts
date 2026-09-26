@@ -26,10 +26,17 @@ async function main() {
     ORDER BY tablename
   `);
 
+  interface PolicyRow {
+    tablename: string;
+    policyname: string;
+    cmd: string;
+    roles: string;
+    qual: string;
+    with_check: string;
+  }
+
   // 2. Get all RLS policies grouped by table
-  const { rows: allPolicies } = await c.query<{
-    tablename: string; policyname: string; cmd: string; roles: string; qual: string; with_check: string;
-  }>(`
+  const { rows: allPolicies } = await c.query<PolicyRow>(`
     SELECT tablename, policyname, cmd, array_to_string(roles, ',') as roles, 
            qual, with_check
     FROM pg_policies
@@ -60,7 +67,7 @@ async function main() {
   await c.end();
 
   // Build per-table report
-  const policyMap: Record<string, typeof allPolicies> = {};
+  const policyMap: Record<string, PolicyRow[]> = {};
   for (const p of allPolicies) {
     if (!policyMap[p.tablename]) policyMap[p.tablename] = [];
     policyMap[p.tablename].push(p);
@@ -96,7 +103,7 @@ async function main() {
   let anonAccessible = 0;
 
   for (const t of allTables) {
-    const policies = policyMap[t.tablename] || [];
+    const policies: PolicyRow[] = policyMap[t.tablename] || [];
     const grants = grantMap[t.tablename] || [];
     const hasAnonRead = grants.some(g => g.startsWith('anon:SELECT') || g.startsWith('PUBLIC:SELECT'));
     const hasAnonWrite = grants.some(g => g.startsWith('anon:INSERT') || g.startsWith('anon:UPDATE') || g.startsWith('anon:DELETE'));
@@ -116,7 +123,7 @@ async function main() {
       table: t.tablename,
       rls_enabled: t.rowsecurity,
       policy_count: policies.length,
-      policies: policies.map(p => `${p.cmd}:${p.roles}:${p.policyname}`),
+      policies: policies.map((p: PolicyRow) => `${p.cmd}:${p.roles}:${p.policyname}`),
       anon_read: hasAnonRead,
       anon_write: hasAnonWrite,
       grants: grants,
