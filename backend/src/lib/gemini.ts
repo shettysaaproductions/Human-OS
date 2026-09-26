@@ -37,12 +37,60 @@ const SAFETY_SETTINGS = [
 ];
 
 export const DEFAULT_GEMINI_FALLBACK_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-1.5-flash',
+  'gemini-3.6-flash',
   'gemini-flash-latest'
 ];
+
+// ── Model Support & Error Classification ─────────────────────────────────────
+const unsupportedModels = new Set<string>();
+
+export function markModelUnsupported(model: string, reason?: string): void {
+  if (!unsupportedModels.has(model)) {
+    unsupportedModels.add(model);
+    logger.warn(`[Gemini] Model '${model}' marked unsupported/not-found${reason ? `: ${reason}` : ''}. Skipping in future requests.`);
+  }
+}
+
+export function isModelSupported(model: string): boolean {
+  return !unsupportedModels.has(model);
+}
+
+export function getUnsupportedModels(): string[] {
+  return Array.from(unsupportedModels);
+}
+
+export function resetUnsupportedModels(): void {
+  unsupportedModels.clear();
+}
+
+export function isGeminiModelNotFoundError(err: any): boolean {
+  const status = err?.status ?? err?.httpErrorCode ?? 0;
+  const msg = (err?.message || '').toLowerCase();
+  return (
+    status === 404 ||
+    msg.includes('not found') ||
+    msg.includes('no longer available') ||
+    msg.includes('is not supported for generatecontent') ||
+    msg.includes('unsupported model')
+  );
+}
+
+export function isGeminiRateLimitError(err: any): boolean {
+  const status = err?.status ?? err?.httpErrorCode ?? 0;
+  const rawMsg = err?.message || '';
+  const msg = rawMsg.toLowerCase();
+  return (
+    status === 429 ||
+    /\b(rate[ -]?limit|quota[ -]?exceeded|resource[ -]?exhausted|too many requests)\b/i.test(rawMsg) ||
+    (msg.includes('quota') && !msg.includes('generatecontent'))
+  );
+}
+
+export function isGeminiOverloadError(err: any): boolean {
+  const status = err?.status ?? err?.httpErrorCode ?? 0;
+  const msg = (err?.message || '').toLowerCase();
+  return status === 503 || msg.includes('overload') || msg.includes('service unavailable');
+}
 
 export class GeminiTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -247,12 +295,10 @@ export class GeminiPool {
       } catch (err: any) {
         lastError = err;
         const status = err.status ?? err.httpErrorCode ?? 0;
-        const msg = (err.message || '').toLowerCase();
         const isBadRequest = status === 400 || status === 401 || status === 403;
         if (isBadRequest) throw err; // Don't retry bad request across keys
 
-        const isModelNotFound = status === 404 || msg.includes('not found') || msg.includes('no longer available');
-        if (isModelNotFound) {
+        if (isGeminiModelNotFoundError(err)) {
           // Model does not exist on endpoint — retrying other keys won't help; caller should try next model
           throw err;
         }
@@ -270,20 +316,13 @@ export class GeminiPool {
 
   handleKeyFailure(keyEntry: PoolKey, err: any): void {
     const status = err.status ?? err.httpErrorCode ?? 0;
-    const rawMsg = err.message || '';
-    const msg = rawMsg.toLowerCase();
 
-    // Prevent false positives: "generateContent" in Google endpoint URLs must NEVER trigger rate limit detection!
-    const isRateLimit = status === 429 ||
-      /\b(rate[ -]?limit|quota[ -]?exceeded|resource[ -]?exhausted|too many requests)\b/i.test(rawMsg) ||
-      (msg.includes('quota') && !msg.includes('generatecontent'));
-    const isOverload  = status === 503 || msg.includes('overload') || msg.includes('service unavailable');
-
-    if (isRateLimit || isOverload) {
+    if (isGeminiRateLimitError(err) || isGeminiOverloadError(err)) {
+      const isRateLimit = isGeminiRateLimitError(err);
       const cooldownMs = isRateLimit ? GeminiPool.COOLDOWN_RATELIMIT_MS : GeminiPool.COOLDOWN_OVERLOAD_MS;
       keyEntry.cooldownUntil = Date.now() + cooldownMs;
       keyEntry.consecutiveFailures++;
-      logger.warn(`[Gemini] ${keyEntry.slot} (${keyEntry.role}) rate-limited/overloaded, cooling ${cooldownMs}ms`, { status });
+      logger.warn(`[Gemini] ${keyEntry.slot} (${keyEntry.role}) ${isRateLimit ? 'rate-limited' : 'overloaded'}, cooling ${cooldownMs}ms`, { status });
     } else {
       keyEntry.consecutiveFailures++;
       logger.warn(`[Gemini] ${keyEntry.slot} (${keyEntry.role}) failed (${err.name}), rotating to failover`, {
@@ -309,8 +348,10 @@ export class GeminiPool {
     return {
       configured: this.keys.size > 0,
       keyCount: this.keys.size,
-      available: availableCount > 0,
+      available: availableCount > 0 && isGeminiAvailable(),
       availableCount,
+      activeModel: config.gemini.chatModel,
+      unsupportedModels: getUnsupportedModels(),
       slots: slotStatus,
     };
   }
@@ -405,9 +446,23 @@ export async function geminiComplete(
   const historyMsgs = history.slice(0, -1);
   const timeoutMs = options.timeoutMs ?? (options.jsonMode ? 30_000 : config.gemini.conversationTimeoutMs);
 
-  const modelsToTry = options.model
+  const fallbackCandidates = (config.gemini.fallbackModels && config.gemini.fallbackModels.length > 0)
+    ? config.gemini.fallbackModels
+    : DEFAULT_GEMINI_FALLBACK_MODELS;
+
+  const candidateModels = options.model
     ? [options.model]
-    : [primaryModel, ...DEFAULT_GEMINI_FALLBACK_MODELS].filter((m, i, a) => Boolean(m) && a.indexOf(m) === i);
+    : [primaryModel, ...fallbackCandidates].filter((m, i, a) => Boolean(m) && a.indexOf(m) === i);
+
+  // Filter out models known to be permanently unsupported (404)
+  const modelsToTry = candidateModels.filter(m => isModelSupported(m));
+
+  if (modelsToTry.length === 0) {
+    if (options.model) {
+      throw new Error(`[Gemini] Requested model '${options.model}' is permanently unsupported or not found`);
+    }
+    throw new Error('[Gemini] All candidate Gemini models are permanently unsupported or not found');
+  }
 
   let lastErr: any = null;
 
@@ -453,6 +508,11 @@ export async function geminiComplete(
       }, options.targetSlot, options.deadlineMs, timeoutMs);
     } catch (err: any) {
       lastErr = err;
+
+      if (isGeminiModelNotFoundError(err)) {
+        markModelUnsupported(currentModel, err.message);
+      }
+
       if (options.targetSlot || err.status === 400 || err.status === 401 || err.status === 403) {
         throw err;
       }
@@ -509,13 +569,19 @@ export async function* geminiStream(
   const historyMsgs = history.slice(0, -1);
   const timeoutMs = options.timeoutMs ?? config.gemini.conversationTimeoutMs;
 
-  if (!pool.available) {
-    throw new Error('[Gemini] All keys are on cooldown or unconfigured');
-  }
+  const fallbackCandidates = (config.gemini.fallbackModels && config.gemini.fallbackModels.length > 0)
+    ? config.gemini.fallbackModels
+    : DEFAULT_GEMINI_FALLBACK_MODELS;
 
-  const modelsToTry = options.model
+  const candidateModels = options.model
     ? [options.model]
-    : [primaryModel, ...DEFAULT_GEMINI_FALLBACK_MODELS].filter((m, i, a) => Boolean(m) && a.indexOf(m) === i);
+    : [primaryModel, ...fallbackCandidates].filter((m, i, a) => Boolean(m) && a.indexOf(m) === i);
+
+  const modelsToTry = candidateModels.filter(m => isModelSupported(m));
+
+  if (!pool.available || modelsToTry.length === 0) {
+    throw new Error('[Gemini] All keys are on cooldown or all models are unsupported');
+  }
 
   let streamErr: any = null;
   const chunks: string[] = [];
@@ -578,6 +644,9 @@ export async function* geminiStream(
       return null;
     }, options.targetSlot, options.deadlineMs, timeoutMs).catch(err => {
       streamErr = err;
+      if (isGeminiModelNotFoundError(err)) {
+        markModelUnsupported(currentModel, err.message);
+      }
     });
 
     if (!streamErr && chunks.length > 0) {
@@ -606,5 +675,10 @@ export function getGeminiStatus() {
 }
 
 export function isGeminiAvailable(): boolean {
-  return pool.available;
+  if (!pool.available) return false;
+  const configuredFallbacks = (config.gemini.fallbackModels && config.gemini.fallbackModels.length > 0)
+    ? config.gemini.fallbackModels
+    : DEFAULT_GEMINI_FALLBACK_MODELS;
+  const candidateModels = [config.gemini.chatModel, ...configuredFallbacks].filter(Boolean);
+  return candidateModels.some(m => isModelSupported(m));
 }

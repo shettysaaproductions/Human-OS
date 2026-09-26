@@ -14,9 +14,21 @@
  * 10. Global 8-second deadline remains intact
  */
 
-import { GeminiPool, GeminiSlot } from '../gemini';
+import {
+  GeminiPool,
+  GeminiSlot,
+  geminiComplete,
+  isGeminiModelNotFoundError,
+  isGeminiRateLimitError,
+  isGeminiOverloadError,
+  markModelUnsupported,
+  isModelSupported,
+  resetUnsupportedModels,
+  getUnsupportedModels,
+  isGeminiAvailable,
+  DEFAULT_GEMINI_FALLBACK_MODELS
+} from '../gemini';
 import { cognitiveRouter } from '../cognitiveRouter';
-import { geminiComplete } from '../gemini';
 import { complete as nvidiaComplete } from '../nvidia';
 
 jest.mock('../nvidia', () => ({
@@ -231,5 +243,130 @@ describe('Gemini 4-Key Failover Policy', () => {
     expect(totalTime).toBeLessThan(8000);
 
     spy.mockRestore();
+  });
+
+  // ── Focused Tests: Model Routing, 404/429 Failure Classification ─────────
+  describe('Model Routing & Failure Classification (Phase 10.2)', () => {
+    beforeEach(() => {
+      resetUnsupportedModels();
+    });
+
+    afterAll(() => {
+      resetUnsupportedModels();
+    });
+
+    it('A. DEFAULT_GEMINI_FALLBACK_MODELS contains supported models and excludes obsolete 404 models', () => {
+      expect(DEFAULT_GEMINI_FALLBACK_MODELS).toContain('gemini-3.6-flash');
+      expect(DEFAULT_GEMINI_FALLBACK_MODELS).toContain('gemini-flash-latest');
+      expect(DEFAULT_GEMINI_FALLBACK_MODELS).not.toContain('gemini-2.5-flash');
+      expect(DEFAULT_GEMINI_FALLBACK_MODELS).not.toContain('gemini-2.0-flash');
+      expect(DEFAULT_GEMINI_FALLBACK_MODELS).not.toContain('gemini-2.5-flash-lite');
+      expect(DEFAULT_GEMINI_FALLBACK_MODELS).not.toContain('gemini-1.5-flash');
+    });
+
+    it('B. classifies HTTP 404 and model deprecation messages as model-not-found errors', () => {
+      const err404: any = new Error('Not found');
+      err404.status = 404;
+      expect(isGeminiModelNotFoundError(err404)).toBe(true);
+
+      const errDeprecated = new Error('This model models/gemini-2.5-flash is no longer available. Please update your code to use models/gemini-3.8-flash');
+      expect(isGeminiModelNotFoundError(errDeprecated)).toBe(true);
+
+      const errNotSupported = new Error('models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent');
+      expect(isGeminiModelNotFoundError(errNotSupported)).toBe(true);
+
+      const errOther = new Error('Something went wrong');
+      expect(isGeminiModelNotFoundError(errOther)).toBe(false);
+    });
+
+    it('C. classifies HTTP 429 and quota exhaustion as rate limit errors (not 404)', () => {
+      const err429: any = new Error('Too many requests');
+      err429.status = 429;
+      expect(isGeminiRateLimitError(err429)).toBe(true);
+      expect(isGeminiModelNotFoundError(err429)).toBe(false);
+
+      const errQuota = new Error('You exceeded your current quota, please check your plan. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests');
+      expect(isGeminiRateLimitError(errQuota)).toBe(true);
+      expect(isGeminiModelNotFoundError(errQuota)).toBe(false);
+    });
+
+    it('D. classifies HTTP 503 as overload errors', () => {
+      const err503: any = new Error('Service Unavailable');
+      err503.status = 503;
+      expect(isGeminiOverloadError(err503)).toBe(true);
+
+      const errOverload = new Error('The model is currently overloaded. Please try again later.');
+      expect(isGeminiOverloadError(errOverload)).toBe(true);
+    });
+
+    it('E. obsolete 404 error throws immediately out of pool.execute without burning subsequent keys or cooling healthy keys', async () => {
+      const executedSlots: GeminiSlot[] = [];
+      const notFoundErr: any = new Error('models/gemini-2.5-flash is no longer available');
+      notFoundErr.status = 404;
+
+      await expect(
+        pool.execute(async (_client, slot) => {
+          executedSlots.push(slot);
+          throw notFoundErr;
+        })
+      ).rejects.toThrow('models/gemini-2.5-flash is no longer available');
+
+      // Crucial: 404 did NOT retry KEY_2, KEY_3, KEY_4! Stopped at first attempt.
+      expect(executedSlots).toEqual(['KEY_1']);
+      // Crucial: KEY_1 was NOT cooled down because the key itself is healthy!
+      expect(pool.keys.get('KEY_1')!.cooldownUntil).toBe(0);
+    });
+
+    it('F. 429 rate limit cools the specific key and rotates to next key, without disabling the model', async () => {
+      const executedSlots: GeminiSlot[] = [];
+      const rateLimitErr: any = new Error('Quota exceeded');
+      rateLimitErr.status = 429;
+
+      const result = await pool.execute(async (_client, slot) => {
+        executedSlots.push(slot);
+        if (slot === 'KEY_1') {
+          throw rateLimitErr;
+        }
+        return 'Success from KEY_2';
+      });
+
+      expect(result).toBe('Success from KEY_2');
+      expect(executedSlots).toEqual(['KEY_1', 'KEY_2']);
+      // KEY_1 was cooled down
+      expect(pool.keys.get('KEY_1')!.cooldownUntil).toBeGreaterThan(Date.now());
+      // Model remains supported (429 is key quota, not dead model)
+      expect(isModelSupported('gemini-3.8-flash')).toBe(true);
+    });
+
+    it('G. markModelUnsupported marks model and skips future requests', () => {
+      expect(isModelSupported('gemini-2.5-flash')).toBe(true);
+
+      markModelUnsupported('gemini-2.5-flash', 'HTTP 404');
+      expect(isModelSupported('gemini-2.5-flash')).toBe(false);
+      expect(getUnsupportedModels()).toContain('gemini-2.5-flash');
+
+      // Idempotent: marking again does not duplicate
+      markModelUnsupported('gemini-2.5-flash');
+      expect(getUnsupportedModels().filter(m => m === 'gemini-2.5-flash').length).toBe(1);
+
+      // Reset clears the unsupported set
+      resetUnsupportedModels();
+      expect(isModelSupported('gemini-2.5-flash')).toBe(true);
+      expect(getUnsupportedModels()).not.toContain('gemini-2.5-flash');
+    });
+
+    it('H. isGeminiAvailable() reports false when all configured candidate models are marked unsupported', () => {
+      expect(isGeminiAvailable()).toBe(true);
+
+      // Mark all candidates unsupported
+      markModelUnsupported('gemini-3.8-flash');
+      markModelUnsupported('gemini-3.6-flash');
+      markModelUnsupported('gemini-flash-latest');
+
+      expect(isGeminiAvailable()).toBe(false);
+
+      resetUnsupportedModels();
+      expect(isGeminiAvailable()).toBe(true);
+    });
   });
 });

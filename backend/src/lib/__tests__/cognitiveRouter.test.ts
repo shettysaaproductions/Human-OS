@@ -48,7 +48,8 @@ jest.mock('../../config', () => ({
     gemini: {
       apiKey1: 'test-key-1',
       apiKey2: 'test-key-2',
-      chatModel: 'gemini-2.0-flash',
+      chatModel: 'gemini-3.8-flash',
+      fallbackModels: ['gemini-3.6-flash', 'gemini-flash-latest'],
     },
     nvidia: {
       apiKey: 'nvapi-test-key',

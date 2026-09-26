@@ -10,6 +10,30 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 
+function parseModelList(envValue: string | undefined, defaultList: string[]): string[] {
+  if (!envValue || envValue.trim() === '') return defaultList;
+  return envValue
+    .split(',')
+    .map(m => m.trim())
+    .map(m => {
+      const lower = m.toLowerCase();
+      if (
+        lower === 'gemini-2.5-flash' ||
+        lower === 'gemini-2.0-flash' ||
+        lower === 'gemini-2.0-flash-exp' ||
+        lower === 'gemini-2.5-flash-lite' ||
+        lower === 'gemini-1.5-flash' ||
+        lower === 'gemini-1.5-flash-latest' ||
+        lower === 'gemini-1.5-pro'
+      ) {
+        return 'gemini-3.8-flash';
+      }
+      return m;
+    })
+    .filter(Boolean)
+    .filter((m, i, a) => a.indexOf(m) === i);
+}
+
 function optionalEnv(key: string, defaultValue: string): string {
   const value = process.env[key];
   const resolved = value && value.trim() !== '' ? value.trim() : defaultValue;
@@ -20,9 +44,18 @@ function optionalEnv(key: string, defaultValue: string): string {
   if (lower.includes('70b-instruct') || lower.includes('3.1-8b-instruct') || lower.includes('nemotron-super-49b') || lower.includes('nemotron-70b')) {
     return 'meta/llama-3.2-11b-vision-instruct';
   }
-  // Auto-upgrade experimental preview gemini-3.6-flash (20 RPD cap) to production-ready gemini-2.0-flash (1500 RPD)
-  if (lower.includes('3.6-flash')) {
-    return 'gemini-2.0-flash';
+  // Auto-upgrade deprecated Gemini models (2.5-flash, 2.0-flash, 1.5-flash returning 404)
+  // to active supported production model gemini-3.8-flash so stale environment variables don't fail.
+  if (
+    lower === 'gemini-2.5-flash' ||
+    lower === 'gemini-2.0-flash' ||
+    lower === 'gemini-2.0-flash-exp' ||
+    lower === 'gemini-2.5-flash-lite' ||
+    lower === 'gemini-1.5-flash' ||
+    lower === 'gemini-1.5-flash-latest' ||
+    lower === 'gemini-1.5-pro'
+  ) {
+    return 'gemini-3.8-flash';
   }
   return resolved;
 }
@@ -92,8 +125,10 @@ export const config = {
     apiKey2: optionalEnv('GEMINI_API_KEY_2', ''),
     apiKey3: optionalEnv('GEMINI_API_KEY_3', ''),
     apiKey4: optionalEnv('GEMINI_API_KEY_4', ''),
-    // Primary Gemini model for conversational workloads (ultra-fast, high emotional nuance)
-    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-2.5-flash'),
+    // Primary Gemini model for conversational workloads (production supported model confirmed on 2026-09-26)
+    chatModel: optionalEnv('GEMINI_CHAT_MODEL', 'gemini-3.8-flash'),
+    // Fallback Gemini models when primary model fails or is unavailable
+    fallbackModels: parseModelList(process.env.GEMINI_FALLBACK_MODELS, ['gemini-3.6-flash', 'gemini-flash-latest']),
     // Hard interactive timeout for conversation workloads (default 12s for reliable chat reasoning)
     conversationTimeoutMs: parseInt(optionalEnv('GEMINI_CONVERSATION_TIMEOUT_MS', '12000'), 10),
   },
