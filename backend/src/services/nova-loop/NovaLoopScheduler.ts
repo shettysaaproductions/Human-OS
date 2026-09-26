@@ -123,7 +123,14 @@ export class NovaLoopScheduler {
       }
 
       const result = await novaLoopScanner.scanNextBatch(batchSize);
-      if (result.messagesProcessed > 0) {
+      if (result.evaluationBlocked) {
+        logger.warn('[NovaLoopScheduler] Offline scan pass paused early due to evaluation block', {
+          messagesProcessed: result.messagesProcessed,
+          incidentsFound: result.incidentsFound,
+          cursor: result.cursorAdvancedTo,
+          reason: result.blockedReason
+        });
+      } else if (result.messagesProcessed > 0) {
         logger.info('[NovaLoopScheduler] Offline scan pass completed', {
           messagesProcessed: result.messagesProcessed,
           incidentsFound: result.incidentsFound,

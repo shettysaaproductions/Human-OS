@@ -14,15 +14,17 @@
 
 import {
   ConversationalEvaluator,
+  conversationalEvaluator,
   IncidentManager,
   NovaLoopScanner,
   RegressionVerifier,
   NovaLoopScheduler,
   computeIncidentFingerprint,
   normalizeFingerprintSlug,
-  ObservableDialogueEvidence
+  ObservableDialogueEvidence,
+  EvaluationBlockedError
 } from '../nova-loop';
-import { CapabilityUnavailableError } from '../../lib/cognitiveRouter';
+import { cognitiveRouter, CapabilityUnavailableError } from '../../lib/cognitiveRouter';
 import { supabaseAdmin } from '../../lib/supabase';
 
 // In-memory mock database state for Nova Loop tables
@@ -51,12 +53,24 @@ jest.mock('../../lib/supabase', () => {
             queryFilters.push((row: any) => row[col] === val);
             return builder;
           }),
+          neq: jest.fn().mockImplementation((col: string, val: any) => {
+            queryFilters.push((row: any) => row[col] !== val);
+            return builder;
+          }),
           lt: jest.fn().mockImplementation((col: string, val: any) => {
             queryFilters.push((row: any) => row[col] < val);
             return builder;
           }),
+          lte: jest.fn().mockImplementation((col: string, val: any) => {
+            queryFilters.push((row: any) => row[col] <= val);
+            return builder;
+          }),
           gt: jest.fn().mockImplementation((col: string, val: any) => {
             queryFilters.push((row: any) => row[col] > val);
+            return builder;
+          }),
+          gte: jest.fn().mockImplementation((col: string, val: any) => {
+            queryFilters.push((row: any) => row[col] >= val);
             return builder;
           }),
           or: jest.fn().mockImplementation((orClause: string) => {
@@ -647,6 +661,316 @@ describe('Nova Loop Engineering Subsystem Comprehensive Verification', () => {
     // Verify incident auto-resolved in ledger
     const resolvedRecord = mockDb.incidents.get(rec.fingerprint);
     expect(resolvedRecord.status).toBe('resolved');
+  });
+
+  // ── TEST N: Checkpoint Safety on LLM Evaluation Failure & Retry (Scenarios 4, 5, 6) ─
+  test('N. Evaluation Failure Checkpoint Invariance & Next-Scan Retry: Halts cursor before failed turn and retries cleanly', async () => {
+    const scanner = new NovaLoopScanner();
+
+    // Seed checkpoint at epoch
+    mockDb.checkpoints.set('conversational_audit', {
+      stage: 'conversational_audit',
+      last_scanned_created_at: '1970-01-01T00:00:00Z',
+      last_scanned_message_id: null,
+      total_scanned_count: 0,
+      incidents_found: 0
+    });
+
+    // Seed 1 turn that requires LLM audit (has question and context)
+    mockDb.chatHistory = [
+      {
+        id: 'msg-u-retry-1',
+        user_id: 'u_retry',
+        conversation_id: 'c_retry',
+        role: 'user',
+        content: 'Maine bataya tha na ki mera interview kal hai?',
+        created_at: '2026-09-24T20:00:01.000Z'
+      },
+      {
+        id: 'msg-a-retry-1',
+        user_id: 'u_retry',
+        conversation_id: 'c_retry',
+        role: 'assistant',
+        content: 'Interview kiske saath hai?',
+        created_at: '2026-09-24T20:00:02.000Z'
+      }
+    ];
+
+    // Pass 1: LLM evaluation encounters provider exhaustion / capability blocked
+    const evalSpy = jest.spyOn(conversationalEvaluator, 'evaluateTurn')
+      .mockRejectedValueOnce(new EvaluationBlockedError('All 9 Gemini keys on cooldown and NVIDIA unavailable', 'capability_unavailable'));
+
+    const run1 = await scanner.scanNextBatch(10, 'conversational_audit');
+
+    // Invariant: checkpoint must NOT advance past the failed evidence!
+    expect(run1.evaluationBlocked).toBe(true);
+    expect(run1.messagesProcessed).toBe(0);
+    expect(run1.cursorAdvancedTo).toBeNull();
+
+    const cpAfterRun1 = mockDb.checkpoints.get('conversational_audit');
+    expect(cpAfterRun1.last_scanned_created_at).toBe('1970-01-01T00:00:00Z');
+    expect(cpAfterRun1.last_scanned_message_id).toBeNull();
+    expect(cpAfterRun1.total_scanned_count).toBe(0);
+
+    // Pass 2: Provider recovers on next scan pass; evaluation succeeds
+    evalSpy.mockResolvedValueOnce(null); // Evaluated cleanly, no flaw
+
+    const run2 = await scanner.scanNextBatch(10, 'conversational_audit');
+
+    // Invariant: Evidence is retried and checkpoint advances normally
+    expect(run2.evaluationBlocked).toBeUndefined();
+    expect(run2.messagesProcessed).toBe(2);
+    expect(run2.cursorAdvancedTo?.created_at).toBe('2026-09-24T20:00:02.000Z');
+    expect(run2.cursorAdvancedTo?.message_id).toBe('msg-a-retry-1');
+
+    const cpAfterRun2 = mockDb.checkpoints.get('conversational_audit');
+    expect(cpAfterRun2.last_scanned_created_at).toBe('2026-09-24T20:00:02.000Z');
+    expect(cpAfterRun2.last_scanned_message_id).toBe('msg-a-retry-1');
+    expect(cpAfterRun2.total_scanned_count).toBe(2);
+
+    evalSpy.mockRestore();
+  });
+
+  // ── TEST O: Mixed Batch Failure Isolation & Subsequent Row Safety (Scenario 7) ──────
+  test('O. Mixed Batch Failure Isolation: Successful rows advance, failed row halts, later rows retried on next pass', async () => {
+    const scanner = new NovaLoopScanner();
+
+    mockDb.checkpoints.set('conversational_audit', {
+      stage: 'conversational_audit',
+      last_scanned_created_at: '1970-01-01T00:00:00Z',
+      last_scanned_message_id: null,
+      total_scanned_count: 0,
+      incidents_found: 0
+    });
+
+    // 6 rows: Turn 1 (ok), Turn 2 (blocked), Turn 3 (future)
+    mockDb.chatHistory = [
+      {
+        id: 'msg-u-1',
+        user_id: 'u1',
+        conversation_id: 'c1',
+        role: 'user',
+        content: 'Hi Nova',
+        created_at: '2026-09-24T20:10:01.000Z'
+      },
+      {
+        id: 'msg-a-1',
+        user_id: 'u1',
+        conversation_id: 'c1',
+        role: 'assistant',
+        content: 'Hello! How are you doing today?',
+        created_at: '2026-09-24T20:10:02.000Z'
+      },
+      {
+        id: 'msg-u-2',
+        user_id: 'u2',
+        conversation_id: 'c2',
+        role: 'user',
+        content: 'Maine galat bola tha, change schedule.',
+        created_at: '2026-09-24T20:10:03.000Z'
+      },
+      {
+        id: 'msg-a-2',
+        user_id: 'u2',
+        conversation_id: 'c2',
+        role: 'assistant',
+        content: 'Schedule update kar diya hai.',
+        created_at: '2026-09-24T20:10:04.000Z'
+      },
+      {
+        id: 'msg-u-3',
+        user_id: 'u3',
+        conversation_id: 'c3',
+        role: 'user',
+        content: 'Good night!',
+        created_at: '2026-09-24T20:10:05.000Z'
+      },
+      {
+        id: 'msg-a-3',
+        user_id: 'u3',
+        conversation_id: 'c3',
+        role: 'assistant',
+        content: 'Sweet dreams! Rest well.',
+        created_at: '2026-09-24T20:10:06.000Z'
+      }
+    ];
+
+    // Spy on evaluateTurn
+    const evalSpy = jest.spyOn(conversationalEvaluator, 'evaluateTurn')
+      .mockImplementation(async (evidence: ObservableDialogueEvidence) => {
+        if (evidence.assistantMessageId === 'msg-a-1') {
+          return null; // Turn 1 succeeds
+        }
+        if (evidence.assistantMessageId === 'msg-a-2') {
+          // Turn 2 fails with EvaluationBlockedError
+          throw new EvaluationBlockedError('Capability unavailable for DEEP_SEMANTIC_REASONING', 'capability_unavailable');
+        }
+        return null;
+      });
+
+    // ── First Scan Pass: Batch encounters failure at msg-a-2 ──────────────────
+    const run1 = await scanner.scanNextBatch(10, 'conversational_audit');
+
+    expect(run1.evaluationBlocked).toBe(true);
+    // Advances ONLY up to Turn 1 (msg-u-1 and msg-a-1)
+    expect(run1.messagesProcessed).toBe(2);
+    expect(run1.cursorAdvancedTo?.created_at).toBe('2026-09-24T20:10:02.000Z');
+    expect(run1.cursorAdvancedTo?.message_id).toBe('msg-a-1');
+
+    const cpAfterRun1 = mockDb.checkpoints.get('conversational_audit');
+    expect(cpAfterRun1.last_scanned_created_at).toBe('2026-09-24T20:10:02.000Z');
+    expect(cpAfterRun1.last_scanned_message_id).toBe('msg-a-1');
+    expect(cpAfterRun1.total_scanned_count).toBe(2);
+
+    // ── Second Scan Pass: Provider recovered, resumes after msg-a-1 ───────────
+    evalSpy.mockImplementation(async () => null); // All turns evaluate cleanly
+
+    const run2 = await scanner.scanNextBatch(10, 'conversational_audit');
+
+    // Invariant: Resumes at Turn 2 (msg-u-2) and finishes through Turn 3 (msg-a-3)
+    expect(run2.evaluationBlocked).toBeUndefined();
+    expect(run2.messagesProcessed).toBe(4); // msg-u-2, msg-a-2, msg-u-3, msg-a-3
+    expect(run2.cursorAdvancedTo?.created_at).toBe('2026-09-24T20:10:06.000Z');
+    expect(run2.cursorAdvancedTo?.message_id).toBe('msg-a-3');
+
+    // Turns 1 was NOT reprocessed; Turn 2 was retried; Turn 3 was NOT skipped!
+    const cpAfterRun2 = mockDb.checkpoints.get('conversational_audit');
+    expect(cpAfterRun2.last_scanned_created_at).toBe('2026-09-24T20:10:06.000Z');
+    expect(cpAfterRun2.last_scanned_message_id).toBe('msg-a-3');
+    expect(cpAfterRun2.total_scanned_count).toBe(6);
+
+    evalSpy.mockRestore();
+  });
+
+  // ── TEST P: ConversationalEvaluator Error Boundary Surfacing ─────────────────
+  test('P. ConversationalEvaluator Error Boundary: Translates capability failures into EvaluationBlockedError', async () => {
+    const evaluator = new ConversationalEvaluator();
+
+    const evidence: ObservableDialogueEvidence = {
+      userId: 'test_user_err',
+      conversationId: 'c_err',
+      userMessageId: 'u_err',
+      userMessage: 'Maine galat bola, interview nahi hai.',
+      userMessageTimestamp: '2026-09-24T20:20:00.000Z',
+      assistantMessageId: 'a_err',
+      assistantResponse: 'Oh achha, kab hai phir?',
+      assistantResponseTimestamp: '2026-09-24T20:20:03.000Z',
+      surroundingContext: [
+        { id: 'c1', role: 'user', content: 'c1', created_at: '2026-09-24T20:19:00.000Z' },
+        { id: 'c2', role: 'assistant', content: 'c2?', created_at: '2026-09-24T20:19:02.000Z' }
+      ]
+    };
+
+    // 1. Mock CapabilityUnavailableError from router
+    const routerSpy = jest.spyOn(cognitiveRouter, 'completeWithCapability')
+      .mockRejectedValueOnce(new CapabilityUnavailableError('DEEP_SEMANTIC_REASONING', 2, 0, 'All keys exhausted'));
+
+    await expect(evaluator.evaluateTurn(evidence)).rejects.toThrow(EvaluationBlockedError);
+
+    // 2. Mock generic provider error from router
+    routerSpy.mockRejectedValueOnce(new Error('NVIDIA 503 Service Unavailable'));
+    await expect(evaluator.evaluateTurn(evidence)).rejects.toThrow(EvaluationBlockedError);
+
+    routerSpy.mockRestore();
+  });
+
+  // ── TEST Q: Deterministic Transit Amnesia Detection Immune to LLM Outage (Scenario 9) ──
+  test('Q. Deterministic Detection Immune to Complete Provider Outage: Flags transit amnesia without touching LLM', async () => {
+    const evaluator = new ConversationalEvaluator();
+
+    // Mock cognitiveRouter to fail catastrophically if called
+    const routerSpy = jest.spyOn(cognitiveRouter, 'completeWithCapability')
+      .mockImplementation(() => {
+        throw new Error('LLM MUST NOT BE CALLED FOR DETERMINISTIC PATTERNS!');
+      });
+
+    const evidence: ObservableDialogueEvidence = {
+      userId: 'test_user_deterministic',
+      conversationId: 'c_det',
+      userMessageId: 'u_det',
+      userMessage: 'I am right now going home by metro from office.',
+      userMessageTimestamp: '2026-09-24T20:30:00.000Z',
+      assistantMessageId: 'a_det',
+      assistantResponse: 'Where are you going?',
+      assistantResponseTimestamp: '2026-09-24T20:30:03.000Z',
+      surroundingContext: []
+    };
+
+    const finding = await evaluator.evaluateTurn(evidence);
+
+    expect(finding).not.toBeNull();
+    expect(finding?.flawType).toBe('CONTEXT_AMNESIA');
+    expect(finding?.confidence).toBe(0.98);
+    expect(finding?.canonicalSubject).toBe('transit_destination_amnesia');
+    // Cognitive router was NEVER touched
+    expect(routerSpy).not.toHaveBeenCalled();
+
+    routerSpy.mockRestore();
+  });
+
+  // ── TEST R: Dual-Cursor Ordering with Identical Timestamp Boundary ──────────
+  test('R. Dual-Cursor Ordering: Multiple messages sharing exact timestamp evaluate in strict (created_at, id) order', async () => {
+    const ts = '2026-09-24T20:40:00.000Z';
+    mockDb.chatHistory = [
+      {
+        id: 'msg-001',
+        user_id: 'u1',
+        conversation_id: 'c1',
+        role: 'user',
+        content: 'I am heading home on the metro.',
+        created_at: ts
+      },
+      {
+        id: 'msg-002',
+        user_id: 'u1',
+        conversation_id: 'c1',
+        role: 'assistant',
+        content: 'Where are you going?',
+        created_at: ts
+      },
+      {
+        id: 'msg-003',
+        user_id: 'u2',
+        conversation_id: 'c2',
+        role: 'user',
+        content: 'Hey there',
+        created_at: ts
+      },
+      {
+        id: 'msg-004',
+        user_id: 'u2',
+        conversation_id: 'c2',
+        role: 'assistant',
+        content: 'Hello! Good to see you.',
+        created_at: ts
+      }
+    ];
+
+    mockDb.checkpoints.set('conversational_audit', {
+      stage: 'conversational_audit',
+      last_scanned_created_at: '1970-01-01T00:00:00Z',
+      last_scanned_message_id: null,
+      total_scanned_count: 0,
+      incidents_found: 0
+    });
+
+    const scanner = new NovaLoopScanner();
+    // Scan batch of 2
+    const batch1 = await scanner.scanNextBatch(2, 'conversational_audit');
+    expect(batch1.messagesProcessed).toBe(2);
+    expect(batch1.cursorAdvancedTo?.created_at).toBe(ts);
+    expect(batch1.cursorAdvancedTo?.message_id).toBe('msg-002');
+
+    // Next batch of 2 starts strictly after (ts, msg-002)
+    const batch2 = await scanner.scanNextBatch(2, 'conversational_audit');
+    expect(batch2.messagesProcessed).toBe(2);
+    expect(batch2.cursorAdvancedTo?.created_at).toBe(ts);
+    expect(batch2.cursorAdvancedTo?.message_id).toBe('msg-004');
+
+    // No messages skipped and no messages duplicated
+    const cp = mockDb.checkpoints.get('conversational_audit');
+    expect(cp.total_scanned_count).toBe(4);
+    expect(cp.last_scanned_message_id).toBe('msg-004');
   });
 });
 

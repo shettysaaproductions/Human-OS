@@ -18,8 +18,9 @@ import {
   ObservableDialogueEvidence,
   ObservableTurnContext
 } from './types';
-import { conversationalEvaluator } from './ConversationalEvaluator';
+import { conversationalEvaluator, EvaluationBlockedError } from './ConversationalEvaluator';
 import { incidentManager, IncidentRecordResult } from './IncidentManager';
+import { CapabilityUnavailableError } from '../../lib/cognitiveRouter';
 
 export interface ScanBatchResult {
   stage: string;
@@ -31,6 +32,8 @@ export interface ScanBatchResult {
     created_at: string;
     message_id: string | null;
   } | null;
+  evaluationBlocked?: boolean;
+  blockedReason?: string;
 }
 
 export class NovaLoopScanner {
@@ -121,6 +124,9 @@ export class NovaLoopScanner {
 
     const incidentResults: IncidentRecordResult[] = [];
     let turnsEvaluated = 0;
+    let lastHandledIndex = -1;
+    let evaluationBlocked = false;
+    let blockedReason: string | undefined;
 
     // 2. Iterate through rows and identify conversational turns (User -> Assistant pairs)
     for (let i = 0; i < rows.length; i++) {
@@ -148,17 +154,20 @@ export class NovaLoopScanner {
             .eq('user_id', current.user_id)
             .eq('conversation_id', current.conversation_id)
             .eq('role', 'user')
-            .lt('created_at', current.created_at)
+            .lte('created_at', current.created_at)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          userTurn = priorUserMsg || null;
+          if (priorUserMsg && priorUserMsg.id !== current.id) {
+            userTurn = priorUserMsg;
+          }
         }
 
         // If no user prompt exists for this assistant response across batch and history, skip evaluation
         // to prevent evaluating an orphaned reply or attributing an unrelated prompt.
         if (!userTurn) {
+          lastHandledIndex = i;
           continue;
         }
 
@@ -168,11 +177,12 @@ export class NovaLoopScanner {
           .select('id, role, content, created_at, reply_to_id, reply_to_content')
           .eq('user_id', current.user_id)
           .eq('conversation_id', current.conversation_id)
-          .lt('created_at', current.created_at)
+          .lte('created_at', current.created_at)
           .order('created_at', { ascending: false })
-          .limit(NovaLoopScanner.CONTEXT_OVERLAP_SIZE);
+          .limit(NovaLoopScanner.CONTEXT_OVERLAP_SIZE + 1);
 
-        const surroundingContext: ObservableTurnContext[] = (contextTurns || []).reverse().map(t => ({
+        const filteredTurns = (contextTurns || []).filter(t => t.id !== current.id).slice(0, NovaLoopScanner.CONTEXT_OVERLAP_SIZE);
+        const surroundingContext: ObservableTurnContext[] = filteredTurns.reverse().map(t => ({
           id: t.id,
           role: t.role as any,
           content: t.content || '',
@@ -203,26 +213,70 @@ export class NovaLoopScanner {
         };
 
         // 3. Evaluate dialogue turn independently
-        const finding = await conversationalEvaluator.evaluateTurn(evidence);
+        try {
+          const finding = await conversationalEvaluator.evaluateTurn(evidence);
 
-        if (finding) {
-          const recorded = await incidentManager.recordFinding(finding, evidence);
-          incidentResults.push(recorded);
+          if (finding) {
+            const recorded = await incidentManager.recordFinding(finding, evidence);
+            incidentResults.push(recorded);
+          }
+
+          // Successfully handled turn
+          lastHandledIndex = i;
+        } catch (err: any) {
+          const isBlocked = err instanceof EvaluationBlockedError || err instanceof CapabilityUnavailableError;
+          logger.warn('[NovaLoopScanner] Evaluation blocked or failed; halting batch to protect checkpoint cursor', {
+            rowId: current.id,
+            role: current.role,
+            created_at: current.created_at,
+            isBlocked,
+            error: err?.message
+          });
+          evaluationBlocked = true;
+          blockedReason = err?.message || 'Evaluation blocked';
+          break; // Stop immediately: do not evaluate or advance past this unhandled row!
         }
       }
     }
 
-    // 4. Atomic cursor advancement: advances ONLY after batch is completely processed
-    const lastProcessedRow = rows[rows.length - 1];
-    const newCreatedAt = lastProcessedRow.created_at;
-    const newMsgId = lastProcessedRow.id;
+    // 4. Safe checkpoint advancement:
+    // When evaluation is blocked, advance ONLY up to the last successfully handled row (if any).
+    // If no rows were successfully handled, DO NOT advance checkpoint at all.
+    // When the batch completed cleanly without evaluation blocks, advance across the full batch.
+    const targetCommitRow = evaluationBlocked
+      ? (lastHandledIndex >= 0 ? rows[lastHandledIndex] : null)
+      : rows[rows.length - 1];
+
+    if (!targetCommitRow) {
+      logger.warn('[NovaLoopScanner] Batch evaluation halted with no rows committed; checkpoint remains at previous cursor', {
+        stage,
+        blockedReason,
+        lastScannedCreatedAt: lastCreatedAt,
+        lastScannedMessageId: lastMsgId
+      });
+
+      return {
+        stage,
+        messagesProcessed: 0,
+        turnsEvaluated,
+        incidentsFound: incidentResults.length,
+        incidentDetails: incidentResults,
+        cursorAdvancedTo: null,
+        evaluationBlocked: true,
+        blockedReason
+      };
+    }
+
+    const messagesCommitted = evaluationBlocked ? (lastHandledIndex + 1) : rows.length;
+    const newCreatedAt = targetCommitRow.created_at;
+    const newMsgId = targetCommitRow.id;
 
     const { error: checkpointErr } = await supabaseAdmin
       .from('nova_loop_checkpoints')
       .update({
         last_scanned_created_at: newCreatedAt,
         last_scanned_message_id: newMsgId,
-        total_scanned_count: (checkpoint.total_scanned_count || 0) + rows.length,
+        total_scanned_count: (checkpoint.total_scanned_count || 0) + messagesCommitted,
         incidents_found: (checkpoint.incidents_found || 0) + incidentResults.length,
         updated_at: new Date().toISOString()
       })
@@ -235,22 +289,24 @@ export class NovaLoopScanner {
 
     logger.info('[NovaLoopScanner] Batch scan complete', {
       stage,
-      messagesProcessed: rows.length,
+      messagesProcessed: messagesCommitted,
       turnsEvaluated,
       incidentsFound: incidentResults.length,
-      cursorAdvancedTo: { created_at: newCreatedAt, id: newMsgId }
+      cursorAdvancedTo: { created_at: newCreatedAt, id: newMsgId },
+      evaluationBlocked
     });
 
     return {
       stage,
-      messagesProcessed: rows.length,
+      messagesProcessed: messagesCommitted,
       turnsEvaluated,
       incidentsFound: incidentResults.length,
       incidentDetails: incidentResults,
       cursorAdvancedTo: {
         created_at: newCreatedAt,
         message_id: newMsgId
-      }
+      },
+      ...(evaluationBlocked ? { evaluationBlocked: true, blockedReason } : {})
     };
   }
 }

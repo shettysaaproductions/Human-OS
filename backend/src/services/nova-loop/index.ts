@@ -3,7 +3,7 @@
  */
 
 export * from './types';
-export { ConversationalEvaluator, conversationalEvaluator, normalizeFingerprintSlug } from './ConversationalEvaluator';
+export { ConversationalEvaluator, conversationalEvaluator, normalizeFingerprintSlug, EvaluationBlockedError } from './ConversationalEvaluator';
 export { IncidentManager, incidentManager, computeIncidentFingerprint } from './IncidentManager';
 export { NovaLoopScanner, novaLoopScanner } from './NovaLoopScanner';
 export { RegressionVerifier, regressionVerifier } from './RegressionVerifier';

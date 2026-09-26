@@ -299,13 +299,18 @@ export class GeminiPool {
   getStatus() {
     const now = Date.now();
     const slotStatus: Record<string, string> = {};
+    let availableCount = 0;
     this.keys.forEach((key, slot) => {
-      slotStatus[slot] = key.cooldownUntil <= now ? 'AVAILABLE' : `COOLING_${Math.round((key.cooldownUntil - now)/1000)}s`;
+      const isAvail = key.cooldownUntil <= now;
+      if (isAvail) availableCount++;
+      slotStatus[slot] = isAvail ? 'AVAILABLE' : `COOLING_${Math.round((key.cooldownUntil - now)/1000)}s`;
     });
 
     return {
       configured: this.keys.size > 0,
       keyCount: this.keys.size,
+      available: availableCount > 0,
+      availableCount,
       slots: slotStatus,
     };
   }
@@ -598,4 +603,8 @@ export async function* geminiStream(
  */
 export function getGeminiStatus() {
   return pool.getStatus();
+}
+
+export function isGeminiAvailable(): boolean {
+  return pool.available;
 }

@@ -20,6 +20,18 @@ import {
 import { cognitiveRouter, CapabilityUnavailableError } from '../../lib/cognitiveRouter';
 import { logger } from '../../lib/logger';
 
+export class EvaluationBlockedError extends Error {
+  public readonly reason: string;
+  public readonly cause?: any;
+
+  constructor(message: string, reason: string = 'capability_unavailable', cause?: any) {
+    super(message);
+    this.name = 'EvaluationBlockedError';
+    this.reason = reason;
+    this.cause = cause;
+  }
+}
+
 /**
  * Normalizes a fingerprint slug into a stable canonical form,
  * preventing minor LLM wording variations from fragmenting fingerprints.
@@ -75,28 +87,23 @@ export class ConversationalEvaluator {
       return await this.evaluateWithLlmCapability(evidence);
     } catch (err: any) {
       if (err instanceof CapabilityUnavailableError) {
-        logger.warn('[ConversationalEvaluator] Required capability unavailable for deep audit; flagging blocked finding', {
+        logger.warn('[ConversationalEvaluator] Required capability unavailable for deep audit; surfacing blocked evaluation', {
           capability: err.capability,
-          requiredScore: err.requiredScore
+          requiredScore: err.requiredScore,
+          error: err.message
         });
-        return {
-          flawType: 'OTHER',
-          severity: 'medium',
-          confidence: 0.85,
-          canonicalSubject: 'audit_escalation_blocked',
-          failureSignature: 'capability_unavailable_for_deep_reasoning',
-          evidenceReferences: {
-            userMessageId: evidence.userMessageId,
-            assistantMessageId: evidence.assistantMessageId,
-            priorTurnIds: evidence.surroundingContext.map(t => t.id)
-          },
-          reasoningSummary: `Deep audit requires ${err.capability} (score ${err.requiredScore}), but current provider capacity is insufficient. Halted safely without guessing.`,
-          requiredCapability: 'ROOT_CAUSE_DIAGNOSIS',
-          recommendedAction: 'Escalate to higher-reasoning model tier or manual engineering review'
-        };
+        throw new EvaluationBlockedError(
+          `Evaluation blocked: required capability '${err.capability}' (score ${err.requiredScore}) is currently unavailable.`,
+          'capability_unavailable',
+          err
+        );
       }
       logger.error('[ConversationalEvaluator] Evaluation error during LLM capability audit', { error: err?.message });
-      return null;
+      throw new EvaluationBlockedError(
+        `Evaluation failed due to provider/LLM error: ${err?.message}`,
+        'provider_error',
+        err
+      );
     }
   }
 
@@ -268,7 +275,9 @@ Return JSON ONLY:
     );
 
     const match = rawResult.match(/\{[\s\S]*\}/);
-    if (!match) return null;
+    if (!match) {
+      throw new Error(`LLM output did not contain valid JSON object: ${rawResult.slice(0, 100)}`);
+    }
 
     const parsed = JSON.parse(match[0]);
     if (!parsed.has_flaw || typeof parsed.confidence !== 'number') {

@@ -26,11 +26,13 @@ import {
   complete as nvidiaComplete,
   stream as nvidiaStream,
   RoutingProfile,
+  canRunNvidia,
 } from './nvidia';
 import {
   geminiComplete,
   geminiStream,
   getGeminiStatus,
+  isGeminiAvailable,
 } from './gemini';
 
 // ── Workload Types ────────────────────────────────────────────────────────────
@@ -401,13 +403,21 @@ class CognitiveModelRouter {
   ): Promise<string> {
     const minScore = requirement.minReasoningScore;
     const geminiStatus = getGeminiStatus();
-    const hasGemini = Boolean(config.gemini.apiKey1 && geminiStatus.keyCount > 0);
-    const hasNvidia = Boolean(config.nvidia.apiKey);
 
-    // Calculate maximum available reasoning score across configured active providers
+    // Distinguish CONFIGURED from CURRENTLY USABLE / AVAILABLE
+    const geminiConfigured = Boolean(config.gemini.apiKey1 && geminiStatus.keyCount > 0);
+    const geminiAvailable = Boolean(geminiConfigured && isGeminiAvailable());
+
+    const nvidiaConfigured = Boolean(config.nvidia.apiKey && config.nvidia.apiKey !== 'dummy_key' && config.nvidia.apiKey !== '');
+    const nvidiaAvailable = Boolean(nvidiaConfigured && canRunNvidia('USER_DEEP', 0));
+
+    // Calculate maximum available reasoning score across currently usable active capacity
     let maxAvailableScore = 0;
-    if (hasNvidia) maxAvailableScore = Math.max(maxAvailableScore, 1);
-    if (hasGemini) {
+    if (nvidiaAvailable) {
+      // NVIDIA deep reasoning profile ('USER_DEEP' with Nemotron / Llama-3.3 70B / 11B) provides score 2 reasoning
+      maxAvailableScore = Math.max(maxAvailableScore, 2);
+    }
+    if (geminiAvailable) {
       const isProConfigured = Boolean(process.env.GEMINI_PRO_MODEL || config.gemini.chatModel?.includes('pro'));
       maxAvailableScore = Math.max(maxAvailableScore, isProConfigured ? 3 : 2);
     }
@@ -417,53 +427,157 @@ class CognitiveModelRouter {
         requirement.capability,
         minScore,
         maxAvailableScore,
-        `Required capability '${requirement.capability}' (score ${minScore}) exceeds maximum available capacity (score ${maxAvailableScore}). Safe halt: refusing to guess with an inadequate model.`
+        `Required capability '${requirement.capability}' (score ${minScore}) cannot be satisfied by currently available capacity (max available score ${maxAvailableScore}). Safe halt without guessing.`
       );
     }
 
-    // Provider selection based on required capability score
+    // ── Execution with capability-negotiated fallback ─────────────────────────
     if (minScore >= 3) {
       const proModel = process.env.GEMINI_PRO_MODEL || 'gemini-2.5-pro';
-      return geminiComplete(messages, {
-        model: proModel,
-        maxTokens: requirement.maxTokens ?? 1024,
-        temperature: requirement.temperature ?? 0.1,
-        jsonMode: requirement.jsonMode ?? true,
-        timeoutMs: requirement.timeoutMs ?? 45_000,
-      });
-    }
-
-    if (minScore === 2) {
-      if (hasGemini) {
-        return geminiComplete(messages, {
+      try {
+        return await geminiComplete(messages, {
+          model: proModel,
           maxTokens: requirement.maxTokens ?? 1024,
           temperature: requirement.temperature ?? 0.1,
           jsonMode: requirement.jsonMode ?? true,
-          timeoutMs: requirement.timeoutMs ?? 30_000,
+          timeoutMs: requirement.timeoutMs ?? 45_000,
         });
+      } catch (geminiErr: any) {
+        throw new CapabilityUnavailableError(
+          requirement.capability,
+          minScore,
+          0,
+          `Gemini Pro capability execution failed for '${requirement.capability}': ${geminiErr?.message}`
+        );
       }
-      return nvidiaComplete('USER_DEEP', messages, {
-        maxTokens: requirement.maxTokens ?? 1024,
-        temperature: requirement.temperature ?? 0.1,
-        ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
-      });
+    }
+
+    if (minScore === 2) {
+      // Primary: Gemini if available
+      if (geminiAvailable) {
+        try {
+          return await geminiComplete(messages, {
+            maxTokens: requirement.maxTokens ?? 1024,
+            temperature: requirement.temperature ?? 0.1,
+            jsonMode: requirement.jsonMode ?? true,
+            timeoutMs: requirement.timeoutMs ?? 30_000,
+          });
+        } catch (geminiErr: any) {
+          logger.warn('[CognitiveRouter] Gemini failed for capability execution, attempting NVIDIA fallback', {
+            capability: requirement.capability,
+            error: geminiErr?.message
+          });
+          // Fall back to NVIDIA if configured and available
+          if (nvidiaAvailable) {
+            try {
+              return await nvidiaComplete('USER_DEEP', messages, {
+                maxTokens: requirement.maxTokens ?? 1024,
+                temperature: requirement.temperature ?? 0.1,
+                ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
+              });
+            } catch (nvidiaErr: any) {
+              throw new CapabilityUnavailableError(
+                requirement.capability,
+                minScore,
+                0,
+                `All providers for '${requirement.capability}' failed. Gemini: ${geminiErr?.message}; NVIDIA fallback: ${nvidiaErr?.message}`
+              );
+            }
+          }
+          throw new CapabilityUnavailableError(
+            requirement.capability,
+            minScore,
+            0,
+            `Gemini failed for '${requirement.capability}' (${geminiErr?.message}) and no NVIDIA fallback available`
+          );
+        }
+      }
+
+      // If Gemini is not currently available, but NVIDIA is available:
+      if (nvidiaAvailable) {
+        try {
+          return await nvidiaComplete('USER_DEEP', messages, {
+            maxTokens: requirement.maxTokens ?? 1024,
+            temperature: requirement.temperature ?? 0.1,
+            ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
+          });
+        } catch (nvidiaErr: any) {
+          throw new CapabilityUnavailableError(
+            requirement.capability,
+            minScore,
+            0,
+            `NVIDIA capability execution failed for '${requirement.capability}': ${nvidiaErr?.message}`
+          );
+        }
+      }
+
+      throw new CapabilityUnavailableError(
+        requirement.capability,
+        minScore,
+        0,
+        `No provider currently available satisfying capability '${requirement.capability}' (score ${minScore})`
+      );
     }
 
     // minScore <= 1 (Surface audit)
-    if (hasNvidia) {
-      return nvidiaComplete('PROACTIVE', messages, {
-        maxTokens: requirement.maxTokens ?? 512,
-        temperature: requirement.temperature ?? 0.1,
-        ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
-      });
+    if (nvidiaAvailable) {
+      try {
+        return await nvidiaComplete('PROACTIVE', messages, {
+          maxTokens: requirement.maxTokens ?? 512,
+          temperature: requirement.temperature ?? 0.1,
+          ...(requirement.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
+        });
+      } catch (nvidiaErr: any) {
+        if (geminiAvailable) {
+          try {
+            return await geminiComplete(messages, {
+              maxTokens: requirement.maxTokens ?? 512,
+              temperature: requirement.temperature ?? 0.1,
+              jsonMode: requirement.jsonMode ?? true,
+              timeoutMs: requirement.timeoutMs ?? 20_000,
+            });
+          } catch (geminiErr: any) {
+            throw new CapabilityUnavailableError(
+              requirement.capability,
+              minScore,
+              0,
+              `Both NVIDIA and Gemini failed for '${requirement.capability}'`
+            );
+          }
+        }
+        throw new CapabilityUnavailableError(
+          requirement.capability,
+          minScore,
+          0,
+          `NVIDIA failed for '${requirement.capability}': ${nvidiaErr?.message}`
+        );
+      }
     }
 
-    return geminiComplete(messages, {
-      maxTokens: requirement.maxTokens ?? 512,
-      temperature: requirement.temperature ?? 0.1,
-      jsonMode: requirement.jsonMode ?? true,
-      timeoutMs: requirement.timeoutMs ?? 20_000,
-    });
+    if (geminiAvailable) {
+      try {
+        return await geminiComplete(messages, {
+          maxTokens: requirement.maxTokens ?? 512,
+          temperature: requirement.temperature ?? 0.1,
+          jsonMode: requirement.jsonMode ?? true,
+          timeoutMs: requirement.timeoutMs ?? 20_000,
+        });
+      } catch (geminiErr: any) {
+        throw new CapabilityUnavailableError(
+          requirement.capability,
+          minScore,
+          0,
+          `Gemini failed for '${requirement.capability}': ${geminiErr?.message}`
+        );
+      }
+    }
+
+    throw new CapabilityUnavailableError(
+      requirement.capability,
+      minScore,
+      0,
+      `No available provider for '${requirement.capability}'`
+    );
   }
 
   // ── Observability ─────────────────────────────────────────────────────────
