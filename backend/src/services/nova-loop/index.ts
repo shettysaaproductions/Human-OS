@@ -16,7 +16,7 @@ export type {
   EngineeringQueueItem
 } from './IncidentManager';
 export { AdversarialVerifier, adversarialVerifier } from './AdversarialVerifier';
-export type { AdversarialVerificationResult } from './AdversarialVerifier';
+export type { AdversarialVerificationResult, VerificationOutcomeMetrics, ManualReviewSample } from './AdversarialVerifier';
 export { NovaLoopScanner, novaLoopScanner } from './NovaLoopScanner';
 export { RegressionVerifier, regressionVerifier } from './RegressionVerifier';
 export { NovaLoopScheduler, novaLoopScheduler } from './NovaLoopScheduler';

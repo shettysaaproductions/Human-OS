@@ -311,12 +311,21 @@ export class IncidentManager {
         throw insertErr;
       }
 
+      const confidenceBand = finding.isDeterministic
+        ? 'DETERMINISTIC'
+        : (finding.confidence >= AdversarialVerifier.HIGH_CONFIDENCE_THRESHOLD
+          ? 'HIGH_CONFIDENCE_GE_0.90'
+          : (finding.confidence >= AdversarialVerifier.MEDIUM_CONFIDENCE_MIN ? 'MEDIUM_CONFIDENCE_0.75_0.89' : 'LOW_CONFIDENCE_LT_0.75'));
+
       logger.info('[IncidentManager] New engineering incident recorded', {
         incidentId: inserted.id,
         flawType: finding.flawType,
         fingerprint,
         status: initialStatus,
-        actionabilityStatus: inserted.actionability_status
+        confidence: finding.confidence,
+        confidenceBand,
+        actionabilityStatus: inserted.actionability_status,
+        verificationRequired: adversarialVerifier.requiresVerification(finding)
       });
 
       let finalActionability: ActionabilityStatus = inserted.actionability_status || initialActionability;
@@ -409,7 +418,9 @@ export class IncidentManager {
     logger.debug('[IncidentManager] Duplicate defect observation recorded (fingerprint clustered)', {
       incidentId: existing.id,
       fingerprint: existing.fingerprint,
-      detectionCount: newDetectionCount
+      detectionCount: newDetectionCount,
+      actionabilityStatus: (updated.actionability_status as ActionabilityStatus) || 'UNVERIFIED',
+      actionableQueueTasksCreated: 0
     });
 
     return {

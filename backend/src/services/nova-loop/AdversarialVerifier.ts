@@ -27,6 +27,41 @@ export interface AdversarialVerificationResult {
   actionabilityStatus: ActionabilityStatus;
 }
 
+export interface VerificationOutcomeMetrics {
+  totalVerifications: number;
+  confirmedCount: number;
+  rejectedCount: number;
+  inconclusiveCount: number;
+  blockedCount: number;
+  confirmedRatio: number;
+  rejectedRatio: number;
+  inconclusiveRatio: number;
+  blockedRatio: number;
+}
+
+export interface ManualReviewSample {
+  verificationId: string;
+  incidentId: string;
+  createdAt: string;
+  flawType: string;
+  evaluatorConfidence: number;
+  evaluatorReasoning: string;
+  adversaryCritique: string;
+  engineeringEvidence: string;
+  outcome: string;
+  dialogueSnippet: {
+    userMessage: string;
+    assistantResponse: string;
+  };
+  auditChecklist: {
+    isGenuineDefect: boolean | null;
+    isBenignBanter: boolean | null;
+    isExpiredSessionGap: boolean | null;
+    humanVerdict: 'CONFIRMED' | 'FALSE_POSITIVE' | 'AMBIGUOUS' | 'PENDING';
+    auditorNotes: string;
+  };
+}
+
 export class AdversarialVerifier {
   public static readonly HIGH_CONFIDENCE_THRESHOLD = 0.90;
   public static readonly MEDIUM_CONFIDENCE_MIN = 0.75;
@@ -56,9 +91,23 @@ export class AdversarialVerifier {
     incidentId: string
   ): Promise<AdversarialVerificationResult> {
     const testedCommit = process.env.APP_VERSION || 'head';
+    const startTime = Date.now();
+    const confidenceBand = finding.confidence >= AdversarialVerifier.HIGH_CONFIDENCE_THRESHOLD
+      ? 'HIGH_CONFIDENCE_GE_0.90'
+      : (finding.confidence >= AdversarialVerifier.MEDIUM_CONFIDENCE_MIN ? 'MEDIUM_CONFIDENCE_0.75_0.89' : 'LOW_CONFIDENCE_LT_0.75');
+
+    logger.info('[AdversarialVerifier] Adversarial verification invoked', {
+      incidentId,
+      flawType: finding.flawType,
+      confidence: finding.confidence,
+      confidenceBand,
+      isDeterministic: Boolean(finding.isDeterministic),
+      capability: 'DEEP_SEMANTIC_REASONING'
+    });
 
     try {
       const result = await this.executeAdversarialAudit(finding, evidence);
+      const latencyMs = Date.now() - startTime;
 
       let actionabilityStatus: ActionabilityStatus;
       let outcome: 'confirmed' | 'rejected' | 'inconclusive';
@@ -117,8 +166,14 @@ export class AdversarialVerifier {
       logger.info('[AdversarialVerifier] Adversarial verification completed', {
         incidentId,
         outcome,
+        previousActionability: 'UNVERIFIED',
         actionabilityStatus,
-        verdict: result.verdict
+        actionabilityTransition: `UNVERIFIED -> ${actionabilityStatus}`,
+        verdict: result.verdict,
+        confidence: result.confidence,
+        confidenceBand,
+        capabilityUsed: 'DEEP_SEMANTIC_REASONING',
+        latencyMs
       });
 
       return {
@@ -130,13 +185,23 @@ export class AdversarialVerifier {
         actionabilityStatus
       };
     } catch (err: any) {
+      const latencyMs = Date.now() - startTime;
       const isBlocked = err instanceof CapabilityUnavailableError;
       const outcome = isBlocked ? 'blocked' : 'inconclusive';
       const actionabilityStatus: ActionabilityStatus = isBlocked ? 'BLOCKED' : 'INCONCLUSIVE';
+      const blockedReason = isBlocked ? (err?.message || 'Capability unavailable for secondary verification') : undefined;
 
       logger.warn('[AdversarialVerifier] Adversarial verification halted', {
         incidentId,
         isBlocked,
+        previousActionability: 'UNVERIFIED',
+        actionabilityStatus,
+        actionabilityTransition: `UNVERIFIED -> ${actionabilityStatus}`,
+        outcome,
+        confidenceBand,
+        blockedReason,
+        capabilityUsed: 'DEEP_SEMANTIC_REASONING',
+        latencyMs,
         error: err?.message
       });
 
@@ -181,6 +246,117 @@ export class AdversarialVerifier {
         actionabilityStatus
       };
     }
+  }
+
+  /**
+   * Aggregate verification distribution metrics from actual production audit rows.
+   */
+  async getVerificationMetrics(): Promise<VerificationOutcomeMetrics> {
+    const { data: rows, error } = await supabaseAdmin
+      .from('nova_incident_verifications')
+      .select('outcome');
+
+    if (error || !rows) {
+      logger.error('[AdversarialVerifier] Failed to query verification metrics', { error: error?.message });
+      return {
+        totalVerifications: 0,
+        confirmedCount: 0,
+        rejectedCount: 0,
+        inconclusiveCount: 0,
+        blockedCount: 0,
+        confirmedRatio: 0,
+        rejectedRatio: 0,
+        inconclusiveRatio: 0,
+        blockedRatio: 0
+      };
+    }
+
+    const total = rows.length;
+    let confirmed = 0;
+    let rejected = 0;
+    let inconclusive = 0;
+    let blocked = 0;
+
+    for (const r of rows) {
+      if (r.outcome === 'confirmed') confirmed++;
+      else if (r.outcome === 'rejected') rejected++;
+      else if (r.outcome === 'inconclusive') inconclusive++;
+      else if (r.outcome === 'blocked') blocked++;
+    }
+
+    return {
+      totalVerifications: total,
+      confirmedCount: confirmed,
+      rejectedCount: rejected,
+      inconclusiveCount: inconclusive,
+      blockedCount: blocked,
+      confirmedRatio: total > 0 ? confirmed / total : 0,
+      rejectedRatio: total > 0 ? rejected / total : 0,
+      inconclusiveRatio: total > 0 ? inconclusive / total : 0,
+      blockedRatio: total > 0 ? blocked / total : 0
+    };
+  }
+
+  /**
+   * Sample verified findings for human engineering review to audit precision without treating
+   * the model's self-verdict as infallible ground truth.
+   */
+  async sampleForManualReview(
+    sampleSize: number = 10,
+    outcomeFilter?: 'confirmed' | 'rejected' | 'inconclusive' | 'blocked'
+  ): Promise<ManualReviewSample[]> {
+    let query = supabaseAdmin
+      .from('nova_incident_verifications')
+      .select('id, incident_id, outcome, created_at, details')
+      .order('created_at', { ascending: false })
+      .limit(sampleSize);
+
+    if (outcomeFilter) {
+      query = query.eq('outcome', outcomeFilter);
+    }
+
+    const { data: rows, error } = await query;
+    if (error || !rows) {
+      logger.error('[AdversarialVerifier] Failed to sample verifications for manual review', { error: error?.message });
+      return [];
+    }
+
+    const incidentIds = rows.map((r: any) => r.incident_id).filter(Boolean);
+    const { data: incidentRows } = await supabaseAdmin
+      .from('nova_engineering_incidents')
+      .select('id, evidence, flaw_type')
+      .in('id', incidentIds);
+
+    const incidentMap = new Map((incidentRows || []).map((inc: any) => [inc.id, inc]));
+
+    return rows.map((r: any) => {
+      const inc = incidentMap.get(r.incident_id) as any;
+      const evidence = inc?.evidence as any;
+      const details = (r.details || {}) as any;
+
+      return {
+        verificationId: r.id,
+        incidentId: r.incident_id,
+        createdAt: r.created_at,
+        flawType: inc?.flaw_type || details.originalFinding?.flawType || 'UNKNOWN',
+        evaluatorConfidence: details.originalFinding?.confidence || 0,
+        evaluatorReasoning: details.originalFinding?.reasoning || '',
+        adversaryCritique: details.adversaryCritique || '',
+        engineeringEvidence: details.engineeringEvidence || '',
+        outcome: r.outcome,
+        dialogueSnippet: {
+          userMessage: evidence?.userMessage || '',
+          assistantResponse: evidence?.assistantResponse || ''
+        },
+        auditChecklist: {
+          isGenuineDefect: null,
+          isBenignBanter: null,
+          isExpiredSessionGap: null,
+          humanVerdict: 'PENDING',
+          auditorNotes: ''
+        }
+      };
+    });
   }
 
   /**
