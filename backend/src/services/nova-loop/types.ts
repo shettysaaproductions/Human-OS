@@ -30,6 +30,13 @@ export type IncidentStatus =
   | 'blocked'
   | 'dismissed';
 
+export type ActionabilityStatus =
+  | 'UNVERIFIED'
+  | 'VERIFIED'
+  | 'REJECTED'
+  | 'INCONCLUSIVE'
+  | 'BLOCKED';
+
 export interface ObservableTurnContext {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -57,6 +64,7 @@ export interface ObservableDialogueEvidence {
     latencyMs?: number;
   };
   systemErrors?: string[];
+  sessionGapHours?: number;
 }
 
 export interface EvaluationFinding {
@@ -73,6 +81,8 @@ export interface EvaluationFinding {
   reasoningSummary: string; // Objective engineering diagnosis (NOT hidden internal thoughts)
   requiredCapability: NovaLoopCapability;
   recommendedAction: string;
+  isDeterministic?: boolean;
+  sessionGapHours?: number;
 }
 
 export interface NovaLoopCheckpoint {
@@ -91,6 +101,7 @@ export interface EngineeringIncidentRecord {
   flaw_type: FlawType;
   severity: IncidentSeverity;
   status: IncidentStatus;
+  actionability_status?: ActionabilityStatus;
   confidence: number;
   user_id: string;
   conversation_id: string;
@@ -112,8 +123,9 @@ export interface EngineeringIncidentRecord {
 export interface IncidentVerificationRecord {
   id?: string;
   incident_id: string;
-  verification_type: 'REPLAY_TEST' | 'CANONICAL_AUDIT' | 'MANUAL_SIGN_OFF';
+  verification_type: 'REPLAY_TEST' | 'CANONICAL_AUDIT' | 'MANUAL_SIGN_OFF' | 'ADVERSARIAL_AUDIT';
   passed: boolean;
+  outcome?: 'confirmed' | 'rejected' | 'inconclusive' | 'blocked';
   tested_at?: string;
   tested_commit?: string;
   details?: Record<string, any>;

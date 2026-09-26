@@ -4,7 +4,19 @@
 
 export * from './types';
 export { ConversationalEvaluator, conversationalEvaluator, normalizeFingerprintSlug, EvaluationBlockedError } from './ConversationalEvaluator';
-export { IncidentManager, incidentManager, computeIncidentFingerprint } from './IncidentManager';
+export {
+  IncidentManager,
+  incidentManager,
+  computeIncidentFingerprint,
+  computeSemanticFingerprint,
+  extractSemanticCluster
+} from './IncidentManager';
+export type {
+  NormalizedSemanticCluster,
+  EngineeringQueueItem
+} from './IncidentManager';
+export { AdversarialVerifier, adversarialVerifier } from './AdversarialVerifier';
+export type { AdversarialVerificationResult } from './AdversarialVerifier';
 export { NovaLoopScanner, novaLoopScanner } from './NovaLoopScanner';
 export { RegressionVerifier, regressionVerifier } from './RegressionVerifier';
 export { NovaLoopScheduler, novaLoopScheduler } from './NovaLoopScheduler';

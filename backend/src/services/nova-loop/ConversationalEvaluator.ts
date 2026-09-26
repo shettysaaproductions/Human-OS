@@ -65,26 +65,64 @@ export function normalizeFingerprintSlug(input: string): string {
 
 export class ConversationalEvaluator {
   private static readonly ACTIONABLE_CONFIDENCE_THRESHOLD = 0.75;
+  public sessionGapHours: number = parseFloat(process.env.NOVA_LOOP_SESSION_GAP_HOURS || '4.0');
+
+  constructor(sessionGapHours?: number) {
+    if (typeof sessionGapHours === 'number' && !isNaN(sessionGapHours)) {
+      this.sessionGapHours = sessionGapHours;
+    }
+  }
+
+  /**
+   * Determine elapsed time in hours between the current turn and the most recent preceding turn.
+   */
+  calculateSessionGapHours(evidence: ObservableDialogueEvidence): number {
+    if (!evidence.surroundingContext || evidence.surroundingContext.length === 0) {
+      return Infinity;
+    }
+    const currentTs = new Date(evidence.userMessageTimestamp || evidence.assistantResponseTimestamp).getTime();
+    if (isNaN(currentTs)) return 0;
+
+    // surroundingContext is ordered chronologically from oldest to newest
+    const lastPriorTurn = evidence.surroundingContext[evidence.surroundingContext.length - 1];
+    const priorTs = new Date(lastPriorTurn.created_at).getTime();
+    if (isNaN(priorTs)) return 0;
+
+    const diffMs = currentTs - priorTs;
+    return Math.max(0, diffMs / (1000 * 60 * 60));
+  }
 
   /**
    * Main evaluation entry point.
    * Evaluates an observable turn slice and returns any detected findings.
    */
   async evaluateTurn(evidence: ObservableDialogueEvidence): Promise<EvaluationFinding | null> {
+    const sessionGapHours = this.calculateSessionGapHours(evidence);
+    evidence.sessionGapHours = sessionGapHours;
+
     // 1. Fast, high-confidence deterministic evaluation (Immune to prompt flakiness)
     const deterministicFinding = this.evaluateDeterministicPatterns(evidence);
     if (deterministicFinding && deterministicFinding.confidence >= ConversationalEvaluator.ACTIONABLE_CONFIDENCE_THRESHOLD) {
-      return deterministicFinding;
+      return {
+        ...deterministicFinding,
+        isDeterministic: true,
+        sessionGapHours
+      };
     }
 
     // 2. Multi-turn heuristic screening before invoking LLM capabilities
-    if (!this.shouldInvokeLlmAudit(evidence)) {
+    if (!this.shouldInvokeLlmAudit(evidence, sessionGapHours)) {
       return null;
     }
 
     // 3. Capability-Negotiated Deep Audit
     try {
-      return await this.evaluateWithLlmCapability(evidence);
+      const finding = await this.evaluateWithLlmCapability(evidence, sessionGapHours);
+      if (finding) {
+        finding.sessionGapHours = sessionGapHours;
+        finding.isDeterministic = false;
+      }
+      return finding;
     } catch (err: any) {
       if (err instanceof CapabilityUnavailableError) {
         logger.warn('[ConversationalEvaluator] Required capability unavailable for deep audit; surfacing blocked evaluation', {
@@ -113,12 +151,20 @@ export class ConversationalEvaluator {
   private evaluateDeterministicPatterns(evidence: ObservableDialogueEvidence): EvaluationFinding | null {
     const userText = (evidence.userMessage || '').toLowerCase().trim();
     const assistantText = (evidence.assistantResponse || '').toLowerCase().trim();
+    const currentTs = new Date(evidence.userMessageTimestamp || evidence.assistantResponseTimestamp).getTime();
 
-    // Check recent context for established transit/location
+    // Check recent context for established transit/location within the current session only
     const allPrecedingTurns = evidence.surroundingContext
-      .filter(t => t.role === 'user')
+      .filter(t => {
+        if (t.role !== 'user') return false;
+        const turnTs = new Date(t.created_at).getTime();
+        if (isNaN(turnTs) || isNaN(currentTs)) return true;
+        const gapHours = (currentTs - turnTs) / (1000 * 60 * 60);
+        return gapHours < this.sessionGapHours;
+      })
       .map(t => t.content.toLowerCase())
       .concat([userText]);
+
 
     const combinedRecentUserText = allPrecedingTurns.slice(-3).join(' · ');
 
@@ -199,13 +245,23 @@ export class ConversationalEvaluator {
   /**
    * Determine whether an LLM evaluation is warranted to conserve quota.
    */
-  private shouldInvokeLlmAudit(evidence: ObservableDialogueEvidence): boolean {
-    const userText = (evidence.userMessage || '').toLowerCase();
-    const assistantText = (evidence.assistantResponse || '').toLowerCase();
+  private shouldInvokeLlmAudit(evidence: ObservableDialogueEvidence, sessionGapHours: number): boolean {
+    const userText = (evidence.userMessage || '').toLowerCase().trim();
+    const assistantText = (evidence.assistantResponse || '').toLowerCase().trim();
 
-    // Check for correction markers in subsequent or current messages
-    const hasCorrectionMarker = /\b(galat|wrong|nahi bola|already told|bhul gaye|maine bataya|kya bol rahe|confused)\b/i.test(userText);
+    // Check for correction or identity markers in subsequent or current messages
+    const hasCorrectionMarker = /\b(galat|wrong|nahi bola|already told|bhul gaye|maine bataya|kya bol rahe|confused|helucinate|hallucinate|nickname|mera naam|mera name|naam toh|maine bola|bola tha|bola na)\b/i.test(userText);
     const hasQuestionInAssistant = assistantText.includes('?');
+
+    // If there is an extended session gap, casual greetings or proactive check-ins without correction markers should not invoke LLM audit
+    const isProactiveOrCasual = /^(hi|hello|hey|all good|shubh raatri|good morning|ok|thik hai|mast|hlo|hii)[.!\s]*$/i.test(userText) || userText.length === 0;
+    if (sessionGapHours >= this.sessionGapHours && isProactiveOrCasual && !hasCorrectionMarker) {
+      // Natural session initiation: skip LLM audit unless Nova repeats 3+ questions (interrogation)
+      const questionCount = (assistantText.match(/\?/g) || []).length;
+      if (questionCount < 3) {
+        return false;
+      }
+    }
 
     // Only audit turns that have dialogue complexity or potential friction
     return hasCorrectionMarker || (evidence.surroundingContext.length >= 2 && hasQuestionInAssistant);
@@ -214,27 +270,50 @@ export class ConversationalEvaluator {
   /**
    * Execute an LLM-assisted capability evaluation.
    */
-  private async evaluateWithLlmCapability(evidence: ObservableDialogueEvidence): Promise<EvaluationFinding | null> {
-    const contextLines = evidence.surroundingContext.map(t =>
-      `[${t.role.toUpperCase()}] ${t.content}`
-    ).join('\n');
+  private async evaluateWithLlmCapability(
+    evidence: ObservableDialogueEvidence,
+    sessionGapHours: number
+  ): Promise<EvaluationFinding | null> {
+    const contextLines = evidence.surroundingContext.map((t, idx) => {
+      let prefix = '';
+      if (idx > 0) {
+        const prevTs = new Date(evidence.surroundingContext[idx - 1].created_at).getTime();
+        const currTs = new Date(t.created_at).getTime();
+        const diffHours = (currTs - prevTs) / (1000 * 60 * 60);
+        if (diffHours >= this.sessionGapHours) {
+          prefix = `\n--- [SESSION BREAK: ${diffHours.toFixed(1)}h inactivity gap] ---\n`;
+        }
+      }
+      return `${prefix}[${t.role.toUpperCase()}] ${t.content}`;
+    }).join('\n');
+
+    let sessionBoundaryContext = '';
+    if (sessionGapHours >= this.sessionGapHours && sessionGapHours !== Infinity) {
+      sessionBoundaryContext = `\n--- [SESSION BOUNDARY: ${sessionGapHours.toFixed(1)}h elapsed since last interaction] ---\n`;
+    }
 
     const prompt = `You are the Human-OS Offline Conversational Engineering Evaluator.
 Analyze this raw user-assistant interaction for genuine conversational or contextual failures:
 
 PAST CONTEXT:
 ${contextLines || '(None)'}
-
+${sessionBoundaryContext}
 CURRENT USER MESSAGE:
-${evidence.userMessage}
+${evidence.userMessage || '(Proactive / Empty)'}
 
 NOVA ASSISTANT RESPONSE:
 ${evidence.assistantResponse}
 
+SESSION BOUNDARY RULES:
+- If a session boundary (>= ${this.sessionGapHours} hours) occurred before the current turn:
+  1. Previous goals are now DORMANT. Proactive check-ins, greetings, or Nova introducing a new conversational topic after a session gap are NATURAL and MUST NOT be flagged as GOAL_DERAILMENT.
+  2. Ephemeral states (current location, transit mode, immediate activity) expire across session boundaries and are NOT CONTEXT_AMNESIA.
+  3. Direct contradictions of permanent user facts (e.g., user name, established family kin, fixed calendar dates) or explicit amnesia ("I forgot what you told me") REMAIN ACTIONABLE DEFECTS.
+
 EVALUATION CRITERIA:
 1. CONTEXT_AMNESIA: Nova asks for or forgets information explicitly established in recent conversation.
 2. SEMANTIC_CONTRADICTION: Nova makes a claim that directly contradicts known facts from the dialogue.
-3. GOAL_DERAILMENT: Nova ignores or changes the subject away from a serious user question or goal.
+3. GOAL_DERAILMENT: Nova ignores or changes the subject away from a serious active user question or goal in the current session.
 4. TEMPORAL_ERROR: Nova claims an impossible time, date, or day-of-week sequence.
 
 CANONICAL TOPIC EXAMPLES (use snake_case, pick the closest canonical topic):
@@ -284,6 +363,23 @@ Return JSON ONLY:
       return null;
     }
 
+    // Post-evaluator session gap validation:
+    // Suppress false GOAL_DERAILMENT when user started a new session with greeting or no active question
+    if (sessionGapHours >= this.sessionGapHours && parsed.flaw_type === 'GOAL_DERAILMENT') {
+      const userMsg = (evidence.userMessage || '').trim().toLowerCase();
+      const hasActiveQuestion = userMsg.includes('?');
+      const isShortGreeting = /^(hi|hello|hey|all good|shubh raatri|good morning|ok|thik hai|mast|hlo|hii)[.!\s]*$/i.test(userMsg);
+      const isProactiveStart = !evidence.userMessage || isShortGreeting;
+
+      if (isProactiveStart && !hasActiveQuestion) {
+        logger.debug('[ConversationalEvaluator] Suppressing false GOAL_DERAILMENT across session gap', {
+          sessionGapHours,
+          userMessage: evidence.userMessage
+        });
+        return null;
+      }
+    }
+
     if (parsed.confidence < ConversationalEvaluator.ACTIONABLE_CONFIDENCE_THRESHOLD) {
       logger.debug('[ConversationalEvaluator] Inconclusive finding discarded below confidence threshold', {
         confidence: parsed.confidence,
@@ -311,6 +407,7 @@ Return JSON ONLY:
       recommendedAction: parsed.recommended_action || 'Inspect conversational pipeline grounding.'
     };
   }
+
 }
 
 export const conversationalEvaluator = new ConversationalEvaluator();
